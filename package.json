@@ -1,0 +1,45 @@
+{
+    "name": "open-art-api",
+    "version": "1.0.0",
+    "description": "Express.js API for Open Art AI Influencer Studio",
+    "main": "index.js",
+    "type": "module",
+    "imports": {
+        "#core/*.js": "./src/core/*.js",
+        "#utils/*.js": "./src/utils/*.js",
+        "#db/*.js": "./src/db/*.js",
+        "#services/*.js": "./src/services/*.js",
+        "#video/*.js": "./src/video/*.js",
+        "#video/*": "./src/video/*",
+        "#image/*.js": "./src/image/*.js",
+        "#container.js": "./src/container.js"
+    },
+    "scripts": {
+        "start": "node index.js",
+        "dev": "nodemon index.js"
+    },
+    "dependencies": {
+        "@fal-ai/client": "^1.9.4",
+        "@google/generative-ai": "^0.24.1",
+        "@huggingface/inference": "^4.13.13",
+        "@supabase/supabase-js": "^2.97.0",
+        "cors": "^2.8.5",
+        "dotenv": "^16.4.5",
+        "express": "^4.18.3",
+        "express-async-handler": "^1.2.0",
+        "express-rate-limit": "^8.3.0",
+        "morgan": "^1.10.0",
+        "multer": "^2.1.1",
+        "node-fetch": "^3.3.2",
+        "openai": "^6.25.0",
+        "sharp": "^0.34.5",
+        "socket.io": "^4.8.3",
+        "uuid": "^9.0.1",
+        "zod": "^4.3.6"
+    },
+    "devDependencies": {
+        "eslint-plugin-react-hooks": "^7.0.1",
+        "nodemon": "^3.1.0",
+        "supabase": "^2.84.5"
+    }
+}

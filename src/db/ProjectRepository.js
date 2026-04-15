@@ -1,0 +1,37 @@
+import { BaseRepository } from "./BaseRepository.js";
+
+export class ProjectRepository extends BaseRepository {
+    constructor() {
+        super("project"); // ← singular, matches new schema
+    }
+
+    async createProject({ name }) {
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .insert({ name })
+            .select()
+            .single();
+        if (error) throw error;
+        return data;
+    }
+
+    async findAll() {
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("*")
+            .order("create_time", { ascending: false });
+        if (error) throw error;
+        return data;
+    }
+
+    async updateName(id, name) {
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .update({ name })
+            .eq("id", id)
+            .select()
+            .single();
+        if (error) throw error;
+        return data;
+    }
+}

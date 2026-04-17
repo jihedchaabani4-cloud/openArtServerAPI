@@ -1,6 +1,4 @@
 const ICONS = {
-    flux:       "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/flux.svg",
-    seedance:   "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/flux-color.svg",
     nanobana:   "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/minimax.svg",
     seedream:   "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/baichuan.svg",
     zimage:     "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/zhipu.svg",
@@ -17,14 +15,13 @@ export const getModelMetadata = (modelName) => {
     const name = modelName.toLowerCase();
     
     if (name.includes("cinema"))   return { label: "Cinema", iconUrl: ICONS.cinema };
-    if (name.includes("flux"))     return { label: "Flux", iconUrl: ICONS.flux };
     if (name.includes("nanobana")) return { label: "NanoBanana", iconUrl: ICONS.nanobana };
     if (name.includes("seedream")) return { label: "SeaDream", iconUrl: ICONS.seedream };
     if (name.includes("z-image") || name.includes("z_image"))  return { label: "Z-Image", iconUrl: ICONS.zimage };
     if (name.includes("kling"))    return { label: "Kling", iconUrl: ICONS.kling };
     if (name.includes("wan"))      return { label: "Wan", iconUrl: ICONS.wan };
     if (name.includes("hailuo"))   return { label: "Hailuo", iconUrl: ICONS.hailuo };
-    if (name.includes("seedance")) return { label: "SeaDream", iconUrl: ICONS.seedance };
+    if (name.includes("seedance")) return { label: "SeaDream", iconUrl: ICONS.default };
 
     return { label: "Standard", iconUrl: ICONS.default };
 };
@@ -73,10 +70,7 @@ export const MODEL_FAMILIES = [
       { id: "seedream_edit", name: "SeaDream 5.0 Edit",   badge: "PREMIUM", subtext: "ByteDance's advanced image editing",      featured: false },
     ],
   },
-  {
-    id: "flux", name: "Flux", type: "image",
-    versions: [{ id: "flux", name: "Flux Pro", badge: "PREMIUM", subtext: "Google levels of quality", featured: true }],
-  },
+
   {
     id: "stability", name: "Stable Diffusion", type: "image",
     versions: [{ id: "sdxl", name: "SDXL Ngrok", badge: "BETA", subtext: "Local fallback generator", featured: false }],

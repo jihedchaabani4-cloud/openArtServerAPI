@@ -14,10 +14,13 @@ export class BaseModel {
         tags,
         tier,
         supportedRatios,
+        supportedQualities,
         maxDuration,
         minDuration,
         variants = null,
         hidden   = false,
+        // ── Default params (picked up by verifyAndClampParams when user sends nothing) ──
+        defaultParams = {},
     }) {
         this.id             = modelName; // default ID
         this.modelName      = modelName;
@@ -28,17 +31,19 @@ export class BaseModel {
         this.editVariant    = null;
         this.hidden         = hidden;
         this.variants       = variants; // { t2v: KlingStdT2v, i2v: KlingStdI2v, etc. }
+        this.defaultParams  = defaultParams; // safe fallbacks when user omits a param
         // Meta
-        this.displayName     = displayName     || modelName;
-        this.description     = description     || "";
-        this.category        = category        || "video";
-        this.modes           = modes           || [type];
-        this.pricing         = pricing         || {};
-        this.tags            = tags            || [];
-        this.tier            = tier            || "std";
-        this.supportedRatios = supportedRatios || ["16:9", "9:16", "1:1"];
-        this.maxDuration     = maxDuration     || 10;
-        this.minDuration     = minDuration     || 5;
+        this.displayName       = displayName       || modelName;
+        this.description       = description       || "";
+        this.category          = category          || "video";
+        this.modes             = modes             || [type];
+        this.pricing           = pricing           || {};
+        this.tags              = tags              || [];
+        this.tier              = tier              || "std";
+        this.supportedRatios   = supportedRatios   || ["16:9", "9:16", "1:1"];
+        this.supportedQualities = supportedQualities || null; // null = model accepts any
+        this.maxDuration       = maxDuration       || 10;
+        this.minDuration       = minDuration       || 5;
     }
 
     supports(cap) { return this.caps.has(cap); }

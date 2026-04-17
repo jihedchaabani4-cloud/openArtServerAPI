@@ -95,18 +95,7 @@ export const IMAGE_ROUTES = {
     // ── SDXL (local) ─────────────────────────────────────────────────────────
     "sdxl": fromRegistry("sdxl_sdxl"),
 
-    // ── Flux 2 (wavespeed) ────────────────────────────────────────────────────
-    "flux_turbo":       fromRegistry("flux_turbo_wavespeed"),
-    "flux_flex":        fromRegistry("flux_flex_wavespeed"),
-    "flux_kontext_max": fromRegistry("flux_kontext_max_wavespeed"),
-    "flux_pro":         fromRegistry("flux_pro_wavespeed"),
 
-    // Example: override one variant → replicate when runner is ready:
-    // "flux_max": fromRegistry("flux_max_wavespeed", {
-    //     i2i:      replicateModels["flux_max_replicate"]?.i2i,       // ← replicate
-    //     i2iMulti: replicateModels["flux_max_replicate"]?.i2iMulti,  // ← replicate
-    // }),
-    "flux_max": fromRegistry("flux_max_wavespeed",),
 
     // ── RunwayML (wavespeed) ─────────────────────────────────────────────────
     "runway_gen4_image":       fromRegistry("runway_gen4_image_wavespeed", true, true),

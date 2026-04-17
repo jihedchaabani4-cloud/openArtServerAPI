@@ -1,6 +1,7 @@
-import { ReferenceProcessor } from "#utils/ReferenceProcessor.js";
+import { ReferenceProcessor             } from "#utils/ReferenceProcessor.js";
 import { getRunner, getModelName, ROUTED_MODELS } from "#video/core/modelRouter.js";
-import { appendMediaToWorkflow, markMediaStatus } from "#db/workflowMediaOps.js";
+import { appendMediaToWorkflow, markMediaStatus  } from "#db/workflowMediaOps.js";
+import { verifyAndClampVideoParams        } from "#image/utils/treatmentUtils.js";
 
 /**
  * MotionTreatment
@@ -72,15 +73,21 @@ export class MotionTreatment {
             );
         }
 
-        // 3. Build form payload
+        // 3. Verify & clamp params using provider's own defaults
+        const verified = verifyAndClampVideoParams(provider, {
+            ratio, duration,
+        });
+
+        // 4. Build form payload
         const form = {
-            prompt, model, ratio,
-            duration: parseFloat(String(duration)) || 5,
-            resolution: video_resolution,
-            image_base64: finalImageUrl,
-            video_base64: finalVideoUrl,
+            prompt, model,
+            ratio:         verified.ratio,
+            duration:      verified.duration,
+            resolution:    video_resolution,
+            image_base64:  finalImageUrl,
+            video_base64:  finalVideoUrl,
             cameraControl: camera_control,
-            references: resolvedRefs,
+            references:    resolvedRefs,
         };
 
         const model_name = getModelName(model, mode);

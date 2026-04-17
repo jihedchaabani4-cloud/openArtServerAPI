@@ -103,7 +103,7 @@ export const getProjectData = async (req, res) => {
         const workflows = await getWorkflows(
             { project_id },
             {
-                select: "id, display_name, variation_index, primary_media_id, create_time, session_id, favorited",
+                select: "id, display_name, variation_index, primary_media_id, create_time, session_id, favorited, workflow_type",
                 order:  { column: "create_time", ascending: false },
             }
         ).catch(err => {
@@ -112,8 +112,9 @@ export const getProjectData = async (req, res) => {
         });
 
         const formattedWorkflows = (workflows || []).map(wf => ({
-            name:      wf.id,
-            projectId: project_id,
+            name:          wf.id,
+            projectId:     project_id,
+            workflow_type: wf.workflow_type,
             metadata: {
                 displayName:    wf.display_name,
                 createTime:     wf.create_time,
@@ -131,9 +132,10 @@ export const getProjectData = async (req, res) => {
                 workflow_id, generation_config_id,
                 generation_config (
                     id, prompt, model, aspect_ratio, generation_type, seed, visibility,
+                    dna:dna ( id, name, type, description, traits ),
                     references:generation_config_reference!generation_config_reference_generation_config_id_fkey (
                         id, position, input_type, ref_media_id,
-                        ref_media:media!fk_gcref_media ( id, url, width, height )
+                        ref_media:media ( id, url, width, height )
                     )
                 )
             `)
@@ -193,6 +195,7 @@ export const getProjectData = async (req, res) => {
                         asset_id: ref.ref_media_id,
                         role:     ref.input_type || "IMAGE_INPUT_TYPE_BASE_IMAGE",
                     })),
+                    dna: config.dna && config.dna.length > 0 ? config.dna[0] : null,
                 } : null,
 
                 mediaMetadata: {

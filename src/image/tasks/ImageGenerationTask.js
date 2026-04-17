@@ -12,7 +12,7 @@ export async function runImageGenerationTask(context, params) {
         provider,
         batchId, configId, workflows,
         generation_type,
-        prompt, negative_prompt,
+        prompt, prompt_optimise, generation_prompt, negative_prompt,
         ratio, quality, size, width, height,
         userId, input_assets, image_base64,
         strength, startTime,
@@ -20,6 +20,8 @@ export async function runImageGenerationTask(context, params) {
         seed, project_id, session_id,
         model_name, count = 1,
     } = params;
+
+    const promptForGeneration = generation_prompt || prompt_optimise || prompt;
 
     console.log(`\n⚙️  [ImageGenerationTask] ${batchId ? `batch:${batchId}` : 'single'} | ${count} variation(s) | provider:${provider.constructor.name}`);
 
@@ -31,7 +33,7 @@ export async function runImageGenerationTask(context, params) {
     // ─── STEP 1: Safety check ───
     let safety;
     try {
-        safety = await promptService.checkPrompt(prompt);
+        safety = await promptService.checkPrompt(promptForGeneration);
     } catch (err) {
         console.error(`❌ Safety check failed: ${err.message}`);
         return;
@@ -44,7 +46,7 @@ export async function runImageGenerationTask(context, params) {
     // ─── STEP 2: Enhance prompt ───
     let finalPrompt, finalNegative;
     try {
-        const enhanced = await promptService.upscalePrompt(prompt, { quality });
+        const enhanced = await promptService.upscalePrompt(promptForGeneration, { quality });
         finalPrompt    = enhanced.enhanced;
         const autoNeg  = await promptService.generateNegativePrompt(finalPrompt);
         finalNegative  = [negative_prompt || "", autoNeg || ""].filter(Boolean).join(", ");
@@ -100,7 +102,8 @@ export async function runImageGenerationTask(context, params) {
 
                     // Per-media config (with seed)
                     const mediaConfig = await db.configs.createConfig({
-                        prompt:      finalPrompt,
+                        prompt,
+                        prompt_optimise: finalPrompt,
                         model:       model_name || "unknown",
                         aspect_ratio: ratio || "LANDSCAPE",
                         generation_type,
@@ -186,7 +189,8 @@ export async function runImageGenerationTask(context, params) {
 
             // Per-media config (with seed from provider result)
             const mediaConfig = await db.configs.createConfig({
-                prompt:          finalPrompt,
+                prompt,
+                prompt_optimise: finalPrompt,
                 model:           model_name || "unknown",
                 aspect_ratio:    ratio || "LANDSCAPE",
                 generation_type,

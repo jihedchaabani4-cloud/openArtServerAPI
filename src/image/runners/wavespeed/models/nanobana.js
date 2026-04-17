@@ -9,17 +9,20 @@ import { CAPS                 } from "#core/capabilities.js";
 class NanobanaNormal extends WavespeedImageRunner {
     constructor() {
         super({
-            modelName:      "google/nano-banana/text-to-image",
-            provider:       "wavespeed",
-            type:           "t2i",
-            maxReferences:  0,
-            capabilities:   [CAPS.TEXT, CAPS.NEGATIVE, CAPS.OUTPUTS_IMAGE],
-            displayName:    "NanoBanana",
-            category:       "image",
-            tier:           "std",
-            tags:           ["fast", "creative", "affordable"],
-            pricing:        { image: 5 },
-            modes:          ["t2i"],
+            modelName:         "google/nano-banana/text-to-image",
+            provider:          "wavespeed",
+            type:              "t2i",
+            maxReferences:     0,
+            capabilities:      [CAPS.TEXT, CAPS.NEGATIVE, CAPS.OUTPUTS_IMAGE],
+            displayName:       "NanoBanana",
+            category:          "image",
+            tier:              "std",
+            tags:              ["fast", "creative", "affordable"],
+            pricing:           { image: 5 },
+            modes:             ["t2i"],
+            supportedRatios:   ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+            supportedQualities:["1k", "2k", "4k"],
+            defaultParams:     { ratio: "1:1", quality: "1k" },
         });
     }
 
@@ -47,18 +50,21 @@ class NanobanaNormal extends WavespeedImageRunner {
 class NanobanaEdit extends WavespeedImageRunner {
     constructor() {
         super({
-            modelName:     "google/nano-banana/edit",
-            provider:      "wavespeed",
-            type:          "i2i",
-            maxReferences: 8,
-            capabilities:  [CAPS.TEXT, CAPS.MULTI_IMAGE, CAPS.NEGATIVE, CAPS.OUTPUTS_IMAGE],
-            displayName:   "NanoBanana Edit",
-            category:      "image",
-            tier:          "std",
-            tags:          ["fast", "edit"],
-            pricing:       { image: 7 },
-            modes:         ["i2i"],
-            hidden:        true,
+            modelName:         "google/nano-banana/edit",
+            provider:          "wavespeed",
+            type:              "i2i",
+            maxReferences:     8,
+            capabilities:      [CAPS.TEXT, CAPS.MULTI_IMAGE, CAPS.NEGATIVE, CAPS.OUTPUTS_IMAGE],
+            displayName:       "NanoBanana Edit",
+            category:          "image",
+            tier:              "std",
+            tags:              ["fast", "edit"],
+            pricing:           { image: 7 },
+            modes:             ["i2i"],
+            hidden:            true,
+            supportedRatios:   ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+            supportedQualities:["1k", "2k", "4k"],
+            defaultParams:     { ratio: "1:1", quality: "1k" },
         });
     }
 
@@ -97,17 +103,20 @@ class NanobanaEdit extends WavespeedImageRunner {
 class Nanobana2T2i extends WavespeedImageRunner {
     constructor() {
         super({
-            modelName:     "google/nano-banana-2/text-to-image",
-            provider:      "wavespeed",
-            type:          "t2i",
-            maxReferences: 0,
-            capabilities:  [CAPS.TEXT, CAPS.NEGATIVE, CAPS.OUTPUTS_IMAGE],
-            displayName:   "NanoBanana 2",
-            category:      "image",
-            tier:          "std",
-            tags:          ["fast", "4k", "creative", "web-search"],
-            pricing:       { image: 7 },
-            modes:         ["t2i"],
+            modelName:         "google/nano-banana-2/text-to-image",
+            provider:          "wavespeed",
+            type:              "t2i",
+            maxReferences:     0,
+            capabilities:      [CAPS.TEXT, CAPS.NEGATIVE, CAPS.OUTPUTS_IMAGE],
+            displayName:       "NanoBanana 2",
+            category:          "image",
+            tier:              "std",
+            tags:              ["fast", "4k", "creative", "web-search"],
+            pricing:           { image: 7 },
+            modes:             ["t2i"],
+            supportedRatios:   ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],
+            supportedQualities:["1k", "2k", "4k"],
+            defaultParams:     { ratio: "1:1", quality: "1k" },
         });
     }
 
@@ -137,18 +146,21 @@ class Nanobana2T2i extends WavespeedImageRunner {
 class Nanobana2Edit extends WavespeedImageRunner {
     constructor() {
         super({
-            modelName:     "google/nano-banana-2/edit",
-            provider:      "wavespeed",
-            type:          "i2i",
-            maxReferences: 14,
-            capabilities:  [CAPS.TEXT, CAPS.MULTI_IMAGE, CAPS.NEGATIVE, CAPS.OUTPUTS_IMAGE],
-            displayName:   "NanoBanana 2 Edit",
-            category:      "image",
-            tier:          "std",
-            tags:          ["fast", "4k", "multi-ref", "edit"],
-            pricing:       { image: 7 },
-            modes:         ["i2i"],
-            hidden:        true,
+            modelName:         "google/nano-banana-2/edit",
+            provider:          "wavespeed",
+            type:              "i2i",
+            maxReferences:     14,
+            capabilities:      [CAPS.TEXT, CAPS.MULTI_IMAGE, CAPS.NEGATIVE, CAPS.OUTPUTS_IMAGE],
+            displayName:       "NanoBanana 2 Edit",
+            category:          "image",
+            tier:              "std",
+            tags:              ["fast", "4k", "multi-ref", "edit"],
+            pricing:           { image: 7 },
+            modes:             ["i2i"],
+            hidden:            true,
+            supportedRatios:   ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],
+            supportedQualities:["1k", "2k", "4k"],
+            defaultParams:     { ratio: "1:1", quality: "1k" },
         });
     }
 
@@ -187,17 +199,20 @@ class Nanobana2Edit extends WavespeedImageRunner {
 class NanobanaProT2i extends WavespeedImageRunner {
     constructor() {
         super({
-            modelName:     "google/nano-banana-pro/text-to-image",
-            provider:      "wavespeed",
-            type:          "t2i",
-            maxReferences: 0,
-            capabilities:  [CAPS.TEXT, CAPS.NEGATIVE, CAPS.OUTPUTS_IMAGE],
-            displayName:   "NanoBanana Pro",
-            category:      "image",
-            tier:          "pro",
-            tags:          ["pro", "4k", "creative", "typography"],
-            pricing:       { image: 14 },
-            modes:         ["t2i"],
+            modelName:         "google/nano-banana-pro/text-to-image",
+            provider:          "wavespeed",
+            type:              "t2i",
+            maxReferences:     0,
+            capabilities:      [CAPS.TEXT, CAPS.NEGATIVE, CAPS.OUTPUTS_IMAGE],
+            displayName:       "NanoBanana Pro",
+            category:          "image",
+            tier:              "pro",
+            tags:              ["pro", "4k", "creative", "typography"],
+            pricing:           { image: 14 },
+            modes:             ["t2i"],
+            supportedRatios:   ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+            supportedQualities:["1k", "2k", "4k"],
+            defaultParams:     { ratio: "1:1", quality: "1k" },
         });
     }
 
@@ -225,18 +240,21 @@ class NanobanaProT2i extends WavespeedImageRunner {
 class NanobanaProEdit extends WavespeedImageRunner {
     constructor() {
         super({
-            modelName:     "google/nano-banana-pro/edit",
-            provider:      "wavespeed",
-            type:          "i2i",
-            maxReferences: 8,
-            capabilities:  [CAPS.TEXT, CAPS.MULTI_IMAGE, CAPS.NEGATIVE, CAPS.OUTPUTS_IMAGE],
-            displayName:   "NanoBanana Pro Edit",
-            category:      "image",
-            tier:          "pro",
-            tags:          ["pro", "4k", "edit", "character-consistency"],
-            pricing:       { image: 14 },
-            modes:         ["i2i"],
-            hidden:        true,
+            modelName:         "google/nano-banana-pro/edit",
+            provider:          "wavespeed",
+            type:              "i2i",
+            maxReferences:     8,
+            capabilities:      [CAPS.TEXT, CAPS.MULTI_IMAGE, CAPS.NEGATIVE, CAPS.OUTPUTS_IMAGE],
+            displayName:       "NanoBanana Pro Edit",
+            category:          "image",
+            tier:              "pro",
+            tags:              ["pro", "4k", "edit", "character-consistency"],
+            pricing:           { image: 14 },
+            modes:             ["i2i"],
+            hidden:            true,
+            supportedRatios:   ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+            supportedQualities:["1k", "2k", "4k"],
+            defaultParams:     { ratio: "1:1", quality: "1k" },
         });
     }
 

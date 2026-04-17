@@ -24,10 +24,19 @@ export function getStandardSize(ratio = "1:1", quality = "2K") {
     // Given the new scaleMap (1, 2, 4), 1024*4 = 4096. 
     // I will increase the clamp to 8192 if needed, but for now 4096 fits 4K.
     const maxDim = scale >= 8 ? 8192 : (scale >= 4 ? 4096 : 2048);
-    const snap = (v) => Math.min(maxDim, Math.round((dims[v] * scale) / 16) * 16);
+    let targetW = dims.width * scale;
+    let targetH = dims.height * scale;
 
-    const width  = snap("width");
-    const height = snap("height");
+    const currentMax = Math.max(targetW, targetH);
+    if (currentMax > maxDim) {
+        const factor = maxDim / currentMax;
+        targetW *= factor;
+        targetH *= factor;
+    }
+
+    const snap = (v) => Math.min(maxDim, Math.round(v / 16) * 16);
+    const width  = snap(targetW);
+    const height = snap(targetH);
 
     return { width, height, size: `${width}*${height}` };
 }

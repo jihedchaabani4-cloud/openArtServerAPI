@@ -8,11 +8,10 @@
 import * as nanobana from "./models/nanobana.js";
 import * as seedream from "./models/seedream.js";
 import * as zImage   from "./models/z-image.js";
-import * as flux     from "./models/flux.js";
 import * as runway   from "./models/runway.js";
 import { IMAGE_ICONS } from "../../utils/imageIcons.js";
 
-const R_BASIC    = ["1:1", "16:9", "9:16"];
+const R_BASIC    = ["1:1", "16:9", "9:16", "3:2", "3:4"];
 const R_EXTENDED = ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"];
 const Q_1K_4K    = ["1k", "2k", "4k"];
 const Q_2K_4K    = ["2k", "4k"];
@@ -103,67 +102,7 @@ export const MODELS = {
         i2i:      zImage.img2img,
     },
 
-    // ─── Flux 2 ───────────────────────────────────────────────────────────────
-    "flux_turbo_wavespeed": {
-        displayName: "Flux 2 Turbo",
-        icon: IMAGE_ICONS.flux,
-        description: "Real-time photoreal generation — ultra-fast",
-        category: "image", tier: "std",
-        pricing:  { per_image: 0.02 },
-        tags:     ["ultra-fast", "real-time", "photoreal"],
-        support:  { ratio: R_BASIC, references: { min: 0, max: 3 } },
-        t2i:      flux.turboT2i,      // wavespeed-ai/flux-2-turbo/text-to-image
-        i2i:      flux.turboEdit,     // wavespeed-ai/flux-2-turbo/edit
-        i2iMulti: flux.turboEdit,
-    },
-    "flux_flex_wavespeed": {
-        displayName: "Flux 2 Flex",
-        icon: IMAGE_ICONS.flux,
-        description: "Best price-to-performance — versatile creative range",
-        category: "image", tier: "std",
-        pricing:  { per_image: 0.03 },
-        tags:     ["creative", "versatile", "best-value"],
-        support:  { ratio: R_BASIC, references: { min: 0, max: 3 } },
-        t2i:      flux.flexT2i,
-        i2i:      flux.flexEdit,
-        i2iMulti: flux.flexEdit,
-    },
-    "flux_max_wavespeed": {
-        displayName: "Flux 2 Max",
-        icon: IMAGE_ICONS.flux,
-        description: "Highest quality Flux — hero assets, client-facing content",
-        category: "image", tier: "pro",
-        pricing:  { per_image: 0.08 },
-        tags:     ["pro", "max-quality", "cinematic"],
-        support:  { ratio: R_BASIC, references: { min: 0, max: 3 } },
-        t2i:      flux.maxT2i,
-        i2i:      flux.maxEdit,       // ← swap to replicate: flux_max_replicate.i2i
-        i2iMulti: flux.maxEdit,
-    },
-    "flux_kontext_max_wavespeed": {
-        displayName: "Flux Kontext Max",
-        icon: IMAGE_ICONS.flux,
-        description: "12B — max prompt adherence, typography, character consistency",
-        category: "image", tier: "pro",
-        pricing:  { per_image: 0.08 },
-        tags:     ["pro", "kontext", "multi-ref", "cinematic"],
-        support:  { ratio: R_BASIC, references: { min: 0, max: 5 } },
-        t2i:      flux.kontextMaxT2i,
-        i2i:      flux.kontextMaxEdit,
-        i2iMulti: flux.kontextMaxMulti,
-    },
-    "flux_pro_wavespeed": {
-        displayName: "Flux 2 Pro",
-        icon: IMAGE_ICONS.flux,
-        description: "Flagship production model — just prompt, no tuning needed",
-        category: "image", tier: "pro",
-        pricing:  { per_image: 0.05 },
-        tags:     ["pro", "production", "campaign-ready"],
-        support:  { ratio: R_BASIC, references: { min: 0, max: 3 } },
-        t2i:      flux.proT2i,
-        i2i:      flux.proEdit,
-        i2iMulti: flux.proEdit,
-    },
+
 
     // ─── RunwayML ─────────────────────────────────────────────────────────────
     "runway_gen4_image_wavespeed": {

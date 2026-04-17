@@ -1,7 +1,8 @@
-import { ReferenceProcessor } from "#utils/ReferenceProcessor.js";
+import { ReferenceProcessor             } from "#utils/ReferenceProcessor.js";
 import { getRunner, getModelName, EDIT_SUPPORT_MODELS } from "#video/core/modelRouter.js";
-import { appendMediaToWorkflow, markMediaStatus } from "#db/workflowMediaOps.js";
-import { CameraTask } from "#video/tasks/CameraTask.js"; // [Removed] No longer needed
+import { appendMediaToWorkflow, markMediaStatus  } from "#db/workflowMediaOps.js";
+import { CameraTask                      } from "#video/tasks/CameraTask.js"; // [Removed] No longer needed
+import { verifyAndClampVideoParams        } from "#image/utils/treatmentUtils.js";
 
 // EditVideoTreatment — exclusively video-to-video editing
 const executeV2V = (p, payload, mode) =>
@@ -110,28 +111,34 @@ export class EditVideoTreatment {
             console.log(`   ✅ [Step 4] Using provided cameraControl: ${JSON.stringify(finalCameraControl)}`);
         }
 
-        // ── Step 5: Build form ────────────────────────────────────────────────
+        // ── Step 5: Verify & clamp params using provider's own defaults ──────
+        const verified = verifyAndClampVideoParams(provider, {
+            ratio, duration, cfgScale,
+        });
+
+        // ── Step 6: Build form ────────────────────────────────────────────────
         const form = {
-            prompt: finalPrompt, model: resolvedModel, ratio,
-            duration:      parseFloat(String(duration)) || 5,
+            prompt: finalPrompt, model: resolvedModel,
+            ratio:         verified.ratio,
+            duration:      verified.duration,
             resolution:    video_resolution,
-            sound, cfgScale, negativePrompt, multiPrompt, keepOriginalSound,
+            sound, cfgScale: verified.cfgScale, negativePrompt, multiPrompt, keepOriginalSound,
             cameraControl: finalCameraControl,
             video:         baseVideoRef?.url,
             references:    remainingRefs,
             edit_type,
         };
         const model_name = getModelName(resolvedModel, mode);
-        console.log(`\n   ✅ [Step 5] Form built | model_name: "${model_name}" | duration: ${form.duration}s | ratio: ${form.ratio}`);
+        console.log(`\n   ✅ [Step 6] Form built | model_name: "${model_name}" | duration: ${form.duration}s | ratio: ${form.ratio}`);
 
         // ── Step 6: Persist generation config ────────────────────────────────
         const config = await this.db.configs.createConfig({
             prompt: finalPrompt,
             model:  model_name,
-            aspect_ratio:    ratio || "16:9",
+            aspect_ratio:    verified.ratio || "16:9",
             generation_type: input_assets.length > 0 ? "VIDEO_REFERENCES" : "TEXT_ONLY",
         });
-        console.log(`   ✅ [Step 6] Config created → id: ${config.id}`);
+        console.log(`   ✅ [Step 7] Config created → id: ${config.id}`);
 
         for (let i = 0; i < input_assets.length; i++) {
             const asset = input_assets[i];
@@ -146,12 +153,12 @@ export class EditVideoTreatment {
             }
         }
 
-        // ── Step 7: Load workflow ─────────────────────────────────────────────
+        // ── Step 8: Load workflow ─────────────────────────────────────────────
         const workflow = await this.db.workflows.getWorkflow(workflow_id);
         if (!workflow) throw new Error(`Workflow ${workflow_id} not found`);
-        console.log(`   ✅ [Step 7] Workflow loaded → id: ${workflow.id}`);
+        console.log(`   ✅ [Step 8] Workflow loaded → id: ${workflow.id}`);
 
-        // ── Step 8: Fire background job ──────────────────────────────────────
+        // ── Step 9: Fire background job ──────────────────────────────────────
         console.log(`\n🚀 [EditVideoTreatment] Dispatching background job... (edit_type: ${edit_type})`);
 
         this._runBackground({

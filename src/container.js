@@ -9,6 +9,7 @@ import { BatchRepository }            from "#db/BatchRepository.js";
 import { WorkflowRepository }         from "#db/WorkflowRepository.js";
 import { MediaRepository }            from "#db/MediaRepository.js";
 import { GenerationConfigRepository } from "#db/GenerationConfigRepository.js";
+import { DnaRepository }              from "#db/DnaRepository.js";
 
 // ─── Video Domain ────────────────────────────────────────────────────────────
 import { VideoTreatment }  from "#video/treatments/VideoTreatment.js";
@@ -22,7 +23,11 @@ import { EditImageTreatment }      from "#image/treatments/EditImageTreatment.js
 import { CameraTreatment }         from "#image/treatments/CameraTreatment.js";
 import { LightingTreatment }       from "#image/treatments/LightingTreatment.js";
 import { UpscaleTreatment }        from "#image/treatments/UpscaleTreatment.js";
+import { ElementSheetTreatment }   from "#image/treatments/ElementSheetTreatment.js";
 import { MODELS as IMAGE_MODELS } from "#image/core/registry.js";
+
+// ─── DNA Domain ───────────────────────────────────────────────────────────────
+import { DnaTreatment } from "./dna/DnaTreatment.js";
 
 // ─── Providers ───────────────────────────────────────────────────────────────
 import { OpenAITextProvider } from "./core/providers/OpenAITextProvider.js";
@@ -45,6 +50,7 @@ export const db = {
     workflows: new WorkflowRepository(),  // table: workflow
     media:     new MediaRepository(),     // table: media
     configs:   new GenerationConfigRepository(), // tables: generation_config + generation_config_reference
+    dna:       new DnaRepository(),       // table: dna
 };
 
 // ─── Treatments ──────────────────────────────────────────────────────────────
@@ -83,4 +89,12 @@ export const lightingTreatment = new LightingTreatment({
 
 export const upscaleTreatment = new UpscaleTreatment({
     storageService, db
+});
+
+export const dnaTreatment = new DnaTreatment({
+    promptService, db
+});
+
+export const elementSheetTreatment = new ElementSheetTreatment({
+    promptService, models: IMAGE_MODELS, storageService, db, dnaTreatment
 });

@@ -18,13 +18,46 @@ export class GenerateImageTreatment {
         return getStandardSize(ratio, quality);
     }
 
+    _buildDisplayName(prompt, workflow_type) {
+        if (!prompt || typeof prompt !== "string") {
+            return workflow_type === "ELEMENT_SHEET" ? "Element Sheet" : "Image Generation";
+        }
+
+        let displayName = prompt
+            .replace(/[_-]+/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+
+        if (workflow_type === "ELEMENT_SHEET") {
+            displayName = displayName
+                .replace(/\b(character|element|sprite|asset)\s+sheet\b/gi, "")
+                .replace(/\b(reference|turnaround|model)\s+sheet\b/gi, "")
+                .replace(/\bsheet\s+of\b/gi, "")
+                .replace(/\bsheet\b/gi, "")
+                .replace(/\bcharacter\b/gi, "")
+                .replace(/\breference\b/gi, "")
+                .replace(/\bturnaround\b/gi, "")
+                .replace(/\s+/g, " ")
+                .replace(/^[,:;.\-\s]+|[,:;.\-\s]+$/g, "")
+                .trim();
+        }
+
+        if (!displayName) {
+            return workflow_type === "ELEMENT_SHEET" ? "Element Sheet" : "Image Generation";
+        }
+
+        return displayName.substring(0, 60);
+    }
+
     // ─────────────────────────────────────────
     // MAIN EXECUTE
     // ─────────────────────────────────────────
     async execute(input) {
         const prompt          = input.prompt;
+        const prompt_optimise = input.prompt_optimise || null;
+        const generation_prompt = prompt_optimise || prompt;
+        const display_name_override = input.display_name || null;
         const negative_prompt = input.negative_prompt || "";
-        const userPlan        = input.userPlan        || "free";
         const model_name      = input.model_name      || "nanobana";
         let ratio             = input.ratio;
         let quality           = input.quality;
@@ -40,7 +73,7 @@ export class GenerateImageTreatment {
 
         const userId = input.userId || input.user_id || "e54d7d5f-9c49-457d-83b7-ac8484bceb80";
         if (!project_id)  throw new Error("project_id required");
-        if (!session_id)  throw new Error("session_id required");
+        // session_id is optional — null = project-level workflow (e.g. element sheets)
 
         const startTime = Date.now();
 
@@ -103,6 +136,7 @@ export class GenerateImageTreatment {
         // ─── DB: Create shared generation_config (batch-level, no seed) ───
         const config = await this.db.configs.createConfig({
             prompt,
+            prompt_optimise,
             model: `${model_name}`,
             aspect_ratio: ratio || "LANDSCAPE",
             generation_type,
@@ -133,7 +167,7 @@ export class GenerateImageTreatment {
         }
 
         // ─── DB: Create one workflow per variation ───
-        const displayName = prompt ? prompt.substring(0, 60) : "Image Generation";
+        const displayName = display_name_override || this._buildDisplayName(prompt, workflow_type);
         const workflows   = [];
         for (let i = 0; i < count; i++) {
             const wf = await this.db.workflows.createWorkflow({
@@ -160,6 +194,8 @@ export class GenerateImageTreatment {
             workflows,
             generation_type,
             prompt,
+            prompt_optimise,
+            generation_prompt,
             negative_prompt,
             ratio, quality, size, width, height,
             userId,

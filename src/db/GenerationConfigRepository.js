@@ -15,6 +15,7 @@ export class GenerationConfigRepository extends BaseRepository {
      */
     async createConfig({
         prompt,
+        prompt_optimise = null,
         model,
         aspect_ratio,
         generation_type,
@@ -23,7 +24,7 @@ export class GenerationConfigRepository extends BaseRepository {
     }) {
         const { data, error } = await this.client()
             .from(this.tableName)
-            .insert({ prompt, model, aspect_ratio, generation_type, seed, visibility })
+            .insert({ prompt, prompt_optimise, model, aspect_ratio, generation_type, seed, visibility })
             .select()
             .single();
         if (error) throw error;

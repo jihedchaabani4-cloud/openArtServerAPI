@@ -41,15 +41,15 @@ export const getWorkflow = async (id) => {
 
 export const createWorkflow = async ({ project_id, session_id, display_name, primary_media_id, variation_index, workflow_type }, options = {}) => {
     try {
-        if (!project_id || !session_id) {
-            throw new Error("project_id and session_id are required");
+        if (!project_id) {
+            throw new Error("project_id is required");
         }
 
         const newWorkflow = {
             project_id,
-            session_id,
-            display_name: display_name || "Untitled Workflow",
-            variation_index: variation_index || 0,
+            session_id:       session_id       || null,  // null = project-level workflow
+            display_name:     display_name     || "Untitled Workflow",
+            variation_index:  variation_index  || 0,
             primary_media_id: primary_media_id || null,
         };
 
@@ -87,6 +87,39 @@ export const updateWorkflow = async (id, updates) => {
     } catch (err) {
         console.error(`❌ Error updating workflow ${id}:`, err);
         throw err;
+    }
+};
+
+// ── PATCH /api/workflows/:id ────────────────────────────────────────────────────
+export const patchWorkflow = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { display_name, primary_media_id, favorited } = req.body || {};
+
+        const updates = {};
+
+        if (display_name !== undefined) {
+            const cleanedName = String(display_name || "").trim();
+            updates.display_name = cleanedName || "Untitled Workflow";
+        }
+
+        if (primary_media_id !== undefined) {
+            updates.primary_media_id = primary_media_id || null;
+        }
+
+        if (favorited !== undefined) {
+            updates.favorited = !!favorited;
+        }
+
+        if (Object.keys(updates).length === 0) {
+            return res.status(400).json({ ok: false, message: "No supported workflow fields provided" });
+        }
+
+        const workflow = await updateWorkflow(id, updates);
+        return res.json({ ok: true, workflow });
+    } catch (err) {
+        console.error(`❌ Error patching workflow ${req.params.id}:`, err);
+        return res.status(500).json({ ok: false, message: err.message });
     }
 };
 

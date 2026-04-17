@@ -1,5 +1,4 @@
 export const IMAGE_ICONS = {
-    flux:       "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/flux.svg",
     nanobana:   "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/minimax.svg",
     google:     "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/google.svg",
     seedream:   "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/baichuan.svg",

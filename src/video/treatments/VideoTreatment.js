@@ -1,7 +1,8 @@
-import { ReferenceProcessor } from "#utils/ReferenceProcessor.js";
-import { detectMode          } from "#video/core/detectMode.js";
+import { ReferenceProcessor              } from "#utils/ReferenceProcessor.js";
+import { detectMode                      } from "#video/core/detectMode.js";
 import { getRunner, getModelName, ROUTED_MODELS } from "#video/core/modelRouter.js";
-import { appendMediaToWorkflow, markMediaStatus } from "#db/workflowMediaOps.js";
+import { appendMediaToWorkflow, markMediaStatus  } from "#db/workflowMediaOps.js";
+import { verifyAndClampVideoParams        } from "#image/utils/treatmentUtils.js";
 
 const METHOD_MAP = {
     "t2v":    (p, payload, mode) => p.generate ? p.generate(payload, mode) : p.textToVideo(payload),
@@ -66,12 +67,18 @@ export class VideoTreatment {
             url: input_assets[i]?.url || ref.url,
         }));
 
-        // 4. Build form
+        // 4. Verify & clamp params using provider's own defaults
+        const verified = verifyAndClampVideoParams(provider, {
+            ratio, duration, cfgScale,
+        });
+
+        // 5. Build form
         const form = {
-            prompt, model, ratio,
-            duration:      parseFloat(String(duration)) || 5,
+            prompt, model,
+            ratio:         verified.ratio,
+            duration:      verified.duration,
             resolution:    video_resolution,
-            sound, cfgScale, negativePrompt, multiPrompt, keepOriginalSound,
+            sound, cfgScale: verified.cfgScale, negativePrompt, multiPrompt, keepOriginalSound,
             cameraControl: cameraControl || camera_control,
             references:    resolvedRefs,
         };

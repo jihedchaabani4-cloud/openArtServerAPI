@@ -23,7 +23,7 @@ async function handleSheetRequest(req, res, sheetType) {
             });
         }
 
-        const userId = req.user?.id || "e54d7d5f-9c49-457d-83b7-ac8484bceb80";
+        const userId = req.user.id;
 
         const result = await elementSheetTreatment.execute({
             sheetType,

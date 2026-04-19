@@ -50,6 +50,37 @@ async function uploadBufferToStorage({ buffer, mime, userId, projectId }) {
     return { publicUrl, path, isVideo, mime };
 }
 
+function validateMedia(metadata, mime) {
+    const isVideo = mime.startsWith("video/");
+    const isImage = mime.startsWith("image/");
+
+    if (isImage) {
+        // Image Max Size: 10MB
+        const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
+        if (metadata.file_size > MAX_IMAGE_SIZE) {
+            throw new Error(`Image is too large (${metadata.file_size_label}). Max allowed is 0.2MB.`);
+        }
+    }
+
+    if (isVideo) {
+        // Video Max Duration: 30 seconds
+        const MAX_VIDEO_DURATION = 30;
+        if (metadata.duration_sec && metadata.duration_sec > MAX_VIDEO_DURATION) {
+            throw new Error(`Video is too long (${metadata.duration_label}). Max allowed is 30s.`);
+        }
+
+        // Video Max Resolution: 200 Megapixels (w * h)
+        const MAX_PIXELS = 200 * 1000 * 1000;
+        if (metadata.width && metadata.height) {
+            const pixels = metadata.width * metadata.height;
+            if (pixels > MAX_PIXELS) {
+                const mp = (pixels / 1000000).toFixed(1);
+                throw new Error(`Video resolution is too high (${mp}MP). Max allowed is 200MP.`);
+            }
+        }
+    }
+}
+
 // ─── POST /api/assets/upload ───────────────────────────────────────────────
 router.post("/upload", upload.single("file"), async (req, res) => {
     try {
@@ -75,9 +106,27 @@ router.post("/upload", upload.single("file"), async (req, res) => {
             return res.status(400).json({ ok: false, error: "No file or base64 provided." });
         }
 
-        // Extract dimensions
+        let bodyMeta = null;
+        if (req.body.metadata) {
+            try { bodyMeta = JSON.parse(req.body.metadata); } catch(e) {}
+        }
+        
+        // Extract dimensions from buffer
         const metadata = await extractMediaMetadata(buffer, mime);
-        if (metadata) console.log(`🔍 [AssetsRoute] Metadata:`, JSON.stringify(metadata));
+        console.log(`🔍 [AssetsRoute] Extracted Meta:`, JSON.stringify(metadata));
+
+        // Security / Policy Validation
+        try {
+            validateMedia(metadata, mime);
+        } catch (validationErr) {
+            return res.status(400).json({ ok: false, error: validationErr.message });
+        }
+
+        const width  = metadata?.width  || bodyMeta?.width  || 1024;
+        const height = metadata?.height || bodyMeta?.height || 1024;
+        const ratio  = metadata?.ratio  || bodyMeta?.ratio  || "1:1";
+        const resolution = metadata?.resolution || bodyMeta?.resolution || null;
+        const size   = metadata?.size   || bodyMeta?.size   || null;
 
         // 1. Create workflow + media record immediately with status=processing
         //    (URL is null at this point — will be updated after storage upload)
@@ -94,8 +143,8 @@ router.post("/upload", upload.single("file"), async (req, res) => {
                 generation_config_id: null,
                 step_id:              "CAE",
                 url:                  null,
-                width:                metadata?.width  || 1024,
-                height:               metadata?.height || 1024,
+                width:                width,
+                height:               height,
             },
             initialStatus: "processing",
         });
@@ -125,6 +174,11 @@ router.post("/upload", upload.single("file"), async (req, res) => {
             workflow_id: wf.id,
             asset_id:    mediaRecord.id, // backward compat alias
             type:        isVideo ? "video" : "image",
+            width:       width,
+            height:      height,
+            ratio:       ratio,
+            resolution:  resolution,
+            size:        size,
         });
 
     } catch (err) {

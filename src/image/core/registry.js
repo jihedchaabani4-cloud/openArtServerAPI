@@ -15,14 +15,14 @@
  */
 
 import { MODELS as wavespeedModels } from "../runners/wavespeed/registry.js";
-import { MODELS as sdxlModels      } from "../runners/sdxl/registry.js";
+
 import { MODELS as falModels        } from "../runners/fal/registry.js";
 import { MODELS as replicateModels  } from "../runners/replicate/registry.js";
 import { MODELS as googleModels     } from "../runners/google/registry.js";
 
 export const MODELS = {
     ...wavespeedModels,
-    ...sdxlModels,
+
     ...falModels,
     ...replicateModels,
     ...googleModels,

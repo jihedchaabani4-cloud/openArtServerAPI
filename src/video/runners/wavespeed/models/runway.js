@@ -23,7 +23,7 @@ class RunwayGen4Turbo extends WavespeedVideoRunner {
     }
     adapt(form) {
         const refs = form.references || [];
-        const image = refs[0]?.url || refs[0] || null;
+        const image = form.image || form.image_base64 || refs[0]?.url || refs[0] || null;
         return {
             prompt:      form.prompt,
             image,

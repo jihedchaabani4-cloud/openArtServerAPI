@@ -1,9 +1,101 @@
-// controllers/imageController.js — HTTP handlers for image-domain treatments
-// Treatment classes: src/image/* — selection: lib/imageTreatmentResolver.js
 import { resolveImageTreatment } from "../lib/imageTreatmentResolver.js";
 import { autoCreateProjectAndSession } from "../lib/helpers.js";
 import { normalizeImageModelName, isImageModelRegistered } from "../lib/modelRegistryKeys.js";
-import { db } from "../src/container.js";
+import { db, imageTreatmentV2 } from "../src/container.js";
+import { getTaskService } from "../src/services/redis-management/index.js";
+
+/**
+ * generateV2
+ * POST /api/images/generatedV2
+ * Modern flow: Uses Redis Task Queue (TaskManager + Scheduler)
+ */
+export const generateV2 = async (req, res) => {
+    try {
+        let { 
+            prompt, negative_prompt, ratio, quality, resolution, 
+            edit_type, strength, count, num_images,
+            project_id, session_id,
+            references,
+            model_name,
+        } = req.body;
+
+        // 1. Validation & Normalization
+        quality = quality || resolution;
+        count   = count   || num_images || 1;
+
+        model_name = normalizeImageModelName(model_name);
+        if (model_name != null && model_name !== "" && !isImageModelRegistered(model_name)) {
+            return res.status(400).json({ ok: false, message: "Model not found" });
+        }
+
+        if (!prompt) {
+            return res.status(400).json({ ok: false, message: "Prompt is required" });
+        }
+
+        // 2. Reject Base64 (Assets must be pre-uploaded)
+        if (Array.isArray(references)) {
+            if (references.some(r => typeof r.url === 'string' && r.url.startsWith('data:'))) {
+                return res.status(400).json({ 
+                    ok: false, 
+                    message: "Base64 references are not accepted. Use URLs or asset IDs."
+                });
+            }
+        }
+
+        const userId = req.user.id;
+        const { is_new_project } = req.body;
+
+        // 3. Resolve Project/Session
+        const { project_id: finalProjectId, session_id: finalSessionId } = 
+            await autoCreateProjectAndSession(userId, project_id, session_id, is_new_project);
+
+        console.log(`🚀 [ImageController] generateV2 | User:${userId} | Mode: Redis Queue`);
+
+        // 4. PREPARE (Creates DB placeholders & returns JSON descriptor)
+        const task = await imageTreatmentV2.prepare({
+            prompt,
+            negative_prompt,
+            ratio,
+            quality,
+            edit_type,
+            strength,
+            count,
+            project_id: finalProjectId,
+            session_id: finalSessionId,
+            references,
+            model_name,
+            userId,
+            mask_selection: req.body.mask_selection,
+        });
+
+        // 5. ENQUEUE (Send to Redis TaskManager)
+        const taskService = getTaskService();
+        const createdTask = await taskService.createTask({
+            runner:   "image", // Matches RunnerManager case in indexing
+            data:     task,    // The serializable descriptor
+            userId,
+            userType: req.user?.userType || "pro", // Default to pro as requested
+        });
+
+        console.log(`✅ [ImageController] Task enqueued | ID:${createdTask.id} | Runner:image`);
+
+        // 6. Respond immediately
+        res.json({ 
+            ok: true,
+            status:    "processing",
+            taskId:    createdTask.id,
+            batchId:   task.batchId,
+            configId:  task.configId,
+            workflows: task.workflows,
+            project_id: finalProjectId,
+            session_id: finalSessionId
+        });
+
+    } catch (error) {
+        console.error("❌ [ImageController] generateV2 error:", error);
+        res.status(500).json({ ok: false, message: error.message });
+    }
+};
 
 /**
  * generate
@@ -56,7 +148,7 @@ export const generate = async (req, res) => {
             }
         }
 
-        const userId = req.user?.id || 'e54d7d5f-9c49-457d-83b7-ac8484bceb80';
+        const userId = req.user.id;
         const { is_new_project } = req.body;
 
         const { project_id: finalProjectId, session_id: finalSessionId } = 
@@ -114,7 +206,7 @@ export const edit = async (req, res) => {
             return res.status(400).json({ ok: false, message: "Prompt and image_base64 are required" });
         }
 
-        const userId = req.user?.id || 'e54d7d5f-9c49-457d-83b7-ac8484bceb80';
+        const userId = req.user.id;
 
         const { project_id: finalProjectId, session_id: finalSessionId } = 
             await autoCreateProjectAndSession(userId, req.body.project_id, req.body.session_id);
@@ -172,7 +264,7 @@ export const generateEdit = async (req, res) => {
             return res.status(400).json({ ok: false, message: "Model not found" });
         }
 
-        const userId = req.user?.id || 'e54d7d5f-9c49-457d-83b7-ac8484bceb80';
+        const userId = req.user.id;
 
         const { project_id: finalProjectId, session_id: finalSessionId } = 
             await autoCreateProjectAndSession(userId, project_id, session_id);

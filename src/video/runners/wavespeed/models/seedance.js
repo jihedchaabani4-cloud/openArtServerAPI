@@ -98,7 +98,7 @@ class SeedanceI2v extends WavespeedVideoRunner {
         const refs = form.references || [];
         return {
             prompt: form.prompt,
-            image: refs.find(r => r.role === "start" || r.role === "normal")?.url || null,
+            image: form.image || form.image_base64 || refs.find(r => r.role === "start" || r.role === "normal")?.url || null,
             duration: parseFloat(form.duration) || 5,
             ratio: form.ratio,
             resolution: form.resolution,

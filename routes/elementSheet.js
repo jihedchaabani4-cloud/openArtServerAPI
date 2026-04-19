@@ -1,7 +1,10 @@
 import express from "express";
 import * as elementSheetController from "../controllers/elementSheetController.js";
+import { requireAuth } from "../src/middleware/auth.js";
 
 const router = express.Router();
+
+router.use(requireAuth);
 
 /**
  * @route POST /api/element-sheet/character

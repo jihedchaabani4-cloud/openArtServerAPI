@@ -77,19 +77,7 @@ export const MODELS = {
         _default: o3Pro,
     },
     
-    // ── Kling Motion Controller ───────────────────────────────────────────────
-    "kling_v26_motion_std_wavespeed": {
-        motion: v26Std, v2v: v26Std, _default: v26Std,
-    },
-    "kling_v26_motion_pro_wavespeed": {
-        motion: v26Pro, v2v: v26Pro, _default: v26Pro,
-    },
-    "kling_v3_motion_std_wavespeed": {
-        motion: v3Std, v2v: v3Std, _default: v3Std,
-    },
-    "kling_v3_motion_pro_wavespeed": {
-        motion: v3Pro, v2v: v3Pro, _default: v3Pro,
-    },
+
     
     // ── Seedance v1.5 Pro ───────────────────────────────────────────────────
     "seedance_v15_pro_wavespeed": {
@@ -215,58 +203,7 @@ export const MODEL_INFO = {
             camera_control: true,
         },
     },
-    "kling_v26_motion_std_wavespeed": {
-        displayName:    "Kling v2.6 Motion Std (Wavespeed)",
-        provider:       "wavespeed",
-        supportedModes: ["motion", "v2v"],
-        pricing:        { "5s": 0.10, "10s": 0.20 },
-        support: {
-            ratio:    [{ value: "16:9" }, { value: "9:16" }, { value: "1:1" }],
-            duration: { min: 5, max: 10, step: 5, unit: "s" },
-            frames:   { startFrame: true, endFrame: true },
-            references: { min: 0, max: 2 },
-            camera_control: true,
-        },
-    },
-    "kling_v26_motion_pro_wavespeed": {
-        displayName:    "Kling v2.6 Motion Pro (Wavespeed)",
-        provider:       "wavespeed",
-        supportedModes: ["motion", "v2v"],
-        pricing:        { "5s": 0.28, "10s": 0.56 },
-        support: {
-            ratio:    [{ value: "16:9" }, { value: "9:16" }, { value: "1:1" }],
-            duration: { min: 5, max: 10, step: 5, unit: "s" },
-            frames:   { startFrame: true, endFrame: true },
-            references: { min: 0, max: 2 },
-            camera_control: true,
-        },
-    },
-    "kling_v3_motion_std_wavespeed": {
-        displayName:    "Kling v3 Motion Std (Wavespeed)",
-        provider:       "wavespeed",
-        supportedModes: ["motion", "v2v"],
-        pricing:        { "5s": 0.35, "10s": 0.70 },
-        support: {
-            ratio:    [{ value: "16:9" }, { value: "9:16" }, { value: "1:1" }],
-            duration: { min: 5, max: 10, step: 5, unit: "s" },
-            frames:   { startFrame: true, endFrame: true },
-            references: { min: 0, max: 2 },
-            camera_control: true,
-        },
-    },
-    "kling_v3_motion_pro_wavespeed": {
-        displayName:    "Kling v3 Motion Pro (Wavespeed)",
-        provider:       "wavespeed",
-        supportedModes: ["motion", "v2v"],
-        pricing:        { "5s": 0.45, "10s": 0.90 },
-        support: {
-            ratio:    [{ value: "16:9" }, { value: "9:16" }, { value: "1:1" }],
-            duration: { min: 5, max: 10, step: 5, unit: "s" },
-            frames:   { startFrame: true, endFrame: true },
-            references: { min: 0, max: 2 },
-            camera_control: true,
-        },
-    },
+
     "seedance_v15_pro_wavespeed": {
         displayName:    "Seedance v1.5 Pro (Wavespeed)",
         provider:       "wavespeed",

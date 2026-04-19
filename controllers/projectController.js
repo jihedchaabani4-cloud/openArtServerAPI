@@ -52,10 +52,6 @@ function getModelConfig() {
 
     const models   = [...videoModels, ...imageModels];
 
-    const editableModels = models.filter(m => m.supportsEdit).map(m => m.displayName);
-    console.log("--- TOTAL MODELS (Length: " + models.length + ") ---");
-    console.log("--- EDIT SUPPORTED MODELS (Length: " + editableModels.length + ") ---", editableModels);
-
     return {
         models,
     };

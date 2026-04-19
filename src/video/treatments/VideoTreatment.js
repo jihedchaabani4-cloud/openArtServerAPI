@@ -165,56 +165,63 @@ export class VideoTreatment {
             initialStatus: "processing",
         });
 
-        // Safety check
-        const safety = await this.promptService.checkPrompt(form.prompt);
-        if (!safety.safe) {
-            console.warn(`⚠️ [VideoTreatment] Prompt rejected: ${safety.reason}`);
-            await markMediaStatus(this.db, media.id, "failed", safety.reason);
-            return;
+        try {
+            // Safety check
+            const safety = await this.promptService.checkPrompt(form.prompt);
+            if (!safety.safe) {
+                console.warn(`⚠️ [VideoTreatment] Prompt rejected: ${safety.reason}`);
+                await markMediaStatus(this.db, media.id, "failed", safety.reason);
+                return;
+            }
+
+            // adapt → toPayload → call API
+            const adapted = provider.adapt(form, mode);
+            const payload = provider.toPayload(adapted, mode);
+
+            const runner = (provider.variants && provider.variants[mode]) || provider;
+            console.log(`\n   ⚙️ [VideoTreatment] Calling Provider API (${runner.modelName || model_name})`);
+
+            const executeMethod = METHOD_MAP[provider.type] || METHOD_MAP["t2v"];
+            const result        = await executeMethod(provider, payload, mode);
+
+            console.log(`\n   ✅ [VideoTreatment] Provider returned output successfully.`);
+
+            const outputUrl = result.video_url || result.image_url;
+            if (!outputUrl) {
+                await markMediaStatus(this.db, media.id, "failed", "Provider returned no output URL");
+                throw new Error("Provider returned no output URL");
+            }
+
+            // Upload to storage
+            console.log(`\n   ☁️ [VideoTreatment] Uploading to Storage...`);
+            const fileName = `${userId}/videos/${batchId || workflow.id}_${Date.now()}.mp4`;
+            const fileUrl  = await this.storageService.uploadFromUrl(fileName, outputUrl);
+            console.log(`      ↳ ${fileUrl}`);
+
+            // Create per-media generation_config (with seed if provider returns one)
+            const mediaConfig = await this.db.configs.createConfig({
+                prompt:          form.prompt,
+                model:           model_name,
+                aspect_ratio:    form.ratio || "16:9",
+                generation_type: input_assets.length > 0 ? "TEXT_REFERENCES" : "TEXT_ONLY",
+                seed:            result.seed || null,
+            });
+
+            // Create Media record (new 7-table schema)
+            await this.db.media.updateFields(media.id, {
+                generation_config_id: mediaConfig.id,
+                url: fileUrl,
+                width: result.width || 1280,
+                height: result.height || 720,
+            });
+            await markMediaStatus(this.db, media.id, "success");
+
+            console.log(`✅ [VideoTreatment] Done: batch ${batchId} → media:${media.id}`);
+
+        } catch (error) {
+            console.error(`❌ [VideoTreatment] _runBackground() error:`, error.message);
+            await markMediaStatus(this.db, media.id, "failed", error.message);
+            throw error;
         }
-
-        // adapt → toPayload → call API
-        const adapted = provider.adapt(form, mode);
-        const payload = provider.toPayload(adapted, mode);
-
-        const runner = (provider.variants && provider.variants[mode]) || provider;
-        console.log(`\n   ⚙️ [VideoTreatment] Calling Provider API (${runner.modelName || model_name})`);
-
-        const executeMethod = METHOD_MAP[provider.type] || METHOD_MAP["t2v"];
-        const result        = await executeMethod(provider, payload, mode);
-
-        console.log(`\n   ✅ [VideoTreatment] Provider returned output successfully.`);
-
-        const outputUrl = result.video_url || result.image_url;
-        if (!outputUrl) {
-            await markMediaStatus(this.db, media.id, "failed", "Provider returned no output URL");
-            throw new Error("Provider returned no output URL");
-        }
-
-        // Upload to storage
-        console.log(`\n   ☁️ [VideoTreatment] Uploading to Storage...`);
-        const fileName = `${userId}/videos/${batchId || workflow.id}_${Date.now()}.mp4`;
-        const fileUrl  = await this.storageService.uploadFromUrl(fileName, outputUrl);
-        console.log(`      ↳ ${fileUrl}`);
-
-        // Create per-media generation_config (with seed if provider returns one)
-        const mediaConfig = await this.db.configs.createConfig({
-            prompt:          form.prompt,
-            model:           model_name,
-            aspect_ratio:    form.ratio || "16:9",
-            generation_type: input_assets.length > 0 ? "TEXT_REFERENCES" : "TEXT_ONLY",
-            seed:            result.seed || null,
-        });
-
-        // Create Media record (new 7-table schema)
-        await this.db.media.updateFields(media.id, {
-            generation_config_id: mediaConfig.id,
-            url: fileUrl,
-            width: result.width || 1280,
-            height: result.height || 720,
-        });
-        await markMediaStatus(this.db, media.id, "success");
-
-        console.log(`✅ [VideoTreatment] Done: batch ${batchId} → media:${media.id}`);
     }
 }

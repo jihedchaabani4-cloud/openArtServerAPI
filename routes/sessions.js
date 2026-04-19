@@ -1,11 +1,11 @@
 import express from "express";
 import * as sessionsController from "../controllers/sessionsController.js";
-import { authenticate } from "../src/middleware/auth.js";
+import { requireAuth } from "../src/middleware/auth.js";
 
 const router = express.Router();
 
 // Apply auth middleware to all session routes
-router.use(authenticate);
+router.use(requireAuth);
 
 
 router.post("/", sessionsController.create);

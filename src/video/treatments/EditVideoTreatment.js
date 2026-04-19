@@ -207,61 +207,68 @@ export class EditVideoTreatment {
         });
         console.log(`   ✅ [BG] Media placeholder created → id: ${media.id}`);
 
-        // Safety check
-        if (form.prompt) {
-            console.log(`   🔍 [BG] Checking prompt safety...`);
-            const safety = await this.promptService.checkPrompt(form.prompt);
-            if (!safety.safe) {
-                console.warn(`   ❌ [BG] Prompt rejected: ${safety.reason}`);
-                await markMediaStatus(this.db, media.id, "failed", safety.reason);
-                return;
+        try {
+            // Safety check
+            if (form.prompt) {
+                console.log(`   🔍 [BG] Checking prompt safety...`);
+                const safety = await this.promptService.checkPrompt(form.prompt);
+                if (!safety.safe) {
+                    console.warn(`   ❌ [BG] Prompt rejected: ${safety.reason}`);
+                    await markMediaStatus(this.db, media.id, "failed", safety.reason);
+                    return;
+                }
+                console.log(`   ✅ [BG] Prompt safe`);
             }
-            console.log(`   ✅ [BG] Prompt safe`);
+
+            // Adapt + payload
+            const adapted = provider.adapt(form, mode);
+            const payload = provider.toPayload(adapted, mode);
+            const runner  = (provider.variants && provider.variants[mode]) || provider;
+
+            console.log(`   🌐 [BG] Calling provider API: ${runner.modelName || model_name}`);
+            console.log(`   📦 [BG] Payload: ${JSON.stringify(payload, null, 2)}`);
+
+            const result    = await executeV2V(provider, payload, mode);
+            const outputUrl = result.video_url || result.image_url;
+
+            if (!outputUrl) {
+                console.error(`   ❌ [BG] Provider returned no output URL`);
+                await markMediaStatus(this.db, media.id, "failed", "Provider returned no output URL");
+                throw new Error("Provider returned no output URL");
+            }
+
+            console.log(`   ✅ [BG] Provider returned URL: ${outputUrl}`);
+
+            // Upload to storage
+            const fileName = `${userId}/videos/${batchId || workflow.id}_edit_${Date.now()}.mp4`;
+            const fileUrl  = await this.storageService.uploadFromUrl(fileName, outputUrl);
+            console.log(`   ✅ [BG] Uploaded to storage: ${fileUrl}`);
+
+            // Update media record
+            const mediaConfig = await this.db.configs.createConfig({
+                prompt:          form.prompt,
+                model:           model_name,
+                aspect_ratio:    form.ratio || "16:9",
+                generation_type: input_assets.length > 0 ? "VIDEO_REFERENCES" : "TEXT_ONLY",
+                seed:            result.seed || null,
+            });
+
+            await this.db.media.updateFields(media.id, {
+                generation_config_id: mediaConfig.id,
+                url:    fileUrl,
+                width:  result.width  || 1280,
+                height: result.height || 720,
+            });
+            await markMediaStatus(this.db, media.id, "success");
+
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            console.log(`\n✅ [EditVideoTreatment][BG] DONE in ${elapsed}s | media.id: ${media.id}`);
+            console.log(`${"─".repeat(60)}\n`);
+
+        } catch (error) {
+            console.error(`❌ [EditVideoTreatment] _runBackground() error:`, error.message);
+            await markMediaStatus(this.db, media.id, "failed", error.message);
+            throw error;
         }
-
-        // Adapt + payload
-        const adapted = provider.adapt(form, mode);
-        const payload = provider.toPayload(adapted, mode);
-        const runner  = (provider.variants && provider.variants[mode]) || provider;
-
-        console.log(`   🌐 [BG] Calling provider API: ${runner.modelName || model_name}`);
-        console.log(`   📦 [BG] Payload: ${JSON.stringify(payload, null, 2)}`);
-
-        const result    = await executeV2V(provider, payload, mode);
-        const outputUrl = result.video_url || result.image_url;
-
-        if (!outputUrl) {
-            console.error(`   ❌ [BG] Provider returned no output URL`);
-            await markMediaStatus(this.db, media.id, "failed", "Provider returned no output URL");
-            throw new Error("Provider returned no output URL");
-        }
-
-        console.log(`   ✅ [BG] Provider returned URL: ${outputUrl}`);
-
-        // Upload to storage
-        const fileName = `${userId}/videos/${batchId || workflow.id}_edit_${Date.now()}.mp4`;
-        const fileUrl  = await this.storageService.uploadFromUrl(fileName, outputUrl);
-        console.log(`   ✅ [BG] Uploaded to storage: ${fileUrl}`);
-
-        // Update media record
-        const mediaConfig = await this.db.configs.createConfig({
-            prompt:          form.prompt,
-            model:           model_name,
-            aspect_ratio:    form.ratio || "16:9",
-            generation_type: input_assets.length > 0 ? "VIDEO_REFERENCES" : "TEXT_ONLY",
-            seed:            result.seed || null,
-        });
-
-        await this.db.media.updateFields(media.id, {
-            generation_config_id: mediaConfig.id,
-            url:    fileUrl,
-            width:  result.width  || 1280,
-            height: result.height || 720,
-        });
-        await markMediaStatus(this.db, media.id, "success");
-
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        console.log(`\n✅ [EditVideoTreatment][BG] DONE in ${elapsed}s | media.id: ${media.id}`);
-        console.log(`${"─".repeat(60)}\n`);
     }
 }

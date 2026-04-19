@@ -14,7 +14,7 @@
 
 // ── Per-Runner Registry Imports ───────────────────────────────────────────────
 import { MODELS as wavespeedModels  } from "#image/runners/wavespeed/registry.js";
-import { MODELS as sdxlModels       } from "#image/runners/sdxl/registry.js";
+
 import { MODELS as falModels         } from "#image/runners/fal/registry.js";
 import { MODELS as replicateModels   } from "#image/runners/replicate/registry.js";
 import { MODELS as googleModels      } from "#image/runners/google/registry.js";
@@ -23,7 +23,7 @@ import { MODELS as googleModels      } from "#image/runners/google/registry.js";
 // Flat map of all model keys → ModelGroup across all providers
 const ALL_REGISTRY_MODELS = {
     ...wavespeedModels,
-    ...sdxlModels,
+
     ...falModels,
     ...replicateModels,
     ...googleModels,
@@ -92,8 +92,7 @@ export const IMAGE_ROUTES = {
     "z_image":      fromRegistry("z_image_wavespeed"),
     "z_image_base": fromRegistry("z_image_base_wavespeed"),
 
-    // ── SDXL (local) ─────────────────────────────────────────────────────────
-    "sdxl": fromRegistry("sdxl_sdxl"),
+
 
 
 

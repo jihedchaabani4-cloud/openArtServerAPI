@@ -1,49 +1,40 @@
 import { upscaleTreatment, db } from "../src/container.js";
-import { autoCreateProjectAndSession } from "../lib/helpers.js";
 import { assertMediaUsable } from "../lib/mediaGuards.js";
 
 export const upscale = async (req, res) => {
     try {
-        let { 
-            project_id,
-            session_id,
+        const { 
             workflow_id,
-            media_id,
             upscaleScale,
             target_resolution,
             target_fps,
         } = req.body;
 
-        if (!media_id) {
-            return res.status(400).json({ ok: false, message: "media_id is required" });
+        if (!workflow_id) {
+            return res.status(400).json({ ok: false, message: "workflow_id is required" });
         }
 
         const userId = req.user?.id || 'e54d7d5f-9c49-457d-83b7-ac8484bceb80';
 
-        // Auto-resolve context from media if not provided by frontend
-        if (!project_id || !session_id || !workflow_id) {
-            const sourceMedia = await db.media.findById(media_id);
-            if (sourceMedia) {
-                project_id  = project_id  || sourceMedia.project_id;
-                session_id  = session_id  || sourceMedia.session_id;
-                workflow_id = workflow_id || sourceMedia.workflow_id;
-            }
+        // Resolve media, project and session from workflow on the server
+        const sourceMedia = await db.media.findLatestByWorkflow(workflow_id);
+        if (!sourceMedia) {
+            return res.status(404).json({ ok: false, message: "No media found for this workflow" });
         }
 
-        const { project_id: finalProjectId, session_id: finalSessionId } = 
-            await autoCreateProjectAndSession(userId, project_id, session_id);
+        const { media_id, project_id, session_id } = sourceMedia;
 
-        // Server-side security: don't allow upscale unless the source media is usable
+        // Server-side security: verify media is usable before upscaling
         await assertMediaUsable({
             media_id,
-            workflow_id: workflow_id || null,
-            project_id: finalProjectId,
-            session_id: finalSessionId,
+            workflow_id,
+            project_id,
+            session_id,
         });
 
         const result = await upscaleTreatment.execute({
-            project_id: finalProjectId,
-            session_id: finalSessionId,
+            project_id,
+            session_id,
             workflow_id,
             media_id,
             upscaleScale,
@@ -55,8 +46,8 @@ export const upscale = async (req, res) => {
         res.json({ 
             ok: true, 
             ...result,
-            project_id: finalProjectId,
-            session_id: finalSessionId
+            project_id,
+            session_id,
         });
 
     } catch (error) {

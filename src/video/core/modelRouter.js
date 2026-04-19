@@ -93,11 +93,7 @@ export const MODEL_ROUTES = {
     "kling_o3":     fromRegistry("kling_o3_wavespeed", "Kling O3", true, true),
     "kling_o3_pro": fromRegistry("kling_o3_pro_wavespeed", "Kling O3 Pro", false, true),
 
-    // ── Kling Motion Controller ───────────────────────────────────────────────
-    "kling_v26_motion_std": fromRegistry("kling_v26_motion_std_wavespeed", "Kling v2.6 Motion Std", false, true),
-    "kling_v26_motion_pro": fromRegistry("kling_v26_motion_pro_wavespeed", "Kling v2.6 Motion Pro", false, true),
-    "kling_v3_motion_std":  fromRegistry("kling_v3_motion_std_wavespeed", "Kling v3 Motion Std", false, true),
-    "kling_v3_motion_pro":  fromRegistry("kling_v3_motion_pro_wavespeed", "Kling v3 Motion Pro", false, true),
+
 
     // ── Seedance v1.5 Pro ───────────────────────────────────────────────────
     "seedance_v15_pro":       fromRegistry("seedance_v15_pro_wavespeed", "Seedance v1.5 Pro", true),

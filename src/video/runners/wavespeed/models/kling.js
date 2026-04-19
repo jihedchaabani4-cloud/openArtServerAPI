@@ -107,7 +107,7 @@ class BaseSimpleI2v extends WavespeedVideoRunner {
             ratio:         form.ratio,
             resolution:    form.resolution,
             duration:      parseFloat(form.duration) || 5,
-            image:         refs.find(r => r.role === "start" || r.role === "normal")?.url || null,
+            image:         form.image || form.image_base64 || refs.find(r => r.role === "start" || r.role === "normal")?.url || null,
             cameraControl: form.cameraControl,
         };
     }
@@ -126,7 +126,7 @@ class BaseMotion extends WavespeedVideoRunner {
             modelName, provider: "wavespeed", type: "motion", maxReferences: 2,
             capabilities: [CAPS.TEXT, CAPS.IMAGE, CAPS.VIDEO_REF, CAPS.OUTPUTS_VIDEO],
             displayName, category: "video", tier, pricing,
-            modes: ["motion"],
+            modes: ["motion", "v2v"],
         });
     }
     adapt(form) {
@@ -135,9 +135,9 @@ class BaseMotion extends WavespeedVideoRunner {
             prompt:        form.prompt,
             duration:      parseFloat(form.duration) || 10,
             resolution:    form.resolution,
-            image:         form.image_base64 || refs.find(r => r.role === "start" || r.role === "normal" || r.role === "mc_image")?.url || null,
+            image:         form.image || form.image_base64 || refs.find(r => r.role === "start" || r.role === "normal" || r.role === "mc_image")?.url || null,
             endImage:      refs.find(r => r.role === "end")?.url || null,
-            video:         form.video_base64 || refs.find(r => r.role === "video"  || r.role === "mc_video" || r.type === "video" || r.type === "video_url")?.url  || null,
+            video:         form.video || form.video_base64 || refs.find(r => r.role === "video"  || r.role === "mc_video" || r.type === "video" || r.type === "video_url")?.url  || null,
             cameraControl: form.cameraControl,
         };
     }
@@ -174,7 +174,7 @@ class BaseRichI2v extends WavespeedVideoRunner {
             ratio:          form.ratio,
             resolution:     form.resolution,
             duration:       parseFloat(form.duration) || 5,
-            image:          refs.find(r => r.role === "start" || r.role === "normal" || r.role === "mc_image")?.url || null,
+            image:          form.image || form.image_base64 || refs.find(r => r.role === "start" || r.role === "normal" || r.role === "mc_image")?.url || null,
             endImage:       refs.find(r => r.role === "end")?.url || undefined,
             sound:          form.sound,
             cfgScale:       form.cfgScale,
@@ -253,7 +253,7 @@ class BaseV3I2v extends WavespeedVideoRunner {
             ratio:          form.ratio,
             resolution:     form.resolution,
             duration:       parseFloat(form.duration) || 5,
-            image:          refs.find(r => r.role === "start" || r.role === "normal" || r.role === "mc_image")?.url || null,
+            image:          form.image || form.image_base64 || refs.find(r => r.role === "start" || r.role === "normal" || r.role === "mc_image")?.url || null,
             endImage:       refs.find(r => r.role === "end")?.url || undefined,
             sound:          form.sound,
             cfgScale:       form.cfgScale,
@@ -295,7 +295,7 @@ class BaseO3I2v extends WavespeedVideoRunner {
             ratio:    form.ratio,
             resolution: form.resolution,
             duration: parseFloat(form.duration) || 5,
-            image:    refs.find(r => r.role === "start" || r.role === "normal")?.url || null,
+            image:    form.image || form.image_base64 || refs.find(r => r.role === "start" || r.role === "normal")?.url || null,
             endImage: refs.find(r => r.role === "end")?.url || undefined,
             sound:    form.sound,
         };
@@ -446,7 +446,7 @@ class KlingV21ProStartEnd extends WavespeedVideoRunner {
             ratio:    form.ratio,
             resolution: form.resolution,
             duration: parseFloat(form.duration) || 5,
-            image:    refs.find(r => r.role === "start" || r.role === "normal")?.url || null,
+            image:    form.image || form.image_base64 || refs.find(r => r.role === "start" || r.role === "normal")?.url || null,
             endImage: refs.find(r => r.role === "end")?.url || null,
         };
     }
@@ -508,14 +508,16 @@ export const v26Std = new ModelFamily("Kling v2.6", {
     "t2v":    v26StdT2v,
     "i2v":    v26StdI2v,
     "i2v_se": v26StdMotion,
-    "motion": v26StdMotion
+    "motion": v26StdMotion,
+    "v2v":    v26StdMotion
 }, { pricing: V2_PRICING, tier: "std" });
 
 export const v26Pro = new ModelFamily("Kling v2.6 Pro", {
     "t2v":    v26ProT2v,
     "i2v":    v26ProI2v,
     "i2v_se": v26ProMotion, // Keyframes mode
-    "motion": v26ProMotion
+    "motion": v26ProMotion,
+    "v2v":    v26ProMotion
 }, { pricing: V2P_PRICING, tier: "pro" });
 
 export const v21ProStartEnd = new ModelFamily("Kling v2.1 Pro Keyframes", {
@@ -526,14 +528,16 @@ export const v3Std = new ModelFamily("Kling v3.0", {
     "t2v":    v3StdT2v,
     "i2v":    v3StdI2v,
     "i2v_se": v3StdI2v,
-    "motion": v3StdMotion
+    "motion": v3StdMotion,
+    "v2v":    v3StdMotion
 }, { pricing: V3_PRICING, tier: "std" });
 
 export const v3Pro = new ModelFamily("Kling v3.0 Pro", {
     "t2v":    v3ProT2v,
     "i2v":    v3ProI2v,
     "i2v_se": v3ProI2v,
-    "motion": v3ProMotion
+    "motion": v3ProMotion,
+    "v2v":    v3ProMotion
 }, { pricing: V3P_PRICING, tier: "pro" });
 
 export const o3Std = new ModelFamily("Kling O3", {

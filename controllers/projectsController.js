@@ -5,11 +5,23 @@ export const getAll = async (req, res) => {
     try {
         const { data, error } = await supabase
             .from("project")
-            .select("*")
-            .order("create_time", { ascending: false });
+            .select(`
+                *,
+                media:media(url, create_time)
+            `)
+            .order("create_time", { ascending: false })
+            .order("create_time", { foreignTable: "media", ascending: false })
+            .limit(1, { foreignTable: "media" });
 
         if (error) throw error;
-        res.json({ ok: true, data });
+
+        // Map latest media to thumbnail_url
+        const projectsWithThumbnails = (data || []).map(project => ({
+            ...project,
+            thumbnail_url: project.media?.[0]?.url || null
+        }));
+
+        res.json({ ok: true, data: projectsWithThumbnails });
     } catch (error) {
         console.error("fetchProjects error:", error);
         res.status(500).json({ ok: false, message: error.message });

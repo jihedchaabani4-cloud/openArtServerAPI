@@ -73,7 +73,7 @@ export const MODEL_FAMILIES = [
 
   {
     id: "stability", name: "Stable Diffusion", type: "image",
-    versions: [{ id: "sdxl", name: "SDXL Ngrok", badge: "BETA", subtext: "Local fallback generator", featured: false }],
+    versions: [],
   },
   {
     id: "kling", name: "Kling", type: "video",

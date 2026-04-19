@@ -44,4 +44,48 @@ export class WorkflowRepository extends BaseRepository {
     async findByProject(project_id, options = {}) {
         return await getWorkflows({ project_id }, options);
     }
+
+    /**
+     * Resolves the primary media URL for a workflow.
+     * Logic: primary_media_id > First created media
+     */
+    async getPrimaryMediaUrl(workflow_id) {
+        if (!workflow_id) return null;
+
+        // 1. Get workflow to find primary_media_id
+        const { data: wf, error: wfErr } = await this.client()
+            .from(this.tableName)
+            .select("primary_media_id")
+            .eq("id", workflow_id)
+            .maybeSingle();
+        
+        if (wfErr) {
+            console.error(`❌ [WorkflowRepo] Error fetching workflow ${workflow_id}:`, wfErr);
+            return null;
+        }
+
+        if (wf?.primary_media_id) {
+            const { data: media, error: mErr } = await this.client()
+                .from("media")
+                .select("url")
+                .eq("id", wf.primary_media_id)
+                .maybeSingle();
+            if (!mErr && media?.url) return media.url;
+        }
+
+        // 2. Fallback: find first media created for this workflow
+        const { data: firstMedia, error: fErr } = await this.client()
+            .from("media")
+            .select("url")
+            .eq("workflow_id", workflow_id)
+            .order("create_time", { ascending: true })
+            .limit(1)
+            .maybeSingle();
+
+        if (fErr) {
+            console.error(`❌ [WorkflowRepo] Error fetching fallback media for wf ${workflow_id}:`, fErr);
+        }
+
+        return firstMedia?.url || null;
+    }
 }

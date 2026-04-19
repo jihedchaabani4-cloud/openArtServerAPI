@@ -18,13 +18,15 @@ import { EditVideoTreatment } from "#video/treatments/EditVideoTreatment.js";
 
 // ─── Image Domain ────────────────────────────────────────────────────────────
 import { GenerateImageTreatment } from "#image/treatments/ImageTreatment.js";
-import { MultiShotTreatment }     from "#image/treatments/MultiShotTreatment.js";
+
 import { EditImageTreatment }      from "#image/treatments/EditImageTreatment.js";
 import { CameraTreatment }         from "#image/treatments/CameraTreatment.js";
 import { LightingTreatment }       from "#image/treatments/LightingTreatment.js";
 import { UpscaleTreatment }        from "#image/treatments/UpscaleTreatment.js";
+import { GenerateImageTreatment as ImageTreatmentV2 } from "#image/treatments/imagetretmentwithRadis.js";
 import { ElementSheetTreatment }   from "#image/treatments/ElementSheetTreatment.js";
 import { MODELS as IMAGE_MODELS } from "#image/core/registry.js";
+export { IMAGE_MODELS };
 
 // ─── DNA Domain ───────────────────────────────────────────────────────────────
 import { DnaTreatment } from "./dna/DnaTreatment.js";
@@ -71,9 +73,11 @@ export const imageTreatment = new GenerateImageTreatment({
     promptService, models: IMAGE_MODELS, storageService, db
 });
 
-export const multiShotTreatment = new MultiShotTreatment({
+export const imageTreatmentV2 = new ImageTreatmentV2({
     promptService, models: IMAGE_MODELS, storageService, db
 });
+
+
 
 export const editImageTreatment = new EditImageTreatment({
     promptService, models: IMAGE_MODELS, storageService, db

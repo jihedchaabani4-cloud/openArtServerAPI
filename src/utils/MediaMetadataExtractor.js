@@ -15,6 +15,16 @@ function simplifyRatio(w, h) {
     return `${Math.round(w / d)}:${Math.round(h / d)}`;
 }
 
+function getResolutionLabel(w, h) {
+    const min = Math.min(w, h);
+    if (min >= 2160) return "4K";
+    if (min >= 1440) return "1440p";
+    if (min >= 1080) return "1080p";
+    if (min >= 720) return "720p";
+    if (min >= 480) return "480p";
+    return `${min}p`;
+}
+
 // ── Image Metadata (via sharp) ───────────────────────────────────────────────
 export async function extractImageMetadata(buffer, mime) {
     try {
@@ -29,6 +39,7 @@ export async function extractImageMetadata(buffer, mime) {
             width:     w,
             height:    h,
             ratio:     simplifyRatio(w, h),
+            resolution: getResolutionLabel(w, h),
             size:      `${w}x${h}`,
             format:    meta.format?.toUpperCase() || mime?.split('/')[1]?.toUpperCase(),
             file_size: fileSizeBytes,
@@ -68,10 +79,20 @@ export function extractVideoMetadata(buffer, mime) {
 
         // Find the 'moov' box
         while (offset + 8 <= buffer.length) {
-            const size = buffer.readUInt32BE(offset);
+            let size = buffer.readUInt32BE(offset);
             const type = buffer.slice(offset + 4, offset + 8).toString('ascii');
+            
+            let headerSize = 8;
+            if (size === 1) {
+                if (offset + 16 > buffer.length) break;
+                size = Number(buffer.readBigUInt64BE(offset + 8));
+                headerSize = 16;
+            } else if (size === 0) {
+                size = buffer.length - offset;
+            }
+
             if (type === 'moov') { moovOffset = offset; break; }
-            if (size < 8) break;
+            if (size < headerSize) break;
             offset += size;
         }
 
@@ -134,6 +155,7 @@ export function extractVideoMetadata(buffer, mime) {
                 width,
                 height,
                 ratio: simplifyRatio(width, height),
+                resolution: getResolutionLabel(width, height),
                 size: `${width}x${height}`,
             } : {}),
             ...(durationSec !== null ? {

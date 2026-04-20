@@ -27,17 +27,31 @@ export class ReferenceProcessor {
      * @param {string} storageFolder
      * @returns {Array} input_assets — each item: { role, type, url, media_id?, is_base? }
      */
-    async process(references, userId, project_id, session_id, storageFolder = "uploads") {
+    async process(references,) {
         const validRefs = (references || []).filter(ref =>
-            ref.asset_id || ref.media_id || ref.url || ref.file || ref.api_url || ref.entity_id
+            ref.asset_id || ref.media_id || ref.url || ref.file || ref.api_url || ref.entity_id || ref.workflow_id
         );
 
         const input_assets = await Promise.all(validRefs.map(async (ref, i) => {
             // ✅ Normalize role before anything else
             const role     = this._normalizeRole(ref.role);
-            const media_id = ref.media_id || ref.asset_id || ref.id || null;
-            const url      = ref.url || ref.api_url || null;
+            let media_id = ref.media_id || ref.asset_id || ref.id || null;
+            let url      = ref.url || ref.api_url || null;
             const file     = ref.file || null;
+
+            // Case 0: workflow_id — Resolve to primary media
+            const workflow_id = ref.workflow_id || null;
+            if (workflow_id && !media_id && !url) {
+                console.log(`🔍 [ReferenceProcessor] Resolving workflow_id: ${workflow_id}`);
+                const primaryMedia = await this.db.workflows.getPrimaryMedia(workflow_id);
+                if (primaryMedia) {
+                    media_id = primaryMedia.id;
+                    url      = primaryMedia.url;
+                    console.log(`   ↳ Resolved to media_id: ${media_id}`);
+                } else {
+                    console.warn(`⚠️ [ReferenceProcessor] Could not resolve workflow_id: ${workflow_id}`);
+                }
+            }
 
             console.log(`🔍 [ReferenceProcessor] Ref [${i}]: role=${role} (raw=${ref.role})`, media_id ? "has media_id" : (url ? "has url" : "other"));
 

@@ -2,6 +2,8 @@ import { randomUUID }  from "crypto";
 import { EventEmitter } from "events";
 import { Redis }        from "@upstash/redis";
 
+const NORMAL_USER_DELAY_MS = 10000;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  REDIS MANAGER
 //  Singleton — one connection shared across the whole app.
@@ -126,14 +128,16 @@ export class TaskService {
         await this.redis.hset(this._taskKey(id), this._serialize(task));
         await this.redis.expire(this._taskKey(id), this.ttl);
 
-        // 2. Push to correct queue (score = created_at → FIFO)
-        await this.redis.zadd(this._queueKey(userType), { score: now, member: id });
+        // 2. Push to correct queue (score = created_at + optional delay → FIFO with delay)
+        const delay = userType === "normal" ? NORMAL_USER_DELAY_MS : 0;
+        const score = now + delay;
+        await this.redis.zadd(this._queueKey(userType), { score: score, member: id });
 
         // 3. Track in status ZSET (for listing/filtering)
         await this.redis.zadd(this._statusKey(status), { score: now, member: id });
 
         console.log(
-            `[TaskService] created | id:${id} | type:${userType} | runner:${runner}`
+            `[TaskService] created | id:${id} | type:${userType} | runner:${runner}${delay > 0 ? ` | delayed:${delay}ms` : ""}`
         );
 
         // 4. Wake up Scheduler immediately — no need to wait for next poll
@@ -291,16 +295,30 @@ export class TaskService {
      * @returns {Promise<object|null>}
      */
     async popFromQueue(type) {
-        const result = await this.redis.zpopmin(this._queueKey(type), 1);
-        if (!result || result.length === 0) return null;
+        const key = this._queueKey(type);
+        const now = Date.now();
 
-        // Upstash returns [{ member, score }] or [member, score] depending on version
-        const id = result[0]?.member ?? result[0];
+        // 1. Peek at oldest to check score (score = creation_time + delay)
+        const oldest = await this.redis.zrange(key, 0, 0, { withScores: true });
+        if (!oldest || oldest.length === 0) return null;
+
+        // Upstash return format check
+        const id    = oldest[0]?.member ?? oldest[0];
+        const score = oldest[0]?.score  ?? oldest[1];
+
         if (!id) return null;
+
+        // 2. Not ready?
+        if (score > now) {
+            return { id, notReady: true, readyAt: score };
+        }
+
+        // 3. Ready -> Remove atomically (mostly)
+        // Note: in high-concurrency multi-worker, use Lua script for atomicity
+        await this.redis.zrem(key, id);
 
         const task = await this.getTask(id);
         if (!task) {
-            // TTL expired between push and pop — skip silently
             console.warn(`[TaskService] popFromQueue | id:${id} expired, skipping`);
             return null;
         }
@@ -431,16 +449,23 @@ export class Scheduler extends EventEmitter {
                 continue;
             }
 
-            const task = await this._pickNext();
+            const result = await this._pickNext();
 
-            if (!task) {
+            if (!result || (!result.task && !result.nextReadyAt)) {
                 // Both queues empty — sleep until signal arrives
                 await this._waitForSignal();
                 continue;
             }
 
+            if (!result.task && result.nextReadyAt) {
+                // Task(s) exists but not ready yet — sleep until first one is ready (or new signal)
+                const waitMs = Math.max(10, result.nextReadyAt - Date.now());
+                await this._waitForSignal(waitMs);
+                continue;
+            }
+
             // Fire and forget — loop continues immediately to fill next slot
-            this._dispatch(task);
+            this._dispatch(result.task);
         }
     }
 
@@ -458,17 +483,26 @@ export class Scheduler extends EventEmitter {
         const cycleLen = this.proWeight + this.normalWeight;
         const pos      = this._counter % cycleLen;
 
-        let task;
-        if (pos < this.proWeight) {
-            task = await this.taskService.popFromQueue("pro")
-                ?? await this.taskService.popFromQueue("normal");
-        } else {
-            task = await this.taskService.popFromQueue("normal")
-                ?? await this.taskService.popFromQueue("pro");
+        const queues = pos < this.proWeight ? ["pro", "normal"] : ["normal", "pro"];
+        let nextReadyAt = null;
+
+        for (const type of queues) {
+            const result = await this.taskService.popFromQueue(type);
+            if (!result) continue;
+
+            if (result.notReady) {
+                if (!nextReadyAt || result.readyAt < nextReadyAt) {
+                    nextReadyAt = result.readyAt;
+                }
+                continue;
+            }
+
+            // Real task found
+            this._counter++;
+            return { task: result };
         }
 
-        if (task) this._counter++;
-        return task ?? null;
+        return { task: null, nextReadyAt };
     }
 
     // ── Dispatch ──────────────────────────────────────────────────────────────
@@ -521,12 +555,24 @@ export class Scheduler extends EventEmitter {
     }
 
     /**
-     * Park the loop here until _signal() is called.
+     * Park the loop here until _signal() is called OR timeout expires.
      * Uses a single Promise resolve — no timers, no polling.
      */
-    _waitForSignal() {
+    _waitForSignal(ms = null) {
         return new Promise(resolve => {
-            this._wakeUp = resolve;
+            let timeout = null;
+            
+            const cleanup = () => {
+                if (timeout) clearTimeout(timeout);
+                this._wakeUp = null;
+                resolve();
+            };
+
+            this._wakeUp = cleanup;
+
+            if (ms !== null) {
+                timeout = setTimeout(cleanup, ms);
+            }
         });
     }
 

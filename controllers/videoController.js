@@ -1,6 +1,5 @@
 // controllers/videoController.js — HTTP handler; domain treatment: src/video/treatments/VideoTreatment.js
 import { videoTreatment, motionTreatment, editVideoTreatment, promptService } from "../src/container.js";
-import { autoCreateProjectAndSession } from "../lib/helpers.js";
 import { isVideoModelRegistered } from "../lib/modelRegistryKeys.js";
 import { getTaskService } from "../src/services/redis-management/index.js";
 
@@ -18,11 +17,12 @@ export const generateVideo = async (req, res) => {
             ratio          = "16:9",
             duration       = "5s",
             sound,
-            cfgScale,
             negativePrompt = "",
             multiPrompt,
             keepOriginalSound,
             references     = [],
+            reference_workflow_ids = [],
+            image_workflow_id,
             project_id,
             session_id,
             is_new_project,
@@ -53,10 +53,10 @@ export const generateVideo = async (req, res) => {
         console.log(`   - Ratio: ${ratio}, Duration: ${duration}`);
         console.log(`   - 📸 References Attached: ${references.length}`);
 
-        const userId = req.user.id;
+        const userId = req.user?.id || "e54d7d5f-9c49-457d-83b7-ac8484bceb80";
 
-        const { project_id: finalProjectId, session_id: finalSessionId } =
-            await autoCreateProjectAndSession(userId, project_id, session_id, is_new_project);
+        const finalProjectId = project_id;
+        const finalSessionId = session_id;
 
         const payload = {
             model: activeModel,
@@ -64,17 +64,35 @@ export const generateVideo = async (req, res) => {
             ratio,
             duration,
             sound,
-            cfgScale,
             negativePrompt,
             multiPrompt,
             keepOriginalSound,
             references,
+            image_workflow_id,
+            reference_workflow_ids,
             project_id: finalProjectId,
             session_id: finalSessionId,
             userId,
         };
 
-        let result = await videoTreatment.execute(payload);
+        const prepared = await videoTreatment.prepare(payload);
+        const task = await getTaskService().createTask({
+            userType: req.user?.plan || "normal",
+            userId: req.user.id,
+            workflow_id: prepared.workflow.id,
+            runner: "video",
+            data: prepared
+        });
+
+        const result = {
+            batchId:   prepared.batchId,
+            configId:  prepared.configId,
+            workflows: prepared.workflows,
+            status:    "processing",
+            mode:      prepared.mode,
+            model:     prepared.model_name,
+            taskId:    task.id,
+        };
 
         res.json({
             ok: true,
@@ -103,15 +121,14 @@ export const extendVideo = async (req, res) => {
             ratio          = "16:9",
             duration       = "5s",
             sound,
-            cfgScale,
             negativePrompt = "",
             multiPrompt,
             keepOriginalSound,
-            references     = [],
+            workflow_id,
+            video_workflow_id,
+            reference_workflow_ids = [],
             project_id,
             session_id,
-            is_new_project,
-            workflow_id,
             media_id,
         } = req.body;
 
@@ -122,10 +139,12 @@ export const extendVideo = async (req, res) => {
             return res.status(400).json({ ok: false, message: "Model not found" });
         }
 
-        if (!workflow_id || !media_id) {
-            return res.status(400).json({ ok: false, message: "workflow_id and media_id are required to extend a video." });
+        const finalWfId = video_workflow_id || workflow_id;
+        if (!finalWfId || !media_id) {
+            return res.status(400).json({ ok: false, message: "video_workflow_id and media_id are required to extend a video." });
         }
 
+        const references = req.body.references || [];
         const hasBase64 = references.some(r => typeof r.url === 'string' && r.url.startsWith('data:'));
         if (hasBase64) {
             return res.status(400).json({
@@ -139,10 +158,10 @@ export const extendVideo = async (req, res) => {
         console.log(`   - Prompt: "${prompt}"`);
         console.log(`   - Extending workflow ID: ${workflow_id}`);
 
-        const userId = req.user.id;
+        const userId = req.user?.id || "e54d7d5f-9c49-457d-83b7-ac8484bceb80";
 
-        const { project_id: finalProjectId, session_id: finalSessionId } =
-            await autoCreateProjectAndSession(userId, project_id, session_id, is_new_project);
+        const finalProjectId = project_id;
+        const finalSessionId = session_id;
 
         const payload = {
             model: activeModel,
@@ -150,21 +169,36 @@ export const extendVideo = async (req, res) => {
             ratio,
             duration,
             sound,
-            cfgScale,
             negativePrompt,
             multiPrompt,
             keepOriginalSound,
             references,
             project_id: finalProjectId,
             session_id: finalSessionId,
-            workflow_id,
-            media_id,
+            video_workflow_id: video_workflow_id || workflow_id,
+            reference_workflow_ids,
             userId,
-            edit_type: "extend",
             section: "video_generator"
         };
 
-        let result = await editVideoTreatment.execute(payload);
+        const prepared = await editVideoTreatment.prepare(payload);
+        const task = await getTaskService().createTask({
+            userType: req.user?.plan || "normal",
+            userId: userId,
+            workflow_id: prepared.workflow.id,
+            runner: "edit_video",
+            data: prepared
+        });
+
+        const result = {
+            batchId:   prepared.batchId,
+            configId:  prepared.configId,
+            workflows: prepared.workflows,
+            status:    "processing",
+            mode:      prepared.mode,
+            model:     prepared.model_name,
+            taskId:    task.id,
+        };
 
         res.json({
             ok: true,
@@ -193,15 +227,14 @@ export const editVideo = async (req, res) => {
             ratio          = "16:9",
             duration       = "5s",
             sound,
-            cfgScale,
             negativePrompt = "",
             multiPrompt,
             keepOriginalSound,
-            references     = [],
+            workflow_id,
+            video_workflow_id,
+            reference_workflow_ids = [],
             project_id,
             session_id,
-            is_new_project,
-            workflow_id,
             media_id,
         } = req.body;
 
@@ -214,10 +247,12 @@ export const editVideo = async (req, res) => {
             return res.status(400).json({ ok: false, message: "Model not found" });
         }
 
-        if (!workflow_id) {
-            return res.status(400).json({ ok: false, message: "workflow_id is required to edit a video." });
+        const finalWfId = video_workflow_id || workflow_id;
+        if (!finalWfId) {
+            return res.status(400).json({ ok: false, message: "video_workflow_id is required to edit a video." });
         }
 
+        const references = req.body.references || [];
         const hasBase64 = references.some(r => typeof r.url === 'string' && r.url.startsWith('data:'));
         if (hasBase64) {
             return res.status(400).json({
@@ -231,10 +266,10 @@ export const editVideo = async (req, res) => {
         console.log(`   - Prompt: "${prompt}"`);
         console.log(`   - Editing workflow ID: ${workflow_id}`);
 
-        const userId = req.user.id;
+        const userId = req.user?.id || "e54d7d5f-9c49-457d-83b7-ac8484bceb80";
 
-        const { project_id: finalProjectId, session_id: finalSessionId } =
-            await autoCreateProjectAndSession(userId, project_id, session_id, is_new_project);
+        const finalProjectId = project_id;
+        const finalSessionId = session_id;
 
         const payload = {
             model: activeModel,
@@ -242,21 +277,36 @@ export const editVideo = async (req, res) => {
             ratio,
             duration,
             sound,
-            cfgScale,
             negativePrompt,
             multiPrompt,
             keepOriginalSound,
             references,
             project_id: finalProjectId,
             session_id: finalSessionId,
-            workflow_id,
-            media_id,
+            video_workflow_id: video_workflow_id || workflow_id,
+            reference_workflow_ids,
             userId,
-            edit_type: "edit",
             section: "video_generator"
         };
 
-        const result = await editVideoTreatment.execute(payload);
+        const prepared = await editVideoTreatment.prepare(payload);
+        const task = await getTaskService().createTask({
+            userType: req.user?.plan || "normal",
+            userId: userId,
+            workflow_id: prepared.workflow.id,
+            runner: "edit_video",
+            data: prepared
+        });
+
+        const result = {
+            batchId:   prepared.batchId,
+            configId:  prepared.configId,
+            workflows: prepared.workflows,
+            status:    "processing",
+            mode:      prepared.mode,
+            model:     prepared.model_name,
+            taskId:    task.id,
+        };
 
         res.json({
             ok: true,
@@ -288,6 +338,7 @@ export const motionControl = async (req, res) => {
             references        = [],
             project_id,
             session_id,
+            reference_workflow_ids = [],
             is_new_project,
         } = req.body;
 
@@ -298,9 +349,9 @@ export const motionControl = async (req, res) => {
             return res.status(400).json({ ok: false, message: "Model not found" });
         }
 
-        const userId = req.user.id;
-        const { project_id: finalProjectId, session_id: finalSessionId } =
-            await autoCreateProjectAndSession(userId, project_id, session_id, is_new_project);
+        const userId = req.user?.id || "e54d7d5f-9c49-457d-83b7-ac8484bceb80";
+        const finalProjectId = project_id;
+        const finalSessionId = session_id;
 
         // Resolve URLs
         let image_url = req.body.image_url;
@@ -342,8 +393,10 @@ export const motionControl = async (req, res) => {
             video_url,
             project_id: finalProjectId,
             session_id: finalSessionId,
+            video_workflow_id,
+            image_workflow_id,
+            reference_workflow_ids,
             userId,
-            edit_type: "motion",
             section: "motion"
         };
 
@@ -355,7 +408,7 @@ export const motionControl = async (req, res) => {
         const prepared = await motionTreatment.prepare(payload);
         const task = await getTaskService().createTask({
             userType: req.user?.plan || "normal",
-            userId: req.user.id,
+            userId: userId,
             workflow_id: prepared.workflow.id,
             runner: "motion",
             data: prepared

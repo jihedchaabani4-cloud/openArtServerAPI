@@ -1,4 +1,5 @@
 import { elementSheetTreatment } from "../src/container.js";
+import { getTaskService } from "../src/services/redis-management/index.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared handler — thin wrapper around ElementSheetTreatment
@@ -23,9 +24,9 @@ async function handleSheetRequest(req, res, sheetType) {
             });
         }
 
-        const userId = req.user.id;
+        const userId = req.user?.id || "e54d7d5f-9c49-457d-83b7-ac8484bceb80";
 
-        const result = await elementSheetTreatment.execute({
+        const preparedTask = await elementSheetTreatment.prepare({
             sheetType,
             prompt,
             features,
@@ -36,7 +37,23 @@ async function handleSheetRequest(req, res, sheetType) {
             userId,
         });
 
-        return res.json({ ok: true, ...result, project_id });
+        // Submit to Redis queue using the dedicated element-sheet runner
+        const task = await getTaskService().createTask({
+            runner:   "element-sheet",
+            data:     preparedTask,
+            userId,
+            userType: req.user?.userType || req.user?.plan || "normal",
+        });
+
+        return res.json({
+            ok: true,
+            batchId: preparedTask.batch?.id || null,
+            configId: preparedTask.configId,
+            workflows: preparedTask.workflows,
+            status: "notyet",
+            provider: preparedTask.model_name,
+            project_id,
+        });
 
     } catch (err) {
         console.error(`❌ [elementSheetController] Error (${sheetType}):`, err);

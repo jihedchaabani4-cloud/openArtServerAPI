@@ -9,15 +9,11 @@ export const create = async (req, res) => {
 
         const sessionName = session_name || name || "Untitled";
 
-        // Find the next position
-        const { count } = await supabase
-            .from("session")
-            .select("id", { count: "exact", head: true })
-            .eq("project_id", project_id);
+
 
         const { data, error } = await supabase
             .from("session")
-            .insert([{ name: sessionName, project_id, position: count || 0 }])
+            .insert([{ name: sessionName, project_id }])
             .select()
             .single();
 

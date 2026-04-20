@@ -1,8 +1,9 @@
 import express from "express";
-import { resolveImageTreatment } from "../lib/imageTreatmentResolver.js";
 import { autoCreateProjectAndSession } from "../lib/helpers.js";
 import { normalizeImageModelName } from "../lib/modelRegistryKeys.js";
-import { editVideoTreatment, promptService } from "../src/container.js";
+import { editVideoTreatment, promptService, cameraTreatment } from "../src/container.js";
+import { getTaskService } from "../src/services/redis-management/index.js";
+
 import { CameraTask } from "../src/video/tasks/CameraTask.js";
 
 const router = express.Router();
@@ -41,17 +42,17 @@ router.post("/image", (req, res) => handleImageCamera(req, res));
 
 async function handleImageCamera(req, res) {
     try {
-        const {
+        let {
             rotation, tilt, zoom,
-            project_id, session_id, workflow_id, media_id,
-            references,
+            project_id, session_id, workflow_id,
+            reference_workflow_ids,
             model_name,
             ratio,
             quality
         } = req.body;
 
-        if (!references || !references.length) {
-            return res.status(400).json({ ok: false, message: "Original image reference is required" });
+        if (!workflow_id) {
+            return res.status(400).json({ ok: false, message: "workflow_id is required" });
         }
 
         const userId = req.user?.id || "e54d7d5f-9c49-457d-83b7-ac8484bceb80";
@@ -60,27 +61,39 @@ async function handleImageCamera(req, res) {
         const { project_id: finalProjectId, session_id: finalSessionId } =
             await autoCreateProjectAndSession(userId, project_id, session_id, false);
 
-        const treatment = resolveImageTreatment("camera");
+        const treatment = cameraTreatment;
 
-        const result = await treatment.execute({
+        const preparedTask = await treatment.prepare({
             rotation, tilt, zoom,
             ratio,
             quality: quality || "1k",
             project_id:  finalProjectId,
             session_id:  finalSessionId,
-            workflow_id,
-            media_id,
-            references,
+            workflow_id: workflow_id,
+            reference_workflow_ids,
+
             model_name: normalizedModelName,
             userId,
+        });
+
+        const task = await getTaskService().createTask({
+            runner: "camera",
+            data: preparedTask,
+            userId,
+            userType: req.user?.plan || "normal",
         });
 
         return res.json({
             ok: true,
             media_type: "image",
-            ...result,
+            batchId: preparedTask.batchId || null,
+            configId: preparedTask.configId,
+            workflows: preparedTask.workflows,
+            status: "notyet",
+            provider: preparedTask.model_name,
             project_id: finalProjectId,
             session_id: finalSessionId,
+            taskId: task.id,
         });
 
     } catch (error) {
@@ -102,11 +115,12 @@ async function handleVideoCamera(req, res) {
             session_id,
             is_new_project,
             workflow_id,
-            media_id,
+            video_workflow_id,
         } = req.body;
 
-        if (!workflow_id) {
-            return res.status(400).json({ ok: false, message: "workflow_id is required for video camera edit." });
+        const finalWfId = video_workflow_id || workflow_id;
+        if (!finalWfId) {
+            return res.status(400).json({ ok: false, message: "video_workflow_id is required for video camera edit." });
         }
 
         const rawCameraText = (camera_text || "").trim();
@@ -130,7 +144,7 @@ async function handleVideoCamera(req, res) {
         console.log(`   - Resolved cameraControl: ${JSON.stringify(cameraControl)}`);
         console.log(`   - Final Prompt for edit:  "${finalPrompt}"`);
 
-        const result = await editVideoTreatment.execute({
+        const prepared = await editVideoTreatment.prepare({
             model,
             prompt: finalPrompt,
             cameraControl: cameraControl,
@@ -140,11 +154,28 @@ async function handleVideoCamera(req, res) {
             references,
             project_id:    finalProjectId,
             session_id:    finalSessionId,
-            workflow_id,
-            media_id,
+            video_workflow_id: finalWfId,
+            reference_workflow_ids: references.map(r => r.workflow_id || r.id || r.media_id || r.asset_id).filter(Boolean),
             userId,
-            edit_type:     "camera",
         });
+
+        const task = await getTaskService().createTask({
+            userType: req.user?.plan || "normal",
+            userId: userId,
+            workflow_id: prepared.workflow.id,
+            runner: "edit_video",
+            data: prepared
+        });
+
+        const result = {
+            batchId:   prepared.batchId,
+            configId:  prepared.configId,
+            workflows: prepared.workflows,
+            status:    "processing",
+            mode:      prepared.mode,
+            model:     prepared.model_name,
+            taskId:    task.id,
+        };
 
         return res.json({
             ok: true,

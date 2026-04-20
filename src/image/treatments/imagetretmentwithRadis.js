@@ -236,6 +236,19 @@ export class GenerateImageTreatment {
             mediaIds.push(media.id);
         }
 
+        // Safety check — reject bad prompts before queuing
+        const promptForGeneration = prompt_optimise || prompt;
+        if (promptForGeneration) {
+            const safety = await this.promptService.checkPrompt(promptForGeneration);
+            if (!safety.safe) {
+                // Mark all placeholder media as failed
+                for (const id of mediaIds) {
+                    await markMediaStatus(this.db, id, "failed", safety.reason);
+                }
+                throw new Error(`Prompt rejected: ${safety.reason}`);
+            }
+        }
+
         // Return plain JSON-serializable descriptor
         return {
             // identifiers
@@ -297,21 +310,8 @@ export class GenerateImageTreatment {
             references: input_assets,
         });
 
-        // 2a. Prompt safety check
+        // 2a. Prompt Enhancement (Upscale + Negative) — Match legacy quality
         const promptForGeneration = generation_prompt || prompt;
-        if (promptForGeneration) {
-            const safety = await this.promptService.checkPrompt(promptForGeneration);
-            if (!safety.safe) {
-                console.warn(`[ImageTreatment] Prompt rejected: ${safety.reason}`);
-                // Mark all media as failed
-                for (const mediaId of mediaIds) {
-                    await markMediaStatus(this.db, mediaId, "failed", safety.reason);
-                }
-                throw new Error(`Prompt rejected: ${safety.reason}`);
-            }
-        }
-
-        // 2b. Prompt Enhancement (Upscale + Negative) — Match legacy quality
         let finalPrompt   = promptForGeneration;
         let finalNegative = negative_prompt;
 

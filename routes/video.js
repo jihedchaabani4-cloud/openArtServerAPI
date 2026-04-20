@@ -16,7 +16,6 @@ router.post("/edit", requireAuth, videoController.editVideo);
 /** POST /api/video/motion — Motion Control specifically */
 router.post("/motion", requireAuth, videoController.motionControl);
 
-/** @deprecated use POST /api/video/generated */
-router.post("/generate", videoController.generateVideo);
+
 
 export default router;

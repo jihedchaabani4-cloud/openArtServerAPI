@@ -4,9 +4,9 @@
 // Treatment: EditImageTreatment → ImageEditTask
 
 import { editImageTreatment } from "../src/container.js";
-import { autoCreateProjectAndSession } from "../lib/helpers.js";
 import { normalizeImageModelName, isImageModelRegistered } from "../lib/modelRegistryKeys.js";
 import { assertMediaUsable } from "../lib/mediaGuards.js";
+import { getTaskService } from "../src/services/redis-management/index.js";
 
 /**
  * POST /api/images/generated/edit/existing
@@ -14,30 +14,21 @@ import { assertMediaUsable } from "../lib/mediaGuards.js";
  * Edits an existing workflow by generating a new media item and attaching it.
  * Supports:
  *  - Localized editing via mask_selection (Gemini bounding-box coords)
- *  - Upscale mode (activeTab === "upscale")
+ *  - Upscale mode (via upscaleScale)
  *  - Full reference list (model uses them as context)
  */
 export const generateEdit = async (req, res) => {
     try {
         let {
             prompt,
-            negative_prompt,
             ratio,
             quality,
             resolution,
-            strength,
             project_id,
             session_id,
             workflow_id,
-            media_id,
-            references,
+            reference_workflow_ids,
             model_name,
-            mask_selection,
-            activeTab,
-            upscaleScale,
-            seed,
-            steps,
-            guidance_scale,
         } = req.body;
 
         // --- Validation ---
@@ -54,25 +45,13 @@ export const generateEdit = async (req, res) => {
             return res.status(400).json({ ok: false, message: `Model "${model_name}" not found` });
         }
 
-        // Guard: reject raw Base64 references
-        if (Array.isArray(references)) {
-            const hasBase64 = references.some(r => typeof r.url === "string" && r.url.startsWith("data:"));
-            if (hasBase64) {
-                return res.status(400).json({
-                    ok: false,
-                    message: "Base64 references are not accepted. Upload first via POST /api/assets/upload.",
-                });
-            }
-        }
+        const userId = req.user?.id || "e54d7d5f-9c49-457d-83b7-ac8484bceb80";
 
-        const userId = req.user.id;
-
-        const { project_id: finalProjectId, session_id: finalSessionId } =
-            await autoCreateProjectAndSession(userId, project_id, session_id);
+        const finalProjectId = project_id;
+        const finalSessionId = session_id;
 
         // Server-side security: edits require a completed source media in the same session/project/workflow
         await assertMediaUsable({
-            media_id,
             workflow_id,
             project_id: finalProjectId,
             session_id: finalSessionId,
@@ -82,35 +61,35 @@ export const generateEdit = async (req, res) => {
         console.log(`   - Model:      ${model_name || "default"}`);
         console.log(`   - Prompt:     "${prompt}"`);
         console.log(`   - Workflow:   ${workflow_id}`);
-        console.log(`   - Media:      ${media_id || "N/A"}`);
-        console.log(`   - ActiveTab:  ${activeTab || "describe"}`);
-        console.log(`   - Mask:       ${mask_selection ? "yes" : "no"}`);
-        console.log(`   - References: ${references?.length ?? 0}`);
+        console.log(`   - Ref WFs:    ${(reference_workflow_ids || []).length}`);
 
-        const result = await editImageTreatment.execute({
+        const prepared = await editImageTreatment.prepare({
             prompt,
-            negative_prompt,
             ratio,
             quality: quality || resolution,
-            strength,
             project_id: finalProjectId,
             session_id: finalSessionId,
             workflow_id,
-            media_id,
-            references,
+            reference_workflow_ids: reference_workflow_ids || [],
             model_name,
             userId,
-            mask_selection,
-            activeTab,
-            upscaleScale,
-            seed,
-            steps,
-            guidance_scale,
+        });
+
+        const task = await getTaskService().createTask({
+            userType:    req.user?.plan || "normal",
+            userId,
+            workflow_id: prepared.workflow.id,
+            runner:      "image-edit",
+            data:        prepared,
         });
 
         return res.json({
             ok: true,
-            ...result,
+            batchId:    null,
+            configId:   prepared.configId,
+            workflows:  [prepared.workflow],
+            status:     "processing",
+            taskId:     task.id,
             project_id: finalProjectId,
             session_id: finalSessionId,
         });

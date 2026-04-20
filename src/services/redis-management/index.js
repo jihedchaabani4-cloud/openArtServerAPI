@@ -4,13 +4,27 @@ import {
     promptService,
     storageService,
     db,
+    elementSheetTreatment,
+    lightingTreatment,
+    upscaleTreatment,
+    cameraTreatment,
+    videoTreatment,
+    editVideoTreatment,
     IMAGE_MODELS
 } from "../../container.js";
 
 // Dedicated Redis-ready treatment for Image Generation (don't use the legacy container one)
 import { GenerateImageTreatment } from "../../image/treatments/imagetretmentwithRadis.js";
+import { EditImageTreatment } from "../../image/treatments/EditImageTreatment.js";
 
 const imageRedisTreatment = new GenerateImageTreatment({
+    promptService,
+    storageService,
+    db,
+    models: IMAGE_MODELS
+});
+
+const editImageRedisTreatment = new EditImageTreatment({
     promptService,
     storageService,
     db,
@@ -33,6 +47,29 @@ const runnerManager = {
             case "image":
                 // task.data = imageRedisTreatment.prepare() output
                 return imageRedisTreatment.run(task.data);
+
+            case "image-edit":
+                // task.data = editImageRedisTreatment.prepare() output
+                return editImageRedisTreatment.run(task.data);
+
+            case "element-sheet":
+                // task.data = elementSheetTreatment.prepare() output
+                return elementSheetTreatment.run(task.data);
+
+            case "lighting":
+                return lightingTreatment.run(task.data);
+
+            case "upscale":
+                return upscaleTreatment.run(task.data);
+
+            case "camera":
+                return cameraTreatment.run(task.data);
+
+            case "video":
+                return videoTreatment.run(task.data);
+
+            case "edit_video":
+                return editVideoTreatment.run(task.data);
 
             // Add future runners here:
             // case "lipsync": return lipsyncTreatment.run(task.data);

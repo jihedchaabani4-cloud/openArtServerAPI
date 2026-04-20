@@ -50,6 +50,15 @@ export class WorkflowRepository extends BaseRepository {
      * Logic: primary_media_id > First created media
      */
     async getPrimaryMediaUrl(workflow_id) {
+        const media = await this.getPrimaryMedia(workflow_id);
+        return media?.url || null;
+    }
+
+    /**
+     * Resolves the primary media for a workflow.
+     * Logic: primary_media_id > First created media
+     */
+    async getPrimaryMedia(workflow_id) {
         if (!workflow_id) return null;
 
         // 1. Get workflow to find primary_media_id
@@ -67,16 +76,16 @@ export class WorkflowRepository extends BaseRepository {
         if (wf?.primary_media_id) {
             const { data: media, error: mErr } = await this.client()
                 .from("media")
-                .select("url")
+                .select("id, url")
                 .eq("id", wf.primary_media_id)
                 .maybeSingle();
-            if (!mErr && media?.url) return media.url;
+            if (!mErr && media) return media;
         }
 
         // 2. Fallback: find first media created for this workflow
         const { data: firstMedia, error: fErr } = await this.client()
             .from("media")
-            .select("url")
+            .select("id, url")
             .eq("workflow_id", workflow_id)
             .order("create_time", { ascending: true })
             .limit(1)
@@ -86,6 +95,6 @@ export class WorkflowRepository extends BaseRepository {
             console.error(`❌ [WorkflowRepo] Error fetching fallback media for wf ${workflow_id}:`, fErr);
         }
 
-        return firstMedia?.url || null;
+        return firstMedia || null;
     }
 }

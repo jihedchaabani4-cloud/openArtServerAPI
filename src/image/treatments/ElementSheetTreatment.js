@@ -1,4 +1,8 @@
-import { GenerateImageTreatment } from "./ImageTreatment.js";
+import { ReferenceProcessor } from "#utils/ReferenceProcessor.js";
+import { getStandardSize } from "#utils/sizeUtils.js";
+import { getImageModel, ROUTED_IMAGE_MODELS } from "#image/core/modelRouter.js";
+import { verifyAndClampParams } from "../utils/treatmentUtils.js";
+import { appendMediaToWorkflow, markMediaStatus } from "#db/workflowMediaOps.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SYSTEM PROMPTS — one per sheet type
@@ -101,6 +105,7 @@ NEGATIVE:
 
 OUTPUT:
 One flowing paragraph followed by the —NEGATIVE line. No introductions, no explanations, no bullet points.`,
+
     LOCATION: `You are an AI Prompt Engineer specializing in environment and location reference image generation.
 Your task is to convert the user's prompt and image reference tags into ONE ultra-detailed image generation prompt.
 
@@ -177,29 +182,53 @@ const DEFAULT_MODELS = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Handles the full pipeline for element sheet generation:
- *   1. Sanitise reference tags in the user prompt (e.g. <MediaAsset:…> → <image0>)
- *   2. Call the LLM to build a detailed, structured image prompt
- *   3. Delegate to GenerateImageTreatment for the actual image generation
- *
- * Sheet workflows are ALWAYS project-scoped (session_id = null).
- * They appear in the project-level Elements library, not inside any specific session.
- *
- * Usage:
- *   const result = await elementSheetTreatment.execute({
- *       sheetType:  "CHARACTER" | "LOCATION" | "PRODUCT",
- *       prompt,
- *       features,       // optional structured feature object
- *       model_name,     // optional override
- *       references,     // array of { media_id, url, … }
- *       project_id,     // required
- *       userId,
- *   });
+ * Handles the full pipeline for element sheet generation independently.
  */
-export class ElementSheetTreatment extends GenerateImageTreatment {
+export class ElementSheetTreatment {
     constructor({ promptService, models, storageService, db, dnaTreatment }) {
-        super({ promptService, models, storageService, db });
-        this.dnaTreatment = dnaTreatment;
+        this.promptService  = promptService;
+        this.models         = models;
+        this.storageService = storageService;
+        this.db             = db;
+        this.dnaTreatment   = dnaTreatment;
+        this.refProcessor   = new ReferenceProcessor({ storageService, db });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HELPERS
+    // ─────────────────────────────────────────────────────────────────────────
+
+    _getStandardSize(ratio, quality) {
+        return getStandardSize(ratio, quality);
+    }
+
+    _resolveProvider(model_name, input) {
+        const { image_base64, references = [], edit_type } = input;
+        const route      = getImageModel(model_name);
+        const modelGroup = route?.group || this.models[model_name];
+
+        if (!modelGroup && !route) {
+            throw new Error(`Model "${model_name}" not found. Available: ${ROUTED_IMAGE_MODELS.join(", ")}`);
+        }
+
+        const hasBase  = !!image_base64;
+        const hasRefs  = references.length > 0 || hasBase;
+        const isMulti  = references.length > 1;
+        const variantKey = hasRefs ? (isMulti ? "i2iMulti" : "i2i") : "t2i";
+
+        let provider;
+        if (route && route[variantKey])              provider = route[variantKey];
+        else if (route && route["i2i"] && hasRefs)   provider = route["i2i"];
+        else if (route && route["t2i"])              provider = route["t2i"];
+        else if (modelGroup?.resolve)                provider = modelGroup.resolve({ references, image_base64, edit_type });
+        else if (modelGroup)                         provider = modelGroup[variantKey] || (hasRefs ? modelGroup.i2i : null) || modelGroup.t2i || modelGroup;
+        else                                         provider = modelGroup;
+
+        if (!["t2i", "i2i"].includes(provider.type)) {
+            throw new Error(`Model "${model_name}" is a video model. Use VideoTreatment instead.`);
+        }
+
+        return provider;
     }
 
     // ─── Step 1: Sanitise the user text (replace <MediaAsset:id> → <imageN>) ──
@@ -233,9 +262,7 @@ export class ElementSheetTreatment extends GenerateImageTreatment {
     }
 
     _toTitleCase(value) {
-        return String(value || "")
-            .toLowerCase()
-            .replace(/\b\w/g, char => char.toUpperCase());
+        return String(value || "").toLowerCase().replace(/\b\w/g, char => char.toUpperCase());
     }
 
     _cleanDisplayText(value) {
@@ -251,88 +278,63 @@ export class ElementSheetTreatment extends GenerateImageTreatment {
 
     _buildSheetDisplayName(type, prompt, features = {}) {
         const directName = [
-            features?.name,
-            features?.title,
-            features?.subject,
-            features?.characterName,
-            features?.productName,
-            features?.locationName,
+            features?.name, features?.title, features?.subject,
+            features?.characterName, features?.productName, features?.locationName,
         ].find(value => typeof value === "string" && value.trim());
 
-        if (directName) {
-            return this._toTitleCase(this._cleanDisplayText(directName)).substring(0, 60);
-        }
+        if (directName) return this._toTitleCase(this._cleanDisplayText(directName)).substring(0, 60);
 
         if (type === "CHARACTER") {
             const parts = [
                 features?.race || features?.ethnicity || features?.origin,
                 features?.gender,
                 features?.characterType && !["CHARACTER", "HUMAN"].includes(String(features.characterType).toUpperCase())
-                    ? features.characterType
-                    : null,
+                    ? features.characterType : null,
             ].filter(Boolean);
-
-            if (parts.length) {
-                return this._toTitleCase(this._cleanDisplayText(parts.join(" "))).substring(0, 60);
-            }
+            if (parts.length) return this._toTitleCase(this._cleanDisplayText(parts.join(" "))).substring(0, 60);
         }
 
         if (type === "PRODUCT") {
             const parts = [
-                features?.color,
-                features?.material,
-                features?.type || features?.category || features?.productType,
+                features?.color, features?.material, features?.type || features?.category || features?.productType,
             ].filter(Boolean);
-
-            if (parts.length) {
-                return this._toTitleCase(this._cleanDisplayText(parts.join(" "))).substring(0, 60);
-            }
+            if (parts.length) return this._toTitleCase(this._cleanDisplayText(parts.join(" "))).substring(0, 60);
         }
 
         if (type === "LOCATION") {
             const parts = [
-                features?.biome || features?.environment,
-                features?.style || features?.architecture,
-                features?.type || features?.locationType,
+                features?.biome || features?.environment, features?.style || features?.architecture, features?.type || features?.locationType,
             ].filter(Boolean);
-
-            if (parts.length) {
-                return this._toTitleCase(this._cleanDisplayText(parts.join(" "))).substring(0, 60);
-            }
+            if (parts.length) return this._toTitleCase(this._cleanDisplayText(parts.join(" "))).substring(0, 60);
         }
 
         const cleanedPrompt = this._cleanDisplayText(prompt);
-        if (cleanedPrompt) {
-            return this._toTitleCase(cleanedPrompt).substring(0, 60);
-        }
+        if (cleanedPrompt) return this._toTitleCase(cleanedPrompt).substring(0, 60);
 
         return `${this._toTitleCase(type)} Sheet`;
     }
 
-    // ─── MAIN EXECUTE ─────────────────────────────────────────────────────────
-    /**
-     * @param {object} input
-     * @param {"CHARACTER"|"LOCATION"|"PRODUCT"} input.sheetType
-     */
-    async execute(input) {
+    // ─────────────────────────────────────────────────────────────────────────
+    // 1. PREPARE
+    // ─────────────────────────────────────────────────────────────────────────
+
+    async prepare(input) {
         const {
             sheetType  = "CHARACTER",
             prompt     = "",
             features,
             references = [],
-            model_name,
             project_id,
-            // session_id intentionally omitted — sheet workflows are project-level
-            userId,
         } = input;
-
+        
+        const userId = input.userId || input.user_id;
         const TYPE = sheetType.toUpperCase();
+        const model_name = input.model_name || DEFAULT_MODELS[TYPE];
 
         const systemPrompt = SYSTEM_PROMPTS[TYPE];
         if (!systemPrompt) {
             throw new Error(`[ElementSheetTreatment] Unknown sheetType "${sheetType}". Must be CHARACTER, LOCATION, or PRODUCT.`);
         }
-
         if (!project_id) throw new Error("[ElementSheetTreatment] project_id is required.");
 
         const temperature = PROMPT_TEMPERATURES[TYPE] ?? 0.5;
@@ -340,48 +342,87 @@ export class ElementSheetTreatment extends GenerateImageTreatment {
         console.log(`\n${"─".repeat(60)}`);
         console.log(`📋 [ElementSheetTreatment] ${TYPE} sheet request`);
         console.log(`   project:     ${project_id}`);
-        console.log(`   model:       ${model_name || DEFAULT_MODELS[TYPE]}`);
+        console.log(`   model:       ${model_name}`);
         console.log(`   temperature: ${temperature}`);
-        console.log(`   references:  ${references?.length || 0}`);
         console.log(`   prompt:      "${prompt.substring(0, 80)}"`);
 
-        // 1. Sanitise reference tags
-        const cleanText  = this._sanitisePrompt(prompt, references);
-        const userPrompt = this._buildUserPrompt(cleanText, features);
-
-        console.log(`\n🧠 [ElementSheetTreatment] Calling LLM for prompt refinement...`);
-
-        // 2. Refine prompt via LLM
+        // Refine Prompt
+        const cleanText   = this._sanitisePrompt(prompt, references);
+        const userPrompt  = this._buildUserPrompt(cleanText, features);
         const refinedPrompt = await this._refinePrompt(systemPrompt, userPrompt, temperature);
-        const displayName   = this._buildSheetDisplayName(TYPE, cleanText, features);
+        const displayName = this._buildSheetDisplayName(TYPE, cleanText, features);
 
-        console.log(`✨ [ElementSheetTreatment] Refined prompt received:`);
-        console.log(`   "${refinedPrompt.substring(0, 120)}..."`);
+        // Verify bounds
+        const provider = this._resolveProvider(model_name, { references });
+        const ratio = "3:2";
+        const quality = "1k";
+        let count = 1;
+        const verified = verifyAndClampParams(provider, { ratio, quality, count });
 
-        // 3. Delegate to parent ImageTreatment with the refined prompt.
-        //    session_id is NOT passed → workflow created at project level (session_id = null).
-        //    16:9 wide ratio is ideal for the 3-view hero layout.
-        const result = await super.execute({
+        // Process references
+        const input_assets = await this.refProcessor.process(
+            references, userId, project_id, null, "uploads"
+        );
+
+        const sizeInfo = this._getStandardSize(verified.ratio, verified.quality);
+        const generation_type = input_assets.length > 0 ? "TEXT_REFERENCES" : "TEXT_ONLY";
+
+        // DB setup
+        const config = await this.db.configs.createConfig({
             prompt,
             prompt_optimise: refinedPrompt,
-            display_name:    displayName,
-            model_name:      model_name || DEFAULT_MODELS[TYPE],
-            references,
-            ratio:           "3:2",
-            quality:         "1k",
-            count:           1,
-            workflow_type:   "ELEMENT_SHEET",
-            project_id,
-            session_id:    null,   // ← project-level, no session
-            userId,
+            model:           model_name,
+            aspect_ratio:    verified.ratio || "LANDSCAPE",
+            generation_type,
         });
 
-        console.log(`✅ [ElementSheetTreatment] ${TYPE} sheet dispatched → configId: ${result.configId}`);
+        for (let i = 0; i < input_assets.length; i++) {
+            const asset = input_assets[i];
+            if (asset.media_id) {
+                await this.db.configs.createReference({
+                    generation_config_id: config.id,
+                    position:   i,
+                    input_type: asset.is_base ? "IMAGE_INPUT_TYPE_BASE_IMAGE" : "IMAGE_INPUT_TYPE_REFERENCE",
+                    ref_media_id: asset.media_id,
+                });
+            }
+        }
 
-        // 4. GENERATE DNA NARRATIVE (Asynchronous / Non-blocking)
+        const workflow = await this.db.workflows.createWorkflow({
+            project_id,
+            session_id: null,
+            batch_id:   null,
+            display_name: displayName,
+            variation_index: 0,
+            workflow_type: "ELEMENT_SHEET",
+        });
+
+        const media = await appendMediaToWorkflow(this.db, {
+            workflow_id: workflow.id,
+            mediaData: {
+                project_id,
+                generation_config_id: config.id,
+                step_id: "CAE",
+                url:     null,
+                width:   sizeInfo?.width  || 1024,
+                height:  sizeInfo?.height || 1024,
+            },
+            initialStatus: "processing",
+        });
+
+        // Prompt safety check
+        if (refinedPrompt) {
+            const safety = await this.promptService.checkPrompt(refinedPrompt);
+            if (!safety.safe) {
+                await markMediaStatus(this.db, media.id, "failed", safety.reason);
+                throw new Error(`Prompt rejected: ${safety.reason}`);
+            }
+        }
+
+        // Trigger DNA Narrative in the background
         if (this.dnaTreatment) {
             this.dnaTreatment.create({
-                generation_config_id: result.configId,
+                generation_config_id: config.id,
                 name: features?.name || `${features?.characterType || TYPE} Sheet`,
                 type: TYPE,
                 features,
@@ -391,8 +432,130 @@ export class ElementSheetTreatment extends GenerateImageTreatment {
             });
         }
 
+        console.log(`✅ [ElementSheetTreatment] ${TYPE} sheet prepared → configId: ${config.id}`);
         console.log(`${"─".repeat(60)}\n`);
 
-        return result;
+        return {
+            userId,
+            project_id,
+            model_name,
+            prompt,
+            prompt_optimise: refinedPrompt,
+            generation_type,
+            ratio: verified.ratio,
+            quality: verified.quality,
+            size: sizeInfo?.size,
+            width: sizeInfo?.width,
+            height: sizeInfo?.height,
+            count: verified.count,
+            input_assets,
+            configId: config.id,
+            workflows: [workflow],
+            mediaIds: [media.id],
+        };
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 2. RUN
+    // ─────────────────────────────────────────────────────────────────────────
+
+    async run(task) {
+        const {
+            userId, model_name,
+            prompt, prompt_optimise, generation_type,
+            ratio, quality, size, width, height,
+            input_assets, configId, workflows, mediaIds,
+        } = task;
+
+        const provider = this._resolveProvider(model_name, { references: input_assets });
+        
+        let finalPrompt = prompt_optimise || prompt;
+        let finalNegative = "";
+
+        try {
+            console.log(`[ElementSheetTreatment] Enhancing prompt for quality: ${quality}...`);
+            const enhanced = await this.promptService.upscalePrompt(finalPrompt, { quality });
+            finalPrompt = enhanced.enhanced;
+            const autoNeg = await this.promptService.generateNegativePrompt(finalPrompt);
+            finalNegative = autoNeg || "";
+            console.log(`[ElementSheetTreatment] Enhanced Prompt: "${finalPrompt.substring(0, 50)}..."`);
+        } catch (err) {
+            console.error(`[ElementSheetTreatment] Prompt enhancement failed (continuing with raw): ${err.message}`);
+        }
+
+        const workflow = workflows[0];
+        const mediaId = mediaIds[0];
+
+        try {
+            const form = {
+                prompt:          finalPrompt,
+                negativePrompt:  finalNegative,
+                negative_prompt: finalNegative,
+                ratio, quality, size, width, height,
+                steps:           20,
+                guidanceScale:   7.5,
+                guidance_scale:  7.5,
+                references:      input_assets,
+            };
+
+            let payload;
+            if (typeof provider.buildPayload === "function") {
+                payload = provider.buildPayload(form);
+            } else if (typeof provider.adapt === "function") {
+                const adapted = provider.adapt(form);
+                payload = provider.toPayload ? provider.toPayload(adapted) : adapted;
+            } else {
+                payload = form;
+            }
+
+            console.log(`[ElementSheetTreatment] workflow:${workflow.id} | calling provider (${provider.constructor.name})...`);
+
+            const result = await provider.generate(payload);
+            const outputUrl = result.image_url || result.url;
+            if (!outputUrl) throw new Error("Provider returned no output URL");
+
+            const ext = "png";
+            const fileName = `${userId}/generations/${workflow.id}_${Date.now()}.${ext}`;
+            const fileUrl = await this.storageService.uploadFromUrl(fileName, outputUrl);
+
+            const mediaConfig = await this.db.configs.createConfig({
+                prompt,
+                prompt_optimise: finalPrompt,
+                model:           model_name,
+                aspect_ratio:    ratio,
+                generation_type,
+            });
+
+            await this.db.media.updateFields(mediaId, {
+                generation_config_id: mediaConfig.id,
+                url:    fileUrl,
+                width:  result.width  || width  || 1024,
+                height: result.height || height || 1024,
+            });
+            await markMediaStatus(this.db, mediaId, "success");
+
+            console.log(`[ElementSheetTreatment] run done | success`);
+            return { configId, succeeded: 1, failed: 0 };
+        } catch (err) {
+            console.error(`[ElementSheetTreatment] run failed | ${err.message}`);
+            await markMediaStatus(this.db, mediaId, "failed", err.message);
+            throw err;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // EXECUTE (Legacy fallback)
+    // ─────────────────────────────────────────────────────────────────────────
+    async execute(input) {
+        const task = await this.prepare(input);
+        console.log(`[ElementSheetTreatment] execute (no queue) | config:${task.configId}`);
+        this.run(task).catch(err => console.error(`[ElementSheetTreatment] Background run error: ${err.message}`));
+        return {
+            batchId:   task.batchId || null,
+            configId:  task.configId,
+            workflows: task.workflows,
+            status:    "processing",
+            provider:  task.model_name,
+        };
     }
 }

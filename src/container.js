@@ -16,11 +16,9 @@ import { VideoTreatment }  from "#video/treatments/VideoTreatment.js";
 import { MotionTreatment } from "#video/treatments/MotionTreatment.js";
 import { EditVideoTreatment } from "#video/treatments/EditVideoTreatment.js";
 
-// ─── Image Domain ────────────────────────────────────────────────────────────
-import { GenerateImageTreatment } from "#image/treatments/ImageTreatment.js";
 
-import { EditImageTreatment }      from "#image/treatments/EditImageTreatment.js";
-import { CameraTreatment }         from "#image/treatments/CameraTreatment.js";
+import { EditImageTreatment }      from "#image/treatments/extendtretment/EditImageTreatment.js";
+import { CameraTreatment }         from "#image/treatments/extendtretment/cameraEdittretment.js";
 import { LightingTreatment }       from "#image/treatments/LightingTreatment.js";
 import { UpscaleTreatment }        from "#image/treatments/UpscaleTreatment.js";
 import { GenerateImageTreatment as ImageTreatmentV2 } from "#image/treatments/imagetretmentwithRadis.js";
@@ -69,9 +67,6 @@ export const editVideoTreatment = new EditVideoTreatment({
     promptService, storageService, db
 });
 
-export const imageTreatment = new GenerateImageTreatment({
-    promptService, models: IMAGE_MODELS, storageService, db
-});
 
 export const imageTreatmentV2 = new ImageTreatmentV2({
     promptService, models: IMAGE_MODELS, storageService, db

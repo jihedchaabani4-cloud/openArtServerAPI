@@ -1,5 +1,6 @@
 import express from "express";
-import { resolveImageTreatment } from "../lib/imageTreatmentResolver.js";
+import { lightingTreatment } from "../src/container.js";
+import { getTaskService } from "../src/services/redis-management/index.js";
 import { autoCreateProjectAndSession } from "../lib/helpers.js";
 import { normalizeImageModelName } from "../lib/modelRegistryKeys.js";
 
@@ -11,10 +12,9 @@ const router = express.Router();
  */
 router.post("/change-lighting", async (req, res) => {
     try {
-        const {
+        let {
             angle, elevation, intensity, type, brightness, color,
-            project_id, session_id, workflow_id, media_id,
-            references,
+            project_id, session_id, workflow_id,
             model_name,
             ratio,
             quality,
@@ -24,8 +24,8 @@ router.post("/change-lighting", async (req, res) => {
 
         console.log("[LightingRoute] body:", req.body);
 
-        if (!references || !references.length) {
-            return res.status(400).json({ ok: false, message: "Original image reference is required" });
+        if (!workflow_id) {
+            return res.status(400).json({ ok: false, message: "workflow_id is required" });
         }
 
         const userId = req.user?.id || 'e54d7d5f-9c49-457d-83b7-ac8484bceb80';
@@ -35,10 +35,10 @@ router.post("/change-lighting", async (req, res) => {
             await autoCreateProjectAndSession(userId, project_id, session_id, false);
 
         // 2. Resolve specialized Lighting Treatment
-        const treatment = resolveImageTreatment("lighting");
+        const treatment = lightingTreatment;
 
-        // 3. Execute with raw parameters
-        const result = await treatment.execute({
+        // 3. Prepare task
+        const preparedTask = await treatment.prepare({
             angle,
             elevation,
             intensity,
@@ -50,17 +50,27 @@ router.post("/change-lighting", async (req, res) => {
             project_id: finalProjectId,
             session_id: finalSessionId,
             workflow_id,
-            media_id,
-            references,
             model_name: normalizedModelName,
             userId,
         });
 
+        const task = await getTaskService().createTask({
+            runner: "lighting",
+            data: preparedTask,
+            userId,
+            userType: req.user?.plan || "normal",
+        });
+
         res.json({
             ok: true,
-            ...result,
+            batchId: preparedTask.batchId || null,
+            configId: preparedTask.configId,
+            workflows: preparedTask.workflows,
+            status: "notyet",
+            provider: preparedTask.model_name,
             project_id: finalProjectId,
             session_id: finalSessionId,
+            taskId: task.id,
         });
 
     } catch (error) {

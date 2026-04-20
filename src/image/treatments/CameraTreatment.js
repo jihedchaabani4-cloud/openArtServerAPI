@@ -1,28 +1,29 @@
-import { GenerateImageTreatment } from "./ImageTreatment.js";
-import { getImageModel } from "#image/core/modelRouter.js";
-import { runImageGenerationTask } from "../tasks/ImageGenerationTask.js";
+import { ReferenceProcessor } from "#utils/ReferenceProcessor.js";
+import { getImageModel, ROUTED_IMAGE_MODELS } from "#image/core/modelRouter.js";
 import { verifyAndClampParams } from "../utils/treatmentUtils.js";
+import { appendMediaToWorkflow, markMediaStatus } from "#db/workflowMediaOps.js";
+import { getStandardSize } from "#utils/sizeUtils.js";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 const getRotationText = (r) => {
-  if (r === 0)                return "front view";
-  if (r > 0   && r <= 45)    return "slightly right angle";
-  if (r > 45  && r <= 90)    return "right side view";
-  if (r > 90  && r <= 135)   return "rear right view";
-  if (r > 135)               return "rear view";
-  if (r < 0   && r >= -45)   return "slightly left angle";
-  if (r < -45 && r >= -90)   return "left side view";
-  if (r < -90 && r >= -135)  return "rear left view";
+  if (r === 0) return "front view";
+  if (r > 0 && r <= 45) return "slightly right angle";
+  if (r > 45 && r <= 90) return "right side view";
+  if (r > 90 && r <= 135) return "rear right view";
+  if (r > 135) return "rear view";
+  if (r < 0 && r >= -45) return "slightly left angle";
+  if (r < -45 && r >= -90) return "left side view";
+  if (r < -90 && r >= -135) return "rear left view";
   return "rear view";
 };
 
 const getTiltText = (t) => {
-  if (t === 0)              return "eye level";
-  if (t > 0  && t <= 30)   return "slightly high angle";
-  if (t > 30 && t <= 60)   return "high angle";
-  if (t > 60)              return "bird's eye view";
-  if (t < 0  && t >= -30)  return "slightly low angle";
+  if (t === 0) return "eye level";
+  if (t > 0 && t <= 30) return "slightly high angle";
+  if (t > 30 && t <= 60) return "high angle";
+  if (t > 60) return "bird's eye view";
+  if (t < 0 && t >= -30) return "slightly low angle";
   if (t < -30 && t >= -60) return "low angle";
   return "worm's eye view";
 };
@@ -36,7 +37,7 @@ const getZoomText = (zoom) => {
 };
 
 const buildCameraPrompt = (rotation, tilt, zoom) => {
-  const rotText  = getRotationText(rotation);
+  const rotText = getRotationText(rotation);
   const tiltText = getTiltText(tilt);
   const zoomText = getZoomText(zoom);
 
@@ -49,75 +50,80 @@ const buildCameraPrompt = (rotation, tilt, zoom) => {
 
 // ─── Class ─────────────────────────────────────────────────────────────────
 
-export class CameraTreatment extends GenerateImageTreatment {
-  constructor(deps) {
-    super(deps);
+export class CameraTreatment {
+  constructor({ promptService, models, storageService, db }) {
+    this.promptService = promptService;
+    this.models = models;
+    this.storageService = storageService;
+    this.db = db;
+    this.refProcessor = new ReferenceProcessor({ storageService, db });
   }
 
-  async execute(input) {
+  _getStandardSize(ratio, quality) {
+    return getStandardSize(ratio, quality);
+  }
+
+  _resolveProvider(model_name, input) {
+    const { image_base64, references = [], edit_type } = input;
+    const route = getImageModel(model_name);
+    const modelGroup = route?.group || this.models[model_name];
+
+    if (!modelGroup && !route) {
+        throw new Error(`Model "${model_name}" not found. Available: ${ROUTED_IMAGE_MODELS.join(", ")}`);
+    }
+
+    const hasBase = !!image_base64;
+    const hasRefs = references.length > 0 || hasBase;
+    const isMulti = references.length > 1;
+    const variantKey = hasRefs ? (isMulti ? "i2iMulti" : "i2i") : "t2i";
+
+    let provider;
+    if (route && route[variantKey]) provider = route[variantKey];
+    else if (route && route["i2i"] && hasRefs) provider = route["i2i"];
+    else if (route && route["t2i"]) provider = route["t2i"];
+    else if (modelGroup?.resolve) provider = modelGroup.resolve({ references, image_base64, edit_type });
+    else if (modelGroup) provider = modelGroup[variantKey] || (hasRefs ? modelGroup.i2i : null) || modelGroup.t2i || modelGroup;
+    else provider = modelGroup;
+
+    if (!["t2i", "i2i"].includes(provider.type)) {
+        throw new Error(`Model "${model_name}" is a video model.`);
+    }
+    return provider;
+  }
+
+  async prepare(input) {
     let {
       rotation = 0, tilt = 0, zoom = 6,
-      project_id, session_id, workflow_id, media_id,
+      project_id, session_id, workflow_id,
       ratio, quality, model_name = "seedream-pro",
       negative_prompt, steps, guidance_scale,
-      seed, userId, references = [],
+      seed, userId
     } = input;
 
-    // 1. Auto-resolve media_id from references
-    if (!media_id && references.length > 0) {
-      media_id = references[0].id || references[0].media_id || references[0].asset_id;
-    }
-
-    // 2. Auto-resolve workflow_id from media record
-    if (!workflow_id && media_id) {
-      try {
-        const media = await this.db.media.findById(media_id);
-        if (media?.workflow_id) {
-          workflow_id = media.workflow_id;
-          console.log(`✨ [CameraTreatment] Resolved workflow_id: ${workflow_id}`);
-        }
-      } catch (err) {
-        console.warn(`⚠️ [CameraTreatment] Could not resolve workflow_id: ${err.message}`);
-      }
-    }
-
-    // 3. Guards
-    if (!project_id)  throw new Error("project_id required");
-    if (!session_id)  throw new Error("session_id required");
     if (!workflow_id) throw new Error("workflow_id required for camera angle edit");
 
-    const startTime = Date.now();
+    const sourceMedia = await this.db.media.findLatestByWorkflow(workflow_id);
+    if (!sourceMedia) throw new Error(`No media found for workflow ${workflow_id}`);
+    if (!sourceMedia.url) throw new Error(`Source media has no final URL yet.`);
 
-    // 4. Build prompt from numeric values only
     const cameraPrompt = buildCameraPrompt(rotation, tilt, zoom);
     console.log(`🎥 [CameraTreatment] Prompt: "${cameraPrompt}"`);
 
-    // 5. Resolve model & provider
-    const route = getImageModel(model_name);
-    if (!route) throw new Error(`Model "${model_name}" not found.`);
-    const provider = route.i2i || route.t2i;
+    const provider = this._resolveProvider(model_name, { references: [{ is_base: true }] });
 
-    // 6. Verify & clamp params
     const verified = verifyAndClampParams(provider, {
       steps, guidance_scale, ratio, quality, count: 1,
     });
 
-    // 7. Process references — ensure base image is first
-    let rawRefs = [...references];
-    const alreadyHasBase = rawRefs.find(
-      r => r.media_id === media_id || r.id === media_id || r.asset_id === media_id
-    );
-    if (media_id && !alreadyHasBase) {
-      rawRefs.unshift({ media_id, role: "IMAGE_INPUT_TYPE_BASE_IMAGE", is_base: true });
-    }
-    const input_assets = await this.refProcessor.process(
-      rawRefs, userId, project_id, session_id, "uploads"
-    );
+    const input_assets = await this.refProcessor.process([{
+        url: sourceMedia.url,
+        media_id: sourceMedia.id,
+        role: "source",
+        is_base: true
+    }], userId, project_id, session_id, "uploads");
 
-    // 8. Size info
     const sizeInfo = this._getStandardSize(verified.ratio, verified.quality);
 
-    // 9. Create generation config in DB
     const generation_type = "TEXT_BASE_IMAGE_REFERENCES";
     const config = await this.db.configs.createConfig({
       prompt: cameraPrompt,
@@ -126,66 +132,117 @@ export class CameraTreatment extends GenerateImageTreatment {
       generation_type,
     });
 
-    // Attach reference records
     for (let i = 0; i < input_assets.length; i++) {
-      const asset = input_assets[i];
-      if (asset.media_id) {
-        await this.db.configs.createReference({
-          generation_config_id: config.id,
-          position: i,
-          input_type: asset.is_base
-            ? "IMAGE_INPUT_TYPE_BASE_IMAGE"
-            : "IMAGE_INPUT_TYPE_REFERENCE",
-          ref_media_id: asset.media_id,
-        });
-      }
+        const asset = input_assets[i];
+        if (asset.media_id) {
+            await this.db.configs.createReference({
+                generation_config_id: config.id,
+                position: i,
+                input_type: asset.is_base ? "IMAGE_INPUT_TYPE_BASE_IMAGE" : "IMAGE_INPUT_TYPE_REFERENCE",
+                ref_media_id: asset.media_id,
+            });
+        }
     }
 
-    // 10. Fetch existing workflow
     const wf = await this.db.workflows.getWorkflow(workflow_id);
     if (!wf) throw new Error(`Workflow ${workflow_id} not found`);
 
-    // 11. Fire background task
-    const context = {
-      promptService:   this.promptService,
-      storageService:  this.storageService,
-      db:              this.db,
-    };
-
-    runImageGenerationTask(context, {
-      provider,
-      batchId:          null,
-      configId:         config.id,
-      workflows:        [wf],
-      generation_type,
-      prompt:           cameraPrompt,
-      negative_prompt,
-      ratio:            verified.ratio,
-      quality:          verified.quality,
-      size:             sizeInfo?.size   || null,
-      width:            sizeInfo?.width  || null,
-      height:           sizeInfo?.height || null,
-      userId,
-      input_assets,
-      startTime,
-      steps:            verified.steps,
-      guidance_scale:   verified.guidance_scale,
-      seed,
-      project_id,
-      session_id,
-      model_name,
-      count:            1,
-    }).catch(err => {
-      console.error(`❌ [CameraTreatment] Unhandled: ${err.message}`);
+    const media = await appendMediaToWorkflow(this.db, {
+        workflow_id: wf.id,
+        mediaData: {
+            project_id,
+            generation_config_id: config.id,
+            step_id: "CAE",
+            url: null,
+            width: sizeInfo?.width || 1024,
+            height: sizeInfo?.height || 1024,
+        },
+        initialStatus: "processing",
     });
 
-    // 12. Return immediately
     return {
-      batchId:   null,
-      configId:  config.id,
-      workflows: [wf],
-      status:    "processing",
-      provider:  `${model_name} → ${provider.constructor.name}`,
+        userId, project_id, session_id, model_name,
+        prompt: cameraPrompt, negative_prompt, generation_type,
+        ratio: verified.ratio, quality: verified.quality,
+        steps: verified.steps, guidance_scale: verified.guidance_scale,
+        size: sizeInfo?.size, width: sizeInfo?.width, height: sizeInfo?.height,
+        seed, input_assets,
+        configId: config.id,
+        workflows: [wf],
+        mediaIds: [media.id],
+    };
+  }
+
+  async run(task) {
+    const {
+        userId, model_name, prompt, negative_prompt, generation_type,
+        ratio, quality, size, width, height, steps, guidance_scale,
+        seed, input_assets, configId, workflows, mediaIds,
+    } = task;
+
+    const provider = this._resolveProvider(model_name, { references: input_assets });
+    const sourceAsset = (input_assets || []).find(a => ["source", "normal", "start", "base"].includes(a.role)) || input_assets[0];
+    const image_url = sourceAsset?.url || null;
+
+    const workflow = workflows[0];
+    const mediaId = mediaIds[0];
+
+    try {
+        const form = {
+            prompt,
+            negativePrompt: negative_prompt,
+            negative_prompt,
+            ratio, quality, size, width, height,
+            steps: steps || 20,
+            guidanceScale: guidance_scale || 7.5,
+            guidance_scale: guidance_scale || 7.5,
+            seed,
+            image: image_url,
+            image_url,
+            references: input_assets,
+        };
+
+        let payload;
+        if (typeof provider.buildPayload === "function") payload = provider.buildPayload(form);
+        else if (typeof provider.adapt === "function") {
+            const adapted = provider.adapt(form);
+            payload = provider.toPayload ? provider.toPayload(adapted) : adapted;
+        } else payload = form;
+
+        const result = await provider.generate(payload);
+        const outputUrl = result.image_url || result.url;
+        if (!outputUrl) throw new Error("Provider returned no output URL");
+
+        const ext = "png";
+        const fileName = `${userId}/generations/camera_${workflow.id}_${Date.now()}.${ext}`;
+        const fileUrl = await this.storageService.uploadFromUrl(fileName, outputUrl);
+
+        const mediaConfig = await this.db.configs.createConfig({
+            prompt, model: model_name, aspect_ratio: ratio, generation_type, seed: result.seed || seed || null,
+        });
+
+        await this.db.media.updateFields(mediaId, {
+            generation_config_id: mediaConfig.id, url: fileUrl,
+            width: result.width || width || 1024, height: result.height || height || 1024,
+        });
+        await markMediaStatus(this.db, mediaId, "success");
+
+        return { configId, succeeded: 1, failed: 0 };
+    } catch (err) {
+        await markMediaStatus(this.db, mediaId, "failed", err.message);
+        throw err;
+    }
+  }
+
+  async execute(input) {
+    const task = await this.prepare(input);
+    this.run(task).catch(err => console.error(`[CameraTreatment] background error: ${err.message}`));
+    return {
+        batchId: null,
+        configId: task.configId,
+        workflows: task.workflows,
+        status: "processing",
+        provider: task.model_name,
     };
   }
 }

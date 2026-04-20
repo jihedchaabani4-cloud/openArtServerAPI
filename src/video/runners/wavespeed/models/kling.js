@@ -541,17 +541,19 @@ export const v3Pro = new ModelFamily("Kling v3.0 Pro", {
 }, { pricing: V3P_PRICING, tier: "pro" });
 
 export const o3Std = new ModelFamily("Kling O3", {
-    "t2v": o3StdT2v_int,
-    "i2v": o3StdI2v_int,
-    "r2v": o3StdR2v_int,
-    "v2v": o3StdV2v_int
+    "t2v":    o3StdT2v_int,
+    "i2v":    o3StdI2v_int,
+    "i2v_se": o3StdI2v_int,
+    "r2v":    o3StdR2v_int,
+    "v2v":    o3StdV2v_int
 }, { pricing: O3_PRICING, tier: "std" });
 
 export const o3Pro = new ModelFamily("Kling O3 Pro", {
-    "t2v": o3ProT2v_int,
-    "i2v": o3ProI2v_int,
-    "r2v": o3ProR2v_int,
-    "v2v": o3ProV2v_int
+    "t2v":    o3ProT2v_int,
+    "i2v":    o3ProI2v_int,
+    "i2v_se": o3ProI2v_int,
+    "r2v":    o3ProR2v_int,
+    "v2v":    o3ProV2v_int
 }, { pricing: O3P_PRICING, tier: "pro" });
 
 // Mode-Specific Variant Exports for Registry

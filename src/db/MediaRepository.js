@@ -31,6 +31,20 @@ export class MediaRepository extends BaseRepository {
         return data;
     }
 
+    async findLatestByWorkflow(workflow_id) {
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("*")
+            .eq("workflow_id", workflow_id)
+            .not("url", "is", null)
+            .order("create_time", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (error) throw error;
+        return data;
+    }
+
     async findByProject(project_id, limit = 30, offset = 0) {
         const { data, error } = await this.client()
             .from(this.tableName)

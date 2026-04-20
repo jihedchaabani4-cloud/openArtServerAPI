@@ -1,274 +1,188 @@
-import { ReferenceProcessor             } from "#utils/ReferenceProcessor.js";
 import { getRunner, getModelName, EDIT_SUPPORT_MODELS } from "#video/core/modelRouter.js";
 import { appendMediaToWorkflow, markMediaStatus  } from "#db/workflowMediaOps.js";
-import { CameraTask                      } from "#video/tasks/CameraTask.js"; // [Removed] No longer needed
 import { verifyAndClampVideoParams        } from "#image/utils/treatmentUtils.js";
-
-// EditVideoTreatment — exclusively video-to-video editing
-const executeV2V = (p, payload, mode) =>
-    p.generate ? p.generate(payload, mode) : p.videoToVideo(payload);
 
 export class EditVideoTreatment {
     constructor({ promptService, storageService, db }) {
         this.promptService  = promptService;
         this.storageService = storageService;
         this.db             = db; 
-        this.refProcessor   = new ReferenceProcessor({ storageService, db });
     }
 
-    async execute(input) {
+    /**
+     * prepare
+     * Resolves workflow IDs into final media URLs and prepares the task descriptor.
+     */
+    async prepare(input) {
         const {
-            model,
-            prompt            = "",
-            ratio             = "16:9",
-            duration          = "5s",
-            project_id,
-            session_id,
-            workflow_id,
-            media_id,
-            sound,
-            cfgScale,
-            negativePrompt    = "",
-            multiPrompt,
-            keepOriginalSound,
-            video_resolution,
-            camera_control,
-            cameraControl,
-            edit_type,
+            video_workflow_id,      // ID of the video to edit
+            reference_workflow_ids = [], // Array of workflow ID strings (No roles)
+            prompt = "", model, ratio = "16:9", duration = "5s",
+            project_id, session_id, userId,
+            video_resolution, cfgScale, negativePrompt, multiPrompt, keepOriginalSound, sound
         } = input;
 
-        let references = input.references || [];
-        const userId    = input.userId || input.user_id;
-        const startTime = Date.now();
+        // 1. Resolve Base Video
+        const vWfId = video_workflow_id || input.workflow_id;
+        if (!vWfId) throw new Error("video_workflow_id is required");
 
-        // ── Step 0: Log incoming request ─────────────────────────────────────
-        console.log(`\n${"─".repeat(60)}`);
-        console.log(`📥 [EditVideoTreatment] New ${edit_type || "edit"} request`);
-        console.log(`   model:       ${model || "(auto)"}`);
-        console.log(`   edit_type:   ${edit_type || "edit"}`);
-        console.log(`   workflow_id: ${workflow_id}`);
-        console.log(`   media_id:    ${media_id}`);
-        console.log(`   prompt:      "${prompt}"`);
-        if (input.camera_text)
-        console.log(`   camera_text: "${input.camera_text}"`);
-        console.log(`   references:  ${references.length} item(s)`);
-        console.log(`${"─".repeat(60)}`);
+        const vMedia = await this.db.media.findLatestByWorkflow(vWfId);
+        if (!vMedia || !vMedia.url) throw new Error(`Base video not ready for workflow ${vWfId}`);
+        const video = vMedia.url;
 
-        if (!project_id) throw new Error("project_id required");
-        if (!session_id) throw new Error("session_id required");
-        if (!workflow_id) throw new Error("workflow_id required for editing/extending video");
-
-        // ── Step 1: Inject media_id as base video reference ──────────────────
-        if (media_id && !references.find(r => r.media_id === media_id || r.asset_id === media_id)) {
-            references.unshift({ media_id, role: "video", type: "video" });
-            console.log(`   ✅ [Step 1] Injected media_id "${media_id}" as base video reference`);
-        } else {
-            console.log(`   ✅ [Step 1] media_id already in references or not provided`);
+        // 2. Resolve Reference Images (Simple ID Array)
+        const references = [];
+        for (const wfId of reference_workflow_ids) {
+            const m = await this.db.media.findLatestByWorkflow(wfId);
+            if (m?.url) {
+                // Roles are removed, so we use a generic "reference" role
+                references.push({ url: m.url, media_id: m.id, role: "reference", type: "image" });
+            }
         }
 
-        // ── Step 2: Resolve model + provider ─────────────────────────────────
+        // Fallback for legacy references if IDs are missing
+        if (references.length === 0 && input.references?.length) {
+            for (const r of input.references) {
+                if (r.url) references.push(r);
+            }
+        }
+
+        // 3. Setup Model & Provider
         const mode = "v2v";
         let resolvedModel = model;
         let provider = getRunner(resolvedModel, mode);
 
         if (!provider) {
-            const fallback = EDIT_SUPPORT_MODELS[0];
-            if (!fallback) throw new Error(`[EditVideoTreatment] No models available that support video editing.`);
-            console.warn(`   ⚠️  [Step 2] Model "${model}" not supported. Falling back to "${fallback}"`);
-            resolvedModel = fallback;
+            resolvedModel = EDIT_SUPPORT_MODELS[0] || "kling_v3";
             provider = getRunner(resolvedModel, mode);
-        } else {
-            console.log(`   ✅ [Step 2] Provider resolved → "${resolvedModel}" (mode: ${mode})`);
         }
 
-        if (!provider) throw new Error(`[EditVideoTreatment] Fallback model "${resolvedModel}" also failed.`);
+        // 4. Verify Params
+        const verified = verifyAndClampVideoParams(provider, { ratio, duration, cfgScale });
 
-        // ── Step 3: Upload / resolve references ──────────────────────────────
-        const maxRefs  = provider.maxReferences ?? 1;
-        const rawRefs  = references.slice(0, maxRefs);
-        console.log(`   ✅ [Step 3] Processing ${rawRefs.length}/${references.length} reference(s) (maxRefs: ${maxRefs})`);
-
-        const input_assets = await this.refProcessor.process(
-            rawRefs, userId, project_id, session_id, "video_uploads"
-        );
-        const resolvedRefs = rawRefs.map((ref, i) => ({
-            ...ref,
-            url: input_assets[i]?.url || ref.url,
-        }));
-
-        const baseVideoRef  = resolvedRefs.find(r => r.media_id === media_id) || resolvedRefs.find(r => r.type === "video");
-        const remainingRefs = resolvedRefs.filter(r => r !== baseVideoRef);
-
-        console.log(`   ✅ [Step 3] Base video URL: ${baseVideoRef?.url || "(none)"}`);
-        console.log(`   ✅ [Step 3] Extra refs:     ${remainingRefs.length} item(s)`);
-
-        // ── Step 4: Camera edit → Setup final prompt ─────────────────────────────
-        let finalPrompt        = prompt;
-        let finalCameraControl = cameraControl || camera_control || undefined;
-
-        console.log(`   ✅ [Step 4] Executing edit with prompt: "${finalPrompt}"`);
-        if (finalCameraControl) {
-            console.log(`   ✅ [Step 4] Using provided cameraControl: ${JSON.stringify(finalCameraControl)}`);
-        }
-
-        // ── Step 5: Verify & clamp params using provider's own defaults ──────
-        const verified = verifyAndClampVideoParams(provider, {
-            ratio, duration, cfgScale,
-        });
-
-        // ── Step 6: Build form ────────────────────────────────────────────────
+        // 5. Build Form (Sent to AI Provider)
         const form = {
-            prompt: finalPrompt, model: resolvedModel,
-            ratio:         verified.ratio,
-            duration:      verified.duration,
-            resolution:    video_resolution,
-            sound, cfgScale: verified.cfgScale, negativePrompt, multiPrompt, keepOriginalSound,
-            cameraControl: finalCameraControl,
-            video:         baseVideoRef?.url,
-            references:    remainingRefs,
-            edit_type,
+            prompt, 
+            model: resolvedModel,
+            video, 
+            references,
+            ratio: verified.ratio,
+            duration: verified.duration,
+            resolution: video_resolution,
+            cfgScale: verified.cfgScale,
+            negativePrompt, multiPrompt, keepOriginalSound, sound
         };
+
         const model_name = getModelName(resolvedModel, mode);
-        console.log(`\n   ✅ [Step 6] Form built | model_name: "${model_name}" | duration: ${form.duration}s | ratio: ${form.ratio}`);
 
-        // ── Step 6: Persist generation config ────────────────────────────────
+        // 6. Persist Config & Placeholder
         const config = await this.db.configs.createConfig({
-            prompt: finalPrompt,
-            model:  model_name,
-            aspect_ratio:    verified.ratio || "16:9",
-            generation_type: input_assets.length > 0 ? "VIDEO_REFERENCES" : "TEXT_ONLY",
+            prompt,
+            model: model_name,
+            aspect_ratio: verified.ratio,
+            generation_type: "VIDEO_EDIT"
         });
-        console.log(`   ✅ [Step 7] Config created → id: ${config.id}`);
 
-        for (let i = 0; i < input_assets.length; i++) {
-            const asset = input_assets[i];
-            if (asset.media_id) {
+        // Link base video
+        await this.db.configs.createReference({
+            generation_config_id: config.id,
+            position: 0,
+            input_type: "VIDEO_INPUT_TYPE_BASE_VIDEO",
+            ref_media_id: vMedia.id
+        });
+
+        // Link references
+        for (let i = 0; i < references.length; i++) {
+            if (references[i].media_id) {
                 await this.db.configs.createReference({
                     generation_config_id: config.id,
-                    position:    i,
-                    input_type:  "VIDEO_INPUT_TYPE_BASE_VIDEO",
-                    ref_media_id: asset.media_id,
+                    position: i + 1,
+                    input_type: "IMAGE_INPUT_TYPE_REFERENCE",
+                    ref_media_id: references[i].media_id
                 });
-                console.log(`   ✅ [Step 6] Reference attached: media_id=${asset.media_id} (pos ${i})`);
             }
         }
 
-        // ── Step 8: Load workflow ─────────────────────────────────────────────
-        const workflow = await this.db.workflows.getWorkflow(workflow_id);
-        if (!workflow) throw new Error(`Workflow ${workflow_id} not found`);
-        console.log(`   ✅ [Step 8] Workflow loaded → id: ${workflow.id}`);
-
-        // ── Step 9: Fire background job ──────────────────────────────────────
-        console.log(`\n🚀 [EditVideoTreatment] Dispatching background job... (edit_type: ${edit_type})`);
-
-        this._runBackground({
-            provider, form, mode,
-            batchId:  null,
-            configId: config.id,
-            workflow,
-            input_assets,
-            userId, project_id, session_id, startTime,
-            model_name,
-        }).catch(err => {
-            console.error(`❌ [EditVideoTreatment] Background Error: ${err.message || err}`);
+        const workflow = await this.db.workflows.getWorkflow(vWfId);
+        const media = await appendMediaToWorkflow(this.db, {
+            workflow_id: workflow.id,
+            mediaData: { 
+                project_id, 
+                generation_config_id: config.id, 
+                step_id: "CAE",
+                width:  vMedia?.width  || 1280,
+                height: vMedia?.height || 720
+            },
+            initialStatus: "processing"
         });
 
         return {
-            batchId:   null,
-            configId:  config.id,
-            workflows: [workflow],
-            status:    "processing",
-            mode,
-            model:     model_name,
-            edit_type,
+            video,       // Resolved URL
+            references,  // Resolved URL array
+            form, 
+            mode, 
+            mediaId: media.id, 
+            workflow,
+            userId, project_id, session_id,
+            model: resolvedModel,
+            model_name,
+            workflows: [workflow]
         };
     }
 
-    async _runBackground({
-        provider, form, mode,
-        batchId, configId, workflow,
-        input_assets,
-        userId, project_id, session_id, startTime,
-        model_name,
-    }) {
-        console.log(`\n⚙️  [EditVideoTreatment][BG] Starting background execution...`);
+    /**
+     * run
+     */
+    async run(task) {
+        const { video, references, form, mode, model, mediaId, userId, workflow, model_name } = task;
+        const startTime = Date.now();
 
-        const media = await appendMediaToWorkflow(this.db, {
-            workflow_id: workflow.id,
-            mediaData: {
-                project_id,
-                generation_config_id: configId,
-                step_id: "CAE",
-                url:    null,
-                width:  1280,
-                height: 720,
-            },
-            initialStatus: "processing",
-        });
-        console.log(`   ✅ [BG] Media placeholder created → id: ${media.id}`);
+        console.log(`\n🚀 [EditVideoTreatment] Starting BG Run | Video: ${video} | Refs: ${references.length}`);
+
+        const provider = getRunner(model, mode);
+        if (!provider) throw new Error(`Provider for ${model} not found`);
 
         try {
-            // Safety check
             if (form.prompt) {
-                console.log(`   🔍 [BG] Checking prompt safety...`);
                 const safety = await this.promptService.checkPrompt(form.prompt);
                 if (!safety.safe) {
-                    console.warn(`   ❌ [BG] Prompt rejected: ${safety.reason}`);
-                    await markMediaStatus(this.db, media.id, "failed", safety.reason);
+                    await markMediaStatus(this.db, mediaId, "failed", safety.reason);
                     return;
                 }
-                console.log(`   ✅ [BG] Prompt safe`);
             }
 
-            // Adapt + payload
             const adapted = provider.adapt(form, mode);
             const payload = provider.toPayload(adapted, mode);
-            const runner  = (provider.variants && provider.variants[mode]) || provider;
+            
+            const executeMethod = provider.generate ? provider.generate.bind(provider) : provider.videoToVideo.bind(provider);
+            const result = await executeMethod(payload, mode);
 
-            console.log(`   🌐 [BG] Calling provider API: ${runner.modelName || model_name}`);
-            console.log(`   📦 [BG] Payload: ${JSON.stringify(payload, null, 2)}`);
-
-            const result    = await executeV2V(provider, payload, mode);
             const outputUrl = result.video_url || result.image_url;
+            if (!outputUrl) throw new Error("Provider returned no output URL");
 
-            if (!outputUrl) {
-                console.error(`   ❌ [BG] Provider returned no output URL`);
-                await markMediaStatus(this.db, media.id, "failed", "Provider returned no output URL");
-                throw new Error("Provider returned no output URL");
-            }
-
-            console.log(`   ✅ [BG] Provider returned URL: ${outputUrl}`);
-
-            // Upload to storage
-            const fileName = `${userId}/videos/${batchId || workflow.id}_edit_${Date.now()}.mp4`;
+            const fileName = `${userId}/videos/${workflow.id}_edit_${Date.now()}.mp4`;
             const fileUrl  = await this.storageService.uploadFromUrl(fileName, outputUrl);
-            console.log(`   ✅ [BG] Uploaded to storage: ${fileUrl}`);
 
-            // Update media record
-            const mediaConfig = await this.db.configs.createConfig({
-                prompt:          form.prompt,
-                model:           model_name,
-                aspect_ratio:    form.ratio || "16:9",
-                generation_type: input_assets.length > 0 ? "VIDEO_REFERENCES" : "TEXT_ONLY",
-                seed:            result.seed || null,
-            });
-
-            await this.db.media.updateFields(media.id, {
-                generation_config_id: mediaConfig.id,
+            await this.db.media.updateFields(mediaId, {
                 url:    fileUrl,
                 width:  result.width  || 1280,
                 height: result.height || 720,
             });
-            await markMediaStatus(this.db, media.id, "success");
+            await markMediaStatus(this.db, mediaId, "success");
 
-            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-            console.log(`\n✅ [EditVideoTreatment][BG] DONE in ${elapsed}s | media.id: ${media.id}`);
-            console.log(`${"─".repeat(60)}\n`);
+            console.log(`✅ [EditVideoTreatment] DONE | ${fileUrl}`);
+            return { fileUrl, mediaId };
 
         } catch (error) {
-            console.error(`❌ [EditVideoTreatment] _runBackground() error:`, error.message);
-            await markMediaStatus(this.db, media.id, "failed", error.message);
+            console.error(`❌ [EditVideoTreatment] Error:`, error.message);
+            await markMediaStatus(this.db, mediaId, "failed", error.message);
             throw error;
         }
+    }
+
+    async execute(input) {
+        const task = await this.prepare(input);
+        this.run(task).catch(err => console.error("BG Error:", err));
+        return { workflows: task.workflows, status: "processing", taskId: null };
     }
 }

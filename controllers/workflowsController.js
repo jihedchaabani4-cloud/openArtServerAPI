@@ -1,5 +1,20 @@
 import { supabase } from "../lib/supabase.js";
 import { assertMediaUsable } from "../lib/mediaGuards.js";
+import { storageService } from "../src/container.js";
+
+function extractPath(url) {
+    if (!url || typeof url !== "string") return null;
+    // Extract the path after the bucket name (e.g., .../public/generations/path/to/file.png)
+    // Most Supabase URLs look like: .../storage/v1/object/public/uploads/userId/filename.png
+    const parts = url.split("/public/");
+    if (parts.length > 1) {
+        // parts[1] is "bucket/path/to/file"
+        // We need "path/to/file"
+        const subParts = parts[1].split("/");
+        return subParts.slice(1).join("/");
+    }
+    return null;
+}
 
 // ── BACKEND UTILS (Not directly exposed as APIs) ────────────────────────────────
 
@@ -125,43 +140,54 @@ export const patchWorkflow = async (req, res) => {
 
 // ── EXPRESS CONTROLLERS ─────────────────────────────────────────────────────────
 
-// ── DELETE /api/workflows/:id ───────────────────────────────────────────────────
 export const deleteWorkflow = async (req, res) => {
-    try {
-        const { id } = req.params;
+    const { id } = req.params;
 
-        // Get all media items for this workflow
-        const { data: mediaItems } = await supabase
-            .from("media")
-            .select("id")
-            .eq("workflow_id", id);
+    res.json({ ok: true, message: "Deletion in progress" });
 
-        if (mediaItems && mediaItems.length > 0) {
-            const mediaIds = mediaItems.map(m => m.id);
-            // Clean up any references pointing to these media items to avoid FK constraint errors
+    (async () => {
+        try {
+            // 1. جيب media
+            const { data: mediaItems } = await supabase
+                .from("media")
+                .select("id, url")
+                .eq("workflow_id", id);
+
+            if (mediaItems?.length) {
+                const mediaIds = mediaItems.map(m => m.id);
+                const filePaths = mediaItems
+                    .map(m => extractPath(m.url))
+                    .filter(Boolean);
+
+                // 2. امسح references
+                await supabase
+                    .from("generation_config_reference")
+                    .delete()
+                    .in("ref_media_id", mediaIds);
+
+                // 3. امسح media
+                await supabase
+                    .from("media")
+                    .delete()
+                    .eq("workflow_id", id);
+
+                // 4. امسح storage
+                if (filePaths.length) {
+                    await storageService.deleteFiles(filePaths);
+                }
+            }
+
+            // 5. امسح workflow
             await supabase
-                .from("generation_config_reference")
+                .from("workflow")
                 .delete()
-                .in("ref_media_id", mediaIds);
+                .eq("id", id);
+
+        } catch (err) {
+            console.error("Delete Error:", err);
         }
-
-        const { data, error } = await supabase
-            .from("workflow")
-            .delete()
-            .eq("id", id)
-            .select()
-            .single();
-
-        if (error) throw error;
-
-        // If the workflow was successfully deleted, data will contain the deleted row
-        return res.json({ ok: true, deleted: data });
-    } catch (err) {
-        console.error(`❌ Error deleting workflow ${req.params.id}:`, err);
-        return res.status(500).json({ ok: false, message: err.message });
-    }
+    })();
 };
-
 // ── PATCH /api/workflows/:id/like ───────────────────────────────────────────────
 export const toggleLike = async (req, res) => {
     try {

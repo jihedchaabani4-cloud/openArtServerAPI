@@ -1,5 +1,5 @@
 import { Errors, parseProviderError } from "../../errors/GenerationErrors.js";
-import { appendMediaToWorkflow, markMediaStatus } from "../../db/workflowMediaOps.js";
+import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "../../db/workflowMediaOps.js";
 
 /**
  * Runs in the background (fire-and-forget).
@@ -135,7 +135,7 @@ export async function runImageGenerationTask(context, params) {
                     console.log(`   ✅ [${i + 1}/${count}] workflow:${wf.id} → media:${media.id}`);
                 } catch (uploadErr) {
                     console.error(`❌ Upload failed for variation ${i + 1}: ${uploadErr.message}`);
-                    if (media?.id) await markMediaStatus(db, media.id, "failed", uploadErr.message);
+                    if (media?.id) await markMediaFailed(db, media.id, uploadErr);
                 }
             }
             console.log(`✅ [ImageGenerationTask] Multi-shot batch done: ${batchId}`);
@@ -175,7 +175,7 @@ export async function runImageGenerationTask(context, params) {
             console.log(`   ✅ [${i + 1}/${count}] Provider returned OK`);
         } catch (err) {
             console.error(`❌ Generation failed for variation ${i + 1}: ${parseProviderError(err).message}`);
-            await markMediaStatus(db, media.id, "failed", parseProviderError(err).message);
+            await markMediaFailed(db, media.id, parseProviderError(err));
             continue;
         }
 
@@ -222,7 +222,7 @@ export async function runImageGenerationTask(context, params) {
             console.log(`   ✅ [${i + 1}/${count}] media:${media.id} saved`);
         } catch (uploadErr) {
             console.error(`❌ Upload/DB failed for variation ${i + 1}: ${uploadErr.message}`);
-            await markMediaStatus(db, media.id, "failed", uploadErr.message);
+            await markMediaFailed(db, media.id, uploadErr);
             continue;
         }
     }

@@ -1,5 +1,5 @@
 import { parseProviderError } from "../../errors/GenerationErrors.js";
-import { appendMediaToWorkflow, markMediaStatus } from "../../db/workflowMediaOps.js";
+import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "../../db/workflowMediaOps.js";
 
 export async function runUpscaleTask(context, params) {
     const { storageService, db } = context;
@@ -33,7 +33,7 @@ export async function runUpscaleTask(context, params) {
 
     if (!image_url) {
         console.error(`❌ [UpscaleTask] Missing image_url`);
-        await markMediaStatus(db, media.id, "failed", "Missing image_url");
+        await markMediaFailed(db, media.id, "Missing image_url");
         return;
     }
 
@@ -54,7 +54,7 @@ export async function runUpscaleTask(context, params) {
         console.log(`   ✅ [UpscaleTask] Provider returned OK`);
     } catch (err) {
         console.error(`❌ [UpscaleTask] Provider call failed: ${parseProviderError(err).message}`);
-        await markMediaStatus(db, media.id, "failed", parseProviderError(err).message);
+        await markMediaFailed(db, media.id, parseProviderError(err));
         return;
     }
 
@@ -68,7 +68,7 @@ export async function runUpscaleTask(context, params) {
         console.log(`      ↳ ${fileUrl}`);
     } catch (err) {
         console.error(`❌ [UpscaleTask] Upload failed: ${err.message}`);
-        await markMediaStatus(db, media.id, "failed", err.message);
+        await markMediaFailed(db, media.id, err);
         return;
     }
 
@@ -87,6 +87,6 @@ export async function runUpscaleTask(context, params) {
         console.log(`\n✅ [UpscaleTask] Done in ${elapsed}s — workflow:${workflow.id} → media:${media.id}`);
     } catch (dbErr) {
         console.error(`❌ [UpscaleTask] DB persist failed: ${dbErr.message}`);
-        await markMediaStatus(db, media.id, "failed", dbErr.message);
+        await markMediaFailed(db, media.id, dbErr);
     }
 }

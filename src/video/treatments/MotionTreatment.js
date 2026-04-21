@@ -1,6 +1,6 @@
 import { ReferenceProcessor             } from "#utils/ReferenceProcessor.js";
 import { getRunner, getModelName, ROUTED_MODELS } from "#video/core/modelRouter.js";
-import { appendMediaToWorkflow, markMediaStatus  } from "#db/workflowMediaOps.js";
+import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "#db/workflowMediaOps.js";
 import { verifyAndClampVideoParams        } from "#image/utils/treatmentUtils.js";
 
 /**
@@ -185,7 +185,7 @@ export class MotionTreatment {
                 const safety = await this.promptService.checkPrompt(form.prompt);
                 if (!safety.safe) {
                     console.warn(`[MotionTreatment] Prompt rejected: ${safety.reason}`);
-                    await markMediaStatus(this.db, mediaId, "failed", safety.reason);
+                    await markMediaFailed(this.db, mediaId, safety.reason);
                     throw new Error(`Prompt rejected: ${safety.reason}`);
                 }
             }
@@ -213,7 +213,7 @@ export class MotionTreatment {
 
             const outputUrl = result.video_url || result.image_url;
             if (!outputUrl) {
-                await markMediaStatus(this.db, mediaId, "failed", "Provider returned no output URL");
+                await markMediaFailed(this.db, mediaId, "Provider returned no output URL");
                 throw new Error("Provider returned no output URL");
             }
 
@@ -247,7 +247,7 @@ export class MotionTreatment {
         } catch (error) {
             console.error(`❌ [MotionTreatment] run() error:`, error.message);
             // Ensure the media record in DB is marked as failed so UI doesn't spin forever
-            await markMediaStatus(this.db, mediaId, "failed", error.message);
+            await markMediaFailed(this.db, mediaId, error);
             throw error; // Re-throw so Scheduler/caller also sees the failure
         }
     }

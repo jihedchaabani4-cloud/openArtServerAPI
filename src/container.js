@@ -18,11 +18,11 @@ import { EditVideoTreatment } from "#video/treatments/EditVideoTreatment.js";
 
 
 import { EditImageTreatment }      from "#image/treatments/extendtretment/EditImageTreatment.js";
-import { CameraTreatment }         from "#image/treatments/extendtretment/cameraEdittretment.js";
-import { LightingTreatment }       from "#image/treatments/LightingTreatment.js";
+import { CameraTreatment }         from "#image/treatments/extendtretment/CameraEditTreatment.js";
+import { LightingTreatment }       from "#image/treatments/extendtretment/LightingTreatment.js";
 import { UpscaleTreatment }        from "#image/treatments/UpscaleTreatment.js";
-import { GenerateImageTreatment as ImageTreatmentV2 } from "#image/treatments/imagetretmentwithRadis.js";
-import { ElementSheetTreatment }   from "#image/treatments/ElementSheetTreatment.js";
+import { GenerateImageTreatment as ImageTreatmentV2 } from "#image/treatments/extendtretment/GenerateImageTreatment.js";
+import { ElementSheetTreatment }   from "#image/treatments/extendtretment/ElementSheetTreatment.js";
 import { MODELS as IMAGE_MODELS } from "#image/core/registry.js";
 export { IMAGE_MODELS };
 

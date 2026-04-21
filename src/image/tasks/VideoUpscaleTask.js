@@ -1,5 +1,5 @@
 import { parseProviderError } from "../../errors/GenerationErrors.js";
-import { appendMediaToWorkflow, markMediaStatus } from "../../db/workflowMediaOps.js";
+import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "../../db/workflowMediaOps.js";
 
 export async function runVideoUpscaleTask(context, params) {
     const { storageService, db } = context;
@@ -33,7 +33,7 @@ export async function runVideoUpscaleTask(context, params) {
     const sourceAsset = (input_assets || []).find((a) => a.is_base || a.role === "source");
     const video_url = sourceAsset?.url || null;
     if (!video_url) {
-        await markMediaStatus(db, media.id, "failed", "Missing video_url");
+        await markMediaFailed(db, media.id, "Missing video_url");
         return;
     }
 
@@ -45,13 +45,13 @@ export async function runVideoUpscaleTask(context, params) {
         result = await provider.generate(payload);
         console.log("   ✅ [VideoUpscaleTask] Provider returned OK");
     } catch (err) {
-        await markMediaStatus(db, media.id, "failed", parseProviderError(err).message);
+        await markMediaFailed(db, media.id, parseProviderError(err));
         return;
     }
 
     const outputUrl = result.video_url || result.image_url;
     if (!outputUrl) {
-        await markMediaStatus(db, media.id, "failed", "Provider returned no output URL");
+        await markMediaFailed(db, media.id, "Provider returned no output URL");
         return;
     }
 
@@ -70,6 +70,6 @@ export async function runVideoUpscaleTask(context, params) {
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         console.log(`\n✅ [VideoUpscaleTask] Done in ${elapsed}s — workflow:${workflow.id} → media:${media.id}`);
     } catch (err) {
-        await markMediaStatus(db, media.id, "failed", err.message);
+        await markMediaFailed(db, media.id, err);
     }
 }

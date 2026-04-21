@@ -14,8 +14,8 @@ import {
 } from "../../container.js";
 
 // Dedicated Redis-ready treatment for Image Generation (don't use the legacy container one)
-import { GenerateImageTreatment } from "../../image/treatments/imagetretmentwithRadis.js";
-import { EditImageTreatment } from "../../image/treatments/EditImageTreatment.js";
+import { GenerateImageTreatment } from "../../image/treatments/extendtretment/GenerateImageTreatment.js";
+import { EditImageTreatment } from "../../image/treatments/extendtretment/EditImageTreatment.js";
 
 const imageRedisTreatment = new GenerateImageTreatment({
     promptService,

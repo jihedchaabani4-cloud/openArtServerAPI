@@ -1,5 +1,5 @@
 import { parseProviderError } from "../../errors/GenerationErrors.js";
-import { appendMediaToWorkflow, markMediaStatus } from "../../db/workflowMediaOps.js";
+import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "../../db/workflowMediaOps.js";
 
 /**
  * ImageEditTask — background task dedicated to editing an EXISTING workflow.
@@ -55,12 +55,12 @@ export async function runImageEditTask(context, params) {
         safety = await promptService.checkPrompt(prompt);
     } catch (err) {
         console.error(`❌ [ImageEditTask] Safety check failed: ${err.message}`);
-        await markMediaStatus(db, media.id, "failed", err.message);
+        await markMediaFailed(db, media.id, err);
         return;
     }
     if (!safety.safe) {
         console.error(`❌ [ImageEditTask] Prompt violation: ${safety.reason}`);
-        await markMediaStatus(db, media.id, "failed", safety.reason);
+        await markMediaFailed(db, media.id, safety.reason);
         return;
     }
 
@@ -125,7 +125,7 @@ export async function runImageEditTask(context, params) {
         console.log(`   ✅ [ImageEditTask] Provider returned OK`);
     } catch (err) {
         console.error(`❌ [ImageEditTask] Provider call failed: ${parseProviderError(err).message}`);
-        await markMediaStatus(db, media.id, "failed", parseProviderError(err).message);
+        await markMediaFailed(db, media.id, parseProviderError(err));
         return;
     }
 
@@ -139,7 +139,7 @@ export async function runImageEditTask(context, params) {
         console.log(`      ↳ ${fileUrl}`);
     } catch (err) {
         console.error(`❌ [ImageEditTask] Upload failed: ${err.message}`);
-        await markMediaStatus(db, media.id, "failed", err.message);
+        await markMediaFailed(db, media.id, err);
         return;
     }
 
@@ -181,6 +181,6 @@ export async function runImageEditTask(context, params) {
         console.log(`\n✅ [ImageEditTask] Done in ${elapsed}s — workflow:${workflow.id} → media:${media.id}`);
     } catch (dbErr) {
         console.error(`❌ [ImageEditTask] DB persist failed: ${dbErr.message}`);
-        await markMediaStatus(db, media.id, "failed", dbErr.message);
+        await markMediaFailed(db, media.id, dbErr);
     }
 }

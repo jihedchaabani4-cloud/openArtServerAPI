@@ -1,4 +1,4 @@
-import { BaseEditTreatment } from "../basetretment/Baseedittreatment .js";
+import { BaseEditTreatment } from "../basetretment/BaseEditTreatment.js";
 
 // ─── Camera helpers ────────────────────────────────────────────────────────
 

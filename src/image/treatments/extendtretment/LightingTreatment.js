@@ -1,4 +1,4 @@
-import { BaseEditTreatment } from "../basetretment/Baseedittreatment ";
+import { BaseEditTreatment } from "../basetretment/BaseEditTreatment.js";
 
 // ─── Lighting helpers ──────────────────────────────────────────────────────
 

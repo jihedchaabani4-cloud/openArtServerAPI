@@ -1,4 +1,4 @@
-import { BaseEditTreatment } from "../basetretment/Baseedittreatment .js";
+import { BaseEditTreatment } from "../basetretment/BaseEditTreatment.js";
 
 export class EditImageTreatment extends BaseEditTreatment {
 
@@ -38,7 +38,7 @@ export class EditImageTreatment extends BaseEditTreatment {
     // Auto-resolve primary media from workflow
     const primaryMedia = await this.db.workflows.getPrimaryMedia(workflow_id);
     if (primaryMedia?.url && !rawRefs.find(r => r.url === primaryMedia.url)) {
-      rawRefs.unshift({ url: primaryMedia.url, role: "source", is_base: false });
+      rawRefs.unshift({ url: primaryMedia.url, role: "source", is_base: true });
     }
     // ── Delegate shared logic to base ──────────────────────────────────────
     return this._runPrepare({

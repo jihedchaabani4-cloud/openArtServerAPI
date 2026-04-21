@@ -14,6 +14,7 @@ export const ERROR_CODES = {
     API_SUBMIT_FAILED:     "API_SUBMIT_FAILED",
     API_AUTH_FAILED:       "API_AUTH_FAILED",
     API_QUOTA_EXCEEDED:    "API_QUOTA_EXCEEDED",
+    PROVIDER_CREDITS_EXCEEDED: "PROVIDER_CREDITS_EXCEEDED",
 
     // Step 4 — Poll
     GENERATION_TIMEOUT:    "GENERATION_TIMEOUT",
@@ -39,6 +40,13 @@ export class GenerationError extends Error {
         this.step        = step
         this.isInternal  = isInternal  // true = details hidden from user
         this.userMessage = userMessage // message shown to user
+    }
+
+    getDisplayMessage() {
+        if (this.isInternal) {
+            return "sorry famam mouchkla 7awel a fuie momment";
+        }
+        return this.message;
     }
 }
 
@@ -90,6 +98,14 @@ export const Errors = {
     apiQuotaExceeded: () => new GenerationError({
         code:        ERROR_CODES.API_QUOTA_EXCEEDED,
         message:     "Provider API quota exceeded.",
+        userMessage: "Generation failed. Please try again later.",
+        status:      500,
+        step:        "submit",
+        isInternal:  true
+    }),
+    providerCreditsExceeded: (reason) => new GenerationError({
+        code:        ERROR_CODES.PROVIDER_CREDITS_EXCEEDED,
+        message:     `Provider out of credits: ${reason}`,
         userMessage: "Generation failed. Please try again later.",
         status:      500,
         step:        "submit",
@@ -159,6 +175,9 @@ export function parseProviderError(err) {
 
     if (msg.includes("429") || msg.toLowerCase().includes("quota") || msg.toLowerCase().includes("rate limit"))
         return Errors.apiQuotaExceeded()
+
+    if (msg.toLowerCase().includes("insufficient credits") || msg.toLowerCase().includes("top up") || msg.toLowerCase().includes("balance too low"))
+        return Errors.providerCreditsExceeded(msg)
 
     if (msg.toLowerCase().includes("timeout"))
         return Errors.generationTimeout(null, 0)

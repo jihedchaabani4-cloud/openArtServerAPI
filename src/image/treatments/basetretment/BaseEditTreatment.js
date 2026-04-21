@@ -1,7 +1,7 @@
 import { getStandardSize } from "#utils/sizeUtils.js";
 import { getImageModel, ROUTED_IMAGE_MODELS } from "#image/core/modelRouter.js";
 import { verifyAndClampParams } from "../../utils/treatmentUtils.js";
-import { appendMediaToWorkflow, markMediaStatus } from "#db/workflowMediaOps.js";
+import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "#db/workflowMediaOps.js";
 
 export class BaseEditTreatment {
   constructor({ promptService, models, storageService, db }) {
@@ -117,7 +117,7 @@ export class BaseEditTreatment {
     if (prompt) {
       const safety = await this.promptService.checkPrompt(prompt);
       if (!safety.safe) {
-        await markMediaStatus(this.db, media.id, "failed", safety.reason);
+        await markMediaFailed(this.db, media.id, safety.reason);
         throw new Error(`Prompt rejected: ${safety.reason}`);
       }
     }
@@ -196,7 +196,7 @@ export class BaseEditTreatment {
       result = await provider.generate(payload);
     } catch (err) {
       const msg = err?.response?.data?.detail || err.message;
-      await markMediaStatus(this.db, mediaId, "failed", msg);
+      await markMediaFailed(this.db, mediaId, msg);
       throw new Error(msg);
     }
 
@@ -212,7 +212,7 @@ export class BaseEditTreatment {
         throw new Error("No output from provider");
       }
     } catch (err) {
-      await markMediaStatus(this.db, mediaId, "failed", err.message);
+      await markMediaFailed(this.db, mediaId, err);
       throw err;
     }
 

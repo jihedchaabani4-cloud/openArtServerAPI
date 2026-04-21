@@ -1,7 +1,7 @@
 import { ReferenceProcessor } from "#utils/ReferenceProcessor.js";
 import { getUpscaleModel } from "#image/core/modelRouter.js";
 import { getUpscaleRunner as getVideoUpscaleRunner } from "#video/core/modelRouter.js";
-import { appendMediaToWorkflow, markMediaStatus } from "#db/workflowMediaOps.js";
+import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "#db/workflowMediaOps.js";
 
 export class UpscaleTreatment {
     constructor({ storageService, db }) {
@@ -17,19 +17,30 @@ export class UpscaleTreatment {
 
     async prepare(input) {
         const {
-            project_id, session_id, workflow_id, media_id,
+            project_id, session_id, workflow_id,
             upscaleScale, target_resolution, target_fps, userId,
         } = input;
 
+        let { media_id } = input;
+
         if (!project_id) throw new Error("project_id required");
         if (!session_id) throw new Error("session_id required");
-        if (!media_id) throw new Error("media_id required");
 
-        const sourceMedia = await this.db.media.findById(media_id);
-        if (!sourceMedia) throw new Error(`Media ${media_id} not found.`);
+        // ── Resolve Source Media ─────────────────────────────────────────────
+        let sourceMedia = null;
+        if (media_id) {
+            sourceMedia = await this.db.media.findById(media_id);
+        } else if (workflow_id) {
+            sourceMedia = await this.db.workflows.getPrimaryMedia(workflow_id);
+            media_id = sourceMedia?.id;
+        }
+
+        if (!sourceMedia) {
+            throw new Error(`Could not resolve source media from media_id:"${media_id || 'none'}" or workflow_id:"${workflow_id || 'none'}"`);
+        }
 
         const finalWorkflowId = workflow_id || sourceMedia.workflow_id;
-        if (!finalWorkflowId) throw new Error("workflow_id could not be resolved from media_id.");
+        if (!finalWorkflowId) throw new Error("workflow_id could not be resolved.");
 
         const input_assets = await this.refProcessor.process(
             [{ url: sourceMedia.url, media_id, role: "source", is_base: true }],
@@ -139,7 +150,7 @@ export class UpscaleTreatment {
             return { configId, succeeded: 1, failed: 0 };
         } catch (err) {
             console.error(`[UpscaleTreatment] run failed | ${err.message}`);
-            await markMediaStatus(this.db, mediaId, "failed", err.message);
+            await markMediaFailed(this.db, mediaId, err);
             throw err;
         }
     }

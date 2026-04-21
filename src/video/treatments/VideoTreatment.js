@@ -1,5 +1,5 @@
 import { getRunner, getModelName             } from "#video/core/modelRouter.js";
-import { appendMediaToWorkflow, markMediaStatus } from "#db/workflowMediaOps.js";
+import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "#db/workflowMediaOps.js";
 import { verifyAndClampVideoParams              } from "#image/utils/treatmentUtils.js";
 import { ReferenceProcessor                     } from "#utils/ReferenceProcessor.js";
 import { getStandardSize                        } from "#utils/sizeUtils.js";
@@ -264,7 +264,7 @@ export class VideoTreatment {
         try {
             const safety = await this.promptService.checkPrompt(form.prompt);
             if (!safety.safe) {
-                await markMediaStatus(this.db, mediaId, "failed", safety.reason);
+                await markMediaFailed(this.db, mediaId, safety.reason);
                 return;
             }
 
@@ -298,7 +298,7 @@ export class VideoTreatment {
             return { fileUrl, mediaId };
 
         } catch (error) {
-            await markMediaStatus(this.db, mediaId, "failed", error.message);
+            await markMediaFailed(this.db, mediaId, error);
             throw error;
         }
     }

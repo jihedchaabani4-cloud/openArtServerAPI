@@ -1,3 +1,5 @@
+import { GenerationError } from "../errors/GenerationErrors.js";
+
 async function safe(fn) {
     try {
         return await fn();
@@ -8,6 +10,27 @@ async function safe(fn) {
 
 export async function markMediaStatus(db, media_id, status, error_message = null) {
     return safe(() => db.media.updateFields(media_id, { status, error_message }));
+}
+
+/**
+ * Specifically marks a media as failed and records the error message.
+ * Handles both Error objects and string messages.
+ */
+export async function markMediaFailed(db, media_id, error) {
+    let message = "sorry famam mouchkla 7awel a fuie momment";
+
+    if (error instanceof GenerationError) {
+        message = error.getDisplayMessage();
+    } else if (typeof error === 'string') {
+        message = error;
+    }
+
+    // Always log the technical error to console for dev logging
+    if (error?.message) {
+        console.error(`[markMediaFailed] Technical Details (${media_id}):`, error.message);
+    }
+
+    return markMediaStatus(db, media_id, "failed", message);
 }
 
 /**

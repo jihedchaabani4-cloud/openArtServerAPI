@@ -2,6 +2,7 @@ import { ReferenceProcessor } from "#utils/ReferenceProcessor.js";
 import { getUpscaleModel } from "#image/core/modelRouter.js";
 import { getUpscaleRunner as getVideoUpscaleRunner } from "#video/core/modelRouter.js";
 import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "#db/workflowMediaOps.js";
+import { enqueueTreatmentJob } from "#queue/treatmentJob.js";
 
 export class UpscaleTreatment {
     constructor({ storageService, db }) {
@@ -13,6 +14,10 @@ export class UpscaleTreatment {
     _isVideoUrl(url = "") {
         const clean = String(url).split("?")[0].toLowerCase();
         return [".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv"].some((ext) => clean.endsWith(ext));
+    }
+
+    getQueueType() {
+        return this.constructor.name;
     }
 
     async prepare(input) {
@@ -161,10 +166,11 @@ export class UpscaleTreatment {
 
     async execute(input) {
         const task = await this.prepare(input);
-        this.run(task).catch(err => console.error(`[UpscaleTreatment] Background error: ${err.message}`));
+        const job = await enqueueTreatmentJob(this.getQueueType(), task);
         return {
+            jobId: job.id,
             configId: task.configId,
-            status: "processing",
+            status: "queued",
             mediaType: task.isVideo ? "video" : "image",
             provider: task.model_name,
         };

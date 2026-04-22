@@ -1,53 +1,62 @@
-import 'dotenv/config';
-import { Worker } from 'bullmq';
-import { redisConnection } from '../queue/redis.js';
-import { QUEUE_NAME } from '../queue/queue.js';
-import { jobHandlers } from '../jobs/jobHandlers.js';
+import "dotenv/config";
+import { Worker, UnrecoverableError } from "bullmq";
+import { redisConnection } from "../queue/redis.js";
+import { QUEUE_NAME } from "../queue/queue.js";
+import { resolveTreatment, treatmentDeps } from "../treatments/treatmentRegistry.js";
 
-import { db, storageService, promptService, IMAGE_MODELS as models } from '../container.js';
+function isPermanentJobError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
 
-// Real dependencies injected into all Treatment handlers
-const deps = {
-  db,
-  storageService,
-  promptService,
-  models,
-  externalApi: {} // Add any other required external API abstractions here if needed in the future
-};
+  return [
+    "insufficient credits",
+    "prompt rejected",
+    "model not found",
+    "provider not found",
+    "does not implement runjob",
+    "missing configuration",
+    "not support",
+    "not an image model",
+    "workflow",
+  ].some((needle) => message.includes(needle));
+}
 
-/**
- * Initialize the worker
- */
 export const worker = new Worker(
   QUEUE_NAME,
   async (job) => {
-    // 1. Find the appropriate handler
-    const handler = jobHandlers[job.name];
+    const { type, payload } = job.data || {};
 
-    // 2. Throw an explicit error if missing
-    if (!handler) {
-      throw new Error(`FATAL: No handler defined for job name "${job.name}"`);
+    if (!type || !payload) {
+      throw new Error(`Invalid job payload for job ${job.id}. Expected { type, payload }.`);
     }
 
-    // 3. Execute the handler with dependency injection
-    return await handler(job.data, deps);
+    const treatment = resolveTreatment(type, treatmentDeps);
+    if (typeof treatment.runJob !== "function") {
+      throw new Error(`Treatment "${type}" does not implement runJob(payload)`);
+    }
+
+    try {
+      return await treatment.runJob(payload);
+    } catch (error) {
+      if (isPermanentJobError(error)) {
+        throw new UnrecoverableError(error.message);
+      }
+      throw error;
+    }
   },
   {
     connection: redisConnection,
-    concurrency: parseInt(process.env.WORKER_CONCURRENCY || '10', 10),
+    concurrency: parseInt(process.env.WORKER_CONCURRENCY || "10", 10),
   }
 );
 
-// --- Event Listeners for Logging & Monitoring ---
-
-worker.on('completed', (job) => {
-  console.log(`✅ [Worker] Job ${job.name} (${job.id}) completed successfully.`);
+worker.on("completed", (job) => {
+  console.log(`[Worker] Job ${job.data?.type || job.name} (${job.id}) completed successfully.`);
 });
 
-worker.on('failed', (job, err) => {
-  console.error(`❌ [Worker] Job ${job.name} (${job.id}) failed: ${err.message}`);
+worker.on("failed", (job, err) => {
+  console.error(`[Worker] Job ${job?.data?.type || job?.name} (${job?.id}) failed: ${err.message}`);
 });
 
-worker.on('error', (err) => {
-  console.error(`🚨 [Worker] Internal Redis error:`, err);
+worker.on("error", (err) => {
+  console.error("[Worker] Internal Redis error:", err);
 });

@@ -1,7 +1,6 @@
 // controllers/videoController.js — HTTP handler; domain treatment: src/video/treatments/VideoTreatment.js
 import { videoTreatment, motionTreatment, editVideoTreatment, promptService } from "../src/container.js";
 import { isVideoModelRegistered } from "../lib/modelRegistryKeys.js";
-import { getTaskService } from "../src/services/redis-management/index.js";
 
 /**
  * generateVideo
@@ -75,23 +74,17 @@ export const generateVideo = async (req, res) => {
             userId,
         };
 
-        const prepared = await videoTreatment.prepare(payload);
-        const task = await getTaskService().createTask({
-            userType: req.user?.plan || "normal",
-            userId: req.user.id,
-            workflow_id: prepared.workflow.id,
-            runner: "video",
-            data: prepared
-        });
+        const queued = await videoTreatment.execute(payload);
 
         const result = {
-            batchId:   prepared.batchId,
-            configId:  prepared.configId,
-            workflows: prepared.workflows,
-            status:    "processing",
-            mode:      prepared.mode,
-            model:     prepared.model_name,
-            taskId:    task.id,
+            batchId:   queued.batchId,
+            configId:  queued.configId,
+            workflows: queued.workflows,
+            status:    queued.status,
+            mode:      queued.mode,
+            model:     queued.model,
+            taskId:    queued.jobId,
+            jobId:     queued.jobId,
         };
 
         res.json({
@@ -181,23 +174,17 @@ export const extendVideo = async (req, res) => {
             section: "video_generator"
         };
 
-        const prepared = await editVideoTreatment.prepare(payload);
-        const task = await getTaskService().createTask({
-            userType: req.user?.plan || "normal",
-            userId: userId,
-            workflow_id: prepared.workflow.id,
-            runner: "edit_video",
-            data: prepared
-        });
+        const queued = await editVideoTreatment.execute(payload);
 
         const result = {
-            batchId:   prepared.batchId,
-            configId:  prepared.configId,
-            workflows: prepared.workflows,
-            status:    "processing",
-            mode:      prepared.mode,
-            model:     prepared.model_name,
-            taskId:    task.id,
+            batchId:   queued.batchId ?? null,
+            configId:  queued.configId,
+            workflows: queued.workflows,
+            status:    queued.status,
+            mode:      queued.mode,
+            model:     queued.model,
+            taskId:    queued.jobId,
+            jobId:     queued.jobId,
         };
 
         res.json({
@@ -289,23 +276,17 @@ export const editVideo = async (req, res) => {
             section: "video_generator"
         };
 
-        const prepared = await editVideoTreatment.prepare(payload);
-        const task = await getTaskService().createTask({
-            userType: req.user?.plan || "normal",
-            userId: userId,
-            workflow_id: prepared.workflow.id,
-            runner: "edit_video",
-            data: prepared
-        });
+        const queued = await editVideoTreatment.execute(payload);
 
         const result = {
-            batchId:   prepared.batchId,
-            configId:  prepared.configId,
-            workflows: prepared.workflows,
-            status:    "processing",
-            mode:      prepared.mode,
-            model:     prepared.model_name,
-            taskId:    task.id,
+            batchId:   queued.batchId ?? null,
+            configId:  queued.configId,
+            workflows: queued.workflows,
+            status:    queued.status,
+            mode:      queued.mode,
+            model:     queued.model,
+            taskId:    queued.jobId,
+            jobId:     queued.jobId,
         };
 
         res.json({
@@ -405,23 +386,17 @@ export const motionControl = async (req, res) => {
         console.log(`   - Resolved Image: ${image_url ? "Yes" : "No"}`);
         console.log(`   - Resolved Video: ${video_url ? "Yes" : "No"}`);
 
-        const prepared = await motionTreatment.prepare(payload);
-        const task = await getTaskService().createTask({
-            userType: req.user?.plan || "normal",
-            userId: userId,
-            workflow_id: prepared.workflow.id,
-            runner: "motion",
-            data: prepared
-        });
+        const queued = await motionTreatment.execute(payload);
 
         const resultData = {
             batchId:   null,
-            configId:  prepared.configId,
-            workflows: [prepared.workflow],
-            status:    "processing",
-            mode:      prepared.mode,
-            model:     prepared.model_name,
-            taskId:    task.id,
+            configId:  queued.configId,
+            workflows: queued.workflows,
+            status:    queued.status,
+            mode:      queued.mode,
+            model:     queued.model,
+            taskId:    queued.jobId,
+            jobId:     queued.jobId,
         };
 
         res.json({

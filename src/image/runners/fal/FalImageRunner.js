@@ -1,4 +1,6 @@
 import { BaseModel } from "#core/BaseModel.js";
+import { resolveExecutionPolicy } from "#core/execution/ExecutionPolicy.js";
+import { createTimeoutSignal } from "#core/execution/ExecutionHelpers.js";
 import fetch from "node-fetch";
 
 export class FalImageRunner extends BaseModel {
@@ -16,6 +18,11 @@ export class FalImageRunner extends BaseModel {
 
     async generate(payload) {
         console.log(`🚀 [Fal.ai] Generating image with model: ${this.modelName}`);
+        const policy = resolveExecutionPolicy(payload, {
+            type: "image",
+            provider: this.provider,
+            model: this.modelName,
+        });
 
         const response = await fetch(`${this.baseUrl}/${this.modelName}`, {
             method: "POST",
@@ -23,7 +30,8 @@ export class FalImageRunner extends BaseModel {
                 "Authorization": `Key ${this.apiKey}`,
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            signal: createTimeoutSignal(policy.requestTimeoutMs),
         });
 
         if (!response.ok) {

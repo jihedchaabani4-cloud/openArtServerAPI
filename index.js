@@ -4,7 +4,6 @@ import cors from "cors";
 import morgan from "morgan";
 import { createServer } from "http";
 import { initSocket } from "./websocket/socket.js";
-import { initRedisManagement, stopRedisManagement } from "./src/services/redis-management/index.js";
 import apiRouter from "./src/api/routes.js";
 
 const app = express();
@@ -12,13 +11,11 @@ const httpServer = createServer(app);
 
 // ── Initialize Services ──────────────────────────────────────
 initSocket(httpServer);
-initRedisManagement();
 
 // ── Graceful Shutdown ────────────────────────────────────────
 async function shutdown(signal) {
     console.log(`\n[Server] ${signal} received. Shutting down gracefully...`);
     try {
-        await stopRedisManagement();
         httpServer.close(() => {
             console.log("[Server] HTTP server closed.");
             process.exit(0);

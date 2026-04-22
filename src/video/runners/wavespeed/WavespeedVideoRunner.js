@@ -1,8 +1,8 @@
 import { BaseModel } from "#core/BaseModel.js";
+import { resolveExecutionPolicy } from "#core/execution/ExecutionPolicy.js";
+import { createTimeoutSignal, sleep } from "#core/execution/ExecutionHelpers.js";
 
 const WAVESPEED_BASE = "https://api.wavespeed.ai/api/v3";
-const POLL_INTERVAL  = 3000;
-const POLL_TIMEOUT   = 300000;
 
 export class WavespeedVideoRunner extends BaseModel {
     constructor(options) {
@@ -10,7 +10,7 @@ export class WavespeedVideoRunner extends BaseModel {
         this.apiKey = process.env.WAVESPEED_API_KEY;
     }
 
-    async _submit(payload) {
+    async _submit(payload, policy) {
         const response = await fetch(
             `${WAVESPEED_BASE}/${this.modelName}`,
             {
@@ -20,6 +20,7 @@ export class WavespeedVideoRunner extends BaseModel {
                     "Authorization": `Bearer ${this.apiKey}`,
                 },
                 body: JSON.stringify(payload),
+                signal: createTimeoutSignal(policy.requestTimeoutMs),
             }
         );
         if (!response.ok) {
@@ -31,16 +32,17 @@ export class WavespeedVideoRunner extends BaseModel {
     }
 
 // ✅ الصحيح
-    async _poll(taskId, pollUrl) {
-        const deadline = Date.now() + POLL_TIMEOUT;
+    async _poll(taskId, pollUrl, policy) {
+        const deadline = Date.now() + policy.maxDurationMs;
         // Uses pollUrl if provided, otherwise constructs it from taskId
         const url = pollUrl || `${WAVESPEED_BASE}/predictions/${taskId}/result`;
 
         while (Date.now() < deadline) {
-            await new Promise(r => setTimeout(r, POLL_INTERVAL));
+            await sleep(policy.pollIntervalMs);
 
             const response = await fetch(url, {
                 headers: { "Authorization": `Bearer ${this.apiKey}` },
+                signal: createTimeoutSignal(policy.pollTimeoutMs),
             });
 
             if (!response.ok) continue;
@@ -58,13 +60,39 @@ export class WavespeedVideoRunner extends BaseModel {
                 throw new Error(`Wavespeed task failed: ${res.error || "Unknown error"}`);
             }
         }
-        throw new Error(`Wavespeed task timed out after ${POLL_TIMEOUT / 1000}s`);
+        throw new Error(`Wavespeed task timed out after ${policy.maxDurationMs / 1000}s`);
     }
 
     // ── Methods ──────────────────────────────────────────────────────────────
-    async imageToVideo(payload)  { return this._poll(await this._submit(payload)); }
-    async textToVideo(payload)   { return this._poll(await this._submit(payload)); }
-    async motionControl(payload) { return this._poll(await this._submit(payload)); }
+    async imageToVideo(payload)  {
+        const policy = resolveExecutionPolicy(payload, {
+            type: "video",
+            provider: this.provider,
+            model: this.modelName,
+        });
+        const taskId = await this._submit(payload, policy);
+        return this._poll(taskId, undefined, policy);
+    }
+
+    async textToVideo(payload)   {
+        const policy = resolveExecutionPolicy(payload, {
+            type: "video",
+            provider: this.provider,
+            model: this.modelName,
+        });
+        const taskId = await this._submit(payload, policy);
+        return this._poll(taskId, undefined, policy);
+    }
+
+    async motionControl(payload) {
+        const policy = resolveExecutionPolicy(payload, {
+            type: "video",
+            provider: this.provider,
+            model: this.modelName,
+        });
+        const taskId = await this._submit(payload, policy);
+        return this._poll(taskId, undefined, policy);
+    }
 
     async generate(payload) {
         if (this.type === "t2v")                       return this.textToVideo(payload);

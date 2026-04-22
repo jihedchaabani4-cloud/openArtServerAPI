@@ -6,7 +6,6 @@
 import { editImageTreatment } from "../src/container.js";
 import { normalizeImageModelName, isImageModelRegistered } from "../lib/modelRegistryKeys.js";
 import { assertMediaUsable } from "../lib/mediaGuards.js";
-import { getTaskService } from "../src/services/redis-management/index.js";
 
 /**
  * POST /api/images/generated/edit/existing
@@ -63,7 +62,7 @@ export const generateEdit = async (req, res) => {
         console.log(`   - Workflow:   ${workflow_id}`);
         console.log(`   - Ref WFs:    ${(reference_workflow_ids || []).length}`);
 
-        const prepared = await editImageTreatment.prepare({
+        const queued = await editImageTreatment.execute({
             prompt,
             ratio,
             quality: quality || resolution,
@@ -75,21 +74,14 @@ export const generateEdit = async (req, res) => {
             userId,
         });
 
-        const task = await getTaskService().createTask({
-            userType:    req.user?.plan || "normal",
-            userId,
-            workflow_id: prepared.workflow.id,
-            runner:      "image-edit",
-            data:        prepared,
-        });
-
         return res.json({
             ok: true,
             batchId:    null,
-            configId:   prepared.configId,
-            workflows:  [prepared.workflow],
-            status:     "processing",
-            taskId:     task.id,
+            configId:   queued.configId,
+            workflows:  queued.workflows,
+            status:     queued.status,
+            taskId:     queued.jobId,
+            jobId:      queued.jobId,
             project_id: finalProjectId,
             session_id: finalSessionId,
         });

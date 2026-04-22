@@ -1,14 +1,22 @@
 import Redis from 'ioredis';
 
 const redisUrl = process.env.REDIS_URL;
+const redisHost = process.env.REDIS_HOST;
+const redisPort = process.env.REDIS_PORT;
+const redisPassword = process.env.REDIS_PASSWORD;
 
-// Export connection config. BullMQ workers/queues prefer creating their own connections 
-// based on these options to avoid blocking issues.
+if (!redisUrl && !(redisHost && redisPort && redisPassword)) {
+  throw new Error(
+    "[Redis] Missing configuration. Set REDIS_URL or set REDIS_HOST, REDIS_PORT, and REDIS_PASSWORD."
+  );
+}
+
+// Export connection config. BullMQ workers/queues should use an explicit Redis config.
 export const connectionOptions = redisUrl ? undefined : {
-  host: process.env.REDIS_HOST || '127.0.0.1',
-  port: process.env.REDIS_PORT || 6379,
-  password: process.env.REDIS_PASSWORD || undefined,
-  maxRetriesPerRequest: null, // CRITICAL: This is required by BullMQ
+  host: redisHost,
+  port: Number(redisPort),
+  password: redisPassword,
+  maxRetriesPerRequest: null,
 };
 
 // Reusable instantiated connection

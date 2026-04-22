@@ -2,7 +2,6 @@ import express from "express";
 import { autoCreateProjectAndSession } from "../lib/helpers.js";
 import { normalizeImageModelName } from "../lib/modelRegistryKeys.js";
 import { editVideoTreatment, promptService, cameraTreatment } from "../src/container.js";
-import { getTaskService } from "../src/services/redis-management/index.js";
 
 import { CameraTask } from "../src/video/tasks/CameraTask.js";
 
@@ -63,7 +62,7 @@ async function handleImageCamera(req, res) {
 
         const treatment = cameraTreatment;
 
-        const preparedTask = await treatment.prepare({
+        const queued = await treatment.execute({
             rotation, tilt, zoom,
             ratio,
             quality: quality || "1k",
@@ -76,24 +75,18 @@ async function handleImageCamera(req, res) {
             userId,
         });
 
-        const task = await getTaskService().createTask({
-            runner: "camera",
-            data: preparedTask,
-            userId,
-            userType: req.user?.plan || "normal",
-        });
-
         return res.json({
             ok: true,
             media_type: "image",
-            batchId: preparedTask.batchId || null,
-            configId: preparedTask.configId,
-            workflows: preparedTask.workflows,
-            status: "notyet",
-            provider: preparedTask.model_name,
+            batchId: queued.batchId || null,
+            configId: queued.configId,
+            workflows: queued.workflows,
+            status: queued.status,
+            provider: queued.provider,
             project_id: finalProjectId,
             session_id: finalSessionId,
-            taskId: task.id,
+            taskId: queued.jobId,
+            jobId: queued.jobId,
         });
 
     } catch (error) {
@@ -144,7 +137,7 @@ async function handleVideoCamera(req, res) {
         console.log(`   - Resolved cameraControl: ${JSON.stringify(cameraControl)}`);
         console.log(`   - Final Prompt for edit:  "${finalPrompt}"`);
 
-        const prepared = await editVideoTreatment.prepare({
+        const queued = await editVideoTreatment.execute({
             model,
             prompt: finalPrompt,
             cameraControl: cameraControl,
@@ -159,22 +152,15 @@ async function handleVideoCamera(req, res) {
             userId,
         });
 
-        const task = await getTaskService().createTask({
-            userType: req.user?.plan || "normal",
-            userId: userId,
-            workflow_id: prepared.workflow.id,
-            runner: "edit_video",
-            data: prepared
-        });
-
         const result = {
-            batchId:   prepared.batchId,
-            configId:  prepared.configId,
-            workflows: prepared.workflows,
-            status:    "processing",
-            mode:      prepared.mode,
-            model:     prepared.model_name,
-            taskId:    task.id,
+            batchId:   queued.batchId ?? null,
+            configId:  queued.configId,
+            workflows: queued.workflows,
+            status:    queued.status,
+            mode:      queued.mode,
+            model:     queued.model,
+            taskId:    queued.jobId,
+            jobId:     queued.jobId,
         };
 
         return res.json({

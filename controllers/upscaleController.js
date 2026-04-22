@@ -1,5 +1,4 @@
 import { upscaleTreatment, db } from "../src/container.js";
-import { getTaskService } from "../src/services/redis-management/index.js";
 import { assertMediaUsable } from "../lib/mediaGuards.js";
 
 export const upscale = async (req, res) => {
@@ -33,7 +32,7 @@ export const upscale = async (req, res) => {
             session_id,
         });
 
-        const preparedTask = await upscaleTreatment.prepare({
+        const queued = await upscaleTreatment.execute({
             project_id,
             session_id,
             workflow_id,
@@ -44,23 +43,17 @@ export const upscale = async (req, res) => {
             userId,
         });
 
-        const task = await getTaskService().createTask({
-            runner: "upscale",
-            data: preparedTask,
-            userId,
-            userType: req.user?.plan || "normal",
-        });
-
         res.json({ 
             ok: true, 
             batchId: null,
-            configId: preparedTask.configId,
-            mediaType: preparedTask.isVideo ? "video" : "image",
-            provider: preparedTask.model_name,
-            status: "notyet",
+            configId: queued.configId,
+            mediaType: queued.mediaType,
+            provider: queued.provider,
+            status: queued.status,
             project_id,
             session_id,
-            taskId: task.id,
+            taskId: queued.jobId,
+            jobId: queued.jobId,
         });
 
     } catch (error) {

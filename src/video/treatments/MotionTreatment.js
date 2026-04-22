@@ -2,6 +2,7 @@ import { ReferenceProcessor             } from "#utils/ReferenceProcessor.js";
 import { getRunner, getModelName, ROUTED_MODELS } from "#video/core/modelRouter.js";
 import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "#db/workflowMediaOps.js";
 import { verifyAndClampVideoParams        } from "#image/utils/treatmentUtils.js";
+import { enqueueTreatmentJob }            from "#queue/treatmentJob.js";
 
 /**
  * MotionTreatment
@@ -15,7 +16,7 @@ import { verifyAndClampVideoParams        } from "#image/utils/treatmentUtils.js
  *
  *   run(task) → receives the prepared descriptor, calls provider API,
  *               uploads result to storage, finalises DB records.
- *               Called by RunnerManager (via Scheduler) — never directly.
+ *               Called by the BullMQ worker via runJob() — never directly from the API.
  *
  *   execute() → legacy convenience entry-point (prepare + run in background).
  *               Still works for simple use-cases without the queue.
@@ -26,6 +27,10 @@ export class MotionTreatment {
         this.storageService = storageService;
         this.db             = db;
         this.refProcessor   = new ReferenceProcessor({ storageService, db });
+    }
+
+    getQueueType() {
+        return this.constructor.name;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -159,7 +164,7 @@ export class MotionTreatment {
 
     // ─────────────────────────────────────────────────────────────────────────
     // 2. RUN
-    //    Receives the descriptor from prepare() (via Redis → Scheduler → RunnerManager).
+    //    Receives the descriptor from prepare() via BullMQ worker execution.
     //    Steps:
     //      a. Safety-check prompt
     //      b. Call provider API
@@ -252,6 +257,10 @@ export class MotionTreatment {
         }
     }
 
+    async runJob(task) {
+        return this.run(task);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // EXECUTE  (legacy entry-point — skips the queue)
     //    Calls prepare() then run() directly in the background.
@@ -260,26 +269,16 @@ export class MotionTreatment {
 
     async execute(input) {
         const task = await this.prepare(input);
-
-        console.log(
-            `[MotionTreatment] execute (no queue) | workflow:${task.workflow.id}`
-        );
-
-        this._runBackground(task).catch(err => {
-            console.error(`[MotionTreatment] Background error: ${err.message}`);
-        });
+        const job = await enqueueTreatmentJob(this.getQueueType(), task);
 
         return {
+            jobId: job.id,
             batchId:   null,
             configId:  task.configId,
             workflows: [task.workflow],
-            status:    "processing",
+            status:    "queued",
             mode:      task.mode,
             model:     task.model_name,
         };
-    }
-
-    async _runBackground(task) {
-        await this.run(task);
     }
 }

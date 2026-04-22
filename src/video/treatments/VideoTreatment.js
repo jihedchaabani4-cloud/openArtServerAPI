@@ -3,6 +3,7 @@ import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "#db/wor
 import { verifyAndClampVideoParams              } from "#image/utils/treatmentUtils.js";
 import { ReferenceProcessor                     } from "#utils/ReferenceProcessor.js";
 import { getStandardSize                        } from "#utils/sizeUtils.js";
+import { enqueueTreatmentJob }                  from "#queue/treatmentJob.js";
 
 // ─── Mode Builders ────────────────────────────────────────────────────────────
 
@@ -143,6 +144,10 @@ export class VideoTreatment {
         this.storageService = storageService;
         this.db             = db;
         this.refProcessor   = new ReferenceProcessor({ storageService, db });
+    }
+
+    getQueueType() {
+        return this.constructor.name;
     }
 
     // ── prepare ──────────────────────────────────────────────────────────────
@@ -303,10 +308,22 @@ export class VideoTreatment {
         }
     }
 
+    async runJob(task) {
+        return this.run(task);
+    }
+
     // ── execute ───────────────────────────────────────────────────────────────
     async execute(input) {
         const task = await this.prepare(input);
-        this.run(task).catch(err => console.error("[VideoTreatment] Background error:", err.message));
-        return { workflows: task.workflows, status: "processing" };
+        const job = await enqueueTreatmentJob(this.getQueueType(), task);
+        return {
+            jobId: job.id,
+            batchId: task.batchId ?? null,
+            configId: task.configId,
+            workflows: task.workflows,
+            status: "queued",
+            mode: task.mode,
+            model: task.model_name,
+        };
     }
 }

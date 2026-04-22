@@ -1,4 +1,6 @@
 import { BaseModel } from "#core/BaseModel.js";
+import { resolveExecutionPolicy } from "#core/execution/ExecutionPolicy.js";
+import { createTimeoutSignal } from "#core/execution/ExecutionHelpers.js";
 import fetch from "node-fetch";
 
 export class SdxlImageRunner extends BaseModel {
@@ -7,7 +9,7 @@ export class SdxlImageRunner extends BaseModel {
         this.baseUrls = Array.isArray(config.baseUrl) ? config.baseUrl : [config.baseUrl];
     }
 
-    async _fetchWithFallback(endpoint, payload) {
+    async _fetchWithFallback(endpoint, payload, policy) {
         let lastError = null;
 
         for (const url of this.baseUrls) {
@@ -21,7 +23,7 @@ export class SdxlImageRunner extends BaseModel {
                         'User-Agent': 'OpenArt-AI-Studio'
                     },
                     body: JSON.stringify(payload),
-                    timeout: 120000 
+                    signal: createTimeoutSignal(policy.requestTimeoutMs),
                 });
 
                 const text = await response.text();
@@ -59,7 +61,12 @@ export class SdxlImageRunner extends BaseModel {
 
     async generate(payload) {
         console.log(`🚀 [SDXL Ngrok] Generating: ${payload.prompt}`);
-        const result = await this._fetchWithFallback("/generate", payload);
+        const policy = resolveExecutionPolicy(payload, {
+            type: "image",
+            provider: this.provider,
+            model: this.modelName,
+        });
+        const result = await this._fetchWithFallback("/generate", payload, policy);
         return {
             image_base64: result.image_base64,
             seed: result.seed,
@@ -69,7 +76,12 @@ export class SdxlImageRunner extends BaseModel {
 
     async generateMultiRef(payload) {
         console.log(`🚀 [SDXL Ngrok] Multi-Ref Img2Img`);
-        const result = await this._fetchWithFallback("/generate_multi_ref", payload);
+        const policy = resolveExecutionPolicy(payload, {
+            type: "image",
+            provider: this.provider,
+            model: this.modelName,
+        });
+        const result = await this._fetchWithFallback("/generate_multi_ref", payload, policy);
         const items = (result.shots || []).map(s => ({
             image_base64: s.image_base64,
             seed: s.seed,

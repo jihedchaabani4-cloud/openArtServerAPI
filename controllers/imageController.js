@@ -1,10 +1,9 @@
 import { normalizeImageModelName, isImageModelRegistered } from "../lib/modelRegistryKeys.js";
 import { db, imageTreatmentV2, editImageTreatment } from "../src/container.js";
-import { jobQueue } from "../src/queue/queue.js";
 /**
  * generateV2
  * POST /api/images/generatedV2
- * Modern flow: Uses Redis Task Queue (TaskManager + Scheduler)
+ * Modern flow: prepare task -> enqueue BullMQ job -> worker runs treatment
  */
 export const generateV2 = async (req, res) => {
     try {
@@ -37,7 +36,7 @@ export const generateV2 = async (req, res) => {
         console.log(`🚀 [ImageController] generateV2 | User:${userId} | Mode: Redis Queue`);
 
         // 4. PREPARE (Creates DB placeholders & returns JSON descriptor)
-        const task = await imageTreatmentV2.prepare({
+        const queued = await imageTreatmentV2.execute({
             prompt,
             negative_prompt,
             ratio,
@@ -50,20 +49,17 @@ export const generateV2 = async (req, res) => {
             model_name,
             userId,
         });
-
-        // 5. ENQUEUE (Send to BullMQ Worker)
-        const job = await jobQueue.add("generate-image", { task });
-
-        console.log(`✅ [ImageController] Task enqueued | BullMQ ID:${job.id} | Runner:image`);
+        console.log(`✅ [ImageController] Task enqueued | BullMQ ID:${queued.jobId} | Treatment:${imageTreatmentV2.constructor.name}`);
 
         // 6. Respond immediately
         res.json({ 
             ok: true,
-            status:    "processing",
-            taskId:    job.id,
-            batchId:   task.batchId,
-            configId:  task.configId,
-            workflows: task.workflows,
+            status:    queued.status,
+            taskId:    queued.jobId,
+            jobId:     queued.jobId,
+            batchId:   queued.batchId,
+            configId:  queued.configId,
+            workflows: queued.workflows,
             project_id: finalProjectId,
             session_id: finalSessionId
         });
@@ -127,6 +123,7 @@ export const generateEdit = async (req, res) => {
         res.json({ 
             ok: true, 
             ...result,
+            taskId: result.jobId,
             project_id: finalProjectId,
             session_id: finalSessionId
         });

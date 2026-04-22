@@ -1,6 +1,5 @@
 import express from "express";
 import { lightingTreatment } from "../src/container.js";
-import { getTaskService } from "../src/services/redis-management/index.js";
 import { autoCreateProjectAndSession } from "../lib/helpers.js";
 import { normalizeImageModelName } from "../lib/modelRegistryKeys.js";
 
@@ -38,7 +37,7 @@ router.post("/change-lighting", async (req, res) => {
         const treatment = lightingTreatment;
 
         // 3. Prepare task
-        const preparedTask = await treatment.prepare({
+        const queued = await treatment.execute({
             angle,
             elevation,
             intensity,
@@ -54,23 +53,17 @@ router.post("/change-lighting", async (req, res) => {
             userId,
         });
 
-        const task = await getTaskService().createTask({
-            runner: "lighting",
-            data: preparedTask,
-            userId,
-            userType: req.user?.plan || "normal",
-        });
-
         res.json({
             ok: true,
-            batchId: preparedTask.batchId || null,
-            configId: preparedTask.configId,
-            workflows: preparedTask.workflows,
-            status: "notyet",
-            provider: preparedTask.model_name,
+            batchId: queued.batchId || null,
+            configId: queued.configId,
+            workflows: queued.workflows,
+            status: queued.status,
+            provider: queued.provider,
             project_id: finalProjectId,
             session_id: finalSessionId,
-            taskId: task.id,
+            taskId: queued.jobId,
+            jobId: queued.jobId,
         });
 
     } catch (error) {

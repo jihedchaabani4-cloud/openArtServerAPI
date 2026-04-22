@@ -1,4 +1,6 @@
 import { BaseModel } from "#core/BaseModel.js";
+import { resolveExecutionPolicy } from "#core/execution/ExecutionPolicy.js";
+import { createTimeoutSignal } from "#core/execution/ExecutionHelpers.js";
 import fetch from "node-fetch";
 
 /**
@@ -13,6 +15,11 @@ export class GoogleImageRunner extends BaseModel {
 
     async generate(payload) {
         console.log(`🚀 [Google AI Studio] Generating image with model: ${this.modelName}`);
+        const policy = resolveExecutionPolicy(payload, {
+            type: "image",
+            provider: this.provider,
+            model: this.modelName,
+        });
 
         try {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.modelName}:generateContent?key=${this.apiKey}`;
@@ -32,7 +39,8 @@ export class GoogleImageRunner extends BaseModel {
             const response = await fetch(url, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body)
+                body: JSON.stringify(body),
+                signal: createTimeoutSignal(policy.requestTimeoutMs),
             });
 
             if (!response.ok) {

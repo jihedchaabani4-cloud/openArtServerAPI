@@ -6,7 +6,7 @@ export const QUEUE_NAME = 'jobs';
 export const jobQueue = new Queue(QUEUE_NAME, {
   connection: redisConnection,
   defaultJobOptions: {
-    attempts: 3,
+    attempts: 1,
     backoff: {
       type: 'exponential',
       delay: 1000,

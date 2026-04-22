@@ -2,6 +2,7 @@ import { getStandardSize } from "#utils/sizeUtils.js";
 import { getImageModel, ROUTED_IMAGE_MODELS } from "#image/core/modelRouter.js";
 import { verifyAndClampParams } from "../../utils/treatmentUtils.js";
 import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "#db/workflowMediaOps.js";
+import { enqueueTreatmentJob } from "#queue/treatmentJob.js";
 
 export class BaseEditTreatment {
   constructor({ promptService, models, storageService, db }) {
@@ -44,6 +45,10 @@ export class BaseEditTreatment {
     }
 
     return provider;
+  }
+
+  getQueueType() {
+    return this.constructor.name;
   }
 
   // ─────────────────────────────────────────────────────────
@@ -277,15 +282,14 @@ export class BaseEditTreatment {
 
   async execute(input) {
     const task = await this.prepare(input);
-
-    this.run(task).catch(err => {
-      console.error(`[${this.constructor.name}] error: ${err.message}`);
-    });
+    const job = await enqueueTreatmentJob(this.getQueueType(), task);
 
     return {
+      jobId: job.id,
       configId: task.configId,
       workflows: [task.workflow],
-      status: "processing",
+      provider: task.model_name,
+      status: "queued",
     };
   }
 }

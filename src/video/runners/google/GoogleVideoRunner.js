@@ -1,4 +1,6 @@
 import { BaseModel } from "#core/BaseModel.js";
+import { resolveExecutionPolicy } from "#core/execution/ExecutionPolicy.js";
+import { createTimeoutSignal } from "#core/execution/ExecutionHelpers.js";
 import fetch from "node-fetch";
 
 const GOOGLE_API_URL = "https://generativelanguage.googleapis.com/v1beta/models";
@@ -11,6 +13,11 @@ export class GoogleVideoRunner extends BaseModel {
 
     async _submit(payload) {
         console.log(`🚀 [Google Video] Generating video with model: ${this.modelName}`);
+        const policy = resolveExecutionPolicy(payload, {
+            type: "video",
+            provider: this.provider,
+            model: this.modelName,
+        });
         
         const url = `${GOOGLE_API_URL}/${this.modelName}:predict?key=${this.apiKey}`;
         
@@ -26,7 +33,8 @@ export class GoogleVideoRunner extends BaseModel {
                     aspectRatio: payload.aspect_ratio || "16:9",
                     duration: payload.duration || 5
                 }
-            })
+            }),
+            signal: createTimeoutSignal(policy.requestTimeoutMs),
         });
 
         if (!response.ok) {

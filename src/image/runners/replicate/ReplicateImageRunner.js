@@ -1,4 +1,6 @@
 import { BaseModel } from "#core/BaseModel.js";
+import { resolveExecutionPolicy } from "#core/execution/ExecutionPolicy.js";
+import { createTimeoutSignal, sleep } from "#core/execution/ExecutionHelpers.js";
 import fetch from "node-fetch";
 
 export class ReplicateImageRunner extends BaseModel {
@@ -16,6 +18,11 @@ export class ReplicateImageRunner extends BaseModel {
 
     async generate(payload) {
         console.log(`🚀 [Replicate] Generating with model: ${this.modelName}`);
+        const policy = resolveExecutionPolicy(payload, {
+            type: "image",
+            provider: this.provider,
+            model: this.modelName,
+        });
 
         // 1. Create prediction
         const response = await fetch(this.baseUrl, {
@@ -27,7 +34,8 @@ export class ReplicateImageRunner extends BaseModel {
             body: JSON.stringify({
                 version: this.versionId,
                 input: payload
-            })
+            }),
+            signal: createTimeoutSignal(policy.requestTimeoutMs),
         });
 
         if (!response.ok) {
@@ -40,12 +48,18 @@ export class ReplicateImageRunner extends BaseModel {
 
         // 2. Poll for result
         console.log(`   ⏳ [Replicate] Waiting for prediction ${predictionId}...`);
-        while (prediction.status !== "succeeded" && prediction.status !== "failed" && prediction.status !== "canceled") {
-            await new Promise(resolve => setTimeout(resolve, 1000));
+        const deadline = Date.now() + policy.maxDurationMs;
+        while (Date.now() < deadline && prediction.status !== "succeeded" && prediction.status !== "failed" && prediction.status !== "canceled") {
+            await sleep(policy.pollIntervalMs);
             const pollRes = await fetch(`${this.baseUrl}/${predictionId}`, {
-                headers: { "Authorization": `Token ${this.apiKey}` }
+                headers: { "Authorization": `Token ${this.apiKey}` },
+                signal: createTimeoutSignal(policy.pollTimeoutMs),
             });
             prediction = await pollRes.json();
+        }
+
+        if (prediction.status !== "succeeded" && prediction.status !== "failed" && prediction.status !== "canceled") {
+            throw new Error(`Replicate generation timed out after ${policy.maxDurationMs}ms`);
         }
 
         if (prediction.status !== "succeeded") {

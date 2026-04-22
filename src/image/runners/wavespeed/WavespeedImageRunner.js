@@ -1,9 +1,9 @@
 import { BaseModel } from "#core/BaseModel.js";
+import { resolveExecutionPolicy } from "#core/execution/ExecutionPolicy.js";
+import { createTimeoutSignal, sleep } from "#core/execution/ExecutionHelpers.js";
 import fetch from "node-fetch";
 
 const BASE = "https://api.wavespeed.ai/api/v3";
-const POLL_INTERVAL = 3000;
-const POLL_TIMEOUT  = 600000;
 
 export class WavespeedImageRunner extends BaseModel {
     constructor(options) {
@@ -25,7 +25,7 @@ export class WavespeedImageRunner extends BaseModel {
     }
 
     // ━━━ Submit task ━━━
-    async _submit(payload) {
+    async _submit(payload, policy) {
         const cleanPayload = Object.fromEntries(Object.entries(payload).filter(([_, v]) => v != null));
 
         // --- Outgoing Request Logging ---
@@ -43,7 +43,7 @@ export class WavespeedImageRunner extends BaseModel {
                 "Content-Type":  "application/json"
             },
             body:   JSON.stringify(cleanPayload),
-            signal: AbortSignal.timeout(30000)
+            signal: createTimeoutSignal(policy.requestTimeoutMs)
         });
 
         if (!res.ok) throw new Error(`WaveSpeed submit: ${await res.text()}`);
@@ -74,20 +74,20 @@ export class WavespeedImageRunner extends BaseModel {
     }
 
     // ━━━ Poll until done ━━━
-    async _poll({ taskId, pollUrl }) {
+    async _poll({ taskId, pollUrl, policy }) {
         const start        = Date.now();
         let   attempts     = 0;
-        const MAX_ATTEMPTS = Math.floor(POLL_TIMEOUT / POLL_INTERVAL);
+        const MAX_ATTEMPTS = Math.floor(policy.maxDurationMs / policy.pollIntervalMs);
         const url          = pollUrl || `${BASE}/predictions/${taskId}/result`;
 
-        while (Date.now() - start < POLL_TIMEOUT && attempts < MAX_ATTEMPTS) {
+        while (Date.now() - start < policy.maxDurationMs && attempts < MAX_ATTEMPTS) {
             attempts++;
-            await new Promise(r => setTimeout(r, POLL_INTERVAL));
+            await sleep(policy.pollIntervalMs);
 
             try {
                 const res = await fetch(url, {
                     headers: { "Authorization": `Bearer ${this.apiKey}` },
-                    signal:  AbortSignal.timeout(10000)
+                    signal:  createTimeoutSignal(policy.pollTimeoutMs)
                 });
 
                 if (!res.ok) continue;
@@ -113,12 +113,18 @@ export class WavespeedImageRunner extends BaseModel {
             }
         }
         await this._cancelTask(taskId);
-        throw new Error(`Timeout after ${POLL_TIMEOUT}ms`);
+        throw new Error(`Timeout after ${policy.maxDurationMs}ms`);
     }
 
     async generate(payload) {
-        const meta = await this._submit(payload);
-        const url = await this._poll(meta);
+        const policy = resolveExecutionPolicy(payload, {
+            type: "image",
+            provider: this.provider,
+            model: this.modelName,
+        });
+
+        const meta = await this._submit(payload, policy);
+        const url = await this._poll({ ...meta, policy });
         if (url) {
             const base64 = await this._urlToBase64(url);
             return { image_base64: base64, image_url: url };

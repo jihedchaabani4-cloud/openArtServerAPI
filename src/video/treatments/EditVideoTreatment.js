@@ -1,12 +1,17 @@
 import { getRunner, getModelName, EDIT_SUPPORT_MODELS } from "#video/core/modelRouter.js";
 import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "#db/workflowMediaOps.js";
 import { verifyAndClampVideoParams        } from "#image/utils/treatmentUtils.js";
+import { enqueueTreatmentJob } from "#queue/treatmentJob.js";
 
 export class EditVideoTreatment {
     constructor({ promptService, storageService, db }) {
         this.promptService  = promptService;
         this.storageService = storageService;
         this.db             = db; 
+    }
+
+    getQueueType() {
+        return this.constructor.name;
     }
 
     /**
@@ -121,6 +126,7 @@ export class EditVideoTreatment {
             references,  // Resolved URL array
             form, 
             mode, 
+            configId: config.id,
             mediaId: media.id, 
             workflow,
             userId, project_id, session_id,
@@ -180,9 +186,20 @@ export class EditVideoTreatment {
         }
     }
 
+    async runJob(task) {
+        return this.run(task);
+    }
+
     async execute(input) {
         const task = await this.prepare(input);
-        this.run(task).catch(err => console.error("BG Error:", err));
-        return { workflows: task.workflows, status: "processing", taskId: null };
+        const job = await enqueueTreatmentJob(this.getQueueType(), task);
+        return {
+            jobId: job.id,
+            configId: task.configId,
+            workflows: task.workflows,
+            status: "queued",
+            mode: task.mode,
+            model: task.model_name,
+        };
     }
 }

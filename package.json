@@ -6,9 +6,11 @@
     "type": "module",
     "imports": {
         "#core/*.js": "./src/core/*.js",
+        "#core/*": "./src/core/*",
         "#utils/*.js": "./src/utils/*.js",
         "#db/*.js": "./src/db/*.js",
         "#services/*.js": "./src/services/*.js",
+        "#queue/*.js": "./src/queue/*.js",
         "#video/*.js": "./src/video/*.js",
         "#video/*": "./src/video/*",
         "#image/*.js": "./src/image/*.js",

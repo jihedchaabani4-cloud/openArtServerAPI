@@ -1,9 +1,9 @@
 import fetch from "node-fetch"; // or built-in if Node >= 18
 import { BaseModel } from "#core/BaseModel.js";
+import { resolveExecutionPolicy } from "#core/execution/ExecutionPolicy.js";
+import { createTimeoutSignal, sleep } from "#core/execution/ExecutionHelpers.js";
 
 const REPLICATE_BASE = "https://api.replicate.com/v1";
-const POLL_INTERVAL  = 3000;
-const POLL_TIMEOUT   = 300_000;
 
 /**
  * Base class for Replicate video runners.
@@ -16,7 +16,7 @@ export class ReplicateVideoRunner extends BaseModel {
         this.apiKey = process.env.REPLICATE_API_KEY;
     }
 
-    async _submit(payload) {
+    async _submit(payload, policy) {
         const response = await fetch(`${REPLICATE_BASE}/models/${this.modelName}/predictions`, {
             method:  "POST",
             headers: {
@@ -25,6 +25,7 @@ export class ReplicateVideoRunner extends BaseModel {
                 "Prefer":        "wait",
             },
             body: JSON.stringify({ input: payload }),
+            signal: createTimeoutSignal(policy.requestTimeoutMs),
         });
 
         if (!response.ok) {
@@ -36,14 +37,17 @@ export class ReplicateVideoRunner extends BaseModel {
         return { id: data.id, urls: data.urls };
     }
 
-    async _poll(id, getUrl) {
+    async _poll(id, getUrl, policy) {
         const url     = getUrl || `${REPLICATE_BASE}/predictions/${id}`;
-        const deadline = Date.now() + POLL_TIMEOUT;
+        const deadline = Date.now() + policy.maxDurationMs;
 
         while (Date.now() < deadline) {
-            await new Promise(r => setTimeout(r, POLL_INTERVAL));
+            await sleep(policy.pollIntervalMs);
 
-            const res  = await fetch(url, { headers: { "Authorization": `Bearer ${this.apiKey}` } });
+            const res  = await fetch(url, {
+                headers: { "Authorization": `Bearer ${this.apiKey}` },
+                signal: createTimeoutSignal(policy.pollTimeoutMs),
+            });
             if (!res.ok) continue;
 
             const data   = await res.json();
@@ -57,11 +61,16 @@ export class ReplicateVideoRunner extends BaseModel {
                 throw new Error(`Replicate prediction ${status}: ${data.error || "unknown"}`);
             }
         }
-        throw new Error(`Replicate timed out after ${POLL_TIMEOUT / 1000}s`);
+        throw new Error(`Replicate timed out after ${policy.maxDurationMs / 1000}s`);
     }
 
     async generate(payload, mode) {
-        const { id, urls } = await this._submit(payload);
-        return this._poll(id, urls?.get);
+        const policy = resolveExecutionPolicy(payload, {
+            type: "video",
+            provider: this.provider,
+            model: this.modelName,
+        });
+        const { id, urls } = await this._submit(payload, policy);
+        return this._poll(id, urls?.get, policy);
     }
 }

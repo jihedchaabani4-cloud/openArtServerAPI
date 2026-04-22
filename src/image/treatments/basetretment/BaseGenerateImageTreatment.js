@@ -35,6 +35,7 @@ import { getStandardSize }                                          from "#utils
 import { verifyAndClampParams }                                     from "../../utils/treatmentUtils.js";
 import { resolveProvider, buildProviderPayload, extractOutputUrl }  from "./providerStrategy.js";
 import { appendMediaToWorkflow, markMediaStatus, markMediaFailed }  from "#db/workflowMediaOps.js";
+import { enqueueTreatmentJob }                                      from "#queue/treatmentJob.js";
 
 export class BaseGenerateImageTreatment {
 
@@ -93,6 +94,10 @@ export class BaseGenerateImageTreatment {
 
     return (name || (workflow_type === "ELEMENT_SHEET" ? "Element Sheet" : "Image Generation"))
       .substring(0, 60);
+  }
+
+  getQueueType() {
+    return this.constructor.name;
   }
 
   // ─────────────────────────────────────────────────────────
@@ -419,5 +424,24 @@ export class BaseGenerateImageTreatment {
       await markMediaFailed(this.db, mediaId, err);
       throw err;
     }
+  }
+
+  async runJob(task) {
+    const optimized = await this.optimizePrompt(task);
+    return this.run(task, optimized);
+  }
+
+  async execute(input) {
+    const task = await this.prepare(input);
+    const job = await enqueueTreatmentJob(this.getQueueType(), task);
+
+    return {
+      jobId: job.id,
+      status: "queued",
+      batchId: task.batchId ?? null,
+      configId: task.configId ?? null,
+      workflows: task.workflows ?? [],
+      provider: task.model_name ?? null,
+    };
   }
 }

@@ -1,29 +1,43 @@
-import { getStandardSize               } from "#utils/sizeUtils.js";
-import { getImageModel, ROUTED_IMAGE_MODELS } from "#image/core/modelRouter.js";
-import { verifyAndClampParams          } from "../../utils/treatmentUtils.js";
-import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "#db/workflowMediaOps.js";
-
 /**
- * BaseGenerateImageTreatment
+ * BaseGenerateImageTreatment.js
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Shared foundation for all image-generation treatments.
  *
- * Shared foundation for all *generation* treatments
- * (TEXT_ONLY, TEXT_REFERENCES, element sheets, …).
+ * ARCHITECTURE — Three clearly separated responsibilities:
  *
- * Responsibilities:
- *   _resolveProvider()   — model-name → provider object
- *   _getStandardSize()   — ratio + quality → {size, width, height}
- *   _buildDisplayName()  — prompt → human-readable workflow name
- *   _runPrepare()        — full prepare pipeline:
- *                          validate → provider → params → config →
- *                          batch? → workflows → media placeholders → safety
- *   run(task)            — dispatch per-variation via _runVariation()
- *   _runVariation()      — single variation: generate → upload → DB update
- *   execute(input)       — fire-and-forget helper
+ *   1. prepare(input)       [SYNC-FAST — called by controller]
+ *      Validates params, creates DB placeholders (config + workflows + media),
+ *      returns a plain JSON-serialisable task descriptor.
+ *      → Controller responds to user immediately after this.
+ *      → Task is enqueued in BullMQ.
  *
- * Subclasses override:
- *   prepare(input)       — shape raw input, resolve references, call _runPrepare()
+ *   2. optimizePrompt(task) [ASYNC — called by worker]
+ *      Safety check → prompt enhancement → negative prompt generation.
+ *      Returns { finalPrompt, finalNegative }.
+ *      Subclasses override this to swap in LLM refinement (ElementSheet).
+ *
+ *   3. run(task)            [ASYNC — called by worker]
+ *      Receives task + optimize result, calls AI provider, uploads to storage,
+ *      updates DB to success/failed.
+ *      Subclasses override this for custom generation logic.
+ *
+ * REMOVED vs original:
+ *   • execute()  fire-and-forget — no longer needed (BullMQ handles this)
+ *   • runJob()   redundant wrapper — worker calls optimizePrompt + run directly
+ *   • _resolveProvider() inline fallback chain → providerStrategy.resolveProvider()
+ *   • Duplicated buildPayload logic in child run() → _buildPayload() shared method
+ *   • Double optimizePrompt() risk — run() no longer calls optimizePrompt internally;
+ *     the worker always calls optimizePrompt first, then passes result to run().
+ * ─────────────────────────────────────────────────────────────────────────────
  */
+
+import { getStandardSize }                                          from "#utils/sizeUtils.js";
+import { verifyAndClampParams }                                     from "../../utils/treatmentUtils.js";
+import { resolveProvider, buildProviderPayload, extractOutputUrl }  from "./providerStrategy.js";
+import { appendMediaToWorkflow, markMediaStatus, markMediaFailed }  from "#db/workflowMediaOps.js";
+
 export class BaseGenerateImageTreatment {
+
   constructor({ promptService, models, storageService, db }) {
     this.promptService  = promptService;
     this.models         = models;
@@ -32,7 +46,29 @@ export class BaseGenerateImageTreatment {
   }
 
   // ─────────────────────────────────────────────────────────
-  // Helpers
+  // Internal logger  (swap for winston/pino without touching callers)
+  // ─────────────────────────────────────────────────────────
+
+  _log(level, msg, meta = {}) {
+    const line = `[${this.constructor.name}] ${msg}`;
+    if (level === "error") console.error(line, meta);
+    else                   console.log  (line, meta);
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Provider helpers (delegate to providerStrategy)
+  // ─────────────────────────────────────────────────────────
+
+  _resolveProvider(model_name, input_assets = []) {
+    return resolveProvider({ model_name, input_assets, models: this.models });
+  }
+
+  _buildPayload(provider, form) {
+    return buildProviderPayload(provider, form);
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Size & display-name helpers
   // ─────────────────────────────────────────────────────────
 
   _getStandardSize(ratio, quality) {
@@ -44,128 +80,100 @@ export class BaseGenerateImageTreatment {
       return workflow_type === "ELEMENT_SHEET" ? "Element Sheet" : "Image Generation";
     }
 
-    let displayName = prompt
-      .replace(/[_-]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+    let name = prompt.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
 
     if (workflow_type === "ELEMENT_SHEET") {
-      displayName = displayName
-        .replace(/\b(character|element|sprite|asset)\s+sheet\b/gi, "")
-        .replace(/\b(reference|turnaround|model)\s+sheet\b/gi, "")
-        .replace(/\bsheet\s+of\b/gi, "")
+      name = name
+        .replace(/\b(character|element|sprite|asset|reference|turnaround|model)\s+sheet\b/gi, "")
         .replace(/\bsheet\b/gi, "")
-        .replace(/\bcharacter\b/gi, "")
-        .replace(/\breference\b/gi, "")
-        .replace(/\bturnaround\b/gi, "")
         .replace(/\s+/g, " ")
         .replace(/^[,:;.\-\s]+|[,:;.\-\s]+$/g, "")
         .trim();
     }
 
-    if (!displayName) {
-      return workflow_type === "ELEMENT_SHEET" ? "Element Sheet" : "Image Generation";
-    }
-
-    return displayName.substring(0, 60);
-  }
-
-  _resolveProvider(model_name, references = []) {
-    const route      = getImageModel(model_name);
-    const modelGroup = route?.group || this.models[model_name];
-
-    if (!modelGroup && !route) {
-      throw new Error(
-        `Model "${model_name}" not found. Available: ${ROUTED_IMAGE_MODELS.join(", ")}`
-      );
-    }
-
-    const isMulti    = references.length > 1;
-    const variantKey = references.length > 0 ? (isMulti ? "i2iMulti" : "i2i") : "t2i";
-
-    const provider =
-      route?.[variantKey] ||
-      (references.length > 0 && route?.i2i) ||
-      route?.t2i ||
-      modelGroup?.[variantKey] ||
-      modelGroup?.i2i ||
-      modelGroup?.t2i ||
-      modelGroup;
-
-    if (!provider) throw new Error(`Provider not found for model "${model_name}"`);
-    if (!["t2i", "i2i"].includes(provider.type)) {
-      throw new Error(`Model "${model_name}" is a video model.`);
-    }
-    return provider;
+    return (name || (workflow_type === "ELEMENT_SHEET" ? "Element Sheet" : "Image Generation"))
+      .substring(0, 60);
   }
 
   // ─────────────────────────────────────────────────────────
-  // 🔥 CORE PREPARE  (shared by all generate subclasses)
+  // 1. PREPARE  ← controller calls this, responds to user immediately
+  //
+  // Subclasses MUST override prepare() to:
+  //   • Shape their raw input (resolve references, pick defaults, …)
+  //   • Then call _runPrepare() with normalised params
+  //
+  // _runPrepare() is the shared DB-writing core — do NOT override it.
   // ─────────────────────────────────────────────────────────
 
   /**
-   * _runPrepare — validates, creates DB records, returns a plain
-   * JSON-serialisable task descriptor safe to enqueue in Redis.
+   * _runPrepare — shared DB-writing core used by every subclass prepare().
    *
-   * @param {object} opts
-   * @param {string}   opts.prompt
+   * Creates: generation_config → batch (if count>1) → workflows → media placeholders.
+   * Returns a plain JSON-serialisable task descriptor (safe to enqueue in Redis).
+   *
+   * @param {object}  opts
+   * @param {string}    opts.prompt
    * @param {string}   [opts.prompt_optimise]
    * @param {string}   [opts.display_name]
    * @param {string}   [opts.negative_prompt]
-   * @param {string}   opts.model_name
-   * @param {string}   [opts.workflow_type]
+   * @param {string}    opts.model_name
+   * @param {string}   [opts.workflow_type]     default "GENERATION"
    * @param {string}   [opts.ratio]
    * @param {string}   [opts.quality]
    * @param {number}   [opts.steps]
    * @param {number}   [opts.guidance_scale]
-   * @param {number}   [opts.count]
+   * @param {number}   [opts.count]             default 1
    * @param {number}   [opts.seed]
    * @param {number}   [opts.strength]
-   * @param {string}   opts.userId
-   * @param {string}   opts.project_id
+   * @param {string}    opts.userId
+   * @param {string}    opts.project_id
    * @param {string}   [opts.session_id]
-   * @param {Array}    [opts.input_assets]  — pre-resolved {url, role, is_base}[]
-   * @param {string}   [opts.stepId]        — default "GEN"
+   * @param {Array}    [opts.input_assets]      resolved {url, role}[] — safe for Redis
+   * @param {string}   [opts.stepId]            default "GEN"
+   * @param {object}   [opts.extraTaskFields]   anything the subclass needs in the task
+   *                                            (e.g. sheetType, systemPrompt, …)
+   * @returns {object} task  — JSON-serialisable, ready for jobQueue.add()
    */
   async _runPrepare({
     prompt,
-    prompt_optimise = null,
-    display_name    = null,
-    negative_prompt = "",
+    prompt_optimise  = null,
+    display_name     = null,
+    negative_prompt  = "",
     model_name,
-    workflow_type   = "GENERATION",
+    workflow_type    = "GENERATION",
     ratio,
     quality,
     steps,
     guidance_scale,
-    count           = 1,
+    count            = 1,
     seed,
     strength,
     userId,
     project_id,
     session_id,
-    input_assets    = [],   // ✅ already resolved [{url, role, is_base}]
-    stepId          = "GEN",
+    input_assets     = [],
+    stepId           = "GEN",
+    extraTaskFields  = {},   // ← subclasses pass sheet-specific data here
   }) {
-    // 1. Provider
+
+    // ── 1. Provider check (fast fail before any DB writes) ────────────────
+    this._resolveProvider(model_name, input_assets); // throws if invalid
+
+    // ── 2. Validate & clamp generation params ─────────────────────────────
     const provider = this._resolveProvider(model_name, input_assets);
+    const verified  = verifyAndClampParams(provider, { steps, guidance_scale, ratio, quality, count });
 
-    // 2. Verify & clamp params
-    const verified = verifyAndClampParams(provider, {
-      steps, guidance_scale, ratio, quality, count,
-    });
-
-    // 3. Size
+    // ── 3. Compute pixel dimensions ───────────────────────────────────────
     const sizeInfo = this._getStandardSize(verified.ratio, verified.quality);
 
-    // 4. Generation type
+    // ── 4. Generation type ────────────────────────────────────────────────
     const generation_type = input_assets.length > 0 ? "TEXT_REFERENCES" : "TEXT_ONLY";
 
-    console.log(
-      `[${this.constructor.name}] prepare | type:${generation_type} | refs:${input_assets.length} | count:${verified.count}`
+    this._log("info",
+      `prepare | type:${generation_type} | model:${model_name} | refs:${input_assets.length} | count:${verified.count}`
     );
 
-    // 5. Generation config
+    // ── 5. Generation config (master record) ──────────────────────────────
     const config = await this.db.configs.createConfig({
       prompt,
       prompt_optimise,
@@ -174,7 +182,7 @@ export class BaseGenerateImageTreatment {
       generation_type,
     });
 
-    // 6. Batch (only when count > 1)
+    // ── 6. Batch (only when count > 1) ────────────────────────────────────
     let batch = null;
     if (verified.count > 1) {
       batch = await this.db.batches.createBatch({
@@ -185,9 +193,10 @@ export class BaseGenerateImageTreatment {
       });
     }
 
-    // 7. Workflows
+    // ── 7. Workflows ──────────────────────────────────────────────────────
     const resolvedDisplayName = display_name || this._buildDisplayName(prompt, workflow_type);
     const workflows = [];
+
     for (let i = 0; i < verified.count; i++) {
       const wf = await this.db.workflows.createWorkflow({
         project_id,
@@ -200,7 +209,7 @@ export class BaseGenerateImageTreatment {
       workflows.push(wf);
     }
 
-    // 8. Media placeholders
+    // ── 8. Media placeholders ─────────────────────────────────────────────
     const mediaIds = [];
     for (const wf of workflows) {
       const media = await appendMediaToWorkflow(this.db, {
@@ -218,26 +227,19 @@ export class BaseGenerateImageTreatment {
       mediaIds.push(media.id);
     }
 
-    // 9. Safety check
-    const promptForGeneration = prompt_optimise || prompt;
-    if (promptForGeneration) {
-      const safety = await this.promptService.checkPrompt(promptForGeneration);
-      if (!safety.safe) {
-        for (const id of mediaIds) {
-          await markMediaFailed(this.db, id, safety.reason);
-        }
-        throw new Error(`Prompt rejected: ${safety.reason}`);
-      }
-    }
-
+    // ── 9. Return task descriptor (JSON-serialisable → safe for Redis) ────
     return {
+      // Identity
       userId,
       project_id,
       session_id,
+      // Model
       model_name,
+      // Prompt (raw — optimization happens in worker)
       prompt,
       prompt_optimise,
       negative_prompt,
+      // Generation params
       generation_type,
       ratio:          verified.ratio,
       quality:        verified.quality,
@@ -246,46 +248,84 @@ export class BaseGenerateImageTreatment {
       count:          verified.count,
       seed,
       strength,
+      // Size
       size:    sizeInfo?.size   || null,
       width:   sizeInfo?.width  || null,
       height:  sizeInfo?.height || null,
-      input_assets,           // ✅ URLs only — safe for Redis
+      // Assets (URLs only — no circular refs)
+      input_assets,
+      // DB IDs
       configId:  config.id,
       batchId:   batch?.id || null,
-      workflows,
+      workflows,   // [{id, display_name, …}]
       mediaIds,
+      // Subclass-specific extras (sheetType, systemPrompt, temperature, …)
+      ...extraTaskFields,
     };
   }
 
   // ─────────────────────────────────────────────────────────
-  // 🔥 RUN  (dispatches per-variation)
+  // 2. OPTIMIZE PROMPT  ← worker calls this FIRST
+  //
+  // Base implementation:  safety check → enhancement → negative prompt
+  // Subclasses override to swap in LLM refinement (e.g. ElementSheet).
+  //
+  // CONTRACT: must return { finalPrompt: string, finalNegative: string }
+  //           must mark media as failed and throw if prompt is rejected
   // ─────────────────────────────────────────────────────────
 
-  async run(task) {
-    const {
-      model_name,
-      prompt, prompt_optimise, negative_prompt,
-      ratio, quality,
-      input_assets,
-      batchId, configId,
-      workflows, mediaIds,
-    } = task;
+  async optimizePrompt(task) {
+    const { prompt, prompt_optimise, negative_prompt, quality, mediaIds } = task;
+    const rawPrompt = prompt_optimise || prompt;
 
-    const provider = this._resolveProvider(model_name, input_assets);
+    let finalPrompt   = rawPrompt;
+    let finalNegative = negative_prompt || "";
 
-    // Prompt enhancement (best-effort)
-    const promptForGeneration = prompt_optimise || prompt;
-    let finalPrompt   = promptForGeneration;
-    let finalNegative = negative_prompt;
+    if (!rawPrompt) return { finalPrompt, finalNegative };
 
+    // ── Safety check ──────────────────────────────────────────────────────
+    const safety = await this.promptService.checkPrompt(rawPrompt);
+    if (!safety.safe) {
+      for (const id of mediaIds ?? []) {
+        await markMediaFailed(this.db, id, safety.reason);
+      }
+      throw new Error(`Prompt rejected: ${safety.reason}`);
+    }
+
+    // ── Enhancement ───────────────────────────────────────────────────────
     try {
-      const enhanced = await this.promptService.upscalePrompt(promptForGeneration, { quality });
-      finalPrompt    = enhanced.enhanced;
+      const enhanced = await this.promptService.upscalePrompt(rawPrompt, { quality });
+      finalPrompt    = enhanced.enhanced || rawPrompt;
+
       const autoNeg  = await this.promptService.generateNegativePrompt(finalPrompt);
       finalNegative  = [negative_prompt || "", autoNeg || ""].filter(Boolean).join(", ");
     } catch (err) {
-      console.error(`[${this.constructor.name}] Prompt enhancement failed: ${err.message}`);
+      this._log("error", `Prompt enhancement failed (continuing with raw): ${err.message}`);
     }
+
+    return { finalPrompt, finalNegative };
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // 3. RUN  ← worker calls this AFTER optimizePrompt
+  //
+  // Receives task + { finalPrompt, finalNegative } from the worker.
+  // Dispatches one _runVariation() per workflow (parallel, allSettled).
+  //
+  // Worker pattern:
+  //   const optimized = await treatment.optimizePrompt(task);
+  //   const result    = await treatment.run(task, optimized);
+  // ─────────────────────────────────────────────────────────
+
+  /**
+   * @param {object} task           — descriptor from prepare()
+   * @param {object} optimizeResult — { finalPrompt, finalNegative } from optimizePrompt()
+   */
+  async run(task, optimizeResult) {
+    const { model_name, input_assets, batchId, configId, workflows, mediaIds } = task;
+    const { finalPrompt, finalNegative } = optimizeResult;
+
+    const provider = this._resolveProvider(model_name, input_assets);
 
     const results = await Promise.allSettled(
       workflows.map((workflow, i) =>
@@ -293,10 +333,10 @@ export class BaseGenerateImageTreatment {
           ...task,
           provider,
           workflow,
-          mediaId:           mediaIds[i],
-          enhanced_prompt:   finalPrompt,
-          enhanced_negative: finalNegative,
-          variationIndex:    i,
+          mediaId:       mediaIds[i],
+          finalPrompt,
+          finalNegative,
+          variationIndex: i,
         })
       )
     );
@@ -309,100 +349,75 @@ export class BaseGenerateImageTreatment {
       throw new Error(firstErr?.reason?.message || "All variations failed");
     }
 
+    this._log("info", `run complete | configId:${configId} | ok:${succeeded} fail:${failed}`);
     return { batchId, configId, succeeded, failed };
   }
 
   // ─────────────────────────────────────────────────────────
-  // 🔥 _runVariation  (single image — override if needed)
+  // _runVariation  — one image: generate → upload → DB update
+  //
+  // Subclasses can override for custom single-image logic.
   // ─────────────────────────────────────────────────────────
 
   async _runVariation({
     provider, workflow, mediaId,
     userId, model_name,
-    prompt, enhanced_prompt, enhanced_negative,
+    prompt, finalPrompt, finalNegative,
     ratio, quality, size, width, height,
     steps, guidance_scale, seed, strength,
     input_assets,
     configId, variationIndex,
   }) {
     try {
-      const sourceAsset = (input_assets || []).find(
+      const sourceAsset = input_assets?.find(
         a => ["source", "normal", "start", "base"].includes(a.role)
-      ) || input_assets[0];
-
-      const image_url = sourceAsset?.url || null;
+      ) ?? input_assets?.[0];
 
       const form = {
-        prompt:          enhanced_prompt,
-        negativePrompt:  enhanced_negative,
-        negative_prompt: enhanced_negative,
+        prompt:          finalPrompt,
+        negativePrompt:  finalNegative,
+        negative_prompt: finalNegative,
         ratio, quality, size, width, height,
-        steps:           steps          || 20,
-        guidanceScale:   guidance_scale || 7.5,
-        guidance_scale:  guidance_scale || 7.5,
+        steps:           steps          ?? 20,
+        guidanceScale:   guidance_scale ?? 7.5,
+        guidance_scale:  guidance_scale ?? 7.5,
         seed,
-        strength:        strength || 0.8,
-        image:           image_url,
-        image_url,
+        strength:        strength ?? 0.8,
+        image:           sourceAsset?.url ?? null,
+        image_url:       sourceAsset?.url ?? null,
         references:      input_assets,
         index:           variationIndex,
       };
 
-      let payload;
-      if (typeof provider.buildPayload === "function")      payload = provider.buildPayload(form);
-      else if (typeof provider.adapt === "function") {
-        const adapted = provider.adapt(form);
-        payload = provider.toPayload ? provider.toPayload(adapted) : adapted;
-      } else payload = form;
-
+      const payload   = this._buildPayload(provider, form);
       const result    = await provider.generate(payload);
-      const outputUrl = result.image_url || result.url;
-      if (!outputUrl) throw new Error("Provider returned no output URL");
+      const outputUrl = extractOutputUrl(result);
 
-      const fileName = `${userId}/generations/${workflow.id}_${Date.now()}.png`;
-      const fileUrl  = await this.storageService.uploadFromUrl(fileName, outputUrl);
+      const fileName  = `${userId}/generations/${workflow.id}_${Date.now()}.png`;
+      const fileUrl   = await this.storageService.uploadFromUrl(fileName, outputUrl);
 
-      // Per-variation config (stores the actual seed used)
+      // Per-variation config stores the actual seed used by the provider
       const mediaConfig = await this.db.configs.createConfig({
         prompt,
         model:           model_name,
         aspect_ratio:    ratio || "LANDSCAPE",
-        generation_type: input_assets.length > 0 ? "TEXT_REFERENCES" : "TEXT_ONLY",
-        seed:            result.seed || seed || null,
+        generation_type: (input_assets?.length ?? 0) > 0 ? "TEXT_REFERENCES" : "TEXT_ONLY",
+        seed:            result.seed ?? seed ?? null,
       });
 
       await this.db.media.updateFields(mediaId, {
         generation_config_id: mediaConfig.id,
         url:    fileUrl,
-        width:  result.width  || width  || 1024,
-        height: result.height || height || 1024,
+        width:  result.width  ?? width  ?? 1024,
+        height: result.height ?? height ?? 1024,
       });
       await markMediaStatus(this.db, mediaId, "success");
 
       return { fileUrl, mediaId, workflowId: workflow.id };
+
     } catch (err) {
       await markMediaFailed(this.db, mediaId, err);
       throw err;
     }
-  }
-
-  // ─────────────────────────────────────────────────────────
-  // execute — fire-and-forget (subclasses can override)
-  // ─────────────────────────────────────────────────────────
-
-  async execute(input) {
-    const task = await this.prepare(input);
-
-    this.run(task).catch(err =>
-      console.error(`[${this.constructor.name}] background error: ${err.message}`)
-    );
-
-    return {
-      batchId:   task.batchId,
-      configId:  task.configId,
-      workflows: task.workflows,
-      status:    "processing",
-      provider:  task.model_name,
-    };
   }
 }

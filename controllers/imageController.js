@@ -1,7 +1,6 @@
 import { normalizeImageModelName, isImageModelRegistered } from "../lib/modelRegistryKeys.js";
 import { db, imageTreatmentV2, editImageTreatment } from "../src/container.js";
-import { getTaskService } from "../src/services/redis-management/index.js";
-
+import { jobQueue } from "../src/queue/queue.js";
 /**
  * generateV2
  * POST /api/images/generatedV2
@@ -52,22 +51,16 @@ export const generateV2 = async (req, res) => {
             userId,
         });
 
-        // 5. ENQUEUE (Send to Redis TaskManager)
-        const taskService = getTaskService();
-        const createdTask = await taskService.createTask({
-            runner:   "image", // Matches RunnerManager case in indexing
-            data:     task,    // The serializable descriptor
-            userId,
-            userType: req.user?.userType || "normal", // Default to pro as requested
-        });
+        // 5. ENQUEUE (Send to BullMQ Worker)
+        const job = await jobQueue.add("generate-image", { task });
 
-        console.log(`✅ [ImageController] Task enqueued | ID:${createdTask.id} | Runner:image`);
+        console.log(`✅ [ImageController] Task enqueued | BullMQ ID:${job.id} | Runner:image`);
 
         // 6. Respond immediately
         res.json({ 
             ok: true,
             status:    "processing",
-            taskId:    createdTask.id,
+            taskId:    job.id,
             batchId:   task.batchId,
             configId:  task.configId,
             workflows: task.workflows,

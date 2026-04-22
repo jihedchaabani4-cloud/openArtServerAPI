@@ -113,14 +113,7 @@ export class BaseEditTreatment {
       initialStatus: "processing",
     });
 
-    // 9. Safety
-    if (prompt) {
-      const safety = await this.promptService.checkPrompt(prompt);
-      if (!safety.safe) {
-        await markMediaFailed(this.db, media.id, safety.reason);
-        throw new Error(`Prompt rejected: ${safety.reason}`);
-      }
-    }
+    // 9. Safety (Moved to optimizePrompt)
 
     return {
       userId,
@@ -145,6 +138,50 @@ export class BaseEditTreatment {
   }
 
   // ─────────────────────────────────────────────────────────
+  // 🔥 RUN JOB (Orchestrator)
+  // ─────────────────────────────────────────────────────────
+  async runJob(task) {
+    const optimized = await this.optimizePrompt(task);
+    return this.run({
+      ...task,
+      enhanced_prompt: optimized.finalPrompt,
+      enhanced_negative: optimized.finalNegative
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // 🔥 PROMPT OPTIMIZATION
+  // ─────────────────────────────────────────────────────────
+  async optimizePrompt(task) {
+    const { prompt, negative_prompt, quality, mediaId } = task;
+    let finalPrompt   = prompt;
+    let finalNegative = negative_prompt;
+
+    if (finalPrompt) {
+      // 1. Safety check
+      const safety = await this.promptService.checkPrompt(finalPrompt);
+      if (!safety.safe) {
+        if (mediaId) {
+          await markMediaFailed(this.db, mediaId, safety.reason);
+        }
+        throw new Error(`Prompt rejected: ${safety.reason}`);
+      }
+
+      // 2. Enhancement
+      try {
+        const enhanced = await this.promptService.upscalePrompt(finalPrompt, { quality });
+        finalPrompt    = enhanced.enhanced;
+        const autoNeg  = await this.promptService.generateNegativePrompt(finalPrompt);
+        finalNegative  = [negative_prompt || "", autoNeg || ""].filter(Boolean).join(", ");
+      } catch (err) {
+        console.error(`[${this.constructor.name}] Prompt enhancement failed: ${err.message}`);
+      }
+    }
+
+    return { finalPrompt, finalNegative };
+  }
+
+  // ─────────────────────────────────────────────────────────
   // 🔥 RUN (PURE — NO DB refs)
   // ─────────────────────────────────────────────────────────
   async run(task) {
@@ -153,6 +190,7 @@ export class BaseEditTreatment {
       model_name,
       prompt,
       negative_prompt,
+      enhanced_prompt, enhanced_negative,
       generation_type,
       ratio, quality, size, width, height,
       steps, guidance_scale,
@@ -166,6 +204,15 @@ export class BaseEditTreatment {
 
     const provider = this._resolveProvider(model_name, { references: input_assets });
 
+    let finalPrompt   = enhanced_prompt !== undefined ? enhanced_prompt : prompt;
+    let finalNegative = enhanced_negative !== undefined ? enhanced_negative : negative_prompt;
+
+    if (enhanced_prompt === undefined) {
+      const optimized = await this.optimizePrompt(task);
+      finalPrompt   = optimized.finalPrompt;
+      finalNegative = optimized.finalNegative;
+    }
+
     const sourceAsset =
       input_assets.find(a => a.is_base || a.role === "source") ||
       input_assets[0];
@@ -173,8 +220,9 @@ export class BaseEditTreatment {
     const image_url = sourceAsset?.url || null;
 
     const form = {
-      prompt,
-      negativePrompt: negative_prompt,
+      prompt: finalPrompt,
+      negativePrompt: finalNegative,
+      negative_prompt: finalNegative,
       ratio, quality, size, width, height,
       steps: steps || 20,
       guidanceScale: guidance_scale || 7.5,

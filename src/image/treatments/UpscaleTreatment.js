@@ -92,6 +92,10 @@ export class UpscaleTreatment {
         };
     }
 
+    async runJob(task) {
+        return this.run(task);
+    }
+
     async run(task) {
         const {
             userId, model_name, isVideo, input_assets, upscaleScale, target_resolution, target_fps,

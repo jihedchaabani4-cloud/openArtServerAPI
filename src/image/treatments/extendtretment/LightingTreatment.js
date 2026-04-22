@@ -79,9 +79,7 @@ export class LightingTreatment extends BaseEditTreatment {
     if (!session_id)  throw new Error("session_id required");
     if (!workflow_id) throw new Error("workflow_id required");
 
-    // ── Build prompt from lighting params ──────────────────────────────────
-    const prompt = buildLightingPrompt({ angle, elevation, intensity, type, brightness, color });
-    console.log(`💡 [LightingTreatment] prompt built`);
+    // ── Prompt is built dynamically in optimizePrompt ──────────────────────
 
     // ── Fetch latest workflow media as base image ──────────────────────────
     const sourceMedia = await this.db.media.findLatestByWorkflow(workflow_id);
@@ -96,8 +94,8 @@ export class LightingTreatment extends BaseEditTreatment {
     }];
 
     // ── Delegate shared logic to base ──────────────────────────────────────
-    return this._runPrepare({
-      prompt,
+    const task = await this._runPrepare({
+      prompt: "", // Built during optimizePrompt
       references,
       model_name,
       ratio,
@@ -113,5 +111,18 @@ export class LightingTreatment extends BaseEditTreatment {
       workflow_id,
       stepId: "LIT",
     });
+
+    Object.assign(task, { angle, elevation, intensity, type, brightness, color });
+    return task;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // optimizePrompt — resolve lighting prompt right before execution
+  // ─────────────────────────────────────────────────────────────────────────
+  async optimizePrompt(task) {
+    const { angle, elevation, intensity, type, brightness, color } = task;
+    task.prompt = buildLightingPrompt({ angle, elevation, intensity, type, brightness, color });
+    console.log(`💡 [LightingTreatment] dynamically built prompt`);
+    return super.optimizePrompt(task);
   }
 }

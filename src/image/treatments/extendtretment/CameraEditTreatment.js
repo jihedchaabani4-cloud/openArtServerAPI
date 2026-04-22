@@ -68,9 +68,7 @@ export class CameraTreatment extends BaseEditTreatment {
     if (!session_id)  throw new Error("session_id required");
     if (!workflow_id) throw new Error("workflow_id required");
 
-    // ── Build prompt from camera params ────────────────────────────────────
-    const prompt = buildCameraPrompt(rotation, tilt, zoom);
-    console.log(`🎥 [CameraTreatment] prompt: "${prompt}"`);
+    // ── Prompt is built dynamically in optimizePrompt ──────────────────────
 
     // ── Fetch latest workflow media as base image ──────────────────────────
     const sourceMedia = await this.db.media.findLatestByWorkflow(workflow_id);
@@ -94,8 +92,8 @@ export class CameraTreatment extends BaseEditTreatment {
     }
 
     // ── Delegate shared logic to base ──────────────────────────────────────
-    return this._runPrepare({
-      prompt,
+    const task = await this._runPrepare({
+      prompt: "", // Will be constructed in optimizePrompt
       references,
       model_name,
       ratio,
@@ -110,5 +108,20 @@ export class CameraTreatment extends BaseEditTreatment {
       workflow_id,
       stepId: "CAE",
     });
+
+    task.rotation = rotation;
+    task.tilt = tilt;
+    task.zoom = zoom;
+
+    return task;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // optimizePrompt — resolve camera prompt right before execution
+  // ─────────────────────────────────────────────────────────────────────────
+  async optimizePrompt(task) {
+    task.prompt = buildCameraPrompt(task.rotation || 0, task.tilt || 0, task.zoom || 6);
+    console.log(`🎥 [CameraTreatment] dynamically built prompt: "${task.prompt}"`);
+    return super.optimizePrompt(task);
   }
 }

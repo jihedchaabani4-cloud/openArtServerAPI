@@ -1,47 +1,55 @@
-import { ReferenceProcessor } from "#utils/ReferenceProcessor.js";
-import { BaseGenerateImageTreatment } from "../basetretment/BaseGenerateImageTreatment.js";
-import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "#db/workflowMediaOps.js";
+/**
+ * ElementSheetTreatment.js
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Generates three-panel reference sheets (CHARACTER / LOCATION / PRODUCT).
+ * Extends BaseGenerateImageTreatment.
+ *
+ * WHAT THIS CLASS OWNS:
+ *   • Per-type defaults (SHEET_DEFAULTS)
+ *   • System prompts for LLM refinement (SYSTEM_PROMPTS)
+ *   • Prompt sanitisation + display-name building helpers
+ *   • prepare()        — shapes input, resolves refs, calls _runPrepare()
+ *   • optimizePrompt() — overrides base: LLM refinement → safety → negative
+ *   • run()            — overrides base: single variation only (no batch loop)
+ *
+ * WHAT THIS CLASS DELEGATES TO THE BASE:
+ *   • _runPrepare()    — DB writes (config, workflows, media placeholders)
+ *   • _resolveProvider() / _buildPayload() — via providerStrategy
+ *   • _log()           — structured logging
+ *
+ * WORKER CONTRACT (same as every other treatment):
+ *   const task      = await treatment.prepare(input);      // controller
+ *   await jobQueue.add("generate-image", { task });        // controller
+ *   // --- in worker ---
+ *   const optimized = await treatment.optimizePrompt(task);
+ *   const result    = await treatment.run(task, optimized);
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
+import { ReferenceProcessor }          from "#utils/ReferenceProcessor.js";
+import { BaseGenerateImageTreatment }  from "../basetretment/BaseGenerateImageTreatment.js";
+import { markMediaFailed }             from "#db/workflowMediaOps.js";
+import { markMediaStatus }             from "#db/workflowMediaOps.js";
+import { extractOutputUrl }            from "../basetretment/providerStrategy.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SHEET DEFAULTS
-// Per sheet type: model, ratio, quality, steps, guidance_scale, temperature
-// All of these can be overridden by the caller via input params.
+// Per-type generation defaults (all overridable by the caller)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SHEET_DEFAULTS = {
-  CHARACTER: {
-    model_name:     "z_image",
-    ratio:          "3:2",
-    quality:        "2k",
-    steps:          35,
-    guidance_scale: 8.0,
-    temperature:    0.4,
-  },
-  LOCATION: {
-    model_name:     "z_image",
-    ratio:          "3:2",
-    quality:        "2k",
-    steps:          30,
-    guidance_scale: 7.5,
-    temperature:    0.7,
-  },
-  PRODUCT: {
-    model_name:     "z_image",
-    ratio:          "3:2",
-    quality:        "2k",
-    steps:          30,
-    guidance_scale: 7.5,
-    temperature:    0.5,
-  },
+  CHARACTER: { model_name: "z_image", ratio: "3:2", quality: "2k", steps: 35, guidance_scale: 8.0, temperature: 0.4 },
+  LOCATION:  { model_name: "z_image", ratio: "3:2", quality: "2k", steps: 30, guidance_scale: 7.5, temperature: 0.7 },
+  PRODUCT:   { model_name: "z_image", ratio: "3:2", quality: "2k", steps: 30, guidance_scale: 7.5, temperature: 0.5 },
 };
 
+const VALID_TYPES = new Set(Object.keys(SHEET_DEFAULTS));
+
 // ─────────────────────────────────────────────────────────────────────────────
-// SYSTEM PROMPTS
+// System prompts (unchanged from original — they are correct)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPTS = {
 
-  // ── CHARACTER ──────────────────────────────────────────────────────────────
   CHARACTER: `You are a senior concept artist and AI prompt engineer specialising in professional character turnaround reference sheets used in AAA game production and cinematic VFX pipelines.
 
 Your sole task: transform the user's description, feature data, and any image reference tags into ONE single ultra-detailed image-generation prompt that produces a flawless three-panel character reference sheet in a single cohesive image.
@@ -129,7 +137,6 @@ No introductions. No explanations. No bullet points. No section headers.
 
 —NEGATIVE (always include): collage, separate images, split panels, panel borders, dividing lines, inconsistent character appearance between panels, multiple different characters, text labels, arrows, watermarks, UI overlays, blurry regions, motion blur, low resolution, cartoon style, anime style, stylised illustration, 3D render look, artificial AI face, human proportions on non-human character`,
 
-  // ── LOCATION ───────────────────────────────────────────────────────────────
   LOCATION: `You are a senior environment concept artist and AI prompt engineer specialising in location reference sheets for AAA game production, cinematic pre-vis, and architectural visualization pipelines.
 
 Your sole task: transform the user's description, feature data, and any image reference tags into ONE single ultra-detailed image-generation prompt that produces a flawless three-panel location reference image in a single cohesive composition.
@@ -160,21 +167,6 @@ Default (override only if user specifies a style):
 Captured with architectural visualization and natural environment photography standards — volumetric god rays consistent with specified time of day, golden-hour or overcast soft diffusion, ultra-detailed surface textures (stone grain, wood fiber, metal oxidation, moss coverage patterns), photorealistic, Phase One IQ4 150MP wide-angle lens, 8K resolution, zero motion blur.
 
 ═══════════════════════════════════════════
-STYLE ADAPTATION
-═══════════════════════════════════════════
-
-• If the user specifies an art style (concept art, watercolor, 3D render, cel-shaded), replace the default camera/lighting block with rendering language native to that style.
-• Fill missing details (biome, time of day, weather, architectural period) with coherent, visually compelling pro-level choices.
-• Enrich surface descriptions: specify stone type, degree of weathering, vegetation coverage percentage, moss/lichen patterns, ambient occlusion depth.
-
-═══════════════════════════════════════════
-REFERENCE IMAGE RULES
-═══════════════════════════════════════════
-
-If the user includes tags like <image0>:
-  Translate to: "identical in atmosphere, architectural style, material palette, and spatial layout to the location shown in reference image [N]."
-
-═══════════════════════════════════════════
 OUTPUT FORMAT (STRICT)
 ═══════════════════════════════════════════
 
@@ -184,7 +176,6 @@ No introductions. No explanations. No bullet points.
 
 —NEGATIVE (always include): split panels, panel borders, dividing lines, inconsistent lighting between panels, text labels, arrows, watermarks, UI overlays, people in scene (unless requested), multiple unrelated locations, low resolution, overexposed sky, flat lighting, cartoon style (unless requested)`,
 
-  // ── PRODUCT ────────────────────────────────────────────────────────────────
   PRODUCT: `You are a senior product designer and AI prompt engineer specialising in commercial product reference sheets for e-commerce, industrial design review, and marketing pipelines.
 
 Your sole task: transform the user's description, product features, and any image reference tags into ONE single ultra-detailed image-generation prompt that produces a flawless three-panel product reference image in a single cohesive studio composition.
@@ -208,37 +199,6 @@ CRITICAL CONSISTENCY RULES:
 • Background: seamless neutral grey studio backdrop across the entire image.
 
 ═══════════════════════════════════════════
-QUALITY & TECHNICAL SPECIFICATIONS
-═══════════════════════════════════════════
-
-Default studio setup:
-Professional product photography studio — seamless neutral grey backdrop, three-point lighting (strong 5600K key light upper-left, soft 4200K fill right, sharp specular accent behind to define edges and depth). Phase One IQ4 150MP, 120mm macro lens. Ultra-sharp focus, micro-detailed material surface textures, surface reflections physically accurate to material type, zero diffraction or chromatic aberration, 8K resolution, zero motion blur.
-
-═══════════════════════════════════════════
-MATERIAL ENRICHMENT (MANDATORY)
-═══════════════════════════════════════════
-
-Always specify:
-  • Finish type: matte / gloss / satin / brushed / anodized / powder-coated / hammered / raw
-  • Surface micro-texture: grain direction, pore depth, reflection anisotropy
-  • Edge treatment: chamfered / rounded / raw / beveled / polished
-  • Material weight impression: whether it reads as heavy/light from visual density cues
-
-═══════════════════════════════════════════
-STYLE ADAPTATION
-═══════════════════════════════════════════
-
-• If the user specifies an art style (3D render, isometric illustration, technical drawing), replace the default studio lighting block with rendering language native to that style.
-• Fill missing product details (color, material, function) with coherent premium-design choices — never leave a placeholder.
-
-═══════════════════════════════════════════
-REFERENCE IMAGE RULES
-═══════════════════════════════════════════
-
-If the user includes tags like <image0>:
-  Translate to: "identical in shape, color, material finish, and branding to the product shown in reference image [N]."
-
-═══════════════════════════════════════════
 OUTPUT FORMAT (STRICT)
 ═══════════════════════════════════════════
 
@@ -253,22 +213,8 @@ No introductions. No explanations. No bullet points.
 // ElementSheetTreatment
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * ElementSheetTreatment
- *
- * Extends BaseGenerateImageTreatment.
- * Adds sheet-specific logic:
- *   • LLM-based prompt refinement (per sheet type)
- *   • ReferenceProcessor for image inputs
- *   • DNA narrative trigger (background)
- *   • Per-type defaults (overridable via input)
- *   • Enhanced 3-panel CHARACTER layout (FRONT / BACK / FACE DETAIL)
- *
- * prepare()        → refine prompt → resolve refs → _runPrepare() from base
- * run(task)        → override: single variation, no batch, no upscalePrompt re-run
- * execute(input)   → inherited fire-and-forget
- */
 export class ElementSheetTreatment extends BaseGenerateImageTreatment {
+
   constructor({ promptService, models, storageService, db, dnaTreatment }) {
     super({ promptService, models, storageService, db });
     this.dnaTreatment = dnaTreatment;
@@ -276,22 +222,20 @@ export class ElementSheetTreatment extends BaseGenerateImageTreatment {
   }
 
   // ─────────────────────────────────────────────────────────
-  // Private: prompt pipeline
+  // Private: prompt helpers
   // ─────────────────────────────────────────────────────────
 
   /** Replace <MediaAsset:id> tags with <imageN> placeholders */
-  _sanitisePrompt(prompt, references) {
+  _sanitisePrompt(prompt = "", references = []) {
     let clean = prompt || "Generate a sheet.";
-    if (references?.length) {
-      references.forEach((ref, index) => {
-        const tag = `<MediaAsset:${ref.media_id || ref.id}>`;
-        clean = clean.split(tag).join(`<image${index}>`);
-      });
-    }
+    references.forEach((ref, i) => {
+      const tag = `<MediaAsset:${ref.media_id || ref.id}>`;
+      clean = clean.split(tag).join(`<image${i}>`);
+    });
     return clean;
   }
 
-  /** Build the LLM user message from cleaned prompt + features */
+  /** Build the LLM user message */
   _buildUserPrompt(cleanText, features) {
     let msg = `User Prompt: ${cleanText}\n`;
     if (features && Object.keys(features).length > 0) {
@@ -300,7 +244,7 @@ export class ElementSheetTreatment extends BaseGenerateImageTreatment {
     return msg;
   }
 
-  /** Ask the LLM to produce the final image prompt */
+  /** Call the LLM to refine the raw user prompt into a full image prompt */
   async _refinePrompt(systemPrompt, userPrompt, temperature) {
     return this.promptService.textProvider.complete({
       systemPrompt,
@@ -310,94 +254,60 @@ export class ElementSheetTreatment extends BaseGenerateImageTreatment {
   }
 
   // ─────────────────────────────────────────────────────────
-  // Private: display name helpers
+  // Private: display-name helpers
   // ─────────────────────────────────────────────────────────
 
-  _toTitleCase(value) {
-    return String(value || "").toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+  _toTitleCase(v) {
+    return String(v || "").toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
   }
 
-  _cleanDisplayText(value) {
-    return String(value || "")
+  _cleanDisplayText(v) {
+    return String(v || "")
       .replace(/[_-]+/g, " ")
-      .replace(/\b(create|generate|make|draw|design|show|need|want)\b/gi, "")
-      .replace(/\b(a|an|the)\b/gi, "")
-      .replace(/\b(character|element|reference|turnaround|model|sheet|product|location)\b/gi, "")
+      .replace(/\b(create|generate|make|draw|design|show|need|want|a|an|the|character|element|reference|turnaround|model|sheet|product|location)\b/gi, "")
       .replace(/\s+/g, " ")
       .replace(/^[,:;.\-\s]+|[,:;.\-\s]+$/g, "")
       .trim();
   }
 
-  _buildSheetDisplayName(type, prompt, features = {}) {
+  _buildSheetDisplayName(TYPE, prompt, features = {}) {
+    // 1. Explicit name field
     const directName = [
       features?.name, features?.title, features?.subject,
       features?.characterName, features?.productName, features?.locationName,
     ].find(v => typeof v === "string" && v.trim());
+    if (directName) return this._toTitleCase(this._cleanDisplayText(directName)).substring(0, 60);
 
-    if (directName) {
-      return this._toTitleCase(this._cleanDisplayText(directName)).substring(0, 60);
+    // 2. Type-specific feature combos
+    const typeParts = {
+      CHARACTER: [features?.race || features?.ethnicity, features?.gender, features?.characterType].filter(Boolean),
+      PRODUCT:   [features?.color, features?.material, features?.type || features?.category].filter(Boolean),
+      LOCATION:  [features?.biome || features?.environment, features?.style, features?.type].filter(Boolean),
+    }[TYPE] ?? [];
+
+    if (typeParts.length) {
+      return this._toTitleCase(this._cleanDisplayText(typeParts.join(" "))).substring(0, 60);
     }
 
-    if (type === "CHARACTER") {
-      const parts = [
-        features?.race || features?.ethnicity || features?.origin,
-        features?.gender,
-        features?.characterType && !["CHARACTER", "HUMAN"].includes(String(features.characterType).toUpperCase())
-          ? features.characterType : null,
-      ].filter(Boolean);
-      if (parts.length) return this._toTitleCase(this._cleanDisplayText(parts.join(" "))).substring(0, 60);
-    }
+    // 3. Fallback to cleaned prompt
+    const fromPrompt = this._cleanDisplayText(prompt);
+    if (fromPrompt) return this._toTitleCase(fromPrompt).substring(0, 60);
 
-    if (type === "PRODUCT") {
-      const parts = [
-        features?.color, features?.material,
-        features?.type || features?.category || features?.productType,
-      ].filter(Boolean);
-      if (parts.length) return this._toTitleCase(this._cleanDisplayText(parts.join(" "))).substring(0, 60);
-    }
-
-    if (type === "LOCATION") {
-      const parts = [
-        features?.biome || features?.environment,
-        features?.style || features?.architecture,
-        features?.type  || features?.locationType,
-      ].filter(Boolean);
-      if (parts.length) return this._toTitleCase(this._cleanDisplayText(parts.join(" "))).substring(0, 60);
-    }
-
-    const cleanedPrompt = this._cleanDisplayText(prompt);
-    if (cleanedPrompt) return this._toTitleCase(cleanedPrompt).substring(0, 60);
-
-    return `${this._toTitleCase(type)} Sheet`;
+    return `${this._toTitleCase(TYPE)} Sheet`;
   }
 
   // ─────────────────────────────────────────────────────────
   // 1. PREPARE  (override)
+  //    Fast: validate → resolve refs → DB placeholders → return task
+  //    No LLM calls here — optimization happens in the worker.
   // ─────────────────────────────────────────────────────────
 
-  /**
-   * @param {object}  input
-   * @param {string}  input.sheetType          — "CHARACTER" | "LOCATION" | "PRODUCT"
-   * @param {string}  [input.prompt]           — raw user prompt
-   * @param {object}  [input.features]         — structured feature data
-   * @param {Array}   [input.references]       — raw reference objects
-   * @param {string}  input.project_id
-   * @param {string}  input.userId
-   *
-   * — Overridable generation params (fall back to SHEET_DEFAULTS per type):
-   * @param {string}  [input.model_name]
-   * @param {string}  [input.ratio]
-   * @param {string}  [input.quality]
-   * @param {number}  [input.steps]
-   * @param {number}  [input.guidance_scale]
-   * @param {number}  [input.temperature]      — LLM refinement temperature
-   */
   async prepare(input) {
     const {
-      sheetType  = "CHARACTER",
-      prompt     = "",
+      sheetType    = "CHARACTER",
+      prompt       = "",
       features,
-      references = [],
+      references   = [],
       project_id,
     } = input;
 
@@ -406,10 +316,9 @@ export class ElementSheetTreatment extends BaseGenerateImageTreatment {
     if (!project_id) throw new Error("[ElementSheetTreatment] project_id is required.");
 
     const TYPE = sheetType.toUpperCase();
-    const systemPrompt = SYSTEM_PROMPTS[TYPE];
-    if (!systemPrompt) {
+    if (!VALID_TYPES.has(TYPE)) {
       throw new Error(
-        `[ElementSheetTreatment] Unknown sheetType "${sheetType}". Must be CHARACTER, LOCATION, or PRODUCT.`
+        `[ElementSheetTreatment] Unknown sheetType "${sheetType}". Must be: ${[...VALID_TYPES].join(", ")}.`
       );
     }
 
@@ -422,25 +331,20 @@ export class ElementSheetTreatment extends BaseGenerateImageTreatment {
     const guidance_scale = input.guidance_scale ?? defaults.guidance_scale;
     const temperature    = input.temperature    ?? defaults.temperature;
 
-    console.log(`\n${"─".repeat(60)}`);
-    console.log(`📋 [ElementSheetTreatment] ${TYPE} | model:${model_name} | ratio:${ratio} | quality:${quality} | steps:${steps} | cfg:${guidance_scale} | temp:${temperature}`);
-    console.log(`   prompt: "${prompt.substring(0, 80)}"`);
+    // ── Pre-compute prompt pieces (no LLM yet — just string ops) ─────────
+    const cleanText   = this._sanitisePrompt(prompt, references);
+    const userPrompt  = this._buildUserPrompt(cleanText, features);
+    const displayName = this._buildSheetDisplayName(TYPE, cleanText, features);
 
-    // ── LLM prompt refinement ─────────────────────────────────────────────
-    const cleanText     = this._sanitisePrompt(prompt, references);
-    const userPrompt    = this._buildUserPrompt(cleanText, features);
-    const refinedPrompt = await this._refinePrompt(systemPrompt, userPrompt, temperature);
-    const displayName   = this._buildSheetDisplayName(TYPE, cleanText, features);
-
-    // ── Resolve references → input_assets ────────────────────────────────
+    // ── Resolve reference images → asset URLs ─────────────────────────────
     const input_assets = await this.refProcessor.process(
       references, userId, project_id, null, "uploads"
     );
 
-    // ── Delegate DB setup to base ─────────────────────────────────────────
+    // ── Create DB records via base ─────────────────────────────────────────
     const task = await this._runPrepare({
       prompt,
-      prompt_optimise: refinedPrompt,
+      prompt_optimise: null,       // set by optimizePrompt in worker
       display_name:    displayName,
       model_name,
       workflow_type:   "ELEMENT_SHEET",
@@ -448,114 +352,152 @@ export class ElementSheetTreatment extends BaseGenerateImageTreatment {
       quality,
       steps,
       guidance_scale,
-      count:           1,           // sheets are always single-variation
+      count:           1,          // sheets are always single-variation
       userId,
       project_id,
-      session_id:      null,
+      session_id:      input.session_id ?? null,
       input_assets,
       stepId:          "CAE",
+      // ── Sheet-specific data passed to worker via task (Redis-safe) ──────
+      extraTaskFields: {
+        sheetType:        TYPE,
+        sheetSystemPrompt: SYSTEM_PROMPTS[TYPE],
+        sheetUserPrompt:   userPrompt,
+        sheetTemperature:  temperature,
+        // DNA trigger data (worker fires this after run)
+        dnaPayload: this.dnaTreatment ? {
+          name:            features?.name || `${features?.characterType || TYPE} Sheet`,
+          type:            TYPE,
+          features,
+          userDescription: prompt,
+        } : null,
+      },
     });
-
-    // ── Trigger DNA narrative (background, non-blocking) ─────────────────
-    if (this.dnaTreatment) {
-      this.dnaTreatment.create({
-        generation_config_id: task.configId,
-        name:                features?.name || `${features?.characterType || TYPE} Sheet`,
-        type:                TYPE,
-        features,
-        userDescription:     prompt,
-      }).catch(err => {
-        console.error(`❌ [ElementSheetTreatment] DNA generation failed: ${err.message}`);
-      });
-    }
 
     return task;
   }
 
   // ─────────────────────────────────────────────────────────
-  // 2. RUN  (override)
-  //
-  // Sheets skip the second upscalePrompt pass from the base
-  // (the LLM refinement in prepare() already did that job).
-  // Single variation only — no Promise.allSettled loop needed.
+  // 2. OPTIMIZE PROMPT  (override)
+  //    LLM refinement → safety check → negative prompt
+  //    Called by worker BEFORE run().
   // ─────────────────────────────────────────────────────────
 
-  async run(task) {
+  async optimizePrompt(task) {
     const {
-      userId, model_name,
-      prompt, prompt_optimise,
+      prompt,
+      sheetSystemPrompt,
+      sheetUserPrompt,
+      sheetTemperature,
+      mediaIds,
+    } = task;
+
+    // ── LLM refinement ────────────────────────────────────────────────────
+    let refinedPrompt = prompt;
+    if (sheetSystemPrompt && sheetUserPrompt) {
+      this._log("info", "refining prompt via LLM…");
+      refinedPrompt = await this._refinePrompt(
+        sheetSystemPrompt,
+        sheetUserPrompt,
+        sheetTemperature,
+      );
+    }
+
+    const finalPrompt = refinedPrompt || prompt;
+
+    // ── Safety check ──────────────────────────────────────────────────────
+    const safety = await this.promptService.checkPrompt(finalPrompt);
+    if (!safety.safe) {
+      for (const id of mediaIds ?? []) {
+        await markMediaFailed(this.db, id, safety.reason);
+      }
+      throw new Error(`Prompt rejected: ${safety.reason}`);
+    }
+
+    // ── Negative prompt ───────────────────────────────────────────────────
+    let finalNegative = "";
+    try {
+      finalNegative = await this.promptService.generateNegativePrompt(finalPrompt) || "";
+    } catch (err) {
+      this._log("error", `Negative prompt generation failed (continuing): ${err.message}`);
+    }
+
+    return { finalPrompt, finalNegative };
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // 3. RUN  (override)
+  //    Sheets = single variation only → no Promise.allSettled loop.
+  //    Receives optimizeResult from worker — no double LLM call.
+  // ─────────────────────────────────────────────────────────
+
+  async run(task, optimizeResult) {
+    const {
+      userId,
+      model_name,
+      prompt,
       ratio, quality, size, width, height,
       steps, guidance_scale,
       input_assets,
       configId,
-      workflows, mediaIds,
+      workflows,
+      mediaIds,
+      dnaPayload,
     } = task;
 
-    const provider  = this._resolveProvider(model_name, input_assets);
+    const { finalPrompt, finalNegative } = optimizeResult;
+
+    const provider = this._resolveProvider(model_name, input_assets);
     const workflow  = workflows[0];
     const mediaId   = mediaIds[0];
 
-    // Generate negative prompt only (no second upscale — already refined)
-    let finalPrompt   = prompt_optimise || prompt;
-    let finalNegative = "";
-
     try {
-      const autoNeg = await this.promptService.generateNegativePrompt(finalPrompt);
-      finalNegative = autoNeg || "";
-    } catch (err) {
-      console.error(`[ElementSheetTreatment] Negative prompt generation failed (continuing): ${err.message}`);
-    }
-
-    try {
-      const sourceAsset = (input_assets || []).find(
+      const sourceAsset = input_assets?.find(
         a => ["source", "base"].includes(a.role)
-      ) || input_assets[0];
+      ) ?? input_assets?.[0];
 
       const form = {
         prompt:          finalPrompt,
         negativePrompt:  finalNegative,
         negative_prompt: finalNegative,
         ratio, quality, size, width, height,
-        steps:           steps          || 35,
-        guidanceScale:   guidance_scale || 8.0,
-        guidance_scale:  guidance_scale || 8.0,
-        image:           sourceAsset?.url || null,
-        image_url:       sourceAsset?.url || null,
+        steps:           steps          ?? 35,
+        guidanceScale:   guidance_scale ?? 8.0,
+        guidance_scale:  guidance_scale ?? 8.0,
+        image:           sourceAsset?.url ?? null,
+        image_url:       sourceAsset?.url ?? null,
         references:      input_assets,
       };
 
-      let payload;
-      if (typeof provider.buildPayload === "function")   payload = provider.buildPayload(form);
-      else if (typeof provider.adapt === "function") {
-        const adapted = provider.adapt(form);
-        payload = provider.toPayload ? provider.toPayload(adapted) : adapted;
-      } else                                             payload = form;
-
-      console.log(`[ElementSheetTreatment] calling provider (${provider.constructor?.name}) | workflow:${workflow.id}`);
-
+      const payload   = this._buildPayload(provider, form);
       const result    = await provider.generate(payload);
-      const outputUrl = result.image_url || result.url;
-      if (!outputUrl) throw new Error("Provider returned no output URL");
+      const outputUrl = extractOutputUrl(result);
 
-      const fileName = `${userId}/generations/${workflow.id}_${Date.now()}.png`;
-      const fileUrl  = await this.storageService.uploadFromUrl(fileName, outputUrl);
+      const fileName  = `${userId}/generations/${workflow.id}_${Date.now()}.png`;
+      const fileUrl   = await this.storageService.uploadFromUrl(fileName, outputUrl);
 
       await this.db.media.updateFields(mediaId, {
         url:    fileUrl,
-        width:  result.width  || width  || 1024,
-        height: result.height || height || 1024,
+        width:  result.width  ?? width  ?? 1024,
+        height: result.height ?? height ?? 1024,
       });
       await markMediaStatus(this.db, mediaId, "success");
 
-      console.log(`[ElementSheetTreatment] ✅ done | configId:${configId}`);
+      this._log("info", `✅ done | configId:${configId}`);
+
+      // ── DNA narrative trigger (non-blocking, after success) ───────────
+      if (this.dnaTreatment && dnaPayload) {
+        this.dnaTreatment
+          .create({ generation_config_id: configId, ...dnaPayload })
+          .catch(err => this._log("error", `DNA generation failed: ${err.message}`));
+      }
+
       return { configId, mediaId, workflowId: workflow.id, succeeded: 1, failed: 0 };
 
     } catch (err) {
-      console.error(`[ElementSheetTreatment] ❌ run failed | ${err.message}`);
+      this._log("error", `run failed: ${err.message}`);
       await markMediaFailed(this.db, mediaId, err);
       throw err;
     }
   }
-
-  // execute() inherited from BaseGenerateImageTreatment ✅
 }

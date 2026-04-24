@@ -56,12 +56,8 @@ export const getWorkflow = async (id) => {
 
 export const createWorkflow = async ({ project_id, session_id, display_name, primary_media_id, variation_index, workflow_type }, options = {}) => {
     try {
-        if (!project_id) {
-            throw new Error("project_id is required");
-        }
-
         const newWorkflow = {
-            project_id,
+            project_id:       project_id       || null,
             session_id:       session_id       || null,  // null = project-level workflow
             display_name:     display_name     || "Untitled Workflow",
             variation_index:  variation_index  || 0,
@@ -105,12 +101,39 @@ export const updateWorkflow = async (id, updates) => {
     }
 };
 
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+
+const verifyWorkflowOwnership = async (workflowId, userId) => {
+    const { data: workflow, error } = await supabase
+        .from("workflow")
+        .select("id, project:project!project_id(user_id)")
+        .eq("id", workflowId)
+        .single();
+    if (error || !workflow || workflow.project?.user_id !== userId) return false;
+    return true;
+};
+
+const verifyMediaOwnership = async (mediaId, userId) => {
+    const { data: media, error } = await supabase
+        .from("media")
+        .select("id, project:project!project_id(user_id)")
+        .eq("id", mediaId)
+        .single();
+    if (error || !media || media.project?.user_id !== userId) return false;
+    return true;
+};
+
 // ── PATCH /api/workflows/:id ────────────────────────────────────────────────────
 export const patchWorkflow = async (req, res) => {
     try {
         const { id } = req.params;
-        const { display_name, primary_media_id, favorited } = req.body || {};
+        const userId = req.user.id;
 
+        if (!(await verifyWorkflowOwnership(id, userId))) {
+            return res.status(403).json({ ok: false, message: "Unauthorized access to this workflow" });
+        }
+
+        const { display_name, primary_media_id, favorited } = req.body || {};
         const updates = {};
 
         if (display_name !== undefined) {
@@ -142,56 +165,71 @@ export const patchWorkflow = async (req, res) => {
 
 export const deleteWorkflow = async (req, res) => {
     const { id } = req.params;
+    const userId = req.user.id;
 
-    res.json({ ok: true, message: "Deletion in progress" });
+    try {
+        if (!(await verifyWorkflowOwnership(id, userId))) {
+            return res.status(403).json({ ok: false, message: "Unauthorized access to this workflow" });
+        }
 
-    (async () => {
-        try {
-            // 1. جيب media
-            const { data: mediaItems } = await supabase
-                .from("media")
-                .select("id, url")
-                .eq("workflow_id", id);
+        res.json({ ok: true, message: "Deletion in progress" });
 
-            if (mediaItems?.length) {
-                const mediaIds = mediaItems.map(m => m.id);
-                const filePaths = mediaItems
-                    .map(m => extractPath(m.url))
-                    .filter(Boolean);
-
-                // 2. امسح references
-                await supabase
-                    .from("generation_config_reference")
-                    .delete()
-                    .in("ref_media_id", mediaIds);
-
-                // 3. امسح media
-                await supabase
+        (async () => {
+            try {
+                // 1. جيب media
+                const { data: mediaItems } = await supabase
                     .from("media")
-                    .delete()
+                    .select("id, url")
                     .eq("workflow_id", id);
 
-                // 4. امسح storage
-                if (filePaths.length) {
-                    await storageService.deleteFiles(filePaths);
+                if (mediaItems?.length) {
+                    const mediaIds = mediaItems.map(m => m.id);
+                    const filePaths = mediaItems
+                        .map(m => extractPath(m.url))
+                        .filter(Boolean);
+
+                    // 2. امسح references
+                    await supabase
+                        .from("generation_config_reference")
+                        .delete()
+                        .in("ref_media_id", mediaIds);
+
+                    // 3. امسح media
+                    await supabase
+                        .from("media")
+                        .delete()
+                        .eq("workflow_id", id);
+
+                    // 4. امسح storage
+                    if (filePaths.length) {
+                        await storageService.deleteFiles(filePaths);
+                    }
                 }
+
+                // 5. امسح workflow
+                await supabase
+                    .from("workflow")
+                    .delete()
+                    .eq("id", id);
+
+            } catch (err) {
+                console.error("Delete Error:", err);
             }
-
-            // 5. امسح workflow
-            await supabase
-                .from("workflow")
-                .delete()
-                .eq("id", id);
-
-        } catch (err) {
-            console.error("Delete Error:", err);
-        }
-    })();
+        })();
+    } catch (err) {
+        return res.status(500).json({ ok: false, message: err.message });
+    }
 };
+
 // ── PATCH /api/workflows/:id/like ───────────────────────────────────────────────
 export const toggleLike = async (req, res) => {
     try {
         const { id } = req.params;
+        const userId = req.user.id;
+
+        if (!(await verifyWorkflowOwnership(id, userId))) {
+            return res.status(403).json({ ok: false, message: "Unauthorized access to this workflow" });
+        }
 
         // First, get the current state
         const { data: wf, error: getErr } = await supabase
@@ -225,17 +263,41 @@ export const toggleLike = async (req, res) => {
 export const moveWorkflow = async (req, res) => {
     try {
         const { id } = req.params;
+        const userId = req.user.id;
         const { session_id, project_id, newsession, session_name } = req.body;
+
+        if (!(await verifyWorkflowOwnership(id, userId))) {
+            return res.status(403).json({ ok: false, message: "Unauthorized access to this workflow" });
+        }
+
+        if (session_id) {
+            // Verify target session ownership
+            const { data: session } = await supabase
+                .from("session")
+                .select("id, project:project!project_id(user_id)")
+                .eq("id", session_id)
+                .single();
+            if (!session || session.project?.user_id !== userId) {
+                return res.status(403).json({ ok: false, message: "Unauthorized access to target session" });
+            }
+        }
+
+        if (project_id) {
+            // Verify target project ownership
+            const { data: project } = await supabase
+                .from("project")
+                .select("user_id")
+                .eq("id", project_id)
+                .single();
+            if (!project || project.user_id !== userId) {
+                return res.status(403).json({ ok: false, message: "Unauthorized access to target project" });
+            }
+        }
 
         console.log(`\n📦 [moveWorkflow] Request received:`);
         console.log(`   workflow_id  : ${id}`);
-        console.log(`   session_id   : ${session_id || "(not provided)"}`);
-        console.log(`   project_id   : ${project_id || "(not provided)"}`);
-        console.log(`   newsession   : ${newsession || false}`);
-        console.log(`   session_name : ${session_name || "(not provided)"}`);
 
         if (!session_id && !newsession) {
-            console.warn(`⚠️  [moveWorkflow] Missing session_id and newsession — rejecting`);
             return res.status(400).json({ ok: false, message: "session_id or newsession is required" });
         }
 
@@ -246,10 +308,8 @@ export const moveWorkflow = async (req, res) => {
         // If creating a new session, we need the project ID (from body or DB)
         if (newsession) {
             if (!targetProjectId) {
-                console.log(`   🔍 [moveWorkflow] newsession=true but no project_id — fetching from DB...`);
                 const { data: wf } = await supabase.from("workflow").select("project_id").eq("id", id).single();
                 if (wf) targetProjectId = wf.project_id;
-                console.log(`   project_id from DB: ${targetProjectId || "(not found)"}`);
             }
             if (!targetProjectId) {
                 return res.status(400).json({ ok: false, message: "Cannot determine project_id for new session" });
@@ -268,16 +328,12 @@ export const moveWorkflow = async (req, res) => {
             if (sessionError) throw new Error(`Failed to create session: ${sessionError.message}`);
             targetSessionId = newSession.id;
             createdSession = newSession;
-            console.log(`   ✅ [moveWorkflow] New session created: ${targetSessionId}`);
         }
 
         const updates = { session_id: targetSessionId };
         if (targetProjectId) {
             updates.project_id = targetProjectId;
         }
-
-        console.log(`\n   📝 [moveWorkflow] Updating workflow in DB...`);
-        console.log(`   updates: ${JSON.stringify(updates)}`);
 
         const { data: workflow, error } = await supabase
             .from("workflow")
@@ -286,27 +342,16 @@ export const moveWorkflow = async (req, res) => {
             .select()
             .single();
 
-        if (error) {
-            console.error(`   ❌ [moveWorkflow] DB update error:`, error);
-            throw error;
-        }
-
-        console.log(`   ✅ [moveWorkflow] Workflow updated: session_id=${workflow?.session_id}`);
+        if (error) throw error;
 
         // If project_id changed, cascade to child media items
         if (targetProjectId) {
-            const { error: mediaError } = await supabase
+            await supabase
                 .from("media")
                 .update({ project_id: targetProjectId })
                 .eq("workflow_id", id);
-            if (mediaError) {
-                console.warn(`   ⚠️  [moveWorkflow] Media cascade update failed:`, mediaError.message);
-            } else {
-                console.log(`   ✅ [moveWorkflow] Media items cascaded to project_id=${targetProjectId}`);
-            }
         }
 
-        console.log(`\n✅ [moveWorkflow] Done — workflow moved to session ${targetSessionId}\n`);
         return res.json({ ok: true, workflow, new_session: createdSession });
     } catch (err) {
         console.error(`❌ [moveWorkflow] Error moving workflow ${req.params.id}:`, err);
@@ -319,13 +364,20 @@ export const setPrimaryMedia = async (req, res) => {
     try {
         const { id } = req.params;
         const { media_id } = req.body;
+        const userId = req.user.id;
 
         if (!media_id) {
             return res.status(400).json({ ok: false, message: "media_id is required" });
         }
 
-        // Security: only allow setting primary media to a completed or processing media belonging to this workflow.
-        // We don't require project/session in the request here, but we at least enforce workflow match + completed/processing.
+        if (!(await verifyWorkflowOwnership(id, userId))) {
+            return res.status(403).json({ ok: false, message: "Unauthorized access to this workflow" });
+        }
+
+        if (!(await verifyMediaOwnership(media_id, userId))) {
+            return res.status(403).json({ ok: false, message: "Unauthorized access to this media" });
+        }
+
         await assertMediaUsable({ media_id, workflow_id: id }, { allowProcessing: true });
 
         const { data, error } = await supabase
@@ -345,23 +397,26 @@ export const setPrimaryMedia = async (req, res) => {
 };
 
 // ── GET /api/workflows/workflow-by-media/:media_id ─────────────────────────────
-// Returns the workflow that owns this media (and optionally its media list).
 export const getWorkflowByMedia = async (req, res) => {
     try {
         const { media_id } = req.params;
+        const userId = req.user.id;
+
         if (!media_id) return res.status(400).json({ ok: false, message: "media_id is required" });
 
-        // Ensure media exists and load workflow context
-        const media = await supabase
+        if (!(await verifyMediaOwnership(media_id, userId))) {
+            return res.status(403).json({ ok: false, message: "Unauthorized access to this media" });
+        }
+
+        const { data: media, error: mediaErr } = await supabase
             .from("media")
             .select("id, workflow_id, project_id, status, url, create_time, error_message")
             .eq("id", media_id)
             .single();
 
-        if (media.error) throw media.error;
-        if (!media.data) return res.status(404).json({ ok: false, message: "Media not found" });
+        if (mediaErr) throw mediaErr;
 
-        const workflowId = media.data.workflow_id;
+        const workflowId = media.workflow_id;
         const { data: workflow, error: wfErr } = await supabase
             .from("workflow")
             .select("*")
@@ -376,11 +431,7 @@ export const getWorkflowByMedia = async (req, res) => {
             .order("create_time", { ascending: true });
         if (itemsErr) throw itemsErr;
 
-        return res.json({
-            ok: true,
-            workflow,
-            items,
-        });
+        return res.json({ ok: true, workflow, items });
     } catch (err) {
         console.error("❌ Error fetching workflow by media:", err);
         return res.status(500).json({ ok: false, message: err.message });
@@ -388,17 +439,16 @@ export const getWorkflowByMedia = async (req, res) => {
 };
 
 // ── POST /api/workflows/detach-media ───────────────────────────────────────────
-// Creates a new workflow and moves a media item into it (becomes primary).
 export const detachMediaToNewWorkflow = async (req, res) => {
     try {
-        const {
-            media_id,
-            project_id,   // optional (validated if provided)
-            session_id,   // optional (validated if provided)
-            display_name, // optional
-        } = req.body || {};
+        const { media_id, project_id, session_id, display_name } = req.body || {};
+        const userId = req.user.id;
 
         if (!media_id) return res.status(400).json({ ok: false, message: "media_id is required" });
+
+        if (!(await verifyMediaOwnership(media_id, userId))) {
+            return res.status(403).json({ ok: false, message: "Unauthorized access to this media" });
+        }
 
         // Fetch media + its current workflow context
         const { data: media, error: mediaErr } = await supabase
@@ -407,7 +457,6 @@ export const detachMediaToNewWorkflow = async (req, res) => {
             .eq("id", media_id)
             .single();
         if (mediaErr) throw mediaErr;
-        if (!media) return res.status(404).json({ ok: false, message: "Media not found" });
 
         const status = (media.status || "").toString().toLowerCase();
         if (["processing", "pending", "uploading"].includes(status)) {
@@ -415,20 +464,8 @@ export const detachMediaToNewWorkflow = async (req, res) => {
         }
 
         const currentWorkflowId = media.workflow_id;
-        const inferredProjectId = media.project_id || media.workflow?.project_id || null;
-        const inferredSessionId = media.workflow?.session_id || null;
-
-        // Optional strict checks if caller sends project/session
-        if (project_id && inferredProjectId && project_id !== inferredProjectId) {
-            return res.status(403).json({ ok: false, message: "media_id does not belong to this project" });
-        }
-        if (session_id && inferredSessionId && session_id !== inferredSessionId) {
-            return res.status(403).json({ ok: false, message: "media_id does not belong to this session" });
-        }
-
-        if (!inferredProjectId || !inferredSessionId) {
-            return res.status(400).json({ ok: false, message: "Unable to infer project_id/session_id for this media" });
-        }
+        const inferredProjectId = media.project_id || media.workflow?.project_id;
+        const inferredSessionId = media.workflow?.session_id;
 
         // Create a new workflow
         const newName = display_name || media.workflow?.display_name || "Detached media";
@@ -445,32 +482,28 @@ export const detachMediaToNewWorkflow = async (req, res) => {
             .single();
         if (wfErr) throw wfErr;
 
-        // Move media to the new workflow
-        const { data: movedMedia, error: moveErr } = await supabase
+        // Move media
+        await supabase
             .from("media")
             .update({ workflow_id: newWorkflow.id, project_id: inferredProjectId })
-            .eq("id", media_id)
-            .select("*")
-            .single();
-        if (moveErr) throw moveErr;
+            .eq("id", media_id);
 
         // Set as primary
-        const { data: updatedWorkflow, error: primErr } = await supabase
+        const { data: updatedWorkflow } = await supabase
             .from("workflow")
             .update({ primary_media_id: media_id })
             .eq("id", newWorkflow.id)
             .select("*")
             .single();
-        if (primErr) throw primErr;
 
-        // If original workflow pointed to this media as primary, try to pick another one (or null)
+        // Fix old workflow primary if needed
         if (currentWorkflowId) {
-            const { data: oldWf, error: oldWfErr } = await supabase
+            const { data: oldWf } = await supabase
                 .from("workflow")
-                .select("id, primary_media_id")
+                .select("primary_media_id")
                 .eq("id", currentWorkflowId)
                 .single();
-            if (!oldWfErr && oldWf?.primary_media_id === media_id) {
+            if (oldWf?.primary_media_id === media_id) {
                 const { data: remaining } = await supabase
                     .from("media")
                     .select("id")
@@ -478,18 +511,11 @@ export const detachMediaToNewWorkflow = async (req, res) => {
                     .order("create_time", { ascending: true })
                     .limit(1);
                 const nextPrimary = remaining?.[0]?.id ?? null;
-                await supabase
-                    .from("workflow")
-                    .update({ primary_media_id: nextPrimary })
-                    .eq("id", currentWorkflowId);
+                await supabase.from("workflow").update({ primary_media_id: nextPrimary }).eq("id", currentWorkflowId);
             }
         }
 
-        return res.json({
-            ok: true,
-            workflow: updatedWorkflow,
-            media: movedMedia,
-        });
+        return res.json({ ok: true, workflow: updatedWorkflow });
     } catch (err) {
         console.error("❌ Error detaching media to new workflow:", err);
         return res.status(500).json({ ok: false, message: err.message });
@@ -500,15 +526,16 @@ export const detachMediaToNewWorkflow = async (req, res) => {
 export const deleteMedia = async (req, res) => {
     try {
         const { media_id } = req.params;
-        if (!media_id) {
-            return res.status(400).json({ ok: false, message: "media_id is required" });
+        const userId = req.user.id;
+
+        if (!media_id) return res.status(400).json({ ok: false, message: "media_id is required" });
+
+        if (!(await verifyMediaOwnership(media_id, userId))) {
+            return res.status(403).json({ ok: false, message: "Unauthorized access to this media" });
         }
 
-        // Clean up any references pointing to this media item
-        await supabase
-            .from("generation_config_reference")
-            .delete()
-            .eq("ref_media_id", media_id);
+        // Clean up references
+        await supabase.from("generation_config_reference").delete().eq("ref_media_id", media_id);
 
         const { data, error } = await supabase
             .from("media")
@@ -518,7 +545,6 @@ export const deleteMedia = async (req, res) => {
             .single();
 
         if (error) throw error;
-
         return res.json({ ok: true, deleted: data });
     } catch (err) {
         console.error(`❌ Error deleting media ${req.params.media_id}:`, err);

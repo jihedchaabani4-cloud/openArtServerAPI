@@ -3,8 +3,11 @@ import * as generationsQuery from "../controllers/generationsQueryController.js"
 import * as projectController from "../controllers/projectController.js";
 import * as generationsMutation from "../controllers/generationsMutationController.js";
 import * as workflowsController from "../controllers/workflowsController.js";
+import { requireAuth } from "../src/middleware/auth.js";
 
 const router = express.Router();
+
+router.use(requireAuth);
 
 // ── GET ─────────────────────────────────────────────────────
 router.get("/assets/:project_id", generationsQuery.getAssets);

@@ -1,15 +1,24 @@
 import { supabase } from "../lib/supabase.js";
 
-
 /** POST — create session */
 export const create = async (req, res) => {
     try {
         const { session_name, name, project_id } = req.body;
         if (!project_id) return res.status(400).json({ ok: false, message: "project_id is required" });
 
+        const userId = req.user.id;
         const sessionName = session_name || name || "Untitled";
 
+        // Verify project ownership
+        const { data: project } = await supabase
+            .from("project")
+            .select("user_id")
+            .eq("id", project_id)
+            .single();
 
+        if (!project || project.user_id !== userId) {
+            return res.status(403).json({ ok: false, message: "Unauthorized access to this project" });
+        }
 
         const { data, error } = await supabase
             .from("session")
@@ -31,6 +40,18 @@ export const update = async (req, res) => {
         const { id } = req.params;
         const { session_name, name } = req.body;
         const sessionName = session_name || name;
+        const userId = req.user.id;
+
+        // Verify ownership through project join
+        const { data: session } = await supabase
+            .from("session")
+            .select("id, project:project!project_id(user_id)")
+            .eq("id", id)
+            .single();
+
+        if (!session || session.project?.user_id !== userId) {
+            return res.status(403).json({ ok: false, message: "Unauthorized access to this session" });
+        }
 
         const { data, error } = await supabase
             .from("session")
@@ -51,6 +72,19 @@ export const update = async (req, res) => {
 export const remove = async (req, res) => {
     try {
         const { id } = req.params;
+        const userId = req.user.id;
+
+        // Verify ownership
+        const { data: session } = await supabase
+            .from("session")
+            .select("id, project:project!project_id(user_id)")
+            .eq("id", id)
+            .single();
+
+        if (!session || session.project?.user_id !== userId) {
+            return res.status(403).json({ ok: false, message: "Unauthorized access to this session" });
+        }
+
         const { error } = await supabase
             .from("session")
             .delete()

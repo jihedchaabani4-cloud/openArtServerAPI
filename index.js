@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import { createServer } from "http";
 import { initSocket } from "./websocket/socket.js";
@@ -55,6 +56,7 @@ app.use(
 );
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(cookieParser());
 app.use(morgan("dev"));
 
 // ── Routes ──────────────────────────────────────────────────

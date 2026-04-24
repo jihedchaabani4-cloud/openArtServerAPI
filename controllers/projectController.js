@@ -71,12 +71,23 @@ export const getProjectData = async (req, res) => {
         }
 
         // ── 1. Project ──────────────────────────────────────────────
-        const { data: projectData } = await supabase
+        const userId = req.user.id;
+        const { data: projectData, error: projectError } = await supabase
             .from("project")
-            .select("name")
+            .select("project_name, user_id")
             .eq("id", project_id)
             .single();
-        const projectName = projectData?.name || "Unknown Project";
+
+        if (projectError || !projectData) {
+            return res.status(404).json({ ok: false, message: "Project not found" });
+        }
+
+        if (projectData.user_id !== userId) {
+            console.warn(`⚠️ [ProjectController] Unauthorized access attempt by user ${userId} on project ${project_id}`);
+            return res.status(403).json({ ok: false, message: "Unauthorized access to this project" });
+        }
+
+        const projectName = projectData?.project_name || "Unknown Project";
 
         // ── 2. Sessions ─────────────────────────────────────────────
         const { data: sessions } = await supabase
@@ -267,3 +278,9 @@ export const getProjectData = async (req, res) => {
         res.status(500).json({ ok: false, message: err.message });
     }
 };
+
+
+
+
+
+

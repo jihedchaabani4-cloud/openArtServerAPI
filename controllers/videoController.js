@@ -52,7 +52,7 @@ export const generateVideo = async (req, res) => {
         console.log(`   - Ratio: ${ratio}, Duration: ${duration}`);
         console.log(`   - 📸 References Attached: ${references.length}`);
 
-        const userId = req.user?.id || "e54d7d5f-9c49-457d-83b7-ac8484bceb80";
+        const userId = req.user.id;
 
         const finalProjectId = project_id;
         const finalSessionId = session_id;
@@ -151,7 +151,7 @@ export const extendVideo = async (req, res) => {
         console.log(`   - Prompt: "${prompt}"`);
         console.log(`   - Extending workflow ID: ${workflow_id}`);
 
-        const userId = req.user?.id || "e54d7d5f-9c49-457d-83b7-ac8484bceb80";
+        const userId = req.user.id;
 
         const finalProjectId = project_id;
         const finalSessionId = session_id;
@@ -253,7 +253,7 @@ export const editVideo = async (req, res) => {
         console.log(`   - Prompt: "${prompt}"`);
         console.log(`   - Editing workflow ID: ${workflow_id}`);
 
-        const userId = req.user?.id || "e54d7d5f-9c49-457d-83b7-ac8484bceb80";
+        const userId = req.user.id;
 
         const finalProjectId = project_id;
         const finalSessionId = session_id;
@@ -330,7 +330,7 @@ export const motionControl = async (req, res) => {
             return res.status(400).json({ ok: false, message: "Model not found" });
         }
 
-        const userId = req.user?.id || "e54d7d5f-9c49-457d-83b7-ac8484bceb80";
+        const userId = req.user.id;
         const finalProjectId = project_id;
         const finalSessionId = session_id;
 

@@ -2,21 +2,14 @@ import express from "express";
 import { autoCreateProjectAndSession } from "../lib/helpers.js";
 import { normalizeImageModelName } from "../lib/modelRegistryKeys.js";
 import { editVideoTreatment, promptService, cameraTreatment } from "../src/container.js";
-
+import { requireAuth } from "../src/middleware/auth.js";
 import { CameraTask } from "../src/video/tasks/CameraTask.js";
 
 const router = express.Router();
 
+router.use(requireAuth);
+
 // ── POST /api/camera/change-angles ─────────────────────────────────────────
-// Unified endpoint. Routes to image or video camera treatment based on
-// `media_type` field ("image" | "video"). Defaults to "image".
-//
-// Image body:
-//   { media_type: "image", rotation, tilt, zoom, references, model_name, ratio, quality, ... }
-//
-// Video body:
-//   { media_type: "video", camera_text: "slow zoom in", model, workflow_id, media_id, ... }
-//
 router.post("/change-angles", async (req, res) => {
     const media_type = (req.body.media_type || "image").toLowerCase();
 
@@ -27,11 +20,9 @@ router.post("/change-angles", async (req, res) => {
 });
 
 // ── POST /api/camera/video ──────────────────────────────────────────────────
-// Dedicated video camera-edit shortcut (same as change-angles with media_type=video)
 router.post("/video", (req, res) => handleVideoCamera(req, res));
 
 // ── POST /api/camera/image ──────────────────────────────────────────────────
-// Dedicated image camera shortcut
 router.post("/image", (req, res) => handleImageCamera(req, res));
 
 
@@ -54,7 +45,7 @@ async function handleImageCamera(req, res) {
             return res.status(400).json({ ok: false, message: "workflow_id is required" });
         }
 
-        const userId = req.user?.id || "e54d7d5f-9c49-457d-83b7-ac8484bceb80";
+        const userId = req.user.id;
         const normalizedModelName = normalizeImageModelName(model_name) || "seedream-pro";
 
         const { project_id: finalProjectId, session_id: finalSessionId } =
@@ -121,7 +112,7 @@ async function handleVideoCamera(req, res) {
             return res.status(400).json({ ok: false, message: "camera_text is required. Describe the camera move (e.g. 'slow zoom in')." });
         }
 
-        const userId = req.user?.id || "e54d7d5f-9c49-457d-83b7-ac8484bceb80";
+        const userId = req.user.id;
 
         const { project_id: finalProjectId, session_id: finalSessionId } =
             await autoCreateProjectAndSession(userId, project_id, session_id, is_new_project);

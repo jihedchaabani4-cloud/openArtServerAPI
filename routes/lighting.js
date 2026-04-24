@@ -2,8 +2,11 @@ import express from "express";
 import { lightingTreatment } from "../src/container.js";
 import { autoCreateProjectAndSession } from "../lib/helpers.js";
 import { normalizeImageModelName } from "../lib/modelRegistryKeys.js";
+import { requireAuth } from "../src/middleware/auth.js";
 
 const router = express.Router();
+
+router.use(requireAuth);
 
 /**
  * POST /api/lighting/change-lighting
@@ -27,7 +30,7 @@ router.post("/change-lighting", async (req, res) => {
             return res.status(400).json({ ok: false, message: "workflow_id is required" });
         }
 
-        const userId = req.user?.id || 'e54d7d5f-9c49-457d-83b7-ac8484bceb80';
+        const userId = req.user.id;
 
         // 1. Resolve Project and Session
         const { project_id: finalProjectId, session_id: finalSessionId } =

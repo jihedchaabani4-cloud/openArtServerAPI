@@ -28,7 +28,7 @@ export const generateV2 = async (req, res) => {
             return res.status(400).json({ ok: false, message: "Prompt is required" });
         }
 
-        const userId = req.user?.id || "e54d7d5f-9c49-457d-83b7-ac8484bceb80";
+        const userId = req.user.id;
         // 3. Resolve Project/Session
         const finalProjectId = project_id;
         const finalSessionId = session_id;

@@ -11,6 +11,23 @@ export const getAssets = async (req, res) => {
             return res.json({ ok: true, data: [] });
         }
 
+        const userId = req.user.id;
+
+        // Verify ownership
+        const { data: projectData, error: projectError } = await supabase
+            .from("project")
+            .select("user_id")
+            .eq("id", project_id)
+            .single();
+
+        if (projectError || !projectData) {
+            return res.status(404).json({ ok: false, message: "Project not found" });
+        }
+
+        if (projectData.user_id !== userId) {
+            return res.status(403).json({ ok: false, message: "Unauthorized access to this project" });
+        }
+
         let query = supabase
             .from("media")
             .select("id, url, width, height, step_id, workflow_id, create_time")

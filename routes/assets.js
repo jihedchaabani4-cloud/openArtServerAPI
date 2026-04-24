@@ -4,8 +4,11 @@ import { db, storageService } from "../src/container.js";
 import { extractMediaMetadata } from "../src/utils/MediaMetadataExtractor.js";
 import { supabase } from "../lib/supabase.js";
 import { createWorkflowWithMedia, markMediaStatus } from "../src/db/workflowMediaOps.js";
+import { requireAuth } from "../src/middleware/auth.js";
 
 const router = Router();
+
+router.use(requireAuth);
 
 // ─── Multer ────────────────────────────────────────────────────────────────
 const upload = multer({
@@ -84,13 +87,9 @@ function validateMedia(metadata, mime) {
 // ─── POST /api/assets/upload ───────────────────────────────────────────────
 router.post("/upload", upload.single("file"), async (req, res) => {
     try {
-        const userId    = req.user?.id || req.body?.user_id || "e54d7d5f-9c49-457d-83b7-ac8484bceb80";
+        const userId    = req.user.id;
         const projectId = req.body?.project_id || null;
-        const sessionId = req.body?.session_id  || null;
-
-        if (!sessionId) {
-            return res.status(400).json({ ok: false, error: "session_id is required for uploads" });
-        }
+        const sessionId = req.body?.session_id || null;
 
         let buffer, mime;
 

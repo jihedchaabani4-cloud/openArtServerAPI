@@ -11,10 +11,6 @@ import { assertMediaUsable } from "../lib/mediaGuards.js";
  * POST /api/images/generated/edit/existing
  *
  * Edits an existing workflow by generating a new media item and attaching it.
- * Supports:
- *  - Localized editing via mask_selection (Gemini bounding-box coords)
- *  - Upscale mode (via upscaleScale)
- *  - Full reference list (model uses them as context)
  */
 export const generateEdit = async (req, res) => {
     try {
@@ -44,7 +40,7 @@ export const generateEdit = async (req, res) => {
             return res.status(400).json({ ok: false, message: `Model "${model_name}" not found` });
         }
 
-        const userId = req.user?.id || "e54d7d5f-9c49-457d-83b7-ac8484bceb80";
+        const userId = req.user.id;
 
         const finalProjectId = project_id;
         const finalSessionId = session_id;
@@ -55,12 +51,6 @@ export const generateEdit = async (req, res) => {
             project_id: finalProjectId,
             session_id: finalSessionId,
         });
-
-        console.log(`\n📥 [EditImageController] Edit request received:`);
-        console.log(`   - Model:      ${model_name || "default"}`);
-        console.log(`   - Prompt:     "${prompt}"`);
-        console.log(`   - Workflow:   ${workflow_id}`);
-        console.log(`   - Ref WFs:    ${(reference_workflow_ids || []).length}`);
 
         const queued = await editImageTreatment.execute({
             prompt,

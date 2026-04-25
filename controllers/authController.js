@@ -187,7 +187,7 @@ export async function googleCallback(req, res) {
     setAuthCookies(res, session);
     await createProfile(user.id, { email: user.email });
 
-    return res.redirect(`${FRONTEND_URL}/projects`);
+    return res.redirect(`${FRONTEND_URL}/`);
   } catch (err) {
     console.error("[Auth] Google callback error:", err);
     return res.status(500).json({ error: "Internal server error." });

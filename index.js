@@ -3,33 +3,10 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
-import { createServer } from "http";
-import { initSocket } from "./websocket/socket.js";
+
 import apiRouter from "./src/api/routes.js";
 
 const app = express();
-const httpServer = createServer(app);
-
-// ── Initialize Services ──────────────────────────────────────
-initSocket(httpServer);
-
-// ── Graceful Shutdown ────────────────────────────────────────
-async function shutdown(signal) {
-    console.log(`\n[Server] ${signal} received. Shutting down gracefully...`);
-    try {
-        httpServer.close(() => {
-            console.log("[Server] HTTP server closed.");
-            process.exit(0);
-        });
-    } catch (err) {
-        console.error("[Server] Error during shutdown:", err);
-        process.exit(1);
-    }
-}
-
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT",  () => shutdown("SIGINT"));
-
 const PORT = process.env.PORT || 3001;
 
 // ── Middleware ──────────────────────────────────────────────
@@ -77,7 +54,7 @@ app.use((err, req, res, next) => {
 });
 
 // ── Start server ─────────────────────────────────────────────
-httpServer.listen(PORT, () => {
+app.listen(PORT, () => {
     console.log(`\n🚀 Open Art API running on http://localhost:${PORT}\n`);
 });
 

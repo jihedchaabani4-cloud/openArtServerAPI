@@ -1,41 +1,79 @@
-import { createClient } from "@supabase/supabase-js";
 import { supabase } from "#lib/supabase.js";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Config
-// ─────────────────────────────────────────────────────────────────────────────
-
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
-const BASE_URL     = process.env.BASE_URL     || "http://localhost:5000";
+const BASE_URL = process.env.BASE_URL || "http://localhost:5000";
 
 const COOKIE_OPTS = {
   httpOnly: true,
-  secure:   process.env.NODE_ENV === "production",
+  secure: process.env.NODE_ENV === "production",
   sameSite: "lax",
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Private helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
 function isValidEmail(email) {
   return typeof email === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 }
 
 function validateAuthInput(body = {}) {
-  const email    = typeof body.email    === "string" ? body.email.trim().toLowerCase() : "";
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   const password = typeof body.password === "string" ? body.password : "";
 
-  if (!isValidEmail(email))            return { error: "Valid email is required." };
-  if (!password || password.length < 6) return { error: "Password must be at least 6 characters long." };
+  if (!isValidEmail(email)) return { error: "Valid email is required." };
+  if (!password || password.length < 6) {
+    return { error: "Password must be at least 6 characters long." };
+  }
 
   return { email, password };
 }
 
-
 function setAuthCookies(res, session) {
-  res.cookie("access_token",  session.access_token,  COOKIE_OPTS);
+  res.cookie("access_token", session.access_token, COOKIE_OPTS);
   res.cookie("refresh_token", session.refresh_token, COOKIE_OPTS);
+}
+
+function clearAuthCookies(res) {
+  res.clearCookie("access_token", COOKIE_OPTS);
+  res.clearCookie("refresh_token", COOKIE_OPTS);
+}
+
+function mapSessionUser(user) {
+  if (!user) return null;
+
+  const meta = user.user_metadata || {};
+
+  return {
+    name: meta.full_name || meta.name || meta.user_name || user.email?.split("@")[0] || null,
+    email: user.email || null,
+    image: meta.avatar_url || meta.picture || null,
+  };
+}
+
+async function resolveUserFromCookies(req, res) {
+  const accessToken = req.cookies?.access_token;
+  const refreshToken = req.cookies?.refresh_token;
+
+  if (accessToken) {
+    const { data, error } = await supabase.auth.getUser(accessToken);
+    if (!error && data?.user) {
+      return data.user;
+    }
+  }
+
+  if (!refreshToken) {
+    clearAuthCookies(res);
+    return null;
+  }
+
+  const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession({
+    refresh_token: refreshToken,
+  });
+
+  if (refreshError || !refreshData?.session || !refreshData?.user) {
+    clearAuthCookies(res);
+    return null;
+  }
+
+  setAuthCookies(res, refreshData.session);
+  return refreshData.user;
 }
 
 async function createProfile(userId, extra = {}) {
@@ -46,14 +84,6 @@ async function createProfile(userId, extra = {}) {
   if (error) throw error;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Email / Password Controllers
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * POST /auth/signup
- * Body: { email, password }
- */
 export async function signup(req, res) {
   const { email, password, error } = validateAuthInput(req.body);
   if (error) return res.status(400).json({ error });
@@ -76,21 +106,14 @@ export async function signup(req, res) {
       });
     }
 
-    // Set secure httpOnly cookies
     setAuthCookies(res, data.session);
-
     return res.status(201).json({ user: { id: data.user.id } });
-
   } catch (err) {
     console.error("[Auth] Signup error:", err);
     return res.status(500).json({ error: "Internal server error." });
   }
 }
 
-/**
- * POST /auth/login
- * Body: { email, password }
- */
 export async function login(req, res) {
   const { email, password, error } = validateAuthInput(req.body);
   if (error) return res.status(400).json({ error });
@@ -104,25 +127,14 @@ export async function login(req, res) {
       return res.status(401).json({ error: "Invalid credentials." });
     }
 
-    // Set secure httpOnly cookies
     setAuthCookies(res, data.session);
-
     return res.status(200).json({ user: { id: data.user.id } });
-
   } catch (err) {
     console.error("[Auth] Login error:", err);
     return res.status(500).json({ error: "Internal server error." });
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Google OAuth Controllers
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * GET /auth/google
- * Redirects the user to Google's OAuth consent screen via Supabase.
- */
 export async function googleRedirect(req, res) {
   try {
     const { data, error } = await supabase.auth.signInWithOAuth({
@@ -135,42 +147,31 @@ export async function googleRedirect(req, res) {
     if (error) return res.status(500).json({ error: error.message });
 
     return res.redirect(data.url);
-
   } catch (err) {
     console.error("[Auth] Google redirect error:", err);
     return res.status(500).json({ error: "Internal server error." });
   }
 }
 
-/**
- * GET /auth/microsoft
- * Redirects the user to Microsoft's OAuth consent screen via Supabase.
- */
 export async function microsoftRedirect(req, res) {
   try {
     const { data, error } = await supabase.auth.signInWithOAuth({
-provider: "azure",
+      provider: "azure",
       options: {
         redirectTo: `${BASE_URL}/api/auth/callback`,
-        scopes: "openid profile email", // زيد openid
+        scopes: "openid profile email",
       },
     });
 
     if (error) return res.status(500).json({ error: error.message });
 
     return res.redirect(data.url);
-
   } catch (err) {
     console.error("[Auth] Microsoft redirect error:", err);
     return res.status(500).json({ error: "Internal server error." });
   }
 }
 
-/**
- * GET /auth/callback
- * Supabase redirects here after OAuth login (Google, Microsoft, etc.).
- * Exchanges the code for a session, sets httpOnly cookies, creates profile.
- */
 export async function googleCallback(req, res) {
   const { code } = req.query;
 
@@ -183,61 +184,36 @@ export async function googleCallback(req, res) {
 
     const { session, user } = data;
 
-    // Set secure httpOnly cookies
     setAuthCookies(res, session);
-
-    // Create or update profile (email from OAuth provider)
     await createProfile(user.id, { email: user.email });
 
     return res.redirect(`${FRONTEND_URL}/projects`);
-
   } catch (err) {
     console.error("[Auth] Google callback error:", err);
     return res.status(500).json({ error: "Internal server error." });
   }
 }
 
-/**
- * GET /auth/me
- * Returns the current user from the access_token cookie.
- */
 export async function getMe(req, res) {
-  const token = req.cookies?.access_token;
-
-  if (!token) return res.status(401).json({ error: "Unauthorized." });
-
   try {
-    const userClient = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_ANON_KEY,
-      { global: { headers: { Authorization: `Bearer ${token}` } } }
-    );
+    const user = await resolveUserFromCookies(req, res);
 
-    const { data, error } = await userClient.auth.getUser();
-
-    if (error || !data.user) {
-      return res.status(401).json({ error: "Invalid or expired token." });
+    if (!user) {
+      return res.status(200).json({ user: null });
     }
 
-    const user = data.user;
-
-    // 🔥 الحل هنا
     await createProfile(user.id, { email: user.email });
 
-    return res.status(200).json({ user });
-
+    return res.status(200).json({
+      user: mapSessionUser(user),
+    });
   } catch (err) {
     console.error("[Auth] getMe error:", err);
     return res.status(500).json({ error: "Internal server error." });
   }
 }
 
-/**
- * POST /auth/logout
- * Clears auth cookies.
- */
 export async function logout(req, res) {
-  res.clearCookie("access_token",  COOKIE_OPTS);
-  res.clearCookie("refresh_token", COOKIE_OPTS);
+  clearAuthCookies(res);
   return res.status(200).json({ message: "Logged out successfully." });
 }

@@ -91,6 +91,33 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         const projectId = req.body?.project_id || null;
         const sessionId = req.body?.session_id || null;
 
+        if (!projectId) {
+            return res.status(400).json({
+                ok: false,
+                error: "project_id is required for asset uploads.",
+            });
+        }
+
+        const { data: ownedProject, error: projectErr } = await supabase
+            .from("project")
+            .select("id, user_id")
+            .eq("id", projectId)
+            .single();
+
+        if (projectErr || !ownedProject) {
+            return res.status(404).json({
+                ok: false,
+                error: "Project not found.",
+            });
+        }
+
+        if (ownedProject.user_id !== userId) {
+            return res.status(403).json({
+                ok: false,
+                error: "You are not allowed to upload assets to this project.",
+            });
+        }
+
         let buffer, mime;
 
         if (req.file) {

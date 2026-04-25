@@ -123,6 +123,29 @@ const verifyMediaOwnership = async (mediaId, userId) => {
     return true;
 };
 
+const normalizeWorkflowIds = (input) => {
+    const values = Array.isArray(input) ? input : [input];
+    return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+};
+
+const verifyWorkflowOwnershipBulk = async (workflowIds, userId) => {
+    if (!workflowIds.length) return [];
+
+    const { data, error } = await supabase
+        .from("workflow")
+        .select("id, project:project!project_id(user_id)")
+        .in("id", workflowIds);
+
+    if (error) throw error;
+
+    const ownedIds = (data || [])
+        .filter((workflow) => workflow.project?.user_id === userId)
+        .map((workflow) => workflow.id);
+
+    if (ownedIds.length !== workflowIds.length) return null;
+    return ownedIds;
+};
+
 // ── PATCH /api/workflows/:id ────────────────────────────────────────────────────
 export const patchWorkflow = async (req, res) => {
     try {
@@ -221,6 +244,70 @@ export const deleteWorkflow = async (req, res) => {
     }
 };
 
+export const bulkDeleteWorkflows = async (req, res) => {
+    const userId = req.user.id;
+    const workflowIds = normalizeWorkflowIds(req.body?.workflow_ids);
+
+    if (!workflowIds.length) {
+        return res.status(400).json({ ok: false, message: "workflow_ids is required" });
+    }
+
+    try {
+        const ownedIds = await verifyWorkflowOwnershipBulk(workflowIds, userId);
+        if (!ownedIds) {
+            return res.status(403).json({ ok: false, message: "Unauthorized access to one or more workflows" });
+        }
+
+        res.json({
+            ok: true,
+            message: "Bulk deletion in progress",
+            workflow_ids: ownedIds,
+            count: ownedIds.length,
+        });
+
+        (async () => {
+            for (const workflowId of ownedIds) {
+                try {
+                    const { data: mediaItems } = await supabase
+                        .from("media")
+                        .select("id, url")
+                        .eq("workflow_id", workflowId);
+
+                    if (mediaItems?.length) {
+                        const mediaIds = mediaItems.map((m) => m.id);
+                        const filePaths = mediaItems
+                            .map((m) => extractPath(m.url))
+                            .filter(Boolean);
+
+                        await supabase
+                            .from("generation_config_reference")
+                            .delete()
+                            .in("ref_media_id", mediaIds);
+
+                        await supabase
+                            .from("media")
+                            .delete()
+                            .eq("workflow_id", workflowId);
+
+                        if (filePaths.length) {
+                            await storageService.deleteFiles(filePaths);
+                        }
+                    }
+
+                    await supabase
+                        .from("workflow")
+                        .delete()
+                        .eq("id", workflowId);
+                } catch (err) {
+                    console.error(`Bulk delete error for workflow ${workflowId}:`, err);
+                }
+            }
+        })();
+    } catch (err) {
+        return res.status(500).json({ ok: false, message: err.message });
+    }
+};
+
 // ── PATCH /api/workflows/:id/like ───────────────────────────────────────────────
 export const toggleLike = async (req, res) => {
     try {
@@ -255,6 +342,52 @@ export const toggleLike = async (req, res) => {
         return res.json({ ok: true, favorited: data.favorited });
     } catch (err) {
         console.error(`❌ Error toggling like for workflow ${req.params.id}:`, err);
+        return res.status(500).json({ ok: false, message: err.message });
+    }
+};
+
+export const bulkToggleLike = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const workflowIds = normalizeWorkflowIds(req.body?.workflow_ids);
+
+        if (!workflowIds.length) {
+            return res.status(400).json({ ok: false, message: "workflow_ids is required" });
+        }
+
+        const ownedIds = await verifyWorkflowOwnershipBulk(workflowIds, userId);
+        if (!ownedIds) {
+            return res.status(403).json({ ok: false, message: "Unauthorized access to one or more workflows" });
+        }
+
+        const { data: currentRows, error: getErr } = await supabase
+            .from("workflow")
+            .select("id, favorited")
+            .in("id", ownedIds);
+
+        if (getErr) throw getErr;
+
+        const explicitFavorited = req.body?.favorited;
+        const allCurrentlyFavorited = (currentRows || []).every((row) => !!row.favorited);
+        const nextFavorited = explicitFavorited === undefined ? !allCurrentlyFavorited : !!explicitFavorited;
+
+        const { data, error } = await supabase
+            .from("workflow")
+            .update({ favorited: nextFavorited })
+            .in("id", ownedIds)
+            .select("id, favorited");
+
+        if (error) throw error;
+
+        return res.json({
+            ok: true,
+            workflow_ids: ownedIds,
+            count: ownedIds.length,
+            favorited: nextFavorited,
+            workflows: data || [],
+        });
+    } catch (err) {
+        console.error("Bulk like error:", err);
         return res.status(500).json({ ok: false, message: err.message });
     }
 };

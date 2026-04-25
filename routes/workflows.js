@@ -9,24 +9,22 @@ const router = express.Router();
 
 router.use(requireAuth);
 
-// ── GET ─────────────────────────────────────────────────────
+router.get("/library", generationsQuery.getUserLibrary);
+router.get("/library/:workflow_id", generationsQuery.getLibraryWorkflowDetail);
 router.get("/assets/:project_id", generationsQuery.getAssets);
-
 router.get("/project-data/:project_id", projectController.getProjectData);
 router.get("/workflow-by-media/:media_id", workflowsController.getWorkflowByMedia);
 
-// Detach a media from its workflow into a brand-new workflow
 router.post("/detach-media", workflowsController.detachMediaToNewWorkflow);
 
-
-// ── PATCH (Update) ──────────────────────────────────────────
+router.patch("/workflows/like", workflowsController.bulkToggleLike);
+router.delete("/workflows", workflowsController.bulkDeleteWorkflows);
 router.patch("/workflows/:id", workflowsController.patchWorkflow);
 router.patch("/workflows/:id/move", workflowsController.moveWorkflow);
 router.patch("/workflows/:id/like", workflowsController.toggleLike);
 router.patch("/workflows/:id/primary-media", workflowsController.setPrimaryMedia);
 router.patch("/items/:id/like", generationsMutation.toggleLike);
 
-// ── DELETE ──────────────────────────────────────────────────
 router.delete("/workflows/:id", workflowsController.deleteWorkflow);
 router.delete("/:id", workflowsController.deleteWorkflow);
 router.delete("/items/:id", generationsMutation.deleteItem);

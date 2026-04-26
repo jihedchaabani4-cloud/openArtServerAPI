@@ -1,6 +1,7 @@
 import { PromptService } from "#services/PromptService.js";
 import { StorageService } from "#services/StorageService.js";
 import { VisionService } from "#services/VisionService.js";
+import { WalletService } from "#services/WalletService.js";
 
 // ─── Repositories ───────────────────────────────────────────────────────────
 import { ProjectRepository }          from "#db/ProjectRepository.js";
@@ -41,6 +42,16 @@ const groq   = new GroqProvider(process.env.GROQ_API_KEY);
 export const promptService  = new PromptService(groq);
 export const storageService = new StorageService();
 export const visionService  = new VisionService(groq);
+const walletServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || null;
+export const walletService  = process.env.SUPABASE_URL && walletServiceKey
+    ? new WalletService(process.env.SUPABASE_URL, walletServiceKey)
+    : null;
+
+if (walletService) {
+    console.log("[Container] WalletService initialized.");
+} else {
+    console.warn("[Container] WalletService disabled: missing SUPABASE_URL or service key.");
+}
 
 // ─── DB (new 7-table schema) ─────────────────────────────────────────────────
 export const db = {
@@ -69,25 +80,25 @@ export const editVideoTreatment = new EditVideoTreatment({
 
 
 export const imageTreatmentV2 = new ImageTreatmentV2({
-    promptService, models: IMAGE_MODELS, storageService, db
+    promptService, models: IMAGE_MODELS, storageService, db, walletService
 });
 
 
 
 export const editImageTreatment = new EditImageTreatment({
-    promptService, models: IMAGE_MODELS, storageService, db
+    promptService, models: IMAGE_MODELS, storageService, db, walletService
 });
 
 export const cameraTreatment = new CameraTreatment({
-    promptService, models: IMAGE_MODELS, storageService, db
+    promptService, models: IMAGE_MODELS, storageService, db, walletService
 });
 
 export const lightingTreatment = new LightingTreatment({
-    promptService, models: IMAGE_MODELS, storageService, db
+    promptService, models: IMAGE_MODELS, storageService, db, walletService
 });
 
 export const upscaleTreatment = new UpscaleTreatment({
-    storageService, db
+    storageService, db, walletService
 });
 
 export const dnaTreatment = new DnaTreatment({
@@ -95,5 +106,5 @@ export const dnaTreatment = new DnaTreatment({
 });
 
 export const elementSheetTreatment = new ElementSheetTreatment({
-    promptService, models: IMAGE_MODELS, storageService, db, dnaTreatment
+    promptService, models: IMAGE_MODELS, storageService, db, dnaTreatment, walletService
 });

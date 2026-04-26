@@ -35,6 +35,32 @@ export const IMAGE_MODEL_TYPES = {
     UPSCALE:   "upscale",
 };
 
+const DEFAULT_IMAGE_QUALITY_MULTIPLIERS = {
+    standard: 1,
+    hd: 1,
+    "1k": 1,
+    "2k": 1.5,
+    "4k": 2.5,
+};
+
+const DEFAULT_UPSCALE_SCALE_MULTIPLIERS = {
+    2: 1,
+    4: 1.8,
+};
+
+function normalizeQualityKey(quality = "standard") {
+    return String(quality || "standard").trim().toLowerCase();
+}
+
+function normalizeScaleKey(scale = 2) {
+    const parsed = Number(scale);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 2;
+}
+
+function roundCredits(value) {
+    return Math.max(0, Math.ceil(Number(value) || 0));
+}
+
 /**
  * IMAGE_ROUTES:
  *   [public_model_key]: {
@@ -49,7 +75,14 @@ export const IMAGE_MODEL_TYPES = {
  * To override a single variant: add an explicit entry below.
  */
 
-function fromRegistry(key, supportsEdit = false, supportsCamera = false, type = IMAGE_MODEL_TYPES.GENERATED, overrides = {}) {
+function fromRegistry(
+    key,
+    supportsEdit = false,
+    supportsCamera = false,
+    type = IMAGE_MODEL_TYPES.GENERATED,
+    pricing = {},
+    overrides = {}
+) {
     const group = ALL_REGISTRY_MODELS[key];
     if (!group) throw new Error(`[imageRouter] Model "${key}" not found in any registry`);
     return {
@@ -62,6 +95,14 @@ function fromRegistry(key, supportsEdit = false, supportsCamera = false, type = 
         open: true,
         supportsEdit,
         supportsCamera,
+        pricing: {
+            generatedBaseCredits: 10,
+            editBaseCredits: 10,
+            upscaleBaseCredits: 6,
+            qualityMultipliers: DEFAULT_IMAGE_QUALITY_MULTIPLIERS,
+            upscaleScaleMultipliers: DEFAULT_UPSCALE_SCALE_MULTIPLIERS,
+            ...pricing,
+        },
         ...overrides, // override specific variants here
     };
 }
@@ -69,9 +110,9 @@ function fromRegistry(key, supportsEdit = false, supportsCamera = false, type = 
 export const IMAGE_ROUTES = {
 
     // ── NanoBanana (wavespeed) ────────────────────────────────────────────────
-    "nanobana":     fromRegistry("nanobana_wavespeed"),
-    "nanobana2":    fromRegistry("nanobana2_wavespeed"),
-    "nanobana_pro": fromRegistry("nanobana_pro_wavespeed", true),
+    "nanobana":     fromRegistry("nanobana_wavespeed", false, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 8, editBaseCredits: 9 }),
+    "nanobana2":    fromRegistry("nanobana2_wavespeed", false, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 9, editBaseCredits: 10 }),
+    "nanobana_pro": fromRegistry("nanobana_pro_wavespeed", true, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 12, editBaseCredits: 14 }),
 
     // ── Nano Banana (google native) ───────────────────────────────────────────
     // "nanobana_2_0_google": fromRegistry("nanobana_2_0_google"),
@@ -80,28 +121,34 @@ export const IMAGE_ROUTES = {
     // "nanobana_pro_google": fromRegistry("nanobana_pro_google"),
 
     // ── Imagen 4 (google native) ─────────────────────────────────────────────
-    "imagen_4":       fromRegistry("imagen_4_google"),
-    "imagen_4_ultra": fromRegistry("imagen_4_ultra_google", true),
-    "imagen_4_fast":  fromRegistry("imagen_4_fast_google"),
+    "imagen_4":       fromRegistry("imagen_4_google", false, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 11, editBaseCredits: 12 }),
+    "imagen_4_ultra": fromRegistry("imagen_4_ultra_google", true, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 15, editBaseCredits: 17 }),
+    "imagen_4_fast":  fromRegistry("imagen_4_fast_google", false, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 8, editBaseCredits: 9 }),
 
     // ── SeaDream (wavespeed) ──────────────────────────────────────────────────
-    "seedream-standard": fromRegistry("seedream_standard_wavespeed"),
-    "seedream-pro":      fromRegistry("seedream_pro_wavespeed"),
+    "seedream-standard": fromRegistry("seedream_standard_wavespeed", false, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 9, editBaseCredits: 10 }),
+    "seedream-pro":      fromRegistry("seedream_pro_wavespeed", false, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 12, editBaseCredits: 14 }),
 
     // ── Z-Image (wavespeed) ───────────────────────────────────────────────────
-    "z_image":      fromRegistry("z_image_wavespeed"),
-    "z_image_base": fromRegistry("z_image_base_wavespeed"),
+    "z_image":      fromRegistry("z_image_wavespeed", false, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 10, editBaseCredits: 12 }),
+    "z_image_base": fromRegistry("z_image_base_wavespeed", false, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 7, editBaseCredits: 8 }),
 
 
 
 
 
     // ── RunwayML (wavespeed) ─────────────────────────────────────────────────
-    "runway_gen4_image":       fromRegistry("runway_gen4_image_wavespeed", true, true),
-    "runway_gen4_image_turbo": fromRegistry("runway_gen4_image_turbo_wavespeed", false, true),
+    "runway_gen4_image":       fromRegistry("runway_gen4_image_wavespeed", true, true, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 14, editBaseCredits: 16 }),
+    "runway_gen4_image_turbo": fromRegistry("runway_gen4_image_turbo_wavespeed", false, true, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 11, editBaseCredits: 13 }),
 
     // ── Topaz (replicate) ───────────────────────────────────────────────────
-    "topaz_image_upscale": fromRegistry("topaz_image_upscale", false, IMAGE_MODEL_TYPES.UPSCALE),
+    "topaz_image_upscale": fromRegistry(
+        "topaz_image_upscale",
+        false,
+        false,
+        IMAGE_MODEL_TYPES.UPSCALE,
+        { upscaleBaseCredits: 6, upscaleScaleMultipliers: { 2: 1, 4: 1.8, 6: 2.4 } }
+    ),
 };
 
 
@@ -140,6 +187,81 @@ export function getUpscaleModel(modelKey) {
         return route;
     }
     return null;
+}
+
+export function getImagePricing(modelKey) {
+    const route = IMAGE_ROUTES[modelKey];
+    return route?.pricing || null;
+}
+
+export function calculateImageCredits({
+    modelKey,
+    quality = "standard",
+    count = 1,
+    operation = "generated",
+}) {
+    const route = getImageModel(modelKey);
+    if (!route) {
+        throw new Error(`Image pricing route not found for model "${modelKey}"`);
+    }
+
+    const pricing = route.pricing || {};
+    const qualityKey = normalizeQualityKey(quality);
+    const quantity = Math.max(1, Number(count) || 1);
+    const baseCredits =
+        operation === "edit"
+            ? pricing.editBaseCredits
+            : pricing.generatedBaseCredits;
+    const qualityMultiplier =
+        pricing.qualityMultipliers?.[qualityKey] ??
+        DEFAULT_IMAGE_QUALITY_MULTIPLIERS[qualityKey] ??
+        1;
+
+    const credits = roundCredits(baseCredits * qualityMultiplier * quantity);
+
+    return {
+        credits,
+        pricingVersion: "image-router-v1",
+        breakdown: {
+            modelKey,
+            operation,
+            baseCredits,
+            quality: qualityKey,
+            qualityMultiplier,
+            count: quantity,
+        },
+    };
+}
+
+export function calculateUpscaleCredits({
+    modelKey,
+    upscaleScale = 2,
+}) {
+    const route = getUpscaleModel(modelKey);
+    if (!route) {
+        throw new Error(`Upscale pricing route not found for model "${modelKey}"`);
+    }
+
+    const pricing = route.pricing || {};
+    const scaleKey = normalizeScaleKey(upscaleScale);
+    const baseCredits = pricing.upscaleBaseCredits ?? 6;
+    const scaleMultiplier =
+        pricing.upscaleScaleMultipliers?.[scaleKey] ??
+        DEFAULT_UPSCALE_SCALE_MULTIPLIERS[scaleKey] ??
+        1;
+    const credits = roundCredits(baseCredits * scaleMultiplier);
+
+    return {
+        credits,
+        pricingVersion: "image-router-v1",
+        breakdown: {
+            modelKey,
+            operation: "upscale",
+            baseCredits,
+            upscaleScale: scaleKey,
+            scaleMultiplier,
+        },
+    };
 }
 
 /**

@@ -4,6 +4,7 @@ import {
   promptService,
   IMAGE_MODELS as models,
   dnaTreatment,
+  walletService,
 } from "../container.js";
 
 import { GenerateImageTreatment } from "#image/treatments/extendtretment/GenerateImageTreatment.js";
@@ -22,6 +23,7 @@ export const treatmentDeps = {
   promptService,
   models,
   dnaTreatment,
+  walletService,
 };
 
 export function createTreatmentRegistry(deps = treatmentDeps) {

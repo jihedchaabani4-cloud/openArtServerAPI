@@ -66,6 +66,12 @@ export const generateV2 = async (req, res) => {
 
     } catch (error) {
         console.error("❌ [ImageController] generateV2 error:", error);
+        if (error?.name === "WalletError") {
+            const status =
+                error.code === "INSUFFICIENT_FUNDS" || error.code === "WALLET_NOT_FOUND" ? 400 :
+                error.code === "DUPLICATE_TRANSACTION" ? 409 : 500;
+            return res.status(status).json({ ok: false, code: error.code, message: error.message });
+        }
         res.status(500).json({ ok: false, message: error.message });
     }
 };

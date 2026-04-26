@@ -215,8 +215,8 @@ No introductions. No explanations. No bullet points.
 
 export class ElementSheetTreatment extends BaseGenerateImageTreatment {
 
-  constructor({ promptService, models, storageService, db, dnaTreatment }) {
-    super({ promptService, models, storageService, db });
+  constructor({ promptService, models, storageService, db, dnaTreatment, walletService = null }) {
+    super({ promptService, models, storageService, db, walletService });
     this.dnaTreatment = dnaTreatment;
     this.refProcessor = new ReferenceProcessor({ storageService, db });
   }

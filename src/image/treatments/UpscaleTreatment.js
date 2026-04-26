@@ -1,13 +1,14 @@
 import { ReferenceProcessor } from "#utils/ReferenceProcessor.js";
-import { getUpscaleModel } from "#image/core/modelRouter.js";
+import { calculateUpscaleCredits, getUpscaleModel } from "#image/core/modelRouter.js";
 import { getUpscaleRunner as getVideoUpscaleRunner } from "#video/core/modelRouter.js";
 import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "#db/workflowMediaOps.js";
 import { enqueueTreatmentJob } from "#queue/treatmentJob.js";
 
 export class UpscaleTreatment {
-    constructor({ storageService, db }) {
+    constructor({ storageService, db, walletService = null }) {
         this.storageService = storageService;
         this.db = db;
+        this.walletService = walletService;
         this.refProcessor = new ReferenceProcessor({ storageService, db });
     }
 
@@ -98,7 +99,25 @@ export class UpscaleTreatment {
     }
 
     async runJob(task) {
-        return this.run(task);
+        try {
+            const result = await this.run(task);
+
+            if (this.walletService && task.walletReferenceId) {
+                await this.walletService.commit(task.walletReferenceId);
+            }
+
+            return result;
+        } catch (error) {
+            if (this.walletService && task.walletReferenceId) {
+                try {
+                    await this.walletService.rollback(task.walletReferenceId);
+                } catch (walletError) {
+                    console.error(`[UpscaleTreatment] wallet rollback failed for ${task.walletReferenceId}: ${walletError.message}`);
+                }
+            }
+
+            throw error;
+        }
     }
 
     async run(task) {
@@ -165,8 +184,71 @@ export class UpscaleTreatment {
     }
 
     async execute(input) {
-        const task = await this.prepare(input);
-        const job = await enqueueTreatmentJob(this.getQueueType(), task);
+        let task;
+        try {
+            task = await this.prepare(input);
+        } catch (error) {
+            throw error;
+        }
+
+        const shouldHoldCredits =
+            !!this.walletService &&
+            !!(input?.userId || input?.user_id) &&
+            !!task?.configId &&
+            Number.isFinite(this.imageHoldAmountPerAsset) &&
+            this.imageHoldAmountPerAsset > 0;
+
+        let walletReferenceId = null;
+        let holdAmount = 0;
+
+        if (shouldHoldCredits) {
+            walletReferenceId = task.configId;
+            const pricing = calculateUpscaleCredits({
+                modelKey: task?.model_name || "topaz_image_upscale",
+                upscaleScale: task?.upscaleScale || input?.upscaleScale || 2,
+            });
+            holdAmount = pricing.credits;
+
+            await this.walletService.hold({
+                userId: input.userId || input.user_id,
+                amount: holdAmount,
+                referenceId: walletReferenceId,
+                metadata: {
+                    treatment: this.getQueueType(),
+                    media_id: task?.media_id || input?.media_id || null,
+                    project_id: task?.project_id || input?.project_id || null,
+                    session_id: task?.session_id || input?.session_id || null,
+                    workflow_id: task?.workflows?.[0]?.id || input?.workflow_id || null,
+                    upscaleScale: task?.upscaleScale || input?.upscaleScale || null,
+                    pricingVersion: pricing.pricingVersion,
+                    pricingBreakdown: pricing.breakdown,
+                },
+            });
+        }
+
+        if (walletReferenceId) {
+            task.walletReferenceId = walletReferenceId;
+            task.walletHoldAmount = holdAmount;
+        }
+
+        let job;
+        try {
+            job = await enqueueTreatmentJob(
+                this.getQueueType(),
+                task,
+                walletReferenceId ? { jobId: walletReferenceId } : {}
+            );
+        } catch (error) {
+            if (this.walletService && walletReferenceId) {
+                try {
+                    await this.walletService.rollback(walletReferenceId);
+                } catch (walletError) {
+                    console.error(`[UpscaleTreatment] wallet rollback after enqueue failure failed for ${walletReferenceId}: ${walletError.message}`);
+                }
+            }
+            throw error;
+        }
+
         return {
             jobId: job.id,
             configId: task.configId,

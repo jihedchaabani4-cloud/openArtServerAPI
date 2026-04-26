@@ -20,9 +20,7 @@ export function getStandardSize(ratio = "1:1", quality = "2K") {
     const dims  = base[ratio] || base["1:1"];
     const scale = scaleMap[String(quality).toUpperCase()] ?? 1.0;
 
-    // snap to multiple of 16 + clamp to 4096 max (if 8K is used) or 2048 as before
-    // Given the new scaleMap (1, 2, 4), 1024*4 = 4096. 
-    // I will increase the clamp to 8192 if needed, but for now 4096 fits 4K.
+    // snap to multiple of 64 (standard for modern models like Flux/Turbo) + clamp
     const maxDim = scale >= 8 ? 8192 : (scale >= 4 ? 4096 : 2048);
     let targetW = dims.width * scale;
     let targetH = dims.height * scale;
@@ -34,11 +32,43 @@ export function getStandardSize(ratio = "1:1", quality = "2K") {
         targetH *= factor;
     }
 
-    const snap = (v) => Math.min(maxDim, Math.round(v / 16) * 16);
+    const snap = (v) => Math.min(maxDim, Math.round(v / 64) * 64);
     const width  = snap(targetW);
     const height = snap(targetH);
 
     return { width, height, size: `${width}*${height}` };
+}
+
+export function normalizeImageSizeForModel(modelName = "", size = {}) {
+    const rawWidth = Number(size?.width || 1024);
+    const rawHeight = Number(size?.height || 1024);
+    const name = String(modelName || "").toLowerCase();
+
+    if (name.includes("z-image") || name.includes("z_image")) {
+        const maxDim = 1536;
+        const snap = (v) => Math.max(512, Math.min(maxDim, Math.round(v / 32) * 32));
+
+        let width = rawWidth;
+        let height = rawHeight;
+        const currentMax = Math.max(width, height);
+
+        if (currentMax > maxDim) {
+            const factor = maxDim / currentMax;
+            width *= factor;
+            height *= factor;
+        }
+
+        width = snap(width);
+        height = snap(height);
+
+        return { width, height, size: `${width}*${height}` };
+    }
+
+    return {
+        width: rawWidth,
+        height: rawHeight,
+        size: `${rawWidth}*${rawHeight}`,
+    };
 }
 
 /**

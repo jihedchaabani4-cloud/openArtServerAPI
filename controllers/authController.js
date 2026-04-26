@@ -1,4 +1,5 @@
 import { supabase } from "#lib/supabase.js";
+import { walletService } from "#container.js";
 
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 const BASE_URL = process.env.BASE_URL || "http://localhost:5000";
@@ -8,6 +9,12 @@ const COOKIE_OPTS = {
   secure: process.env.NODE_ENV === "production",
   sameSite: "lax",
 };
+
+const INITIAL_ACCOUNT_CREDITS = Number(
+  process.env.INITIAL_WALLET_BALANCE ||
+  process.env.DEFAULT_WALLET_BALANCE ||
+  100
+);
 
 function isValidEmail(email) {
   return typeof email === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
@@ -77,11 +84,27 @@ async function resolveUserFromCookies(req, res) {
 }
 
 async function createProfile(userId, extra = {}) {
+  const { data: existingProfile, error: existingProfileError } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (existingProfileError) throw existingProfileError;
+  if (existingProfile) return existingProfile;
+
   const { error } = await supabase
     .from("profiles")
-    .upsert({ id: userId, credits: 0, ...extra }, { onConflict: "id" });
+    .insert({ id: userId, credits: INITIAL_ACCOUNT_CREDITS, ...extra });
 
   if (error) throw error;
+}
+
+async function ensureUserAccount(userId, extra = {}) {
+  await Promise.all([
+    createProfile(userId, extra),
+    walletService?.ensureWallet(userId) ?? Promise.resolve(null),
+  ]);
 }
 
 export async function signup(req, res) {
@@ -97,7 +120,7 @@ export async function signup(req, res) {
       return res.status(500).json({ error: "Signup succeeded but no user was returned." });
     }
 
-    await createProfile(data.user.id);
+    await ensureUserAccount(data.user.id);
 
     if (!data.session) {
       return res.status(201).json({
@@ -185,7 +208,7 @@ export async function googleCallback(req, res) {
     const { session, user } = data;
 
     setAuthCookies(res, session);
-    await createProfile(user.id, { email: user.email });
+    await ensureUserAccount(user.id, { email: user.email });
 
     return res.redirect(`${FRONTEND_URL}/`);
   } catch (err) {
@@ -202,7 +225,7 @@ export async function getMe(req, res) {
       return res.status(200).json({ user: null });
     }
 
-    await createProfile(user.id, { email: user.email });
+    await ensureUserAccount(user.id, { email: user.email });
 
     return res.status(200).json({
       user: mapSessionUser(user),

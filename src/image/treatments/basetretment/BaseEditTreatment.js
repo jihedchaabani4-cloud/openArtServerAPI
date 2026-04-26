@@ -1,15 +1,16 @@
 import { getStandardSize } from "#utils/sizeUtils.js";
-import { getImageModel, ROUTED_IMAGE_MODELS } from "#image/core/modelRouter.js";
+import { calculateImageCredits, getImageModel, ROUTED_IMAGE_MODELS } from "#image/core/modelRouter.js";
 import { verifyAndClampParams } from "../../utils/treatmentUtils.js";
 import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "#db/workflowMediaOps.js";
 import { enqueueTreatmentJob } from "#queue/treatmentJob.js";
 
 export class BaseEditTreatment {
-  constructor({ promptService, models, storageService, db }) {
+  constructor({ promptService, models, storageService, db, walletService = null }) {
     this.promptService  = promptService;
     this.models         = models;
     this.storageService = storageService;
     this.db             = db;
+    this.walletService  = walletService;
   }
 
   // ─────────────────────────────────────────────────────────
@@ -146,12 +147,30 @@ export class BaseEditTreatment {
   // 🔥 RUN JOB (Orchestrator)
   // ─────────────────────────────────────────────────────────
   async runJob(task) {
-    const optimized = await this.optimizePrompt(task);
-    return this.run({
-      ...task,
-      enhanced_prompt: optimized.finalPrompt,
-      enhanced_negative: optimized.finalNegative
-    });
+    try {
+      const optimized = await this.optimizePrompt(task);
+      const result = await this.run({
+        ...task,
+        enhanced_prompt: optimized.finalPrompt,
+        enhanced_negative: optimized.finalNegative
+      });
+
+      if (this.walletService && task.walletReferenceId) {
+        await this.walletService.commit(task.walletReferenceId);
+      }
+
+      return result;
+    } catch (error) {
+      if (this.walletService && task.walletReferenceId) {
+        try {
+          await this.walletService.rollback(task.walletReferenceId);
+        } catch (walletError) {
+          console.error(`[${this.constructor.name}] wallet rollback failed for ${task.walletReferenceId}: ${walletError.message}`);
+        }
+      }
+
+      throw error;
+    }
   }
 
   // ─────────────────────────────────────────────────────────
@@ -281,8 +300,72 @@ export class BaseEditTreatment {
   }
 
   async execute(input) {
-    const task = await this.prepare(input);
-    const job = await enqueueTreatmentJob(this.getQueueType(), task);
+    let task;
+    try {
+      task = await this.prepare(input);
+    } catch (error) {
+      throw error;
+    }
+
+    const shouldHoldCredits =
+      !!this.walletService &&
+      !!(input?.userId || input?.user_id) &&
+      !!task?.configId &&
+      Number.isFinite(this.imageHoldAmountPerAsset) &&
+      this.imageHoldAmountPerAsset > 0;
+
+    let walletReferenceId = null;
+    let holdAmount = 0;
+
+    if (shouldHoldCredits) {
+      walletReferenceId = task.configId;
+      const pricing = calculateImageCredits({
+        modelKey: task?.model_name || input?.model_name,
+        quality: task?.quality || input?.quality || "standard",
+        count: 1,
+        operation: "edit",
+      });
+      holdAmount = pricing.credits;
+
+      await this.walletService.hold({
+        userId: input.userId || input.user_id,
+        amount: holdAmount,
+        referenceId: walletReferenceId,
+        metadata: {
+          treatment: this.getQueueType(),
+          model_name: task?.model_name || input?.model_name || null,
+          prompt: task?.prompt || input?.prompt || null,
+          project_id: task?.project_id || input?.project_id || null,
+          session_id: task?.session_id || input?.session_id || null,
+          workflow_id: task?.workflow?.id || input?.workflow_id || null,
+          pricingVersion: pricing.pricingVersion,
+          pricingBreakdown: pricing.breakdown,
+        },
+      });
+    }
+
+    if (walletReferenceId) {
+      task.walletReferenceId = walletReferenceId;
+      task.walletHoldAmount = holdAmount;
+    }
+
+    let job;
+    try {
+      job = await enqueueTreatmentJob(
+        this.getQueueType(),
+        task,
+        walletReferenceId ? { jobId: walletReferenceId } : {}
+      );
+    } catch (error) {
+      if (this.walletService && walletReferenceId) {
+        try {
+          await this.walletService.rollback(walletReferenceId);
+        } catch (walletError) {
+          console.error(`[${this.constructor.name}] wallet rollback after enqueue failure failed for ${walletReferenceId}: ${walletError.message}`);
+        }
+      }
+      throw error;
+    }
 
     return {
       jobId: job.id,

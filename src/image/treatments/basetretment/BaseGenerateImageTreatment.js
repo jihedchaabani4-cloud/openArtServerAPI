@@ -31,19 +31,21 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import { getStandardSize }                                          from "#utils/sizeUtils.js";
+import { getStandardSize, normalizeImageSizeForModel }              from "#utils/sizeUtils.js";
 import { verifyAndClampParams }                                     from "../../utils/treatmentUtils.js";
 import { resolveProvider, buildProviderPayload, extractOutputUrl }  from "./providerStrategy.js";
 import { appendMediaToWorkflow, markMediaStatus, markMediaFailed }  from "#db/workflowMediaOps.js";
 import { enqueueTreatmentJob }                                      from "#queue/treatmentJob.js";
+import { calculateImageCredits }                                    from "#image/core/modelRouter.js";
 
 export class BaseGenerateImageTreatment {
 
-  constructor({ promptService, models, storageService, db }) {
+  constructor({ promptService, models, storageService, db, walletService = null }) {
     this.promptService  = promptService;
     this.models         = models;
     this.storageService = storageService;
     this.db             = db;
+    this.walletService  = walletService;
   }
 
   // ─────────────────────────────────────────────────────────
@@ -169,7 +171,8 @@ export class BaseGenerateImageTreatment {
     const verified  = verifyAndClampParams(provider, { steps, guidance_scale, ratio, quality, count });
 
     // ── 3. Compute pixel dimensions ───────────────────────────────────────
-    const sizeInfo = this._getStandardSize(verified.ratio, verified.quality);
+    const rawSizeInfo = this._getStandardSize(verified.ratio, verified.quality);
+    const sizeInfo = normalizeImageSizeForModel(model_name, rawSizeInfo);
 
     // ── 4. Generation type ────────────────────────────────────────────────
     const generation_type = input_assets.length > 0 ? "TEXT_REFERENCES" : "TEXT_ONLY";
@@ -427,13 +430,96 @@ export class BaseGenerateImageTreatment {
   }
 
   async runJob(task) {
-    const optimized = await this.optimizePrompt(task);
-    return this.run(task, optimized);
+    try {
+      const optimized = await this.optimizePrompt(task);
+      const result = await this.run(task, optimized);
+
+      if (this.walletService && task.walletReferenceId) {
+        await this.walletService.commit(task.walletReferenceId);
+      }
+
+      return result;
+    } catch (error) {
+      if (this.walletService && task.walletReferenceId) {
+        try {
+          await this.walletService.rollback(task.walletReferenceId);
+        } catch (walletError) {
+          this._log("error", `wallet rollback failed for ${task.walletReferenceId}: ${walletError.message}`);
+        }
+      }
+
+      throw error;
+    }
   }
 
   async execute(input) {
-    const task = await this.prepare(input);
-    const job = await enqueueTreatmentJob(this.getQueueType(), task);
+    let task;
+    try {
+      task = await this.prepare(input);
+    } catch (error) {
+      throw error;
+    }
+
+    const shouldHoldCredits =
+      !!this.walletService &&
+      !!(input?.userId || input?.user_id) &&
+      !!task?.configId &&
+      Number.isFinite(this.imageHoldAmountPerAsset) &&
+      this.imageHoldAmountPerAsset > 0;
+
+    let walletReferenceId = null;
+    let holdAmount = 0;
+
+    if (shouldHoldCredits) {
+      walletReferenceId = task.configId;
+      const requestedCount = Math.max(1, Number(task?.count || input?.count || input?.num_images || 1));
+      const pricing = calculateImageCredits({
+        modelKey: task?.model_name || input?.model_name,
+        quality: task?.quality || input?.quality || "standard",
+        count: requestedCount,
+        operation: "generated",
+      });
+      holdAmount = pricing.credits;
+
+      await this.walletService.hold({
+        userId: input.userId || input.user_id,
+        amount: holdAmount,
+        referenceId: walletReferenceId,
+        metadata: {
+          treatment: this.getQueueType(),
+          model_name: task?.model_name || input?.model_name || null,
+          prompt: task?.prompt || input?.prompt || null,
+          count: requestedCount,
+          project_id: task?.project_id || input?.project_id || null,
+          session_id: task?.session_id || input?.session_id || null,
+          pricingVersion: pricing.pricingVersion,
+          pricingBreakdown: pricing.breakdown,
+        },
+      });
+    }
+
+    if (walletReferenceId) {
+      task.walletReferenceId = walletReferenceId;
+      task.walletHoldAmount = holdAmount;
+    }
+
+    let job;
+    try {
+      job = await enqueueTreatmentJob(
+        this.getQueueType(),
+        task,
+        walletReferenceId ? { jobId: walletReferenceId } : {}
+      );
+    } catch (error) {
+      if (this.walletService && walletReferenceId) {
+        try {
+          await this.walletService.rollback(walletReferenceId);
+        } catch (walletError) {
+          this._log("error", `wallet rollback after enqueue failure failed for ${walletReferenceId}: ${walletError.message}`);
+        }
+      }
+      throw error;
+    }
 
     return {
       jobId: job.id,

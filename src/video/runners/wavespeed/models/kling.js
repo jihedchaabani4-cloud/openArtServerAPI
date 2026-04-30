@@ -28,9 +28,18 @@ class ModelFamily extends WavespeedVideoRunner {
         const allCaps = new Set();
         const allModes = new Set();
         let maxRefs = 0;
+        
         Object.values(variants).forEach(v => {
-            v.caps.forEach(c => allCaps.add(c));
-            v.modes.forEach(m => allModes.add(m));
+            if (v.caps) {
+                v.caps.forEach(c => allCaps.add(c));
+            } else if (v.capabilities) {
+                v.capabilities.forEach(c => allCaps.add(c));
+            }
+            
+            if (v.modes) {
+                v.modes.forEach(m => allModes.add(m));
+            }
+            
             if (v.maxReferences > maxRefs) maxRefs = v.maxReferences;
         });
 
@@ -45,23 +54,41 @@ class ModelFamily extends WavespeedVideoRunner {
             variants,
             ...metaOverrides
         });
+        
+        // Explicitly set variants to be absolutely sure
+        this.variants = variants;
     }
 
     adapt(form, mode) {
-        const m = mode || "t2v"; // fallback
-        const runner = this.variants[m] || Object.values(this.variants)[0];
+        const m = mode || "t2v";
+        const variants = this.variants || {};
+        const runner = variants[m] || Object.values(variants)[0];
+        if (!runner) throw new Error(`[ModelFamily] No runner found for mode: ${m}`);
         return runner.adapt(form);
     }
 
     toPayload(adapted, mode) {
         const m = mode || "t2v";
-        const runner = this.variants[m] || Object.values(this.variants)[0];
+        const variants = this.variants || {};
+        const runner = variants[m] || Object.values(variants)[0];
+        if (!runner) throw new Error(`[ModelFamily] No runner found for mode: ${m}`);
         return runner.toPayload(adapted);
     }
 
     async generate(adapted, mode) {
         const m = mode || "t2v";
-        const runner = this.variants[m] || Object.values(this.variants)[0];
+        console.log(`🚀 [ModelFamily] generate | Mode: ${m} | HasVariants: ${!!this.variants}`);
+        
+        const variants = this.variants || {};
+        const runner = variants[m] || Object.values(variants)[0];
+        
+        if (!runner) {
+            console.error(`❌ [ModelFamily] No runner found for mode: ${m}`, {
+                availableModes: Object.keys(variants),
+                thisKeys: Object.keys(this)
+            });
+            throw new Error(`[ModelFamily] No runner found for mode: ${m}`);
+        }
         return runner.generate(adapted, m);
     }
 }
@@ -419,48 +446,7 @@ class BaseO3V2v extends WavespeedVideoRunner {
     }
 }
 
-// ─── Unique Class ─────────────────────────────────────────────────────────────
-class KlingV21ProStartEnd extends WavespeedVideoRunner {
-    constructor() {
-        super({
-            modelName:      "kwaivgi/kling-v2.1-i2v-pro-start-end-frame",
-            provider:       "wavespeed",
-            type:           "i2v",
-            maxReferences:  2,
-            capabilities:   [CAPS.TEXT, CAPS.IMAGE, CAPS.END_IMAGE, CAPS.OUTPUTS_VIDEO],
-            displayName:    "Kling v2.1 Pro Keyframes",
-            description:    "Precise start-to-end keyframe controlled generation",
-            category:       "video",
-            tier:           "pro",
-            modes:          ["i2v_se"],
-            pricing:        { "5s": 0.35, "10s": 0.70 },
-            tags:           ["keyframes", "start-end", "precise"],
-            minDuration:    5,
-            maxDuration:    10,
-        });
-    }
-    adapt(form) {
-        const refs = form.references || [];
-        return {
-            prompt:   form.prompt,
-            ratio:    form.ratio,
-            resolution: form.resolution,
-            duration: parseFloat(form.duration) || 5,
-            image:    form.image || form.image_base64 || refs.find(r => r.role === "start" || r.role === "normal")?.url || null,
-            endImage: refs.find(r => r.role === "end")?.url || null,
-        };
-    }
-    toPayload({ prompt, image, endImage, ratio, resolution, duration }) {
-        return {
-            prompt:       prompt || "",
-            image,
-            end_image:    endImage,
-            aspect_ratio: ratio    || "16:9",
-            duration:     duration || 5,
-            ...(resolution !== undefined && { resolution }),
-        };
-    }
-}
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // EXPORTS
@@ -482,8 +468,7 @@ const v26ProT2v    = new BaseSimpleT2v({ modelName: "kwaivgi/kling-v2.6-pro/text
 const v26ProI2v    = new BaseRichI2v  ({ modelName: "kwaivgi/kling-v2.6-pro/image-to-video",   displayName: "Kling v2.6 Pro", tier: "pro", pricing: V2P_PRICING, hidden: true });
 const v26ProMotion = new BaseMotion   ({ modelName: "kwaivgi/kling-v2.6-pro/motion-control",         displayName: "Kling v2.6 Pro", tier: "pro", pricing: V2P_PRICING, hidden: true });
 
-const v21ProStartEndInternal = new KlingV21ProStartEnd();
-v21ProStartEndInternal.hidden = true;
+
 
 const v3StdT2v    = new BaseV3T2v({ modelName: "kwaivgi/kling-v3.0-std/text-to-video",             displayName: "Kling v3.0",     tier: "std", pricing: V3_PRICING, hidden: true  });
 const v3StdI2v    = new BaseV3I2v({ modelName: "kwaivgi/kling-v3.0-std/image-to-video",            displayName: "Kling v3.0",     tier: "std", pricing: V3_PRICING, hidden: true  });
@@ -520,9 +505,7 @@ export const v26Pro = new ModelFamily("Kling v2.6 Pro", {
     "v2v":    v26ProMotion
 }, { pricing: V2P_PRICING, tier: "pro" });
 
-export const v21ProStartEnd = new ModelFamily("Kling v2.1 Pro Keyframes", {
-    "i2v_se": v21ProStartEndInternal
-}, { pricing: V2P_PRICING, tier: "pro" });
+
 
 export const v3Std = new ModelFamily("Kling v3.0", {
     "t2v":    v3StdT2v,
@@ -560,7 +543,7 @@ export const o3Pro = new ModelFamily("Kling O3 Pro", {
 export {
     v26StdT2v, v26StdI2v, v26StdMotion,
     v26ProT2v, v26ProI2v, v26ProMotion,
-    v21ProStartEndInternal,
+
     v3StdT2v, v3StdI2v, v3StdMotion,
     v3ProT2v, v3ProI2v, v3ProMotion,
     o3StdT2v_int, o3StdI2v_int, o3StdR2v_int, o3StdV2v_int,

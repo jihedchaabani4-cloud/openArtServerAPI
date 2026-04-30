@@ -4,7 +4,7 @@
  */
 
 import {
-    v26Std, v26Pro, v21ProStartEnd,
+    v26Std, v26Pro,
     v3Std, v3Pro, o3Std, o3Pro
 } from "./models/kling.js";
 
@@ -35,12 +35,7 @@ export const MODELS = {
         _default: v26Pro,
     },
     
-    // ── Kling v2.1 ───────────────────────────────────────────────────────────
-    "kling_v21_pro_wavespeed": {
-        i2v_se:   v21ProStartEnd,
-        _default: v21ProStartEnd,
-    },
-    
+
     // ── Kling v3.0 ───────────────────────────────────────────────────────────
     "kling_v3_wavespeed": {
         t2v:      v3Std,
@@ -121,7 +116,7 @@ export const MODEL_INFO = {
         support: {
             ratio:    [{ value: "16:9" }, { value: "9:16" }, { value: "1:1" }],
             duration: { min: 5, max: 10, step: 5, unit: "s" },
-            frames:   { startFrame: true, endFrame: false },
+            frames:   { startFrame: true, endFrame: true },
             references: { min: 0, max: 1 },
             camera_control: true,
         },
@@ -139,18 +134,7 @@ export const MODEL_INFO = {
             camera_control: true,
         },
     },
-    "kling_v21_pro_wavespeed": {
-        displayName:    "Kling v2.1 Pro Keyframes (Wavespeed)",
-        provider:       "wavespeed",
-        supportedModes: ["i2v_se"],
-        pricing:        { "5s": 0.28, "10s": 0.56 },
-        support: {
-            ratio:    [{ value: "16:9" }, { value: "9:16" }, { value: "1:1" }],
-            duration: { min: 5, max: 10, step: 5, unit: "s" },
-            frames:   { startFrame: true, endFrame: true },
-            references: { min: 2, max: 2 },
-        },
-    },
+
     "kling_v3_wavespeed": {
         displayName:    "Kling v3.0 (Wavespeed)",
         provider:       "wavespeed",

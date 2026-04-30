@@ -30,7 +30,6 @@ export class UpscaleTreatment {
         let { media_id } = input;
 
         if (!project_id) throw new Error("project_id required");
-        if (!session_id) throw new Error("session_id required");
 
         // ── Resolve Source Media ─────────────────────────────────────────────
         let sourceMedia = null;
@@ -82,8 +81,10 @@ export class UpscaleTreatment {
             mediaData: {
                 project_id,
                 generation_config_id: config.id,
-                step_id: isVideo ? "VID" : "CAE",
+                step_id: "UP",
                 url: null,
+                width: sourceMedia?.width || 1024,
+                height: sourceMedia?.height || 1024,
             },
             initialStatus: "processing",
         });

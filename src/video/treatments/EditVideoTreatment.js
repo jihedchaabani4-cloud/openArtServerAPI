@@ -92,7 +92,7 @@ export class EditVideoTreatment {
         await this.db.configs.createReference({
             generation_config_id: config.id,
             position: 0,
-            input_type: "VIDEO_INPUT_TYPE_BASE_VIDEO",
+            input_type: "IMAGE_INPUT_TYPE_BASE_IMAGE",
             ref_media_id: vMedia.id
         });
 
@@ -114,7 +114,7 @@ export class EditVideoTreatment {
             mediaData: { 
                 project_id, 
                 generation_config_id: config.id, 
-                step_id: "CAE",
+                step_id: "VID",
                 width:  vMedia?.width  || 1280,
                 height: vMedia?.height || 720
             },

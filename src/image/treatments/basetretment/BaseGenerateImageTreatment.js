@@ -46,6 +46,7 @@ export class BaseGenerateImageTreatment {
     this.storageService = storageService;
     this.db             = db;
     this.walletService  = walletService;
+    this.imageHoldAmountPerAsset = Number(process.env.IMAGE_GENERATION_HOLD_AMOUNT || 10);
   }
 
   // ─────────────────────────────────────────────────────────
@@ -189,6 +190,19 @@ export class BaseGenerateImageTreatment {
       aspect_ratio:    verified.ratio || "LANDSCAPE",
       generation_type,
     });
+
+    await Promise.all(
+      (input_assets || [])
+        .filter((asset) => asset?.media_id)
+        .map((asset, index) =>
+          this.db.configs.createReference({
+            generation_config_id: config.id,
+            position: index,
+            input_type: asset.is_base ? "IMAGE_INPUT_TYPE_BASE_IMAGE" : "IMAGE_INPUT_TYPE_REFERENCE",
+            ref_media_id: asset.media_id,
+          })
+        )
+    );
 
     // ── 6. Batch (only when count > 1) ────────────────────────────────────
     let batch = null;
@@ -413,6 +427,19 @@ export class BaseGenerateImageTreatment {
         seed:            result.seed ?? seed ?? null,
       });
 
+      await Promise.all(
+        (input_assets || [])
+          .filter((asset) => asset?.media_id)
+          .map((asset, index) =>
+            this.db.configs.createReference({
+              generation_config_id: mediaConfig.id,
+              position: index,
+              input_type: asset.is_base ? "IMAGE_INPUT_TYPE_BASE_IMAGE" : "IMAGE_INPUT_TYPE_REFERENCE",
+              ref_media_id: asset.media_id,
+            })
+          )
+      );
+
       await this.db.media.updateFields(mediaId, {
         generation_config_id: mediaConfig.id,
         url:    fileUrl,
@@ -460,9 +487,10 @@ export class BaseGenerateImageTreatment {
       throw error;
     }
 
+    const userId = input?.userId || input?.user_id;
     const shouldHoldCredits =
       !!this.walletService &&
-      !!(input?.userId || input?.user_id) &&
+      !!userId &&
       !!task?.configId &&
       Number.isFinite(this.imageHoldAmountPerAsset) &&
       this.imageHoldAmountPerAsset > 0;
@@ -471,10 +499,11 @@ export class BaseGenerateImageTreatment {
     let holdAmount = 0;
 
     if (shouldHoldCredits) {
+      this._log("info", `holding credits for user:${userId} | configId:${task.configId}`);
       walletReferenceId = task.configId;
       const requestedCount = Math.max(1, Number(task?.count || input?.count || input?.num_images || 1));
       const pricing = calculateImageCredits({
-        modelKey: task?.model_name || input?.model_name,
+        modelKey: task?.model_name || input?.model_name || "z_image",
         quality: task?.quality || input?.quality || "standard",
         count: requestedCount,
         operation: "generated",

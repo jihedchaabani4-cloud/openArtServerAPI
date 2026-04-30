@@ -81,6 +81,8 @@ function fromRegistry(
     supportsCamera = false,
     type = IMAGE_MODEL_TYPES.GENERATED,
     pricing = {},
+    isOpen = true,
+    isHidden = false,
     overrides = {}
 ) {
     const group = ALL_REGISTRY_MODELS[key];
@@ -92,7 +94,8 @@ function fromRegistry(
         _registryKey: key,
         group,
         type,
-        open: true,
+        open: isOpen,
+        hidden: isHidden,
         supportsEdit,
         supportsCamera,
         pricing: {
@@ -134,8 +137,8 @@ export const IMAGE_ROUTES = {
     "z_image_base": fromRegistry("z_image_base_wavespeed", false, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 7, editBaseCredits: 8 }),
 
 
-
-
+    // ── GPT Image 2 (wavespeed) ───────────────────────────────────────────────
+    "gpt-image-2":  fromRegistry("gpt_image_2_wavespeed", true, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 10, editBaseCredits: 12 }),
 
     // ── RunwayML (wavespeed) ─────────────────────────────────────────────────
     "runway_gen4_image":       fromRegistry("runway_gen4_image_wavespeed", true, true, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 14, editBaseCredits: 16 }),
@@ -147,7 +150,9 @@ export const IMAGE_ROUTES = {
         false,
         false,
         IMAGE_MODEL_TYPES.UPSCALE,
-        { upscaleBaseCredits: 6, upscaleScaleMultipliers: { 2: 1, 4: 1.8, 6: 2.4 } }
+        { upscaleBaseCredits: 6, upscaleScaleMultipliers: { 2: 1, 4: 1.8, 6: 2.4 } },
+        true,  // isOpen
+        true   // isHidden — backend-only, never shown to users
     ),
 };
 

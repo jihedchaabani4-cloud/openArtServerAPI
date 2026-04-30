@@ -1,4 +1,5 @@
 import { BaseEditTreatment } from "../basetretment/BaseEditTreatment.js";
+import { resolveReferences }  from "../../utils/resolveReferences.js";
 
 export class EditImageTreatment extends BaseEditTreatment {
 
@@ -23,27 +24,18 @@ export class EditImageTreatment extends BaseEditTreatment {
   }) {
     if (!userId)      throw new Error("userId required");
     if (!project_id)  throw new Error("project_id required");
-    if (!session_id)  throw new Error("session_id required");
     if (!workflow_id) throw new Error("workflow_id required");
 
     // ── Build references from workflows ────────────────────────────────────
-    const rawRefs = [];
-    for (const refWfId of (reference_workflow_ids || [])) {
-      const pm = await this.db.workflows.getPrimaryMedia(refWfId);
-      if (pm?.url && !rawRefs.find(r => r.url === pm.url)) {
-        rawRefs.push({ url: pm.url, role: "reference", is_base: false });
-      }
-    }
+    const references = await resolveReferences(this.db, {
+      baseWorkflowId:       workflow_id,
+      referenceWorkflowIds: reference_workflow_ids,
+    });
 
-    // Auto-resolve primary media from workflow
-    const primaryMedia = await this.db.workflows.getPrimaryMedia(workflow_id);
-    if (primaryMedia?.url && !rawRefs.find(r => r.url === primaryMedia.url)) {
-      rawRefs.unshift({ url: primaryMedia.url, role: "source", is_base: true });
-    }
     // ── Delegate shared logic to base ──────────────────────────────────────
     return this._runPrepare({
       prompt,
-      references: rawRefs,
+      references,
       model_name,
       ratio,
       quality,

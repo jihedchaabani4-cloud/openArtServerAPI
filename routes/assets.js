@@ -167,7 +167,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
             mediaData: {
                 project_id:           projectId,
                 generation_config_id: null,
-                step_id:              "CAE",
+                step_id:              "upload",
                 url:                  null,
                 width:                width,
                 height:               height,

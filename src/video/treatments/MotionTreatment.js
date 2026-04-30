@@ -109,6 +109,7 @@ export class MotionTreatment {
             const asset         = input_assets[i];
             const existingMedia = await this.db.media.findByUrl(asset.url);
             if (existingMedia) {
+                asset.media_id = existingMedia.id;
                 if (asset.role === "source") {
                     sourceWidth = existingMedia.width; sourceHeight = existingMedia.height;
                 }
@@ -138,7 +139,7 @@ export class MotionTreatment {
             mediaData: {
                 project_id,
                 generation_config_id: config.id,
-                step_id: "CAE",
+                step_id: "VID",
                 url:    null,
                 width:  sourceWidth,
                 height: sourceHeight,
@@ -157,6 +158,7 @@ export class MotionTreatment {
             configId:     config.id,
             workflow,
             mediaId:      media.id,
+            input_assets,
             sourceWidth,
             sourceHeight,
         };
@@ -236,6 +238,17 @@ export class MotionTreatment {
                 generation_type: "TEXT_BASE_IMAGE",
                 seed:            result.seed || null,
             });
+
+            await Promise.all(
+                (input_assets || [])
+                    .filter((asset) => asset?.media_id)
+                    .map((asset, index) => this.db.configs.createReference({
+                        generation_config_id: mediaConfig.id,
+                        position: index,
+                        input_type: asset.is_base ? "IMAGE_INPUT_TYPE_BASE_IMAGE" : "IMAGE_INPUT_TYPE_REFERENCE",
+                        ref_media_id: asset.media_id,
+                    }))
+            );
 
             // 2e. Finalise media record
             await this.db.media.updateFields(mediaId, {

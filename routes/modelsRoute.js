@@ -28,12 +28,12 @@ router.get("/", (req, res) => {
     const { category } = req.query;
 
     let videoModels = Object.entries(MODEL_ROUTES)
-        .filter(([_, route]) => route.type === VIDEO_MODEL_TYPES.GENERATED && route.open !== false)
+        .filter(([_, route]) => route.type === VIDEO_MODEL_TYPES.GENERATED && route.open !== false && !route.hidden)
         .map(([key, route]) => videoModelInfoToPayload(key, route));
 
     // ── Image models ──────────────────────────────────────────────────────
     let imageModels = Object.entries(IMAGE_ROUTES)
-        .filter(([_, route]) => route.type === IMAGE_MODEL_TYPES.GENERATED && route.open !== false)
+        .filter(([_, route]) => route.type === IMAGE_MODEL_TYPES.GENERATED && route.open !== false && !route.hidden)
         .map(([key, route]) => {
             const group = route.group;
         console.log("--- IMAGE MODEL ROUTE ---", group);
@@ -85,12 +85,12 @@ router.get("/:key", (req, res) => {
     const route = MODEL_ROUTES?.[key];
     const isOpen = route ? route.open !== false : false;
 
-    if (route && route.type === VIDEO_MODEL_TYPES.GENERATED && isOpen) {
+    if (route && route.type === VIDEO_MODEL_TYPES.GENERATED && isOpen && !route.hidden) {
         return res.json({ success: true, data: videoModelInfoToPayload(key, route) });
     }
 
     const imageGroup = IMAGE_ROUTES[key];
-    if (imageGroup && imageGroup.type === IMAGE_MODEL_TYPES.GENERATED && imageGroup.open !== false) {
+    if (imageGroup && imageGroup.type === IMAGE_MODEL_TYPES.GENERATED && imageGroup.open !== false && !imageGroup.hidden) {
         return res.json({
             success: true,
             data: {

@@ -76,7 +76,7 @@ export class WorkflowRepository extends BaseRepository {
         if (wf?.primary_media_id) {
             const { data: media, error: mErr } = await this.client()
                 .from("media")
-                .select("id, url")
+                .select("id, url, generation_config_id")
                 .eq("id", wf.primary_media_id)
                 .maybeSingle();
             if (!mErr && media) return media;
@@ -85,7 +85,7 @@ export class WorkflowRepository extends BaseRepository {
         // 2. Fallback: find first media created for this workflow
         const { data: firstMedia, error: fErr } = await this.client()
             .from("media")
-            .select("id, url")
+            .select("id, url, generation_config_id")
             .eq("workflow_id", workflow_id)
             .order("create_time", { ascending: true })
             .limit(1)

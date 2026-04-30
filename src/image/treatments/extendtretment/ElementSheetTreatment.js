@@ -2,215 +2,419 @@
  * ElementSheetTreatment.js
  * ─────────────────────────────────────────────────────────────────────────────
  * Generates three-panel reference sheets (CHARACTER / LOCATION / PRODUCT).
- * Extends BaseGenerateImageTreatment.
- *
- * WHAT THIS CLASS OWNS:
- *   • Per-type defaults (SHEET_DEFAULTS)
- *   • System prompts for LLM refinement (SYSTEM_PROMPTS)
- *   • Prompt sanitisation + display-name building helpers
- *   • prepare()        — shapes input, resolves refs, calls _runPrepare()
- *   • optimizePrompt() — overrides base: LLM refinement → safety → negative
- *   • run()            — overrides base: single variation only (no batch loop)
- *
- * WHAT THIS CLASS DELEGATES TO THE BASE:
- *   • _runPrepare()    — DB writes (config, workflows, media placeholders)
- *   • _resolveProvider() / _buildPayload() — via providerStrategy
- *   • _log()           — structured logging
- *
- * WORKER CONTRACT (same as every other treatment):
- *   const task      = await treatment.prepare(input);      // controller
- *   await jobQueue.add("generate-image", { task });        // controller
- *   // --- in worker ---
- *   const optimized = await treatment.optimizePrompt(task);
- *   const result    = await treatment.run(task, optimized);
+ * NO LLM — prompt built directly from features (deterministic, cinematic).
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import { ReferenceProcessor }          from "#utils/ReferenceProcessor.js";
-import { BaseGenerateImageTreatment }  from "../basetretment/BaseGenerateImageTreatment.js";
-import { markMediaFailed }             from "#db/workflowMediaOps.js";
-import { markMediaStatus }             from "#db/workflowMediaOps.js";
-import { extractOutputUrl }            from "../basetretment/providerStrategy.js";
+import { ReferenceProcessor }         from "#utils/ReferenceProcessor.js";
+import { BaseGenerateImageTreatment } from "../basetretment/BaseGenerateImageTreatment.js";
+import { markMediaFailed }            from "#db/workflowMediaOps.js";
+import { markMediaStatus }            from "#db/workflowMediaOps.js";
+import { extractOutputUrl }           from "../basetretment/providerStrategy.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Per-type generation defaults (all overridable by the caller)
+// SHEET DEFAULTS
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SHEET_DEFAULTS = {
-  CHARACTER: { model_name: "z_image", ratio: "3:2", quality: "2k", steps: 35, guidance_scale: 8.0, temperature: 0.4 },
-  LOCATION:  { model_name: "z_image", ratio: "3:2", quality: "2k", steps: 30, guidance_scale: 7.5, temperature: 0.7 },
-  PRODUCT:   { model_name: "z_image", ratio: "3:2", quality: "2k", steps: 30, guidance_scale: 7.5, temperature: 0.5 },
+  CHARACTER: { model_name: "gpt-image-2", ratio: "3:2", quality: "2k", steps: 40, guidance_scale: 9.0 },
+  LOCATION:  { model_name: "z_image",  ratio: "3:2", quality: "2k", steps: 30, guidance_scale: 7.5 },
+  PRODUCT:   { model_name: "z_image",  ratio: "3:2", quality: "2k", steps: 30, guidance_scale: 7.5 },
 };
 
 const VALID_TYPES = new Set(Object.keys(SHEET_DEFAULTS));
 
 // ─────────────────────────────────────────────────────────────────────────────
-// System prompts (unchanged from original — they are correct)
+// FEATURE MAPS  (keys = exact frontend values)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPTS = {
+// --- CHARACTER TYPE ---
+const CHARACTER_TYPE_MAP = {
+  human:      { desc: "human", isHumanoid: true  },
+  elf:        { desc: "fantasy elf with delicately pointed ears and ethereal features", isHumanoid: true  },
+  alien:      { desc: "extraterrestrial alien being", isHumanoid: false },
+  ant:        { desc: "anthropomorphic ant character with a powerful segmented exoskeleton, compound eyes, and articulated antennae", isHumanoid: false },
+  bee:        { desc: "anthropomorphic bee character with golden-striped chitin armor, membranous wings, and large compound eyes", isHumanoid: false },
+  octopus:    { desc: "anthropomorphic octopus character with eight dexterous tentacles and iridescent chromatophore skin", isHumanoid: false },
+  crocodile:  { desc: "anthropomorphic crocodile character with heavily armored scute-covered hide and powerful reptilian jaw", isHumanoid: false },
+  iguana:     { desc: "anthropomorphic iguana character with layered dorsal spines and textured scale-covered body", isHumanoid: false },
+  lizard:     { desc: "anthropomorphic lizard character with smooth scaled skin and a long articulated tail", isHumanoid: false },
+  beetle:     { desc: "anthropomorphic beetle character with iridescent shell-like elytra and thick chitinous limbs", isHumanoid: false },
+  reptile:    { desc: "anthropomorphic reptile character with dense scale-plated body and cold, calculating eyes", isHumanoid: false },
+  amphibian:  { desc: "anthropomorphic amphibian character with moist semi-translucent skin and wide expressive eyes", isHumanoid: false },
+  mantis:     { desc: "anthropomorphic praying mantis character with raptorial forelegs, triangular head, and faceted compound eyes", isHumanoid: false },
+};
 
-  CHARACTER: `You are a senior concept artist and AI prompt engineer specialising in professional character turnaround reference sheets used in AAA game production and cinematic VFX pipelines.
+// --- GENDER ---
+const GENDER_MAP = {
+  male:   "man",
+  female: "woman",
+};
 
-Your sole task: transform the user's description, feature data, and any image reference tags into ONE single ultra-detailed image-generation prompt that produces a flawless three-panel character reference sheet in a single cohesive image.
+// --- RACE ---
+const RACE_MAP = {
+  african:        "African",
+  asian:          "East Asian",
+  european:       "European",
+  indian:         "South Asian",
+  middle_eastern: "Middle Eastern",
+  mixed:          "mixed-heritage",
+};
 
-═══════════════════════════════════════════
-MANDATORY LAYOUT — THREE PANELS, ONE IMAGE
-═══════════════════════════════════════════
+// --- BUILD ---
+const BUILD_MAP = {
+  slim:     "a slender, willowy frame",
+  lean:     "a lean, wiry physique with understated muscle definition",
+  athletic: "a powerfully athletic build — broad shoulders, defined musculature, compact waist",
+  muscular: "an imposing, heavily muscled physique with thick limbs and a barrel chest",
+  curvy:    "a voluptuous, full-figured silhouette with pronounced curves and a defined waist",
+  heavy:    "a large, heavy-set frame — solid, substantial, commanding presence",
+};
 
-The image must contain exactly three panels arranged horizontally inside a single seamless composition with no borders, frames, or dividing lines between them:
+// --- HEIGHT ---
+const HEIGHT_MAP = {
+  "very-short": "standing well below average height, barely reaching 155 cm",
+  "short":      "of short stature, around 155 to 165 cm",
+  "average":    "of average height, around 165 to 175 cm",
+  "tall":       "tall, standing between 175 and 185 cm",
+  "very-tall":  "exceptionally tall, towering over 185 cm",
+};
 
-  PANEL 1 — LEFT THIRD  : Full-body FRONT view, head-to-toe, character facing directly forward, arms relaxed at sides, feet shoulder-width apart, neutral A-pose. Show complete silhouette.
+// --- HAIR COLOR ---
+const HAIR_COLOR_MAP = {
+  black:        "jet-black",
+  brown:        "warm chestnut brown",
+  blonde:       "natural golden blonde",
+  "ash-blonde": "cool ash blonde",
+  grey:         "silver-streaked grey",
+  white:        "striking snow white",
+  auburn:       "rich deep auburn",
+  "ash-mauve":  "muted dusty ash mauve — a rare muted purple-grey tint",
+};
 
-  PANEL 2 — CENTER THIRD: Full-body BACK view, head-to-toe, identical pose mirrored, all back details fully visible: spine, rear muscle structure, back of costume/armor, tail or wing structure if applicable.
+// --- HAIR TEXTURE ---
+const HAIR_TEXTURE_MAP = {
+  straight: "poker-straight",
+  wavy:     "softly waved",
+  curly:    "loosely curled",
+  coily:    "densely coiled",
+};
 
-  PANEL 3 — RIGHT THIRD : Large close-up portrait, head and neck only, three-quarter (¾) angle facing slightly left, ultra-detailed facial anatomy — pores, iris texture, individual hairs or scales, micro-surface detail of skin/exoskeleton/fur.
+// --- HAIR STYLE ---
+const HAIR_STYLE_MAP = {
+  short: "cut short and close to the scalp",
+  long:  "flowing past the shoulders",
+  bald:  null, // handled separately
+  afro:  "worn in a full, voluminous natural afro",
+  punk:  "sculpted into a sharp punk mohawk",
+};
 
-CRITICAL CONSISTENCY RULES:
-• All three panels show the EXACT same character — zero variation in color, proportion, costume, or material finish.
-• Lighting direction, color temperature, and shadow falloff are identical across all three panels.
-• Scale is consistent: the head in Panel 3 matches the head visible in Panels 1 and 2.
-• Background: seamless neutral warm-grey (#B0A9A0) across the entire image.
-• No text labels, arrows, grid lines, watermarks, or UI elements anywhere.
+// --- EYE COLOR ---
+const EYE_COLOR_MAP = {
+  brown:        "warm brown eyes",
+  "deep-brown": "deep, almost black-brown eyes with rich depth",
+  black:        "dark obsidian eyes with nearly invisible irises",
+  blue:         "clear, bright blue eyes",
+  green:        "vivid green eyes",
+  grey:         "cool, pale grey eyes",
+  amber:        "golden amber eyes that catch the light",
+  red:          "intense crimson-red eyes — a vivid fantasy trait rendered with photorealistic iris texture",
+  purple:       "rare violet-purple eyes, luminous and otherworldly",
+  white:        "unsettling pale white eyes with no visible iris, ethereal and haunting",
+};
 
-═══════════════════════════════════════════
-CHARACTER TYPE ANATOMY (CRITICAL)
-═══════════════════════════════════════════
+// --- SKIN CONDITION ---
+const SKIN_CONDITION_MAP = {
+  freckles:      "a natural dusting of freckles across the nose and cheekbones",
+  wrinkles:      "deep, lived-in wrinkles etched by decades of expression",
+  vitiligo:      "striking vitiligo — irregular islands of depigmentation across the skin",
+  albinism:      "albinism — near-translucent pale skin and silver-white hair",
+  "dry-skin":    "severely cracked, drought-parched skin with deep fissure textures",
+  pigmentation:  "uneven skin pigmentation with visible dark patches and tonal variation",
+  scars:         "a network of visible scars — both fine silver lines and raised keloid marks",
+  birthmarks:    "prominent port-wine birthmarks, each unique in shape and placement",
+};
 
-Read the "characterType" from Features. Adapt ALL physical descriptions accordingly:
+// --- LIMB MODIFICATIONS ---
+const LIMB_MAP = {
+  prosthetic:  "a prosthetic",
+  robotic:     "a sleek robotic",
+  mechanical:  "a heavy industrial mechanical",
+  cute:        "a whimsical cartoon-styled",
+};
 
-  HUMAN      → Realistic human anatomy, natural skin with subsurface scattering, cinematic realism, no stylisation
-  ELF        → Humanoid with elongated ears, refined bone structure, otherworldly skin quality
-  ALIEN      → Exotic biologically-plausible anatomy, non-human proportions, creature realism
-  REPTILE    → Scales with iridescent micro-detail, lidded eyes, cold-blooded body temperature cues
-  LIZARD     → Keeled scales, forked tongue, parietal eye if applicable
-  IGUANA     → Dorsal spines, loose dewlap, laterally compressed torso
-  CROCODILE  → Osteoderms (bony scutes), powerful jaw with exposed teeth, muscular tail
-  ANT        → Three-segmented body (head / thorax / gaster), compound eyes, antennae, six-limb structure, chitinous exoskeleton
-  BEE        → Dense pollen-collecting hairs, membranous wings with venation, compound eyes, abdominal stripes, stinger
-  MANTIS     → Triangular cephalic structure, raptorial forelegs, compound eyes with pseudopupil, spiked tibia
-  BEETLE     → Elytra (hardened fore-wings), diverse horn morphology, tarsal claws, highly polished chitin
-  OCTOPUS    → Soft boneless body, eight arms with suckers, chromatophores, mantle, siphon
-  AMPHIBIAN  → Moist permeable skin, parotoid glands if applicable, large tympanic membrane, webbed digits
-  MANTIS SHRIMP → Raptorial appendages (dactyl clubs), 16-type photoreceptor-inspired eye coloration, telson
-  DEFAULT    → If no type provided, treat as HUMAN
+// --- OUTFIT ---
+const OUTFIT_MAP = {
+  casual:         "casual everyday wear — relaxed jeans and a simple t-shirt",
+  formal:         "sharp formal attire — a tailored suit or elegant dress",
+  sporty:         "fitted athletic sportswear with performance fabrics",
+  workwear:       "rugged practical workwear with utility belt and durable fabrics",
+  vintage:        "carefully curated vintage clothing evoking a specific past era",
+  punk:           "full punk-style outfit — studded leather jacket, ripped fabric, heavy boots, and chains",
+  "high-fashion": "avant-garde high-fashion editorial clothing — architectural cuts and unexpected silhouettes",
+};
 
-NON-HUMAN RULE: Non-human characters must NEVER adopt human body proportions. Maintain strict biological plausibility.
-
-═══════════════════════════════════════════
-REALISM INTERPRETATION
-═══════════════════════════════════════════
-
-If the user requests "hyper realistic", "photorealistic", or "realistic", render as:
-  • Documentary creature photography realism
-  • Biologically plausible surface anatomy
-  • Cinematic natural-history lighting
-  • Real-world material response (subsurface scattering on skin, specular highlights on chitin, translucency on membranes)
-NEVER produce: cartoon style, anime style, stylised illustration, artificial AI-generated faces.
-
-═══════════════════════════════════════════
-QUALITY & TECHNICAL SPECIFICATIONS
-═══════════════════════════════════════════
-
-Lighting:    Three-point studio setup — 5600K key light upper-left, 4200K fill right, rim light behind to separate from background
-Lens:        Phase One IQ4 150MP, 120mm macro equivalent — zero distortion, ultra-flat perspective
-Resolution:  8K native, zero motion blur, zero chromatic aberration
-Focus:       Tack-sharp across all three panels simultaneously
-DOF:         Infinite depth of field — every detail from toe to tip is in focus
-
-═══════════════════════════════════════════
-REFERENCE IMAGE RULES
-═══════════════════════════════════════════
-
-If the user includes tags like <image0>, <image1>:
-  Translate to: "identical in appearance, color, proportion, and surface detail to the character shown in reference image [N]".
-
-Fill all missing details (color, texture, accessories) with coherent pro-level concept art choices.
-
-═══════════════════════════════════════════
-OUTPUT FORMAT (STRICT)
-═══════════════════════════════════════════
-
-Output ONE single flowing paragraph — the complete image prompt.
-End with a line break then the NEGATIVE block starting with —NEGATIVE:
-No introductions. No explanations. No bullet points. No section headers.
-
-—NEGATIVE (always include): collage, separate images, split panels, panel borders, dividing lines, inconsistent character appearance between panels, multiple different characters, text labels, arrows, watermarks, UI overlays, blurry regions, motion blur, low resolution, cartoon style, anime style, stylised illustration, 3D render look, artificial AI face, human proportions on non-human character`,
-
-  LOCATION: `You are a senior environment concept artist and AI prompt engineer specialising in location reference sheets for AAA game production, cinematic pre-vis, and architectural visualization pipelines.
-
-Your sole task: transform the user's description, feature data, and any image reference tags into ONE single ultra-detailed image-generation prompt that produces a flawless three-panel location reference image in a single cohesive composition.
-
-═══════════════════════════════════════════
-MANDATORY LAYOUT — THREE PANELS, ONE IMAGE
-═══════════════════════════════════════════
-
-The image must contain exactly three panels arranged horizontally inside a single seamless composition with no borders, frames, or dividing lines:
-
-  PANEL 1 — LEFT THIRD  : Wide panoramic establishing shot of the entire location — full environmental context, horizon, sky, scale reference.
-
-  PANEL 2 — CENTER THIRD: Mid-range hero shot focusing on the primary architectural element, terrain feature, or structural focal point — enough detail to read materials, proportions, and spatial relationships.
-
-  PANEL 3 — RIGHT THIRD : Large close-up of a defining surface detail — specific material texture (stone grain, wood fiber, metal oxidation, bark pattern, crystal facet), weathering, or interior atmospheric detail.
-
-CRITICAL CONSISTENCY RULES:
-• All three panels depict the EXACT same location — identical time of day, weather, color palette, and lighting conditions.
-• No dividers, borders, frames, or lines separating the panels.
-• The close-up in Panel 3 shows a surface visible in Panel 1 or 2.
-• No people, no UI, no text labels, no watermarks unless explicitly requested.
-
-═══════════════════════════════════════════
-QUALITY & TECHNICAL SPECIFICATIONS
-═══════════════════════════════════════════
-
-Default (override only if user specifies a style):
-Captured with architectural visualization and natural environment photography standards — volumetric god rays consistent with specified time of day, golden-hour or overcast soft diffusion, ultra-detailed surface textures (stone grain, wood fiber, metal oxidation, moss coverage patterns), photorealistic, Phase One IQ4 150MP wide-angle lens, 8K resolution, zero motion blur.
-
-═══════════════════════════════════════════
-OUTPUT FORMAT (STRICT)
-═══════════════════════════════════════════
-
-Output ONE single flowing paragraph — the complete image prompt.
-End with a line break then the NEGATIVE block starting with —NEGATIVE:
-No introductions. No explanations. No bullet points.
-
-—NEGATIVE (always include): split panels, panel borders, dividing lines, inconsistent lighting between panels, text labels, arrows, watermarks, UI overlays, people in scene (unless requested), multiple unrelated locations, low resolution, overexposed sky, flat lighting, cartoon style (unless requested)`,
-
-  PRODUCT: `You are a senior product designer and AI prompt engineer specialising in commercial product reference sheets for e-commerce, industrial design review, and marketing pipelines.
-
-Your sole task: transform the user's description, product features, and any image reference tags into ONE single ultra-detailed image-generation prompt that produces a flawless three-panel product reference image in a single cohesive studio composition.
-
-═══════════════════════════════════════════
-MANDATORY LAYOUT — THREE PANELS, ONE IMAGE
-═══════════════════════════════════════════
-
-The image must contain exactly three panels arranged horizontally inside a single seamless studio composition with no borders, frames, or dividing lines:
-
-  PANEL 1 — LEFT THIRD  : Clean front-facing orthographic shot — product perfectly centered, hero lighting, complete silhouette visible.
-
-  PANEL 2 — CENTER THIRD: Sleek angled three-quarter shot (30–45° rotation) — reveals depth, side profile, and form language simultaneously.
-
-  PANEL 3 — RIGHT THIRD : Large macro close-up of the product's most distinctive detail — signature texture, material finish (matte/gloss/brushed/anodized), logo treatment, or functional mechanism.
-
-CRITICAL CONSISTENCY RULES:
-• All three panels show the EXACT same product — identical color, finish, proportion, and branding. Zero variation.
-• No dividers, borders, frames, or separating lines.
-• No hands (unless explicitly requested), no price tags, no promotional text.
-• Background: seamless neutral grey studio backdrop across the entire image.
-
-═══════════════════════════════════════════
-OUTPUT FORMAT (STRICT)
-═══════════════════════════════════════════
-
-Output ONE single flowing paragraph — the complete image prompt.
-End with a line break then the NEGATIVE block starting with —NEGATIVE:
-No introductions. No explanations. No bullet points.
-
-—NEGATIVE (always include): split panels, panel borders, dividing lines, multiple backgrounds, text labels, price tags, arrows, watermarks, UI overlays, hands (unless requested), inconsistent product appearance between panels, low resolution, overexposed highlights, flat lighting, cartoon style (unless requested)`,
+// --- RENDERING STYLE ---
+const RENDERING_STYLE_MAP = {
+  "hyper-realistic": {
+    prompt:   "rendered in ultra-photorealistic detail — natural skin texture with visible pores, fine surface imperfections, cinematic lighting with deep shadows and warm highlights, 8K resolution, indistinguishable from a real professional photograph",
+    negative: ["cartoon", "anime", "3D render", "painting", "illustration", "CGI", "stylized"],
+  },
+  "anime": {
+    prompt:   "rendered in high-quality anime art style — clean expressive linework, cel-shaded vibrant colors, dynamic composition, professional studio-quality animation aesthetic",
+    negative: ["photorealistic", "3D render", "photograph", "CGI", "hyperrealism"],
+  },
+  "3d-cartoon": {
+    prompt:   "rendered as a high-quality 3D cartoon — smooth stylized surfaces, Pixar-level character quality, soft subsurface lighting, appealing exaggerated proportions",
+    negative: ["photorealistic", "anime", "2D illustration", "flat design", "sketch"],
+  },
+  "2d-illustration": {
+    prompt:   "rendered as a professional 2D digital illustration — clean confident linework, rich intentional color palette, editorial illustration quality",
+    negative: ["photorealistic", "3D render", "anime", "photograph"],
+  },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ElementSheetTreatment
+// DEFAULT FALLBACKS (by race)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const RACE_DEFAULTS = {
+  african:        { hairColor: "black",  hairTexture: "coily",    eyeColor: "deep-brown" },
+  asian:          { hairColor: "black",  hairTexture: "straight", eyeColor: "brown"      },
+  european:       { hairColor: "brown",  hairTexture: "wavy",     eyeColor: "blue"       },
+  indian:         { hairColor: "black",  hairTexture: "straight", eyeColor: "brown"      },
+  middle_eastern: { hairColor: "black",  hairTexture: "wavy",     eyeColor: "brown"      },
+  mixed:          { hairColor: "brown",  hairTexture: "wavy",     eyeColor: "brown"      },
+};
+
+function getRaceDefault(race, field) {
+  return RACE_DEFAULTS[race]?.[field] ?? null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CINEMATIC PROMPT BUILDER  (NO LLM — deterministic)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function buildCharacterPrompt(features = {}, userText = "") {
+  const identity = features.identity || {};
+  const head     = features.head     || {};
+  const details  = features.details  || {};
+
+  // ── Rendering Style ─────────────────────────────────────────────────────────
+  const renderingKey   = features.renderingStyle || "hyper-realistic";
+  const renderingData  = RENDERING_STYLE_MAP[renderingKey] || RENDERING_STYLE_MAP["hyper-realistic"];
+
+  // ── Character Type ───────────────────────────────────────────────────────────
+  const charTypeKey  = identity.characterType || "human";
+  const charTypeData = CHARACTER_TYPE_MAP[charTypeKey] || CHARACTER_TYPE_MAP["human"];
+  const isHumanoid   = charTypeData.isHumanoid;
+
+  // ── Core Identity ────────────────────────────────────────────────────────────
+  const age      = identity.age    || "25";
+  const gender   = GENDER_MAP[identity.gender] || identity.gender || "person";
+  const race     = identity.race;
+  const raceDesc = race ? (RACE_MAP[race] || race) : null;
+
+  // ── Build & Height ───────────────────────────────────────────────────────────
+  const buildDesc  = identity.build  ? (BUILD_MAP[identity.build]   || identity.build)  : "an average proportional build";
+  const heightDesc = identity.height ? (HEIGHT_MAP[identity.height] || identity.height) : null;
+
+  // ── Era ──────────────────────────────────────────────────────────────────────
+  const era = features.era || null;
+
+  // ── Outfit ───────────────────────────────────────────────────────────────────
+  const outfitDesc = features.outfit
+    ? (OUTFIT_MAP[features.outfit] || features.outfit)
+    : "casual modern clothing";
+  const clothingLine = era
+    ? `${outfitDesc}, tailored to the authentic fashion of the ${era}`
+    : outfitDesc;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // HUMANOID PATH (human / elf)
+  // ─────────────────────────────────────────────────────────────────────────────
+  let paragraphParts = [];
+
+  if (isHumanoid) {
+
+    // Sentence 1 — Opening identity line
+    const identityTokens = [`A ${age}-year-old`];
+    if (raceDesc) identityTokens.push(raceDesc);
+    identityTokens.push(gender);
+    if (charTypeKey !== "human") identityTokens.push(`— ${charTypeData.desc}`);
+    paragraphParts.push(`${identityTokens.join(" ")}.`);
+
+    // Sentence 2 — Physique
+    const physique = heightDesc
+      ? `${buildDesc}, ${heightDesc}`
+      : buildDesc;
+    paragraphParts.push(`They carry ${physique}.`);
+
+    // Sentence 3 — Hair
+    const hairStyle = head.hairStyle;
+    if (hairStyle === "bald") {
+      paragraphParts.push(`Their head is completely shaved — smooth, clean, not a strand of hair.`);
+    } else {
+      const colorRaw    = head.hairColor   || getRaceDefault(race, "hairColor")   || "brown";
+      const textureRaw  = head.hairTexture || getRaceDefault(race, "hairTexture") || "wavy";
+      const colorDesc   = HAIR_COLOR_MAP[colorRaw]   || colorRaw;
+      const textureDesc = HAIR_TEXTURE_MAP[textureRaw] || textureRaw;
+
+      if (hairStyle === "afro") {
+        paragraphParts.push(`Their ${colorDesc} hair is worn in a full, voluminous natural afro — a crown of dense, proud coils.`);
+      } else if (hairStyle === "punk") {
+        paragraphParts.push(`Their ${colorDesc} hair is sculpted into a sharp, defiant punk mohawk.`);
+      } else {
+        const styleDesc = hairStyle ? (HAIR_STYLE_MAP[hairStyle] || hairStyle) : "worn at medium length";
+        paragraphParts.push(`Their hair is ${colorDesc} and ${textureDesc}, ${styleDesc}.`);
+      }
+    }
+
+    // Sentence 4 — Eyes
+    const eyeRaw  = details.eyeColor || getRaceDefault(race, "eyeColor") || "brown";
+    const eyeDesc = EYE_COLOR_MAP[eyeRaw] || eyeRaw;
+    paragraphParts.push(`Their eyes are ${eyeDesc}.`);
+
+    // Sentence 5 — Skin condition (optional)
+    if (details.skinCondition) {
+      const skinDesc = SKIN_CONDITION_MAP[details.skinCondition] || details.skinCondition;
+      paragraphParts.push(`Their skin bears ${skinDesc}.`);
+    }
+
+    // Sentence 6 — Limb modifications (optional)
+    const limbParts = [];
+    const limbDefs = [
+      { key: "rightArm", label: "right arm" },
+      { key: "leftArm",  label: "left arm"  },
+      { key: "rightLeg", label: "right leg" },
+      { key: "leftLeg",  label: "left leg"  },
+    ];
+    for (const { key, label } of limbDefs) {
+      const val = details[key];
+      if (val && val !== "none" && val !== "normal") {
+        const mod = LIMB_MAP[val];
+        if (mod) limbParts.push(`${mod} ${label}`);
+      }
+    }
+    if (limbParts.length > 0) {
+      paragraphParts.push(`In place of natural limbs, they have ${limbParts.join(" and ")}.`);
+    }
+
+    // Sentence 7 — Outfit
+    paragraphParts.push(`They are dressed in ${clothingLine}.`);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // NON-HUMAN PATH (alien, ant, bee, octopus, etc.)
+  // ─────────────────────────────────────────────────────────────────────────────
+  } else {
+
+    // Sentence 1 — Opening line
+    paragraphParts.push(`A ${age}-year-old ${charTypeData.desc}.`);
+
+    // Sentence 2 — Physique adapted for creature
+    const physique = heightDesc
+      ? `${buildDesc}, ${heightDesc}`
+      : buildDesc;
+    paragraphParts.push(`The creature possesses ${physique}.`);
+
+    // Sentence 3 — Outfit on non-human (optional — only if user chose one)
+    if (features.outfit) {
+      paragraphParts.push(`It is dressed in ${clothingLine}, adapted to fit its unique anatomy.`);
+    }
+
+    // Sentence 4 — Limb modifications (optional)
+    const limbParts = [];
+    const limbDefs = [
+      { key: "rightArm", label: "right appendage" },
+      { key: "leftArm",  label: "left appendage"  },
+      { key: "rightLeg", label: "right lower limb" },
+      { key: "leftLeg",  label: "left lower limb"  },
+    ];
+    for (const { key, label } of limbDefs) {
+      const val = details[key];
+      if (val && val !== "none" && val !== "normal") {
+        const mod = LIMB_MAP[val];
+        if (mod) limbParts.push(`a ${mod} ${label}`);
+      }
+    }
+    if (limbParts.length > 0) {
+      paragraphParts.push(`Its body has been modified with ${limbParts.join(" and ")}.`);
+    }
+  }
+
+  // ── Extra user text ──────────────────────────────────────────────────────────
+  const extra = userText?.trim();
+  if (extra) {
+    paragraphParts.push(`Additional details: ${extra}.`);
+  }
+
+  // ── Rendering ────────────────────────────────────────────────────────────────
+  paragraphParts.push(`The entire image is ${renderingData.prompt}.`);
+
+  // ── Three-panel layout ───────────────────────────────────────────────────────
+  paragraphParts.push(
+    "This is a seamless three-panel character reference sheet on a warm neutral grey background (#B0A9A0) with absolutely no borders, frames, or dividing lines between panels. " +
+    "The left panel presents the character in a full-body front view — neutral A-pose, arms relaxed at the sides, feet shoulder-width apart, captured head to toe. " +
+    "The center panel shows the same character from directly behind in an identical pose, revealing every back detail of their clothing and body. " +
+    "The right panel is a large, intimate close-up portrait — the character's head and upper neck rendered at a three-quarter angle, facing slightly to the left. " +
+    "The exact same character — the same face, eyes, hair, skin, clothing, and body — must appear with absolute consistency across all three panels. " +
+    "Lighting direction, color temperature, and shadow quality are identical in every panel. Zero variation between views."
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // ASSEMBLE FINAL PROMPT
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  const finalPrompt = paragraphParts.join(" ");
+
+  // ── Negative prompt ──────────────────────────────────────────────────────────
+  const negativeBase = [
+    "collage", "split panels", "panel borders", "dividing lines",
+    "multiple different characters", "inconsistent appearance between panels",
+    "different face between panels", "different hair between panels",
+    "different eye color between panels", "different skin tone between panels",
+    "text labels", "arrows", "watermarks", "UI elements", "grid lines",
+    "blurry regions", "out of frame", "cropped limbs", "low resolution",
+  ];
+
+  const negativePrompt = [...negativeBase, ...renderingData.negative].join(", ");
+
+  return { finalPrompt, negativePrompt };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DISPLAY NAME BUILDER
+// ─────────────────────────────────────────────────────────────────────────────
+
+function buildDisplayName(TYPE, features = {}) {
+  const typeLabel = TYPE.charAt(0) + TYPE.slice(1).toLowerCase();
+
+  const directName = features?.name || features?.characterName || features?.productName || features?.locationName;
+  if (directName?.trim()) {
+    return `${typeLabel}: ${directName.trim().substring(0, 50)}`;
+  }
+
+  if (TYPE === "CHARACTER") {
+    const identity = features?.identity || {};
+    const parts = [identity.race, identity.gender, identity.characterType].filter(Boolean);
+    if (parts.length) return `${typeLabel}: ${parts.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(" ")}`;
+  }
+
+  if (TYPE === "PRODUCT") {
+    const parts = [features?.color, features?.material, features?.type].filter(Boolean);
+    if (parts.length) return `${typeLabel}: ${parts.join(" ")}`;
+  }
+
+  if (TYPE === "LOCATION") {
+    const parts = [features?.biome, features?.style, features?.type].filter(Boolean);
+    if (parts.length) return `${typeLabel}: ${parts.join(" ")}`;
+  }
+
+  return `${typeLabel} Sheet`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ElementSheetTreatment CLASS
 // ─────────────────────────────────────────────────────────────────────────────
 
 export class ElementSheetTreatment extends BaseGenerateImageTreatment {
@@ -221,93 +425,16 @@ export class ElementSheetTreatment extends BaseGenerateImageTreatment {
     this.refProcessor = new ReferenceProcessor({ storageService, db });
   }
 
-  // ─────────────────────────────────────────────────────────
-  // Private: prompt helpers
-  // ─────────────────────────────────────────────────────────
-
-  /** Replace <MediaAsset:id> tags with <imageN> placeholders */
-  _sanitisePrompt(prompt = "", references = []) {
-    let clean = prompt || "Generate a sheet.";
-    references.forEach((ref, i) => {
-      const tag = `<MediaAsset:${ref.media_id || ref.id}>`;
-      clean = clean.split(tag).join(`<image${i}>`);
-    });
-    return clean;
-  }
-
-  /** Build the LLM user message */
-  _buildUserPrompt(cleanText, features) {
-    let msg = `User Prompt: ${cleanText}\n`;
-    if (features && Object.keys(features).length > 0) {
-      msg += `Features selected:\n${JSON.stringify(features, null, 2)}`;
-    }
-    return msg;
-  }
-
-  /** Call the LLM to refine the raw user prompt into a full image prompt */
-  async _refinePrompt(systemPrompt, userPrompt, temperature) {
-    return this.promptService.textProvider.complete({
-      systemPrompt,
-      userPrompt,
-      temperature,
-    });
-  }
-
-  // ─────────────────────────────────────────────────────────
-  // Private: display-name helpers
-  // ─────────────────────────────────────────────────────────
-
-  _toTitleCase(v) {
-    return String(v || "").toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
-  }
-
-  _cleanDisplayText(v) {
-    return String(v || "")
-      .replace(/[_-]+/g, " ")
-      .replace(/\b(create|generate|make|draw|design|show|need|want|a|an|the|character|element|reference|turnaround|model|sheet|product|location)\b/gi, "")
-      .replace(/\s+/g, " ")
-      .replace(/^[,:;.\-\s]+|[,:;.\-\s]+$/g, "")
-      .trim();
-  }
-
-  _buildSheetDisplayName(TYPE, prompt, features = {}) {
-    // 1. Explicit name field
-    const directName = [
-      features?.name, features?.title, features?.subject,
-      features?.characterName, features?.productName, features?.locationName,
-    ].find(v => typeof v === "string" && v.trim());
-    if (directName) return this._toTitleCase(this._cleanDisplayText(directName)).substring(0, 60);
-
-    // 2. Type-specific feature combos
-    const typeParts = {
-      CHARACTER: [features?.race || features?.ethnicity, features?.gender, features?.characterType].filter(Boolean),
-      PRODUCT:   [features?.color, features?.material, features?.type || features?.category].filter(Boolean),
-      LOCATION:  [features?.biome || features?.environment, features?.style, features?.type].filter(Boolean),
-    }[TYPE] ?? [];
-
-    if (typeParts.length) {
-      return this._toTitleCase(this._cleanDisplayText(typeParts.join(" "))).substring(0, 60);
-    }
-
-    // 3. Fallback to cleaned prompt
-    const fromPrompt = this._cleanDisplayText(prompt);
-    if (fromPrompt) return this._toTitleCase(fromPrompt).substring(0, 60);
-
-    return `${this._toTitleCase(TYPE)} Sheet`;
-  }
-
-  // ─────────────────────────────────────────────────────────
-  // 1. PREPARE  (override)
-  //    Fast: validate → resolve refs → DB placeholders → return task
-  //    No LLM calls here — optimization happens in the worker.
-  // ─────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // 1. PREPARE
+  // ─────────────────────────────────────────────────────────────────────────
 
   async prepare(input) {
     const {
-      sheetType    = "CHARACTER",
-      prompt       = "",
+      sheetType  = "CHARACTER",
+      prompt     = "",
       features,
-      references   = [],
+      references = [],
       project_id,
     } = input;
 
@@ -322,29 +449,22 @@ export class ElementSheetTreatment extends BaseGenerateImageTreatment {
       );
     }
 
-    // ── Merge caller params with per-type defaults ────────────────────────
-    const defaults = SHEET_DEFAULTS[TYPE];
-    const model_name     = input.model_name     || defaults.model_name;
-    const ratio          = input.ratio          || defaults.ratio;
-    const quality        = input.quality        || defaults.quality;
-    const steps          = input.steps          ?? defaults.steps;
-    const guidance_scale = input.guidance_scale ?? defaults.guidance_scale;
-    const temperature    = input.temperature    ?? defaults.temperature;
+    const defaults       = SHEET_DEFAULTS[TYPE];
+    const model_name     = defaults.model_name;
+    const ratio          = defaults.ratio;
+    const quality        =defaults.quality;
+    const steps          = defaults.steps;
+    const guidance_scale = defaults.guidance_scale;
 
-    // ── Pre-compute prompt pieces (no LLM yet — just string ops) ─────────
-    const cleanText   = this._sanitisePrompt(prompt, references);
-    const userPrompt  = this._buildUserPrompt(cleanText, features);
-    const displayName = this._buildSheetDisplayName(TYPE, cleanText, features);
+    const displayName = buildDisplayName(TYPE, features);
 
-    // ── Resolve reference images → asset URLs ─────────────────────────────
     const input_assets = await this.refProcessor.process(
       references, userId, project_id, null, "uploads"
     );
 
-    // ── Create DB records via base ─────────────────────────────────────────
     const task = await this._runPrepare({
       prompt,
-      prompt_optimise: null,       // set by optimizePrompt in worker
+      prompt_optimise: null,
       display_name:    displayName,
       model_name,
       workflow_type:   "ELEMENT_SHEET",
@@ -352,21 +472,18 @@ export class ElementSheetTreatment extends BaseGenerateImageTreatment {
       quality,
       steps,
       guidance_scale,
-      count:           1,          // sheets are always single-variation
+      count:           1,
       userId,
       project_id,
       session_id:      input.session_id ?? null,
       input_assets,
       stepId:          "CAE",
-      // ── Sheet-specific data passed to worker via task (Redis-safe) ──────
       extraTaskFields: {
-        sheetType:        TYPE,
-        sheetSystemPrompt: SYSTEM_PROMPTS[TYPE],
-        sheetUserPrompt:   userPrompt,
-        sheetTemperature:  temperature,
-        // DNA trigger data (worker fires this after run)
+        sheetType:   TYPE,
+        rawFeatures: features,
+        userText:    prompt,
         dnaPayload: this.dnaTreatment ? {
-          name:            features?.name || `${features?.characterType || TYPE} Sheet`,
+          name:            features?.name || `${features?.identity?.characterType || TYPE} Sheet`,
           type:            TYPE,
           features,
           userDescription: prompt,
@@ -377,65 +494,39 @@ export class ElementSheetTreatment extends BaseGenerateImageTreatment {
     return task;
   }
 
-  // ─────────────────────────────────────────────────────────
-  // 2. OPTIMIZE PROMPT  (override)
-  //    LLM refinement → safety check → negative prompt
-  //    Called by worker BEFORE run().
-  // ─────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // 2. OPTIMIZE PROMPT  (no LLM — pure cinematic builder)
+  // ─────────────────────────────────────────────────────────────────────────
 
   async optimizePrompt(task) {
-    const {
-      prompt,
-      sheetSystemPrompt,
-      sheetUserPrompt,
-      sheetTemperature,
-      mediaIds,
-    } = task;
+    const { rawFeatures = {}, userText = "", mediaIds = [] } = task;
 
-    // ── LLM refinement ────────────────────────────────────────────────────
-    let refinedPrompt = prompt;
-    if (sheetSystemPrompt && sheetUserPrompt) {
-      this._log("info", "refining prompt via LLM…");
-      refinedPrompt = await this._refinePrompt(
-        sheetSystemPrompt,
-        sheetUserPrompt,
-        sheetTemperature,
-      );
-    }
+    const { finalPrompt, negativePrompt } = buildCharacterPrompt(rawFeatures, userText);
 
-    const finalPrompt = refinedPrompt || prompt;
+    this._log("info", `✅ Cinematic prompt built (no LLM): ${finalPrompt.slice(0, 120)}…`);
+    console.log("\n🎬 [ElementSheetTreatment] FINAL PROMPT:\n", finalPrompt);
+    console.log("\n🚫 [ElementSheetTreatment] NEGATIVE PROMPT:\n", negativePrompt);
 
-    // ── Safety check ──────────────────────────────────────────────────────
+    // Safety check
     const safety = await this.promptService.checkPrompt(finalPrompt);
     if (!safety.safe) {
-      for (const id of mediaIds ?? []) {
+      for (const id of mediaIds) {
         await markMediaFailed(this.db, id, safety.reason);
       }
       throw new Error(`Prompt rejected: ${safety.reason}`);
     }
 
-    // ── Negative prompt ───────────────────────────────────────────────────
-    let finalNegative = "";
-    try {
-      finalNegative = await this.promptService.generateNegativePrompt(finalPrompt) || "";
-    } catch (err) {
-      this._log("error", `Negative prompt generation failed (continuing): ${err.message}`);
-    }
-
-    return { finalPrompt, finalNegative };
+    return { finalPrompt, finalNegative: negativePrompt };
   }
 
-  // ─────────────────────────────────────────────────────────
-  // 3. RUN  (override)
-  //    Sheets = single variation only → no Promise.allSettled loop.
-  //    Receives optimizeResult from worker — no double LLM call.
-  // ─────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // 3. RUN
+  // ─────────────────────────────────────────────────────────────────────────
 
   async run(task, optimizeResult) {
     const {
       userId,
       model_name,
-      prompt,
       ratio, quality, size, width, height,
       steps, guidance_scale,
       input_assets,
@@ -447,55 +538,57 @@ export class ElementSheetTreatment extends BaseGenerateImageTreatment {
 
     const { finalPrompt, finalNegative } = optimizeResult;
 
-    const provider = this._resolveProvider(model_name, input_assets);
+    const provider  = this._resolveProvider(model_name, input_assets);
     const workflow  = workflows[0];
     const mediaId   = mediaIds[0];
 
     try {
-      const sourceAsset = input_assets?.find(
-        a => ["source", "base"].includes(a.role)
-      ) ?? input_assets?.[0];
+      const sourceAsset = input_assets?.find(a => ["source", "base"].includes(a.role))
+        ?? input_assets?.[0];
 
       const form = {
         prompt:          finalPrompt,
         negativePrompt:  finalNegative,
         negative_prompt: finalNegative,
         ratio, quality, size, width, height,
-        steps:           steps          ?? 35,
-        guidanceScale:   guidance_scale ?? 8.0,
-        guidance_scale:  guidance_scale ?? 8.0,
-        image:           sourceAsset?.url ?? null,
-        image_url:       sourceAsset?.url ?? null,
-        references:      input_assets,
+        steps:          steps          ?? 40,
+        guidanceScale:  guidance_scale ?? 9.0,
+        guidance_scale: guidance_scale ?? 9.0,
+        image:          sourceAsset?.url ?? null,
+        image_url:      sourceAsset?.url ?? null,
+        references:     input_assets,
       };
 
       const payload   = this._buildPayload(provider, form);
       const result    = await provider.generate(payload);
       const outputUrl = extractOutputUrl(result);
 
-      const fileName  = `${userId}/generations/${workflow.id}_${Date.now()}.png`;
-      const fileUrl   = await this.storageService.uploadFromUrl(fileName, outputUrl);
+      const fileName = `${userId}/generations/${workflow.id}_${Date.now()}.png`;
+      const fileUrl  = await this.storageService.uploadFromUrl(fileName, outputUrl);
 
       await this.db.media.updateFields(mediaId, {
         url:    fileUrl,
-        width:  result.width  ?? width  ?? 1024,
+        width:  result.width  ?? width  ?? 1536,
         height: result.height ?? height ?? 1024,
       });
       await markMediaStatus(this.db, mediaId, "success");
 
-      this._log("info", `✅ done | configId:${configId}`);
+      this._log("info", `✅ Sheet generated | configId:${configId}`);
 
-      // ── DNA narrative trigger (non-blocking, after success) ───────────
       if (this.dnaTreatment && dnaPayload) {
         this.dnaTreatment
-          .create({ generation_config_id: configId, ...dnaPayload })
+          .run({
+            workflow_id: workflow.id,
+            features:    dnaPayload.features,
+            description: dnaPayload.userDescription,
+          })
           .catch(err => this._log("error", `DNA generation failed: ${err.message}`));
       }
 
       return { configId, mediaId, workflowId: workflow.id, succeeded: 1, failed: 0 };
 
     } catch (err) {
-      this._log("error", `run failed: ${err.message}`);
+      this._log("error", `Sheet generation failed: ${err.message}`);
       await markMediaFailed(this.db, mediaId, err);
       throw err;
     }

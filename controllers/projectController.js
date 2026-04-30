@@ -24,10 +24,10 @@ function videoModelInfoToPayload(key, route) {
 
 function getModelConfig() {
     const videoModels = Object.entries(MODEL_ROUTES)
-        .filter(([_, route]) => route.type === "generated" && route.open !== false)
+        .filter(([_, route]) => route.type === "generated" && route.open !== false && !route.hidden)
         .map(([key, route]) => videoModelInfoToPayload(key, route));
     const imageModels = Object.entries(IMAGE_ROUTES)
-        .filter(([_, route]) => route.open !== false)
+        .filter(([_, route]) => route.open !== false && !route.hidden)
         .map(([key, route]) => {
         const group = route.group;
         return {
@@ -189,7 +189,7 @@ export const getProjectData = async (req, res) => {
                 error:          m.error_message || null,
                 projectId:      project_id,
                 workflowId:     m.workflow_id,
-                workflowStepId: isUpload ? "upload" : (m.step_id || "CAE"),
+                workflowStepId: isUpload ? "upload" : (m.step_id || "GEN"),
 
                 generationConfig: config ? {
                     prompt:         config.prompt          || "",

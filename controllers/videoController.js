@@ -1,6 +1,6 @@
 // controllers/videoController.js — HTTP handler; domain treatment: src/video/treatments/VideoTreatment.js
 import { videoTreatment, motionTreatment, editVideoTreatment, promptService } from "../src/container.js";
-import { isVideoModelRegistered } from "../lib/modelRegistryKeys.js";
+import { isVideoModelRegistered, isModelHidden } from "../lib/modelRegistryKeys.js";
 
 /**
  * generateVideo
@@ -82,7 +82,7 @@ export const generateVideo = async (req, res) => {
             workflows: queued.workflows,
             status:    queued.status,
             mode:      queued.mode,
-            model:     queued.model,
+            model:     isModelHidden(queued.model) ? null : queued.model,
             taskId:    queued.jobId,
             jobId:     queued.jobId,
         };
@@ -182,7 +182,7 @@ export const extendVideo = async (req, res) => {
             workflows: queued.workflows,
             status:    queued.status,
             mode:      queued.mode,
-            model:     queued.model,
+            model:     isModelHidden(queued.model) ? null : queued.model,
             taskId:    queued.jobId,
             jobId:     queued.jobId,
         };
@@ -284,7 +284,7 @@ export const editVideo = async (req, res) => {
             workflows: queued.workflows,
             status:    queued.status,
             mode:      queued.mode,
-            model:     queued.model,
+            model:     isModelHidden(queued.model) ? null : queued.model,
             taskId:    queued.jobId,
             jobId:     queued.jobId,
         };
@@ -394,7 +394,7 @@ export const motionControl = async (req, res) => {
             workflows: queued.workflows,
             status:    queued.status,
             mode:      queued.mode,
-            model:     queued.model,
+            model:     isModelHidden(queued.model) ? null : queued.model,
             taskId:    queued.jobId,
             jobId:     queued.jobId,
         };

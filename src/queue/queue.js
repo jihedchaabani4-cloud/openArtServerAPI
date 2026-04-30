@@ -11,7 +11,8 @@ export const jobQueue = new Queue(QUEUE_NAME, {
       type: 'exponential',
       delay: 1000,
     },
-    removeOnComplete: true, // Keep Redis memory clean
-    removeOnFail: false,    // Retain failed jobs for inspection
+    // ── Redis Memory Optimization (important on Upstash free plan) ──────────
+    removeOnComplete: { count: 10 },  // Keep only last 10 completed jobs
+    removeOnFail:     { count: 50 },  // Keep last 50 failed for inspection
   },
 });

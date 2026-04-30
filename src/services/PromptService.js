@@ -42,13 +42,86 @@ export class PromptService {
         }
     }
 
-    async upscalePrompt(prompt, { style = "cinematic", quality = "ultra" } = {}) {
-        // Feature disabled per user request: return original prompt without LLM modification
-        return {
-            enhanced: prompt,
-            suggestedParams: { guidanceScale: 7.5, steps: 30 }
+    /**
+     * optimizePrompt
+     * 
+     * Single-pass LLM call that:
+     *  1. Detects the language (Arabic, French, Tunisian dialect, etc.)
+     *  2. Translates to English if needed
+     *  3. Fixes incomplete / broken words (typos, half-written words)
+     *  4. Enriches the prompt with cinematic/visual details for AI generation
+     *  5. Returns the improved prompt + metadata
+     *
+     * @param {string} prompt - raw user input
+     * @param {{ mode?: "image"|"video", style?: string }} [opts]
+     * @returns {{ optimized: string, originalLanguage: string, wasTranslated: boolean, wasEnhanced: boolean }}
+     */
+    async optimizePrompt(prompt, { mode = "image", style = "cinematic" } = {}) {
+        if (!prompt?.trim()) return {
+            optimized: prompt,
+            originalLanguage: "en",
+            wasTranslated: false,
+            wasEnhanced: false,
         };
+
+                    const modeHint = mode === "video"
+                        ? "for an AI video generation model (describe motion, camera, atmosphere)"
+                        : "for an AI image generation model (describe visuals, lighting, composition, style)";
+
+                    const systemPrompt = `
+            You are an expert AI Prompt Engineer and multilingual translator specialized in generative AI.
+
+            YOUR TASKS (in order):
+            1. DETECT the language of the user's input (may be Arabic, Tunisian Darija, French, mixed, or English).
+            2. TRANSLATE to fluent English if the input is not already English.
+            3. FIX any incomplete or broken words, typos, or half-written expressions.
+            4. ENHANCE the result ${modeHint}. Add descriptive visual details, lighting, mood, and style keywords — but preserve the user's core intent. Keep it under 120 words.
+            5. Return ONLY a valid JSON object matching this schema:
+
+            {
+                "optimized_prompt": string,       // the final English, enhanced, clean prompt
+                "original_language": string,      // detected language code (e.g. "ar", "fr", "en", "tn-darija")
+                "was_translated": boolean,        // true if translation was needed
+                "was_enhanced": boolean,          // true if you added or fixed content
+                "changes_summary": string         // one-line summary of what you changed (or "none")
+            }
+
+            RULES:
+            - NEVER refuse. Always return a result.
+            - NEVER add inappropriate or NSFW content.
+            - If input is already a perfect English prompt, still return it cleaned up with minor enhancements.
+            - Keep the user's creative vision. Do not replace their idea with something else.
+            - If the user wrote a single word or very short phrase, expand it into a descriptive prompt.
+            `;
+
+        const userPrompt = `User input: "${prompt}"`;
+
+        try {
+            const result = await this.textProvider.completeJSON({ systemPrompt, userPrompt, temperature: 0.5 });
+            return {
+                optimized:        result.optimized_prompt  || prompt,
+                originalLanguage: result.original_language || "en",
+                wasTranslated:    result.was_translated    ?? false,
+                wasEnhanced:      result.was_enhanced      ?? false,
+                changesSummary:   result.changes_summary   || "none",
+            };
+        } catch (e) {
+            console.error("[PromptService] optimizePrompt failed:", e);
+            return {
+                optimized:        prompt,
+                originalLanguage: "en",
+                wasTranslated:    false,
+                wasEnhanced:      false,
+                changesSummary:   "none",
+            };
+        }
     }
+
+    /** @deprecated — use optimizePrompt instead */
+    async upscalePrompt(prompt, { style = "cinematic", quality = "ultra" } = {}) {
+        return this.optimizePrompt(prompt, { style });
+    }
+
 
     async generateDnaFromPrompt(userPrompt) {
         const systemPrompt = `You are a Master Character Architect and Cinematographer. Your EXCLUSIVE goal is photorealistic human/character generation.

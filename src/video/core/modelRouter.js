@@ -68,6 +68,8 @@ function fromRegistry(
     supportsCamera = false,
     type = VIDEO_MODEL_TYPES.GENERATED,
     pricing = {},
+    isOpen = true,
+    isHidden = false,
     overrides = {}
 ) {
     const group = ALL_REGISTRY_MODELS[key];
@@ -92,7 +94,8 @@ function fromRegistry(
         group,
         info,
         type,
-        open: true,
+        open: isOpen,
+        hidden: isHidden,
         supportsEdit,
         supportsCamera,
         pricing: {
@@ -116,8 +119,6 @@ export const MODEL_ROUTES = {
     "kling_v2":      fromRegistry("kling_v2_wavespeed", "Kling v2.6", false, true, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 20, perSecondCredits: 4 }),
     "kling_v2_pro":  fromRegistry("kling_v2_pro_wavespeed", "Kling v2.6 Pro", false, true, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 26, perSecondCredits: 5 }),
 
-    // ── Kling v2.1 ───────────────────────────────────────────────────────────
-    "kling_v21_pro": fromRegistry("kling_v21_pro_wavespeed", "Kling v2.1 Pro Keyframes", false, true, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 24, perSecondCredits: 5 }),
 
     // ── Kling v3.0 ───────────────────────────────────────────────────────────
     "kling_v3":     fromRegistry("kling_v3_wavespeed", "Kling v3.0", false, true, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 24, perSecondCredits: 5 }),
@@ -126,7 +127,6 @@ export const MODEL_ROUTES = {
     // ── Kling O3 ─────────────────────────────────────────────────────────────
     "kling_o3":     fromRegistry("kling_o3_wavespeed", "Kling O3", true, true, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 28, perSecondCredits: 6 }),
     "kling_o3_pro": fromRegistry("kling_o3_pro_wavespeed", "Kling O3 Pro", false, true, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 34, perSecondCredits: 7 }),
-
 
 
     // ── Seedance v1.5 Pro ───────────────────────────────────────────────────
@@ -139,7 +139,7 @@ export const MODEL_ROUTES = {
     "runway_gen4_aleph": fromRegistry("runway_gen4_aleph_wavespeed", "RunwayML Gen-4 Aleph", true, true, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 32, perSecondCredits: 7 }),
 
     // ── Topaz Video Models ───────────────────────────────────────────────────
-    "topaz_video_upscale": fromRegistry("topaz_video_upscale_replicate", "Topaz Video Upscale", false, false, VIDEO_MODEL_TYPES.UPSCALE, { baseCredits: 12, perSecondCredits: 3 }),
+    "topaz_video_upscale": fromRegistry("topaz_video_upscale_replicate", "Topaz Video Upscale", false, false, VIDEO_MODEL_TYPES.UPSCALE, { baseCredits: 12, perSecondCredits: 3 }, true, true),
 };
 
 
@@ -260,13 +260,17 @@ export const NO_EDIT_MODELS = Object.keys(MODEL_ROUTES).filter(
 );
 
 export const ROUTED_MODELS = Object.keys(MODEL_ROUTES).filter(
-    (key) => MODEL_ROUTES[key].type === VIDEO_MODEL_TYPES.GENERATED && MODEL_ROUTES[key].open
+    (key) => MODEL_ROUTES[key].type === VIDEO_MODEL_TYPES.GENERATED
+          && MODEL_ROUTES[key].open
+          && !MODEL_ROUTES[key].hidden
 );
 
 export const UPSCALE_MODELS = Object.keys(MODEL_ROUTES).filter(
-    (key) => MODEL_ROUTES[key].type === VIDEO_MODEL_TYPES.UPSCALE && MODEL_ROUTES[key].open
+    (key) => MODEL_ROUTES[key].type === VIDEO_MODEL_TYPES.UPSCALE
+          && MODEL_ROUTES[key].open
+          && !MODEL_ROUTES[key].hidden
 );
 
 export const AVAILABLE_MODELS = Object.keys(MODEL_ROUTES).filter(
-    (key) => MODEL_ROUTES[key].open
+    (key) => MODEL_ROUTES[key].open && !MODEL_ROUTES[key].hidden
 );

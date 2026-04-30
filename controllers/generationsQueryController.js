@@ -1,4 +1,5 @@
 import { supabase } from "../lib/supabase.js";
+import { isModelHidden } from "../lib/modelRegistryKeys.js";
 
 async function getOwnedProjectIds(userId, projectId = null) {
     let projectsQuery = supabase
@@ -98,7 +99,7 @@ async function buildLibraryPayload({ workflows = [] }) {
                 {
                     id: config.id,
                     prompt: config.prompt || "",
-                    model: config.model || "",
+                    model: isModelHidden(config.model) ? null : (config.model || ""),
                     aspect_ratio: config.aspect_ratio || null,
                     generation_type: config.generation_type || null,
                     seed: config.seed ?? null,

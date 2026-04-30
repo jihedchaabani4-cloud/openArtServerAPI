@@ -1,18 +1,12 @@
 import { BaseGenerateImageTreatment } from "../basetretment/BaseGenerateImageTreatment.js";
+import { processPrompt }             from "../../../services/promptServiceV2.js";
+import { markMediaFailed }            from "#db/workflowMediaOps.js";
+import { resolveReferences }          from "../../utils/resolveReferences.js";
 
 /**
  * GenerateImageTreatment
  *
  * Handles standard text-to-image and reference-based generation.
- * Extends BaseGenerateImageTreatment — only overrides prepare()
- * to resolve reference workflow IDs into URLs before delegating
- * all shared logic to _runPrepare().
- *
- * Usage (same as before):
- *   const result = await treatment.execute(input);
- *   // or
- *   const task = await treatment.prepare(input);
- *   await treatment.run(task);  // can be queued in Redis
  */
 export class GenerateImageTreatment extends BaseGenerateImageTreatment {
 
@@ -31,25 +25,31 @@ export class GenerateImageTreatment extends BaseGenerateImageTreatment {
       strength,
       project_id,
       session_id,
+      references      = [],
     } = input;
 
     const userId = input.userId || input.user_id;
     if (!userId)     throw new Error("userId required");
     if (!project_id) throw new Error("project_id required");
 
-    let { ratio, quality, steps, guidance_scale, count = 1, references = [] } = input;
+    let { ratio, quality, steps, guidance_scale, count = 1 } = input;
 
-    // ── Resolve reference workflow IDs → URLs ───────────────────────────
-    const input_assets = [];
+    // ── Resolve reference workflow IDs → Enriched Assets ───────────────────
+    const referenceWorkflowIds = references
+      .map(ref => ref.workflow_id || ref.id)
+      .filter(Boolean);
+
+    const input_assets = await resolveReferences(this.db, {
+      referenceWorkflowIds
+    });
+
+    // Handle direct URLs if any (rare in current flow but good for compatibility)
     for (const ref of references) {
-      const wfId = ref.workflow_id || ref.id;
-      if (!wfId) continue;
-
-      const media = await this.db.media.findLatestByWorkflow(wfId);
-      if (media?.url) {
+      if (ref.url && !input_assets.find(a => a.url === ref.url)) {
         input_assets.push({
-          url:     media.url,
+          url:     ref.url,
           role:    ref.role    || "reference",
+          media_id: ref.media_id || ref.asset_id || ref.id || null,
           is_base: ref.is_base || false,
         });
       }
@@ -75,7 +75,52 @@ export class GenerateImageTreatment extends BaseGenerateImageTreatment {
       session_id,
       input_assets,
       stepId: "GEN",
+      extraTaskFields: {
+        rawReferences: input_assets // for optimizePrompt tags
+      }
     });
+  }
+
+  /**
+   * optimizePrompt — overrides base to use promptServiceV2
+   */
+  async optimizePrompt(task) {
+    const { prompt, prompt_optimise, negative_prompt, mediaIds, model_name, rawReferences = [] } = task;
+    const rawPrompt = prompt_optimise || prompt;
+
+    let finalNegative = negative_prompt || "";
+
+    if (!rawPrompt) return { finalPrompt: prompt, finalNegative };
+
+    // ── 1. Use the new single-call pipeline ──────────────────────────────
+    const result = await processPrompt({
+      prompt:     rawPrompt,
+      references: rawReferences,
+      modelType:  model_name?.includes("runway") ? "runway" : "kling", // simple mapping for now
+      textProvider: this.promptService.textProvider,
+    });
+
+    if (!result.success) {
+      this._log("error", `prompt optimization failed: ${result.reason}`);
+    } else {
+      // ── Save optimized prompt back to DB ────────────────────────────────
+      if (task.configId) {
+        await this.db.configs.updateFields(task.configId, { prompt_optimise: result.prompt })
+          .catch(err => this._log("error", `Failed to save optimized prompt: ${err.message}`));
+      }
+    }
+
+    const finalPrompt = result.success ? result.prompt : rawPrompt;
+
+    // ── 2. Generate negative prompt (optional, fallback to old service) ──
+    try {
+      const autoNeg = await this.promptService.generateNegativePrompt(finalPrompt);
+      finalNegative = [negative_prompt || "", autoNeg || ""].filter(Boolean).join(", ");
+    } catch (e) {
+      this._log("error", `Failed to generate negative prompt: ${e.message}`);
+    }
+
+    return { finalPrompt, finalNegative };
   }
 
   // run(), _runVariation(), execute() — all inherited from base ✅

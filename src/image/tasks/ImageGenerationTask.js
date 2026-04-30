@@ -47,7 +47,7 @@ export async function runImageGenerationTask(context, params) {
     let finalPrompt, finalNegative;
     try {
         const enhanced = await promptService.upscalePrompt(promptForGeneration, { quality });
-        finalPrompt    = enhanced.enhanced;
+        finalPrompt    = enhanced?.optimized || enhanced?.enhanced || promptForGeneration;
         const autoNeg  = await promptService.generateNegativePrompt(finalPrompt);
         finalNegative  = [negative_prompt || "", autoNeg || ""].filter(Boolean).join(", ");
         console.log(`   ✏️  Prompt: "${finalPrompt.substring(0, 80)}..."`);
@@ -88,7 +88,7 @@ export async function runImageGenerationTask(context, params) {
                         mediaData: {
                             project_id,
                             generation_config_id: configId,
-                            step_id: "CAE",
+                            step_id: "GEN",
                             url: null,
                             width: width || 1024,
                             height: height || 1024,
@@ -157,7 +157,7 @@ export async function runImageGenerationTask(context, params) {
             mediaData: {
                 project_id,
                 generation_config_id: configId,
-                step_id: "CAE",
+                step_id: "GEN",
                 url: null,
                 width: width || 1024,
                 height: height || 1024,

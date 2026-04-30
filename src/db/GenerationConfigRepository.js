@@ -38,6 +38,7 @@ export class GenerationConfigRepository extends BaseRepository {
      * @param {string} input_type - "IMAGE_INPUT_TYPE_BASE_IMAGE" | "IMAGE_INPUT_TYPE_REFERENCE"
      */
     async createReference({ generation_config_id, position, input_type, ref_media_id }) {
+        console.log(`🔗 [DB] Creating Reference: ConfigID=${generation_config_id}, Pos=${position}, Type=${input_type}, MediaID=${ref_media_id}`);
         const { data, error } = await this.client()
             .from("generation_config_reference")
             .insert({ generation_config_id, position, input_type, ref_media_id })

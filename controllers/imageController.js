@@ -1,4 +1,4 @@
-import { normalizeImageModelName, isImageModelRegistered } from "../lib/modelRegistryKeys.js";
+import { normalizeImageModelName, isImageModelRegistered, isModelHidden } from "../lib/modelRegistryKeys.js";
 import { db, imageTreatmentV2, editImageTreatment } from "../src/container.js";
 /**
  * generateV2
@@ -14,8 +14,9 @@ export const generateV2 = async (req, res) => {
             references,
             model_name,
         } = req.body;
-
         // 1. Validation & Normalization
+        console.log("$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$",references)
+        console.log(`🚀 [ImageController] generateV2 | Incoming Body:`, JSON.stringify(req.body, null, 2));
         quality = quality || resolution;
         count   = count   || num_images || 1;
 
@@ -129,6 +130,7 @@ export const generateEdit = async (req, res) => {
         res.json({ 
             ok: true, 
             ...result,
+            model: result.model && isModelHidden(result.model) ? null : result.model,
             taskId: result.jobId,
             project_id: finalProjectId,
             session_id: finalSessionId

@@ -62,6 +62,7 @@ export const db = {
     media:     new MediaRepository(),     // table: media
     configs:   new GenerationConfigRepository(), // tables: generation_config + generation_config_reference
     dna:       new DnaRepository(),       // table: dna
+    characters: new DnaRepository(),       // alias for resolveReferences helper
 };
 
 // ─── Treatments ──────────────────────────────────────────────────────────────
@@ -102,7 +103,8 @@ export const upscaleTreatment = new UpscaleTreatment({
 });
 
 export const dnaTreatment = new DnaTreatment({
-    promptService, db
+    textProvider: promptService.textProvider,
+    db
 });
 
 export const elementSheetTreatment = new ElementSheetTreatment({

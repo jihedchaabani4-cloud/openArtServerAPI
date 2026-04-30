@@ -46,7 +46,7 @@ async function handleImageCamera(req, res) {
         }
 
         const userId = req.user.id;
-        const normalizedModelName = normalizeImageModelName(model_name) || "seedream-pro";
+        const normalizedModelName = normalizeImageModelName(model_name) || "gpt-image-2";
 
         const { project_id: finalProjectId, session_id: finalSessionId } =
             await autoCreateProjectAndSession(userId, project_id, session_id, false);

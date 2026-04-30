@@ -66,12 +66,12 @@ const MODE_BUILDERS = {
 const ROLE_ALIASES = new Set(["start", "source", "normal", "base"]);
 
 const PROVIDER_METHODS = {
-    t2v:    (p, payload, mode) => (p.generate ?? p.textToVideo)(payload, mode),
-    i2v:    (p, payload, mode) => (p.generate ?? p.imageToVideo)(payload, mode),
-    i2v_se: (p, payload, mode) => (p.generate ?? p.imageToVideo ?? p.motionControl)(payload, mode),
-    motion: (p, payload, mode) => (p.generate ?? p.motionControl)(payload, mode),
-    r2v:    (p, payload, mode) => (p.generate ?? p.imageToVideo)(payload, mode),
-    v2v:    (p, payload, mode) => (p.generate ?? p.videoToVideo)(payload, mode),
+    t2v:    (p, payload, mode) => p.generate(payload, mode),
+    i2v:    (p, payload, mode) => p.generate(payload, mode),
+    i2v_se: (p, payload, mode) => p.generate(payload, mode),
+    motion: (p, payload, mode) => p.generate(payload, mode),
+    r2v:    (p, payload, mode) => p.generate(payload, mode),
+    v2v:    (p, payload, mode) => p.generate(payload, mode),
 };
 
 const DB_INPUT_TYPE = {
@@ -129,11 +129,21 @@ function resolveMode(startAsset, endAsset, referenceAssets) {
 
 function normalizeReferences(rawReferences, image_workflow_id, reference_workflow_ids) {
     const refs = [...rawReferences];
-    if (image_workflow_id) refs.push({ workflow_id: image_workflow_id, role: "start" });
-    for (const wfId of reference_workflow_ids) {
-        refs.push(typeof wfId === "string" ? { workflow_id: wfId, role: "reference" } : wfId);
+    const existingWfIds = new Set(refs.map(r => r.workflow_id || r.id).filter(Boolean));
+
+    if (image_workflow_id && !existingWfIds.has(image_workflow_id)) {
+        refs.push({ workflow_id: image_workflow_id, role: "start" });
+        existingWfIds.add(image_workflow_id);
     }
-    return refs.filter(r => r?.workflow_id);
+
+    for (const wfId of reference_workflow_ids) {
+        const id = typeof wfId === "string" ? wfId : (wfId.workflow_id || wfId.id);
+        if (id && !existingWfIds.has(id)) {
+            refs.push(typeof wfId === "string" ? { workflow_id: wfId, role: "reference" } : wfId);
+            existingWfIds.add(id);
+        }
+    }
+    return refs.filter(r => r?.workflow_id || r?.media_id || r?.url);
 }
 
 // ─── VideoTreatment ───────────────────────────────────────────────────────────
@@ -245,7 +255,7 @@ export class VideoTreatment {
 
         const media = await appendMediaToWorkflow(this.db, {
             workflow_id: workflow.id,
-            mediaData:   { project_id, generation_config_id: config.id, step_id: "CAE", width, height },
+            mediaData:   { project_id, generation_config_id: config.id, step_id: "VID", width, height },
             initialStatus: "processing",
         });
 
@@ -291,6 +301,19 @@ export class VideoTreatment {
                 generation_type: references.length > 0 ? "TEXT_REFERENCES" : "TEXT_ONLY",
                 seed:            result.seed ?? null,
             });
+
+            await Promise.all(
+                (references || [])
+                    .filter((asset) => asset?.media_id)
+                    .map((asset, index) => this.db.configs.createReference({
+                        generation_config_id: mediaConfig.id,
+                        position: index,
+                        input_type: asset.role === "start" ? DB_INPUT_TYPE.start
+                                   : asset.role === "end" ? DB_INPUT_TYPE.end
+                                   : DB_INPUT_TYPE.other,
+                        ref_media_id: asset.media_id,
+                    }))
+            );
 
             await this.db.media.updateFields(mediaId, {
                 generation_config_id: mediaConfig.id,

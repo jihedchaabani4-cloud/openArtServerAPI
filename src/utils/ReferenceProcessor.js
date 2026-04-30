@@ -124,11 +124,15 @@ export class ReferenceProcessor {
                 };
             }
 
-            throw new Error(`[ReferenceProcessor] Invalid reference structure: ${JSON.stringify(ref)}`);
+            console.warn(`❌ [ReferenceProcessor] Invalid reference structure or could not resolve: ${JSON.stringify(ref)}`);
+            return null; // Skip this one
         }));
 
-        this.validate(input_assets);
-        return input_assets;
+        // Filter out nulls (skipped references)
+        const finalAssets = input_assets.filter(Boolean);
+
+        this.validate(finalAssets);
+        return finalAssets;
     }
 
     validate(input_assets) {

@@ -9,6 +9,7 @@ import * as nanobana from "./models/nanobana.js";
 import * as seedream from "./models/seedream.js";
 import * as zImage   from "./models/z-image.js";
 import * as runway   from "./models/runway.js";
+import * as gptImage from "./models/gpt-image-2.js";
 import { IMAGE_ICONS } from "../../utils/imageIcons.js";
 
 const R_BASIC    = ["1:1", "16:9", "9:16", "3:2", "3:4"];
@@ -134,5 +135,22 @@ export const MODELS = {
         },
         t2i:      runway.gen4ImageTurbo,
         i2i:      runway.gen4ImageTurbo,
+    },
+
+    // ─── GPT Image 2 ──────────────────────────────────────────────────────────
+    "gpt_image_2_wavespeed": {
+        displayName: "GPT Image 2",
+        icon: IMAGE_ICONS.nanobana, // Or a specific GPT icon if available
+        description: "High-quality text-to-image and editing powered by GPT Image 2",
+        category: "image", tier: "pro",
+        pricing:  { per_image: 13 },
+        tags:     ["gpt", "creative", "high-quality"],
+        support:  { 
+            ratio: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"], 
+            quality: ["1k", "2k"],
+            references: { min: 0, max: 5 } 
+        },
+        t2i:      gptImage.t2i,
+        i2i:      gptImage.edit,
     },
 };

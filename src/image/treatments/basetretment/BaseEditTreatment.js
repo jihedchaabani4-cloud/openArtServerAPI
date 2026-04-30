@@ -1,10 +1,12 @@
-import { getStandardSize } from "#utils/sizeUtils.js";
+import { getStandardSize }                                          from "#utils/sizeUtils.js";
 import { calculateImageCredits, getImageModel, ROUTED_IMAGE_MODELS } from "#image/core/modelRouter.js";
-import { verifyAndClampParams } from "../../utils/treatmentUtils.js";
-import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "#db/workflowMediaOps.js";
-import { enqueueTreatmentJob } from "#queue/treatmentJob.js";
+import { verifyAndClampParams }                                      from "../../utils/treatmentUtils.js";
+import { appendMediaToWorkflow, markMediaStatus, markMediaFailed }   from "#db/workflowMediaOps.js";
+import { enqueueTreatmentJob }                                       from "#queue/treatmentJob.js";
+import { processPrompt }                                             from "#services/promptServiceV2.js"; // 🔥
 
 export class BaseEditTreatment {
+
   constructor({ promptService, models, storageService, db, walletService = null }) {
     this.promptService  = promptService;
     this.models         = models;
@@ -57,7 +59,7 @@ export class BaseEditTreatment {
   // ─────────────────────────────────────────────────────────
   async _runPrepare({
     prompt,
-    references, // ⚡ already URLs
+    references,
     model_name,
     ratio,
     quality,
@@ -72,13 +74,19 @@ export class BaseEditTreatment {
     workflow_id,
     stepId,
   }) {
-    // 1. Normalize refs (NO media_id anymore)
+    // 1. Normalize refs — preserve all fields including DNA + label + type
     const input_assets = (references || []).map(r => ({
-      url: r.url,
-      role: r.role || "reference",
-      is_base: !!r.is_base,
+      url:      r.url,
+      role:     r.role     || "reference",
+      media_id: r.media_id || r.asset_id || r.id || null,
+      is_base:  !!r.is_base,
+      // 🔥 preserve DNA fields for optimizePrompt
+      id:       r.media_id || r.id || null,
+      label:    r.label    || null,
+      type:     r.type     || "reference",
+      dna:      r.dna      || null,
     }));
-
+console.log("input_assets ************************** ", input_assets);
     // 2. Provider
     const provider = this._resolveProvider(model_name, { references: input_assets });
 
@@ -96,10 +104,25 @@ export class BaseEditTreatment {
     // 6. Config
     const config = await this.db.configs.createConfig({
       prompt,
-      model: model_name,
+      model:        model_name,
       aspect_ratio: verified.ratio || "LANDSCAPE",
       generation_type,
     });
+
+    await Promise.all(
+      input_assets
+        .filter((asset) => asset?.media_id)
+        .map((asset, index) =>
+          this.db.configs.createReference({
+            generation_config_id: config.id,
+            position:   index,
+            input_type: asset.is_base
+              ? "IMAGE_INPUT_TYPE_BASE_IMAGE"
+              : "IMAGE_INPUT_TYPE_REFERENCE",
+            ref_media_id: asset.media_id,
+          })
+        )
+    );
 
     // 7. Workflow
     const wf = await this.db.workflows.getWorkflow(workflow_id);
@@ -112,14 +135,12 @@ export class BaseEditTreatment {
         project_id,
         generation_config_id: config.id,
         step_id: stepId,
-        url: null,
+        url:    null,
         width:  sizeInfo?.width  || 1024,
         height: sizeInfo?.height || 1024,
       },
       initialStatus: "processing",
     });
-
-    // 9. Safety (Moved to optimizePrompt)
 
     return {
       userId,
@@ -127,19 +148,95 @@ export class BaseEditTreatment {
       prompt,
       negative_prompt,
       generation_type,
-      ratio: verified.ratio,
-      quality: verified.quality,
-      steps: verified.steps,
+      ratio:          verified.ratio,
+      quality:        verified.quality,
+      steps:          verified.steps,
       guidance_scale: verified.guidance_scale,
-      size: sizeInfo?.size,
-      width: sizeInfo?.width,
-      height: sizeInfo?.height,
+      size:           sizeInfo?.size,
+      width:          sizeInfo?.width,
+      height:         sizeInfo?.height,
       seed,
-      input_assets, // ✅ URLs only
+      input_assets,
       upscaleScale,
-      configId: config.id,
-      workflow: wf,
-      mediaId: media.id,
+      configId:  config.id,
+      workflow:  wf,
+      mediaId:   media.id,
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // 🔥 PROMPT OPTIMIZATION — dynamic pipeline
+  //
+  // CASES:
+  //   1. No prompt          → skip everything
+  //   2. Prompt + no refs   → simple safety + upscale (no DNA)
+  //   3. Prompt + refs      → full processPrompt() pipeline
+  //      a. refs avec DNA   → [EDIT CONTEXT] + [CHARACTER DNA] + optimize
+  //      b. refs sans DNA   → [EDIT CONTEXT] + optimize
+  // ─────────────────────────────────────────────────────────
+  async optimizePrompt(task) {
+    const { prompt, negative_prompt, quality, mediaId, input_assets, model_name } = task;
+
+    // ── Case 1: No prompt — skip everything ───────────────────────────────
+    if (!prompt?.trim()) {
+      console.log(`[${this.constructor.name}] No prompt — skipping optimization`);
+      return { finalPrompt: prompt || "", finalNegative: negative_prompt || "" };
+    }
+
+    // ── Case 2: No references — simple safety + upscale ───────────────────
+    if (!input_assets?.length) {
+      console.log(`[${this.constructor.name}] No references — simple optimization`);
+
+      const safety = await this.promptService.checkPrompt(prompt);
+      if (!safety.safe) {
+        if (mediaId) await markMediaFailed(this.db, mediaId, safety.reason);
+        throw new Error(`Prompt rejected: ${safety.reason}`);
+      }
+
+      try {
+        const enhanced    = await this.promptService.upscalePrompt(prompt, { quality });
+        const finalPrompt = enhanced?.optimized || enhanced?.enhanced || prompt;
+        const autoNeg     = await this.promptService.generateNegativePrompt(finalPrompt);
+        const finalNegative = [negative_prompt || "", autoNeg || ""].filter(Boolean).join(", ");
+        return { finalPrompt, finalNegative };
+      } catch (err) {
+        console.error(`[${this.constructor.name}] Simple enhancement failed: ${err.message}`);
+        return { finalPrompt: prompt, finalNegative: negative_prompt || "" };
+      }
+    }
+
+    // ── Case 3: Prompt + references — full processPrompt() pipeline ────────
+    console.log(`[${this.constructor.name}] Full pipeline — ${input_assets.length} refs, model: ${model_name}`);
+    console.log(`[${this.constructor.name}] ALL REFERENCES INCOMING:`, JSON.stringify(input_assets, null, 2));
+
+    const result = await processPrompt({
+      prompt,
+      references:   input_assets,   // carries url + label + type + dna + is_base
+      modelType:    model_name,
+      textProvider: this.promptService.textProvider,
+      isEdit:       true,            // always edit mode in BaseEditTreatment
+    });
+    console.log("result ***************************** ", result);
+    // Safety rejected
+    if (!result.success) {
+      if (mediaId) await markMediaFailed(this.db, mediaId, result.reason);
+      throw new Error(`Prompt rejected: ${result.reason}`);
+    }
+
+    // Merge negative prompt
+    let finalNegative = negative_prompt || "";
+    try {
+      const autoNeg = await this.promptService.generateNegativePrompt(result.prompt);
+      finalNegative = [negative_prompt || "", autoNeg || ""].filter(Boolean).join(", ");
+    } catch (_) {
+      // negative prompt generation failed — use original
+    }
+
+    console.log(`[${this.constructor.name}] ✅ Final prompt ready`);
+
+    return {
+      finalPrompt:   result.prompt,
+      finalNegative,
     };
   }
 
@@ -151,8 +248,8 @@ export class BaseEditTreatment {
       const optimized = await this.optimizePrompt(task);
       const result = await this.run({
         ...task,
-        enhanced_prompt: optimized.finalPrompt,
-        enhanced_negative: optimized.finalNegative
+        enhanced_prompt:   optimized.finalPrompt,
+        enhanced_negative: optimized.finalNegative,
       });
 
       if (this.walletService && task.walletReferenceId) {
@@ -168,41 +265,8 @@ export class BaseEditTreatment {
           console.error(`[${this.constructor.name}] wallet rollback failed for ${task.walletReferenceId}: ${walletError.message}`);
         }
       }
-
       throw error;
     }
-  }
-
-  // ─────────────────────────────────────────────────────────
-  // 🔥 PROMPT OPTIMIZATION
-  // ─────────────────────────────────────────────────────────
-  async optimizePrompt(task) {
-    const { prompt, negative_prompt, quality, mediaId } = task;
-    let finalPrompt   = prompt;
-    let finalNegative = negative_prompt;
-
-    if (finalPrompt) {
-      // 1. Safety check
-      const safety = await this.promptService.checkPrompt(finalPrompt);
-      if (!safety.safe) {
-        if (mediaId) {
-          await markMediaFailed(this.db, mediaId, safety.reason);
-        }
-        throw new Error(`Prompt rejected: ${safety.reason}`);
-      }
-
-      // 2. Enhancement
-      try {
-        const enhanced = await this.promptService.upscalePrompt(finalPrompt, { quality });
-        finalPrompt    = enhanced.enhanced;
-        const autoNeg  = await this.promptService.generateNegativePrompt(finalPrompt);
-        finalNegative  = [negative_prompt || "", autoNeg || ""].filter(Boolean).join(", ");
-      } catch (err) {
-        console.error(`[${this.constructor.name}] Prompt enhancement failed: ${err.message}`);
-      }
-    }
-
-    return { finalPrompt, finalNegative };
   }
 
   // ─────────────────────────────────────────────────────────
@@ -214,7 +278,8 @@ export class BaseEditTreatment {
       model_name,
       prompt,
       negative_prompt,
-      enhanced_prompt, enhanced_negative,
+      enhanced_prompt,
+      enhanced_negative,
       generation_type,
       ratio, quality, size, width, height,
       steps, guidance_scale,
@@ -228,9 +293,10 @@ export class BaseEditTreatment {
 
     const provider = this._resolveProvider(model_name, { references: input_assets });
 
-    let finalPrompt   = enhanced_prompt !== undefined ? enhanced_prompt : prompt;
+    let finalPrompt   = enhanced_prompt   !== undefined ? enhanced_prompt   : prompt;
     let finalNegative = enhanced_negative !== undefined ? enhanced_negative : negative_prompt;
 
+    // Fallback — should not happen if worker pattern is followed
     if (enhanced_prompt === undefined) {
       const optimized = await this.optimizePrompt(task);
       finalPrompt   = optimized.finalPrompt;
@@ -244,14 +310,14 @@ export class BaseEditTreatment {
     const image_url = sourceAsset?.url || null;
 
     const form = {
-      prompt: finalPrompt,
-      negativePrompt: finalNegative,
+      prompt:          finalPrompt,
+      negativePrompt:  finalNegative,
       negative_prompt: finalNegative,
       ratio, quality, size, width, height,
-      steps: steps || 20,
+      steps:         steps          || 20,
       guidanceScale: guidance_scale || 7.5,
       seed,
-      image: image_url,
+      image:      image_url,
       image_url,
       references: input_assets,
       ...(upscaleScale ? { scale: upscaleScale } : {}),
@@ -289,8 +355,8 @@ export class BaseEditTreatment {
     }
 
     await this.db.media.updateFields(mediaId, {
-      url: fileUrl,
-      width: result.width || width || 1024,
+      url:    fileUrl,
+      width:  result.width  || width  || 1024,
       height: result.height || height || 1024,
     });
 
@@ -299,6 +365,9 @@ export class BaseEditTreatment {
     return { configId, mediaId, workflowId: workflow.id };
   }
 
+  // ─────────────────────────────────────────────────────────
+  // 🔥 EXECUTE
+  // ─────────────────────────────────────────────────────────
   async execute(input) {
     let task;
     try {
@@ -320,25 +389,25 @@ export class BaseEditTreatment {
     if (shouldHoldCredits) {
       walletReferenceId = task.configId;
       const pricing = calculateImageCredits({
-        modelKey: task?.model_name || input?.model_name,
-        quality: task?.quality || input?.quality || "standard",
-        count: 1,
+        modelKey:  task?.model_name || input?.model_name,
+        quality:   task?.quality    || input?.quality || "standard",
+        count:     1,
         operation: "edit",
       });
       holdAmount = pricing.credits;
 
       await this.walletService.hold({
-        userId: input.userId || input.user_id,
-        amount: holdAmount,
+        userId:      input.userId || input.user_id,
+        amount:      holdAmount,
         referenceId: walletReferenceId,
         metadata: {
-          treatment: this.getQueueType(),
-          model_name: task?.model_name || input?.model_name || null,
-          prompt: task?.prompt || input?.prompt || null,
-          project_id: task?.project_id || input?.project_id || null,
-          session_id: task?.session_id || input?.session_id || null,
-          workflow_id: task?.workflow?.id || input?.workflow_id || null,
-          pricingVersion: pricing.pricingVersion,
+          treatment:       this.getQueueType(),
+          model_name:      task?.model_name      || input?.model_name  || null,
+          prompt:          task?.prompt          || input?.prompt       || null,
+          project_id:      task?.project_id      || input?.project_id  || null,
+          session_id:      task?.session_id      || input?.session_id  || null,
+          workflow_id:     task?.workflow?.id    || input?.workflow_id  || null,
+          pricingVersion:  pricing.pricingVersion,
           pricingBreakdown: pricing.breakdown,
         },
       });
@@ -346,7 +415,7 @@ export class BaseEditTreatment {
 
     if (walletReferenceId) {
       task.walletReferenceId = walletReferenceId;
-      task.walletHoldAmount = holdAmount;
+      task.walletHoldAmount  = holdAmount;
     }
 
     let job;
@@ -368,11 +437,11 @@ export class BaseEditTreatment {
     }
 
     return {
-      jobId: job.id,
-      configId: task.configId,
+      jobId:     job.id,
+      configId:  task.configId,
       workflows: [task.workflow],
-      provider: task.model_name,
-      status: "queued",
+      provider:  task.model_name,
+      status:    "queued",
     };
   }
 }

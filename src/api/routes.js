@@ -12,6 +12,7 @@ import cameraRouter      from '../../routes/camera.js';
 import lightingRouter    from '../../routes/lighting.js';
 import mediaRouter       from '../../routes/media.js';
 import authRouter        from '../../routes/authRoutes.js';
+import promptRouter      from '../../routes/prompt.js';
 
 
 const router = express.Router();
@@ -29,5 +30,6 @@ router.use('/assets',       assetsRouter);
 router.use('/camera',       cameraRouter);
 router.use('/lighting',     lightingRouter);
 router.use('/media',        mediaRouter);
+router.use('/prompt',       promptRouter);
 
 export default router;

@@ -125,10 +125,7 @@ export class WavespeedImageRunner extends BaseModel {
 
         const meta = await this._submit(payload, policy);
         const url = await this._poll({ ...meta, policy });
-        if (url) {
-            const base64 = await this._urlToBase64(url);
-            return { image_base64: base64, image_url: url };
-        }
-        return { image_base64: null, image_url: null };
+        
+        return { image_url: url };
     }
 }

@@ -34,7 +34,15 @@ export class MediaRepository extends BaseRepository {
     async findLatestByWorkflow(workflow_id) {
         const { data, error } = await this.client()
             .from(this.tableName)
-            .select("*")
+            .select(`
+                *,
+                config:generation_config (
+                   dna_data:dna(name, type, description, traits)
+                ),
+                workflow:workflow!workflow_id (
+                   workflow_type
+                )
+            `)
             .eq("workflow_id", workflow_id)
             .not("url", "is", null)
             .order("create_time", { ascending: false })
@@ -65,10 +73,11 @@ export class MediaRepository extends BaseRepository {
             .select(`
                 *,
                 config:generation_config (
-                    id, prompt, model, aspect_ratio, generation_type, seed
+                    id, prompt, model, aspect_ratio, generation_type, seed,
+                    dna_data:dna(name, type, description, traits)
                 ),
                 workflow:workflow!workflow_id (
-                    id, display_name, session_id, variation_index
+                    id, display_name, session_id, variation_index, workflow_type
                 )
             `)
             .eq("id", id)

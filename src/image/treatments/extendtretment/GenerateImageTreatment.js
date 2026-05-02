@@ -34,13 +34,13 @@ export class GenerateImageTreatment extends BaseGenerateImageTreatment {
 
     let { ratio, quality, steps, guidance_scale, count = 1 } = input;
 
-    // ── Resolve reference workflow IDs → Enriched Assets ───────────────────
-    const referenceWorkflowIds = references
-      .map(ref => ref.workflow_id || ref.id)
+    // ── Resolve reference media IDs → Enriched Assets ───────────────────
+    const referenceMediaIds = references
+      .map(ref => ref.media_id || ref.id)
       .filter(Boolean);
 
     const input_assets = await resolveReferences(this.db, {
-      referenceWorkflowIds
+      referenceMediaIds
     });
 
     // Handle direct URLs if any (rare in current flow but good for compatibility)

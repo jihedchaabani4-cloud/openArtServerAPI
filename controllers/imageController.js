@@ -62,7 +62,8 @@ export const generateV2 = async (req, res) => {
             configId:  queued.configId,
             workflows: queued.workflows,
             project_id: finalProjectId,
-            session_id: finalSessionId
+            session_id: finalSessionId,
+            balance:   queued.balance
         });
 
     } catch (error) {

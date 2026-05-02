@@ -163,7 +163,7 @@ class BaseMotion extends WavespeedVideoRunner {
             duration:      parseFloat(form.duration) || 10,
             resolution:    form.resolution,
             image:         form.image || form.image_base64 || refs.find(r => r.role === "start" || r.role === "normal" || r.role === "mc_image")?.url || null,
-            endImage:      refs.find(r => r.role === "end")?.url || null,
+            endImage:      form.end_image || form.endImage || refs.find(r => r.role === "end")?.url || null,
             video:         form.video || form.video_base64 || refs.find(r => r.role === "video"  || r.role === "mc_video" || r.type === "video" || r.type === "video_url")?.url  || null,
             cameraControl: form.cameraControl,
         };
@@ -202,7 +202,7 @@ class BaseRichI2v extends WavespeedVideoRunner {
             resolution:     form.resolution,
             duration:       parseFloat(form.duration) || 5,
             image:          form.image || form.image_base64 || refs.find(r => r.role === "start" || r.role === "normal" || r.role === "mc_image")?.url || null,
-            endImage:       refs.find(r => r.role === "end")?.url || undefined,
+            endImage:       form.end_image || form.endImage || refs.find(r => r.role === "end")?.url || undefined,
             sound:          form.sound,
             cfgScale:       form.cfgScale,
             negativePrompt: form.negativePrompt,
@@ -281,7 +281,7 @@ class BaseV3I2v extends WavespeedVideoRunner {
             resolution:     form.resolution,
             duration:       parseFloat(form.duration) || 5,
             image:          form.image || form.image_base64 || refs.find(r => r.role === "start" || r.role === "normal" || r.role === "mc_image")?.url || null,
-            endImage:       refs.find(r => r.role === "end")?.url || undefined,
+            endImage:       form.end_image || form.endImage || refs.find(r => r.role === "end")?.url || undefined,
             sound:          form.sound,
             cfgScale:       form.cfgScale,
             negativePrompt: form.negativePrompt,
@@ -323,7 +323,7 @@ class BaseO3I2v extends WavespeedVideoRunner {
             resolution: form.resolution,
             duration: parseFloat(form.duration) || 5,
             image:    form.image || form.image_base64 || refs.find(r => r.role === "start" || r.role === "normal")?.url || null,
-            endImage: refs.find(r => r.role === "end")?.url || undefined,
+            endImage: form.end_image || form.endImage || refs.find(r => r.role === "end")?.url || undefined,
             sound:    form.sound,
         };
     }

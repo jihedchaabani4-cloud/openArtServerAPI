@@ -1,9 +1,12 @@
 import { getRunner, getModelName             } from "#video/core/modelRouter.js";
+import { calculateVideoCredits               } from "#video/core/modelRouter.js";
 import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "#db/workflowMediaOps.js";
 import { verifyAndClampVideoParams              } from "#image/utils/treatmentUtils.js";
 import { ReferenceProcessor                     } from "#utils/ReferenceProcessor.js";
 import { getStandardSize                        } from "#utils/sizeUtils.js";
 import { enqueueTreatmentJob }                  from "#queue/treatmentJob.js";
+import { processVideoPrompt }                   from "#services/promptServiceV2.js";
+import { skipIfMediaAlreadyDone }               from "#utils/skipIfMediaAlreadyDone.js";
 
 // ─── Mode Builders ────────────────────────────────────────────────────────────
 
@@ -127,20 +130,20 @@ function resolveMode(startAsset, endAsset, referenceAssets) {
     return "t2v";
 }
 
-function normalizeReferences(rawReferences, image_workflow_id, reference_workflow_ids) {
+function normalizeReferences(rawReferences, image_workflow_id, reference_media_ids) {
     const refs = [...rawReferences];
-    const existingWfIds = new Set(refs.map(r => r.workflow_id || r.id).filter(Boolean));
+    const existingMediaIds = new Set(refs.map(r => r.media_id || r.id).filter(Boolean));
 
-    if (image_workflow_id && !existingWfIds.has(image_workflow_id)) {
+    // Backward compatibility for image_workflow_id
+    if (image_workflow_id && !existingMediaIds.has(image_workflow_id)) {
         refs.push({ workflow_id: image_workflow_id, role: "start" });
-        existingWfIds.add(image_workflow_id);
     }
 
-    for (const wfId of reference_workflow_ids) {
-        const id = typeof wfId === "string" ? wfId : (wfId.workflow_id || wfId.id);
-        if (id && !existingWfIds.has(id)) {
-            refs.push(typeof wfId === "string" ? { workflow_id: wfId, role: "reference" } : wfId);
-            existingWfIds.add(id);
+    for (const mId of reference_media_ids) {
+        const id = typeof mId === "string" ? mId : (mId.media_id || mId.id);
+        if (id && !existingMediaIds.has(id)) {
+            refs.push(typeof mId === "string" ? { media_id: mId, role: "reference" } : mId);
+            existingMediaIds.add(id);
         }
     }
     return refs.filter(r => r?.workflow_id || r?.media_id || r?.url);
@@ -149,10 +152,11 @@ function normalizeReferences(rawReferences, image_workflow_id, reference_workflo
 // ─── VideoTreatment ───────────────────────────────────────────────────────────
 
 export class VideoTreatment {
-    constructor({ promptService, storageService, db }) {
+    constructor({ promptService, storageService, db, walletService = null }) {
         this.promptService  = promptService;
         this.storageService = storageService;
         this.db             = db;
+        this.walletService  = walletService;
         this.refProcessor   = new ReferenceProcessor({ storageService, db });
     }
 
@@ -170,7 +174,7 @@ export class VideoTreatment {
             project_id,
             session_id,
             image_workflow_id,
-            reference_workflow_ids = [],
+            reference_media_ids = [],
             references: rawReferences = [],
             sound,
             cfgScale,
@@ -185,8 +189,36 @@ export class VideoTreatment {
         // 1. Validate
         const userId = validateInput(input);
 
+        // 1b. Credit check (fail-fast before any DB writes)
+        const durationSeconds = parseFloat(String(duration).replace("s", "")) || 5;
+        let pricingDetails = null;
+        let holdAmount = 0;
+        if (this.walletService) {
+            try {
+                const priceResult = calculateVideoCredits({
+                    modelKey: model,
+                    durationSeconds,
+                    resolution: video_resolution || "720p",
+                    count: 1,
+                });
+                pricingDetails = priceResult;
+                holdAmount = priceResult.credits;
+                const wallet = await this.walletService.getWalletOrThrow(userId);
+                if (wallet.balance < holdAmount) {
+                    const { WalletError } = await import("#services/WalletService.js");
+                    throw new WalletError(
+                        `Insufficient funds: need ${holdAmount}, have ${wallet.balance}`,
+                        "INSUFFICIENT_FUNDS"
+                    );
+                }
+            } catch (err) {
+                if (err.name === "WalletError") throw err;
+                console.warn("[VideoTreatment] Credit check skipped:", err.message);
+            }
+        }
+
         // 2. Resolve all references into assets
-        const toProcess    = normalizeReferences(rawReferences, image_workflow_id, reference_workflow_ids);
+        const toProcess    = normalizeReferences(rawReferences, image_workflow_id, reference_media_ids);
         const input_assets = await this.refProcessor.process(
             toProcess, userId, project_id, session_id, "uploads"
         );
@@ -268,22 +300,52 @@ export class VideoTreatment {
             workflow,
             workflows:  [workflow],
             references: input_assets,
+            walletHoldAmount: holdAmount,
+            pricingDetails,
         };
     }
 
     // ── run ───────────────────────────────────────────────────────────────────
-    async run(task) {
+    async optimizePrompt(task) {
+        const { form, mediaId, references = [], model_name, mode: videoMode } = task;
+        const rawPrompt = form?.prompt || "";
+        const baseNegative = form?.negativePrompt || "";
+
+        if (!rawPrompt.trim()) {
+            return { finalPrompt: rawPrompt, finalNegative: baseNegative };
+        }
+
+        const result = await processVideoPrompt({
+            prompt: rawPrompt,
+            references,
+            modelType: model_name,
+            textProvider: this.promptService.textProvider,
+            videoMode,
+        });
+
+        if (!result.success) {
+            await markMediaFailed(this.db, mediaId, result.reason);
+            throw new Error(`Prompt rejected: ${result.reason}`);
+        }
+
+        // Single LLM round-trip: processVideoPrompt already does safety + optimization.
+        // Do not call generateNegativePrompt here — it doubled text-model calls per video job.
+        return { finalPrompt: result.prompt, finalNegative: baseNegative };
+    }
+
+    async run(task, optimizeResult = null) {
         const { model, form, mode, workflow, mediaId, userId, model_name, references } = task;
         const provider = validateProvider(model, mode);
 
         try {
-            const safety = await this.promptService.checkPrompt(form.prompt);
-            if (!safety.safe) {
-                await markMediaFailed(this.db, mediaId, safety.reason);
-                return;
-            }
+            const optimized = optimizeResult || await this.optimizePrompt(task);
+            const effectiveForm = {
+                ...form,
+                prompt: optimized.finalPrompt,
+                negativePrompt: optimized.finalNegative,
+            };
 
-            const payload  = provider.toPayload(provider.adapt(form, mode), mode);
+            const payload  = provider.toPayload(provider.adapt(effectiveForm, mode), mode);
             const execute  = PROVIDER_METHODS[mode];
             if (!execute) throw new Error(`[VideoTreatment] No execution method for mode "${mode}"`);
 
@@ -295,9 +357,9 @@ export class VideoTreatment {
             const fileUrl  = await this.storageService.uploadFromUrl(fileName, outputUrl);
 
             const mediaConfig = await this.db.configs.createConfig({
-                prompt:          form.prompt,
+                prompt:          effectiveForm.prompt,
                 model:           model_name,
-                aspect_ratio:    form.ratio,
+                aspect_ratio:    effectiveForm.ratio,
                 generation_type: references.length > 0 ? "TEXT_REFERENCES" : "TEXT_ONLY",
                 seed:            result.seed ?? null,
             });
@@ -332,13 +394,80 @@ export class VideoTreatment {
     }
 
     async runJob(task) {
-        return this.run(task);
+        try {
+            const duplicateSkip = await skipIfMediaAlreadyDone(this.db, task.mediaId);
+            if (duplicateSkip) {
+                console.log(`[VideoTreatment] Skipping duplicate job — media ${task.mediaId} already completed (no extra provider charge)`);
+                if (this.walletService && task.walletReferenceId) {
+                    await this.walletService.commitHoldIdempotent(task.walletReferenceId);
+                }
+                return duplicateSkip;
+            }
+
+            const optimized = await this.optimizePrompt(task);
+            const result = await this.run(task, optimized);
+
+            if (this.walletService && task.walletReferenceId) {
+                await this.walletService.commitHoldIdempotent(task.walletReferenceId);
+            }
+
+            return result;
+        } catch (error) {
+            if (this.walletService && task.walletReferenceId) {
+                try { await this.walletService.rollback(task.walletReferenceId); } catch (e) {
+                    console.error(`[VideoTreatment] wallet rollback failed: ${e.message}`);
+                }
+            }
+            throw error;
+        }
     }
 
     // ── execute ───────────────────────────────────────────────────────────────
     async execute(input) {
         const task = await this.prepare(input);
-        const job = await enqueueTreatmentJob(this.getQueueType(), task);
+
+        const userId = input?.userId || input?.user_id;
+        let walletReferenceId = null;
+
+        if (this.walletService && userId && task.configId && task.walletHoldAmount > 0) {
+            walletReferenceId = task.configId;
+            await this.walletService.hold({
+                userId,
+                amount: task.walletHoldAmount,
+                referenceId: walletReferenceId,
+                metadata: {
+                    treatment: this.getQueueType(),
+                    model_name: task.model_name || null,
+                    prompt: task.form?.prompt || null,
+                    project_id: task.project_id || null,
+                    session_id: task.session_id || null,
+                    pricingVersion: task.pricingDetails?.pricingVersion,
+                    pricingBreakdown: task.pricingDetails?.breakdown,
+                },
+            });
+
+            const wallet = await this.walletService.getWalletOrThrow(userId);
+            task.remainingBalance = wallet.balance;
+        }
+
+        if (walletReferenceId) task.walletReferenceId = walletReferenceId;
+
+        let job;
+        try {
+            job = await enqueueTreatmentJob(
+                this.getQueueType(),
+                task,
+                walletReferenceId ? { jobId: walletReferenceId } : {}
+            );
+        } catch (error) {
+            if (this.walletService && walletReferenceId) {
+                try { await this.walletService.rollback(walletReferenceId); } catch (e) {
+                    console.error(`[VideoTreatment] wallet rollback failed: ${e.message}`);
+                }
+            }
+            throw error;
+        }
+
         return {
             jobId: job.id,
             batchId: task.batchId ?? null,
@@ -347,6 +476,7 @@ export class VideoTreatment {
             status: "queued",
             mode: task.mode,
             model: task.model_name,
+            balance: task.remainingBalance ?? null,
         };
     }
 }

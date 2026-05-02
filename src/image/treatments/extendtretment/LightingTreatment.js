@@ -249,7 +249,7 @@ export class LightingTreatment extends BaseEditTreatment {
     guidance_scale,
     negative_prompt,
     strength,
-    reference_workflow_ids = [],
+    reference_media_ids = [],
 
     userId,
     project_id,
@@ -268,10 +268,10 @@ export class LightingTreatment extends BaseEditTreatment {
     intensity  = Math.min(100, Math.max(0,   intensity));
     brightness = Math.min(100, Math.max(0,   brightness));
 
-    // ── Build references from workflows ────────────────────────────────────
+    // ── Build references from workflows/media ────────────────────────────────
     const references = await resolveReferences(this.db, {
       baseWorkflowId:       workflow_id,
-      referenceWorkflowIds: reference_workflow_ids,
+      referenceMediaIds:    reference_media_ids,
     });
 
     // ── Prepare task ──────────────────────────────────────────────────────

@@ -68,15 +68,15 @@ export const db = {
 // ─── Treatments ──────────────────────────────────────────────────────────────
 
 export const videoTreatment = new VideoTreatment({
-    promptService, storageService, db
+    promptService, storageService, db, walletService
 });
 
 export const motionTreatment = new MotionTreatment({
-    promptService, storageService, db
+    promptService, storageService, db, walletService
 });
 
 export const editVideoTreatment = new EditVideoTreatment({
-    promptService, storageService, db
+    promptService, storageService, db, walletService
 });
 
 

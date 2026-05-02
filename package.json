@@ -21,7 +21,7 @@
         "start": "node index.js",
         "start:worker": "node src/workers/worker.js",
         "dev:api": "nodemon index.js",
-        "dev:worker": "nodemon src/workers/worker.js",
+        "dev:worker": "nodemon --delay 1500 src/workers/worker.js",
         "dev": "concurrently \"npm run dev:api\" \"npm run dev:worker\""
     },
     "dependencies": {

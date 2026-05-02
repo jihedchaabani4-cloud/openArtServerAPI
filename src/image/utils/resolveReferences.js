@@ -1,15 +1,19 @@
 // c:\Users\jihad\Desktop\open art\apiOpenArt\src\image\utils\resolveReferences.js
 
 /**
- * resolveOneReference — fetch media + character for one workflow
+ * resolveOneReference — fetch media + character for one media ID
  */
-async function resolveOneReference(db, workflowId, { isBase = false } = {}) {
-  // 1. Fetch primary media
-  const media = await db.workflows.getPrimaryMedia(workflowId)
+async function resolveOneReference(db, mediaId, { isBase = false } = {}) {
+  // 1. Fetch primary media directly by ID
+  let media = await db.media.findById(mediaId)
+
   if (!media?.url) {
-    console.warn(`[resolveReferences] No media found for workflow: ${workflowId}`)
+    console.warn(`[resolveReferences] No media found for ID: ${mediaId}`)
     return null
   }
+
+  // Use the actual workflow_id from the media
+  const actualWorkflowId = media.workflow_id || mediaId
 
   // 2. Try to fetch character DNA (optional — never throws)
   let label = null
@@ -18,8 +22,8 @@ async function resolveOneReference(db, workflowId, { isBase = false } = {}) {
 
   try {
     // DB method: db.characters.getByWorkflowId(workflow_id)
-    const character = await db.characters.getByWorkflowId(workflowId)
-    console.log(`[resolveReferences] Character found for workflow ${workflowId}:`, character)
+    const character = await db.characters.getByWorkflowId(actualWorkflowId)
+    console.log(`[resolveReferences] Character found for workflow ${actualWorkflowId}:`, character)
     if (character) {
       // ── Character found — enrich reference ──────────────────
       label = character.character_name || null
@@ -30,13 +34,13 @@ async function resolveOneReference(db, workflowId, { isBase = false } = {}) {
         ? { description: character.description }
         : null
 
-      console.log(`[resolveReferences] ✅ Character found for workflow ${workflowId}: ${label}`)
+      console.log(`[resolveReferences] ✅ Character found for workflow ${actualWorkflowId}: ${label}`)
     } else {
-      console.log(`[resolveReferences] ℹ️ No character for workflow ${workflowId} — using as visual reference`)
+      console.log(`[resolveReferences] ℹ️ No character for workflow ${actualWorkflowId} — using as visual reference`)
     }
   } catch (err) {
     // DB method missing or failed — continue without DNA
-    console.warn(`[resolveReferences] ⚠️ Character fetch failed for ${workflowId}: ${err.message}`)
+    console.warn(`[resolveReferences] ⚠️ Character fetch failed for ${actualWorkflowId}: ${err.message}`)
   }
 
   // 3. Fetch aspect_ratio from config (optional)
@@ -67,30 +71,45 @@ async function resolveOneReference(db, workflowId, { isBase = false } = {}) {
 /**
  * resolveReferences — main export
  * 
- * @param db              — db instance with workflows + characters
- * @param baseWorkflowId   — the workflow being edited (source/base image)
- * @param referenceWorkflowIds — array of workflow IDs to resolve as references
+ * @param db              — db instance with media + workflows + characters
+ * @param baseMediaId     — the media ID being edited (source/base image)
+ * @param referenceMediaIds — array of media IDs to resolve as references
  */
 export async function resolveReferences(db, {
-  baseWorkflowId   = null,
-  referenceWorkflowIds = [],
+  baseMediaId   = null,
+  baseWorkflowId = null, // fallback
+  referenceMediaIds = [],
+  referenceWorkflowIds = [], // fallback
 }) {
   const references = []
   const seenUrls   = new Set()
 
+  const finalRefIds = (referenceMediaIds?.length ? referenceMediaIds : referenceWorkflowIds) || [];
+
   // ── 1. Base image (source) — always first ──────────────────
-  if (baseWorkflowId) {
-    const base = await resolveOneReference(db, baseWorkflowId, { isBase: true })
+  if (baseMediaId) {
+    const base = await resolveOneReference(db, baseMediaId, { isBase: true })
     if (base) {
       references.push(base)
       seenUrls.add(base.url)
       console.log(`[resolveReferences] 🖼️ Base image resolved: ${base.url}`)
     }
+  } else if (baseWorkflowId) {
+    // Legacy support: explicitly resolve base workflow to its primary media
+    const baseMedia = await db.workflows.getPrimaryMedia(baseWorkflowId);
+    if (baseMedia?.id) {
+      const base = await resolveOneReference(db, baseMedia.id, { isBase: true })
+      if (base) {
+        references.push(base)
+        seenUrls.add(base.url)
+        console.log(`[resolveReferences] 🖼️ Base image resolved from workflow: ${base.url}`)
+      }
+    }
   }
 
   // ── 2. Reference images ────────────────────────────────────
-  for (const wfId of referenceWorkflowIds || []) {
-    const ref = await resolveOneReference(db, wfId, { isBase: false })
+  for (const refId of finalRefIds) {
+    const ref = await resolveOneReference(db, refId, { isBase: false })
     if (!ref) continue
 
     // Dedup by URL

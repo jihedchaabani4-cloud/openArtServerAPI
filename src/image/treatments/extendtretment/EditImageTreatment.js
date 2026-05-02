@@ -16,7 +16,7 @@ export class EditImageTreatment extends BaseEditTreatment {
     steps,
     guidance_scale,
     negative_prompt,
-    reference_workflow_ids = [],
+    reference_media_ids = [],
     userId,
     project_id,
     session_id,
@@ -26,10 +26,10 @@ export class EditImageTreatment extends BaseEditTreatment {
     if (!project_id)  throw new Error("project_id required");
     if (!workflow_id) throw new Error("workflow_id required");
 
-    // ── Build references from workflows ────────────────────────────────────
+    // ── Build references from workflows/media ────────────────────────────────
     const references = await resolveReferences(this.db, {
       baseWorkflowId:       workflow_id,
-      referenceWorkflowIds: reference_workflow_ids,
+      referenceMediaIds:    reference_media_ids,
     });
 
     // ── Delegate shared logic to base ──────────────────────────────────────

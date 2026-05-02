@@ -20,7 +20,7 @@ export const generateVideo = async (req, res) => {
             multiPrompt,
             keepOriginalSound,
             references     = [],
-            reference_workflow_ids = [],
+            reference_media_ids = [],
             image_workflow_id,
             project_id,
             session_id,
@@ -68,7 +68,7 @@ export const generateVideo = async (req, res) => {
             keepOriginalSound,
             references,
             image_workflow_id,
-            reference_workflow_ids,
+            reference_media_ids,
             project_id: finalProjectId,
             session_id: finalSessionId,
             userId,
@@ -119,7 +119,7 @@ export const extendVideo = async (req, res) => {
             keepOriginalSound,
             workflow_id,
             video_workflow_id,
-            reference_workflow_ids = [],
+            reference_media_ids = [],
             project_id,
             session_id,
             media_id,
@@ -169,7 +169,7 @@ export const extendVideo = async (req, res) => {
             project_id: finalProjectId,
             session_id: finalSessionId,
             video_workflow_id: video_workflow_id || workflow_id,
-            reference_workflow_ids,
+            reference_media_ids,
             userId,
             section: "video_generator"
         };
@@ -219,7 +219,7 @@ export const editVideo = async (req, res) => {
             keepOriginalSound,
             workflow_id,
             video_workflow_id,
-            reference_workflow_ids = [],
+            reference_media_ids = [],
             project_id,
             session_id,
             media_id,
@@ -271,7 +271,7 @@ export const editVideo = async (req, res) => {
             project_id: finalProjectId,
             session_id: finalSessionId,
             video_workflow_id: video_workflow_id || workflow_id,
-            reference_workflow_ids,
+            reference_media_ids,
             userId,
             section: "video_generator"
         };
@@ -319,7 +319,7 @@ export const motionControl = async (req, res) => {
             references        = [],
             project_id,
             session_id,
-            reference_workflow_ids = [],
+            reference_media_ids = [],
             is_new_project,
         } = req.body;
 
@@ -376,7 +376,7 @@ export const motionControl = async (req, res) => {
             session_id: finalSessionId,
             video_workflow_id,
             image_workflow_id,
-            reference_workflow_ids,
+            reference_media_ids,
             userId,
             section: "motion"
         };

@@ -37,6 +37,7 @@ import { resolveProvider, buildProviderPayload, extractOutputUrl }  from "./prov
 import { appendMediaToWorkflow, markMediaStatus, markMediaFailed }  from "#db/workflowMediaOps.js";
 import { enqueueTreatmentJob }                                      from "#queue/treatmentJob.js";
 import { calculateImageCredits }                                    from "#image/core/modelRouter.js";
+import { skipIfAllMediaAlreadyDone }                                from "#utils/skipIfMediaAlreadyDone.js";
 
 export class BaseGenerateImageTreatment {
 
@@ -171,6 +172,23 @@ export class BaseGenerateImageTreatment {
     const provider = this._resolveProvider(model_name, input_assets);
     const verified  = verifyAndClampParams(provider, { steps, guidance_scale, ratio, quality, count });
 
+    // ── NEW: Check Wallet Balance before DB writes ────────────────────────
+    let holdAmount = 0;
+    let pricingDetails = null;
+    if (this.walletService && userId) {
+      pricingDetails = calculateImageCredits({
+        modelKey: model_name || "z_image",
+        quality: verified.quality || "standard",
+        count: verified.count,
+        operation: "generated",
+      });
+      holdAmount = pricingDetails.credits;
+
+      if (holdAmount > 0) {
+        await this.walletService.checkSufficientFunds(userId, holdAmount);
+      }
+    }
+
     // ── 3. Compute pixel dimensions ───────────────────────────────────────
     const rawSizeInfo = this._getStandardSize(verified.ratio, verified.quality);
     const sizeInfo = normalizeImageSizeForModel(model_name, rawSizeInfo);
@@ -281,14 +299,13 @@ export class BaseGenerateImageTreatment {
       batchId:   batch?.id || null,
       workflows,   // [{id, display_name, …}]
       mediaIds,
+      // Pricing and wallet state
+      walletHoldAmount: holdAmount,
+      pricingDetails,
       // Subclass-specific extras (sheetType, systemPrompt, temperature, …)
       ...extraTaskFields,
     };
   }
-
-  // ─────────────────────────────────────────────────────────
-  // 2. OPTIMIZE PROMPT  ← worker calls this FIRST
-  //
   // Base implementation:  safety check → enhancement → negative prompt
   // Subclasses override to swap in LLM refinement (e.g. ElementSheet).
   //
@@ -458,11 +475,23 @@ export class BaseGenerateImageTreatment {
 
   async runJob(task) {
     try {
+      const duplicateSkip = await skipIfAllMediaAlreadyDone(this.db, task.mediaIds);
+      if (duplicateSkip) {
+        if (this.walletService && task.walletReferenceId) {
+          await this.walletService.commitHoldIdempotent(task.walletReferenceId);
+        }
+        return {
+          batchId: task.batchId ?? null,
+          configId: task.configId,
+          ...duplicateSkip,
+        };
+      }
+
       const optimized = await this.optimizePrompt(task);
       const result = await this.run(task, optimized);
 
       if (this.walletService && task.walletReferenceId) {
-        await this.walletService.commit(task.walletReferenceId);
+        await this.walletService.commitHoldIdempotent(task.walletReferenceId);
       }
 
       return result;
@@ -492,44 +521,36 @@ export class BaseGenerateImageTreatment {
       !!this.walletService &&
       !!userId &&
       !!task?.configId &&
-      Number.isFinite(this.imageHoldAmountPerAsset) &&
-      this.imageHoldAmountPerAsset > 0;
+      (task.walletHoldAmount > 0);
 
     let walletReferenceId = null;
-    let holdAmount = 0;
 
     if (shouldHoldCredits) {
       this._log("info", `holding credits for user:${userId} | configId:${task.configId}`);
       walletReferenceId = task.configId;
-      const requestedCount = Math.max(1, Number(task?.count || input?.count || input?.num_images || 1));
-      const pricing = calculateImageCredits({
-        modelKey: task?.model_name || input?.model_name || "z_image",
-        quality: task?.quality || input?.quality || "standard",
-        count: requestedCount,
-        operation: "generated",
-      });
-      holdAmount = pricing.credits;
 
       await this.walletService.hold({
-        userId: input.userId || input.user_id,
-        amount: holdAmount,
+        userId: userId,
+        amount: task.walletHoldAmount,
         referenceId: walletReferenceId,
         metadata: {
           treatment: this.getQueueType(),
-          model_name: task?.model_name || input?.model_name || null,
-          prompt: task?.prompt || input?.prompt || null,
-          count: requestedCount,
-          project_id: task?.project_id || input?.project_id || null,
-          session_id: task?.session_id || input?.session_id || null,
-          pricingVersion: pricing.pricingVersion,
-          pricingBreakdown: pricing.breakdown,
+          model_name: task.model_name || input?.model_name || null,
+          prompt: task.prompt || input?.prompt || null,
+          count: task.count,
+          project_id: task.project_id || input?.project_id || null,
+          session_id: task.session_id || input?.session_id || null,
+          pricingVersion: task.pricingDetails?.pricingVersion,
+          pricingBreakdown: task.pricingDetails?.breakdown,
         },
       });
+
+      const wallet = await this.walletService.getWalletOrThrow(userId);
+      task.remainingBalance = wallet.balance;
     }
 
     if (walletReferenceId) {
       task.walletReferenceId = walletReferenceId;
-      task.walletHoldAmount = holdAmount;
     }
 
     let job;
@@ -557,6 +578,7 @@ export class BaseGenerateImageTreatment {
       configId: task.configId ?? null,
       workflows: task.workflows ?? [],
       provider: task.model_name ?? null,
+      balance: task.remainingBalance ?? null,
     };
   }
 }

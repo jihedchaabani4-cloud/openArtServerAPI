@@ -16,7 +16,7 @@ export class WalletService {
     this.defaultInitialBalance = Number(
       process.env.INITIAL_WALLET_BALANCE ||
       process.env.DEFAULT_WALLET_BALANCE ||
-      100
+      0
     );
   }
 
@@ -105,6 +105,26 @@ export class WalletService {
     return this.resolveTransaction(referenceId, "COMPLETED");
   }
 
+  /**
+   * Use after a successful provider run. Safe when BullMQ replays the job: if the
+   * hold was already committed, this is a no-op (avoids leaving PENDING holds).
+   */
+  async commitHoldIdempotent(referenceId) {
+    if (!referenceId) return;
+    try {
+      await this.commit(referenceId);
+    } catch (err) {
+      if (!(err instanceof WalletError)) throw err;
+      const { data: tx } = await this.supabase
+        .from("transactions")
+        .select("status")
+        .eq("reference_id", referenceId)
+        .maybeSingle();
+      if (tx?.status === "COMPLETED") return;
+      throw err;
+    }
+  }
+
   async rollback(referenceId) {
     return this.resolveTransaction(referenceId, "FAILED");
   }
@@ -140,6 +160,19 @@ export class WalletService {
   async getBalance(userId) {
     const wallet = await this.getWalletOrThrow(userId);
     return wallet.balance;
+  }
+
+  async checkSufficientFunds(userId, amount) {
+    const wallet = await this.getWalletOrThrow(userId);
+
+    if (wallet.balance < amount) {
+      throw new WalletError(
+        `Insufficient funds: need ${amount}, have ${wallet.balance}`,
+        "INSUFFICIENT_FUNDS"
+      );
+    }
+    
+    return true;
   }
 
   async getTransactions(userId, limit = 20, offset = 0) {

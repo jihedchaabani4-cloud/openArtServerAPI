@@ -1,5 +1,5 @@
 import express from "express";
-import { signup, login, googleRedirect, googleCallback, getMe, logout, microsoftRedirect } from "../controllers/authController.js";
+import { signup, login, googleRedirect, googleCallback, getMe, logout, microsoftRedirect, getWalletBalance } from "../controllers/authController.js";
 
 const router = express.Router();
 
@@ -15,5 +15,6 @@ router.get("/callback", googleCallback);
 // Session management
 router.get("/me", getMe);
 router.post("/logout", logout);
+router.get("/wallet/balance", getWalletBalance);
 
 export default router;

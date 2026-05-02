@@ -3,6 +3,7 @@ import { calculateUpscaleCredits, getUpscaleModel } from "#image/core/modelRoute
 import { getUpscaleRunner as getVideoUpscaleRunner } from "#video/core/modelRouter.js";
 import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "#db/workflowMediaOps.js";
 import { enqueueTreatmentJob } from "#queue/treatmentJob.js";
+import { skipIfMediaAlreadyDone } from "#utils/skipIfMediaAlreadyDone.js";
 
 export class UpscaleTreatment {
     constructor({ storageService, db, walletService = null }) {
@@ -62,6 +63,21 @@ export class UpscaleTreatment {
         const workflow = await this.db.workflows.getWorkflow(finalWorkflowId);
         if (!workflow) throw new Error(`Workflow ${finalWorkflowId} not found.`);
 
+        // ── Check Wallet Balance before DB writes ───────────────────────────
+        let holdAmount = 0;
+        let pricingDetails = null;
+        if (this.walletService && userId) {
+            pricingDetails = calculateUpscaleCredits({
+                modelKey: model_name || "topaz_image_upscale",
+                upscaleScale: upscaleScale || 2,
+            });
+            holdAmount = pricingDetails.credits;
+
+            if (holdAmount > 0) {
+                await this.walletService.checkSufficientFunds(userId, holdAmount);
+            }
+        }
+
         const config = await this.db.configs.createConfig({
             prompt: "Upscale",
             model: model_name,
@@ -96,15 +112,27 @@ export class UpscaleTreatment {
             configId: config.id,
             workflows: [workflow],
             mediaIds: [media.id],
+            // Pricing and wallet state
+            walletHoldAmount: holdAmount,
+            pricingDetails,
         };
     }
 
     async runJob(task) {
         try {
+            const mediaId = task.mediaIds?.[0];
+            const duplicateSkip = await skipIfMediaAlreadyDone(this.db, mediaId);
+            if (duplicateSkip) {
+                if (this.walletService && task.walletReferenceId) {
+                    await this.walletService.commitHoldIdempotent(task.walletReferenceId);
+                }
+                return duplicateSkip;
+            }
+
             const result = await this.run(task);
 
             if (this.walletService && task.walletReferenceId) {
-                await this.walletService.commit(task.walletReferenceId);
+                await this.walletService.commitHoldIdempotent(task.walletReferenceId);
             }
 
             return result;
@@ -192,44 +220,40 @@ export class UpscaleTreatment {
             throw error;
         }
 
+        const userId = input?.userId || input?.user_id;
         const shouldHoldCredits =
             !!this.walletService &&
-            !!(input?.userId || input?.user_id) &&
+            !!userId &&
             !!task?.configId &&
-            Number.isFinite(this.imageHoldAmountPerAsset) &&
-            this.imageHoldAmountPerAsset > 0;
+            (task.walletHoldAmount > 0);
 
         let walletReferenceId = null;
-        let holdAmount = 0;
 
         if (shouldHoldCredits) {
             walletReferenceId = task.configId;
-            const pricing = calculateUpscaleCredits({
-                modelKey: task?.model_name || "topaz_image_upscale",
-                upscaleScale: task?.upscaleScale || input?.upscaleScale || 2,
-            });
-            holdAmount = pricing.credits;
 
             await this.walletService.hold({
-                userId: input.userId || input.user_id,
-                amount: holdAmount,
+                userId: userId,
+                amount: task.walletHoldAmount,
                 referenceId: walletReferenceId,
                 metadata: {
                     treatment: this.getQueueType(),
-                    media_id: task?.media_id || input?.media_id || null,
-                    project_id: task?.project_id || input?.project_id || null,
-                    session_id: task?.session_id || input?.session_id || null,
-                    workflow_id: task?.workflows?.[0]?.id || input?.workflow_id || null,
-                    upscaleScale: task?.upscaleScale || input?.upscaleScale || null,
-                    pricingVersion: pricing.pricingVersion,
-                    pricingBreakdown: pricing.breakdown,
+                    media_id: task.media_id || input?.media_id || null,
+                    project_id: task.project_id || input?.project_id || null,
+                    session_id: task.session_id || input?.session_id || null,
+                    workflow_id: task.workflows?.[0]?.id || input?.workflow_id || null,
+                    upscaleScale: task.upscaleScale || input?.upscaleScale || null,
+                    pricingVersion: task.pricingDetails?.pricingVersion,
+                    pricingBreakdown: task.pricingDetails?.breakdown,
                 },
             });
+
+            const wallet = await this.walletService.getWalletOrThrow(userId);
+            task.remainingBalance = wallet.balance;
         }
 
         if (walletReferenceId) {
             task.walletReferenceId = walletReferenceId;
-            task.walletHoldAmount = holdAmount;
         }
 
         let job;
@@ -256,6 +280,7 @@ export class UpscaleTreatment {
             status: "queued",
             mediaType: task.isVideo ? "video" : "image",
             provider: task.model_name,
+            balance: task.remainingBalance ?? null,
         };
     }
 }

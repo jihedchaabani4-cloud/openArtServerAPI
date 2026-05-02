@@ -11,9 +11,7 @@ const COOKIE_OPTS = {
 };
 
 const INITIAL_ACCOUNT_CREDITS = Number(
-  process.env.INITIAL_WALLET_BALANCE ||
-  process.env.DEFAULT_WALLET_BALANCE ||
-  100
+0
 );
 
 function isValidEmail(email) {
@@ -239,4 +237,21 @@ export async function getMe(req, res) {
 export async function logout(req, res) {
   clearAuthCookies(res);
   return res.status(200).json({ message: "Logged out successfully." });
+}
+
+export async function getWalletBalance(req, res) {
+  try {
+    const user = await resolveUserFromCookies(req, res);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const balance = await walletService.getBalance(user.id);
+
+    return res.status(200).json({ balance });
+  } catch (err) {
+    console.error("[Auth] getWalletBalance error:", err);
+    return res.status(500).json({ error: "Internal server error." });
+  }
 }

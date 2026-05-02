@@ -1,8 +1,11 @@
 import { ReferenceProcessor             } from "#utils/ReferenceProcessor.js";
 import { getRunner, getModelName, ROUTED_MODELS } from "#video/core/modelRouter.js";
+import { calculateVideoCredits                  } from "#video/core/modelRouter.js";
 import { appendMediaToWorkflow, markMediaStatus, markMediaFailed } from "#db/workflowMediaOps.js";
 import { verifyAndClampVideoParams        } from "#image/utils/treatmentUtils.js";
 import { enqueueTreatmentJob }            from "#queue/treatmentJob.js";
+import { skipIfMediaAlreadyDone }         from "#utils/skipIfMediaAlreadyDone.js";
+import { processVideoPrompt }             from "#services/promptServiceV2.js";
 
 /**
  * MotionTreatment
@@ -22,10 +25,11 @@ import { enqueueTreatmentJob }            from "#queue/treatmentJob.js";
  *               Still works for simple use-cases without the queue.
  */
 export class MotionTreatment {
-    constructor({ promptService, storageService, db }) {
+    constructor({ promptService, storageService, db, walletService = null }) {
         this.promptService  = promptService;
         this.storageService = storageService;
         this.db             = db;
+        this.walletService  = walletService;
         this.refProcessor   = new ReferenceProcessor({ storageService, db });
     }
 
@@ -71,6 +75,34 @@ export class MotionTreatment {
 
         if (!image_url || !video_url) {
             throw new Error("Motion Control requires both image_url and video_url.");
+        }
+
+        // 1a-b. Credit check (fail-fast before any DB writes)
+        const durationSeconds = parseFloat(String(duration).replace("s", "")) || 5;
+        let pricingDetails = null;
+        let holdAmount = 0;
+        if (this.walletService) {
+            try {
+                const priceResult = calculateVideoCredits({
+                    modelKey: model,
+                    durationSeconds,
+                    resolution: "720p",
+                    count: 1,
+                });
+                pricingDetails = priceResult;
+                holdAmount = priceResult.credits;
+                const wallet = await this.walletService.getWalletOrThrow(userId);
+                if (wallet.balance < holdAmount) {
+                    const { WalletError } = await import("#services/WalletService.js");
+                    throw new WalletError(
+                        `Insufficient funds: need ${holdAmount}, have ${wallet.balance}`,
+                        "INSUFFICIENT_FUNDS"
+                    );
+                }
+            } catch (err) {
+                if (err.name === "WalletError") throw err;
+                console.warn("[MotionTreatment] Credit check skipped:", err.message);
+            }
         }
 
         // 1b. Clamp params to provider limits
@@ -161,6 +193,8 @@ export class MotionTreatment {
             input_assets,
             sourceWidth,
             sourceHeight,
+            walletHoldAmount: holdAmount,
+            pricingDetails,
         };
     }
 
@@ -174,7 +208,31 @@ export class MotionTreatment {
     //      d. Persist final media record in DB
     // ─────────────────────────────────────────────────────────────────────────
 
-    async run(task) {
+    async optimizePrompt(task) {
+        const { form, mediaId, input_assets = [], model_name } = task;
+        const rawPrompt = form?.prompt || "";
+
+        if (!rawPrompt.trim()) {
+            return { finalPrompt: rawPrompt, finalNegative: "" };
+        }
+
+        const result = await processVideoPrompt({
+            prompt: rawPrompt,
+            references: input_assets,
+            modelType: model_name,
+            textProvider: this.promptService.textProvider,
+            videoMode: "motion",
+        });
+
+        if (!result.success) {
+            await markMediaFailed(this.db, mediaId, result.reason);
+            throw new Error(`Prompt rejected: ${result.reason}`);
+        }
+
+        return { finalPrompt: result.prompt, finalNegative: "" };
+    }
+
+    async run(task, optimizeResult = null) {
         const {
             model, form, mode,
             userId, project_id,
@@ -187,18 +245,11 @@ export class MotionTreatment {
             // Re-resolve provider from model string (providers are not serializable)
             const provider = getRunner(model, mode);
 
-            // 2a. Prompt safety check
-            if (form.prompt) {
-                const safety = await this.promptService.checkPrompt(form.prompt);
-                if (!safety.safe) {
-                    console.warn(`[MotionTreatment] Prompt rejected: ${safety.reason}`);
-                    await markMediaFailed(this.db, mediaId, safety.reason);
-                    throw new Error(`Prompt rejected: ${safety.reason}`);
-                }
-            }
+            const optimized = optimizeResult || await this.optimizePrompt(task);
+            const effectiveForm = { ...form, prompt: optimized.finalPrompt };
 
             // 2b. Adapt → payload → API call
-            const adapted = provider.adapt(form, mode);
+            const adapted = provider.adapt(effectiveForm, mode);
             const payload = provider.toPayload(adapted, mode);
 
             const runner = (provider.variants && provider.variants[mode]) || provider;
@@ -232,9 +283,9 @@ export class MotionTreatment {
 
             // 2d. Create per-media generation_config
             const mediaConfig = await this.db.configs.createConfig({
-                prompt:          form.prompt,
+                prompt:          effectiveForm.prompt,
                 model:           model_name,
-                aspect_ratio:    form.ratio || "16:9",
+                aspect_ratio:    effectiveForm.ratio || "16:9",
                 generation_type: "TEXT_BASE_IMAGE",
                 seed:            result.seed || null,
             });
@@ -271,18 +322,81 @@ export class MotionTreatment {
     }
 
     async runJob(task) {
-        return this.run(task);
+        try {
+            const duplicateSkip = await skipIfMediaAlreadyDone(this.db, task.mediaId);
+            if (duplicateSkip) {
+                console.log(`[MotionTreatment] Skipping duplicate job — media ${task.mediaId} already completed (no extra provider charge)`);
+                if (this.walletService && task.walletReferenceId) {
+                    await this.walletService.commitHoldIdempotent(task.walletReferenceId);
+                }
+                return duplicateSkip;
+            }
+
+            const optimized = await this.optimizePrompt(task);
+            const result = await this.run(task, optimized);
+
+            if (this.walletService && task.walletReferenceId) {
+                await this.walletService.commitHoldIdempotent(task.walletReferenceId);
+            }
+
+            return result;
+        } catch (error) {
+            if (this.walletService && task.walletReferenceId) {
+                try { await this.walletService.rollback(task.walletReferenceId); } catch (e) {
+                    console.error(`[MotionTreatment] wallet rollback failed: ${e.message}`);
+                }
+            }
+            throw error;
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // EXECUTE  (legacy entry-point — skips the queue)
-    //    Calls prepare() then run() directly in the background.
-    //    Use this only when you don't need queue control.
+    // EXECUTE
     // ─────────────────────────────────────────────────────────────────────────
 
     async execute(input) {
         const task = await this.prepare(input);
-        const job = await enqueueTreatmentJob(this.getQueueType(), task);
+
+        const userId = input?.userId || input?.user_id;
+        let walletReferenceId = null;
+
+        if (this.walletService && userId && task.configId && task.walletHoldAmount > 0) {
+            walletReferenceId = task.configId;
+            await this.walletService.hold({
+                userId,
+                amount: task.walletHoldAmount,
+                referenceId: walletReferenceId,
+                metadata: {
+                    treatment: this.getQueueType(),
+                    model_name: task.model_name || null,
+                    prompt: task.form?.prompt || null,
+                    project_id: task.project_id || null,
+                    session_id: task.session_id || null,
+                    pricingVersion: task.pricingDetails?.pricingVersion,
+                    pricingBreakdown: task.pricingDetails?.breakdown,
+                },
+            });
+            const wallet = await this.walletService.getWalletOrThrow(userId);
+            task.remainingBalance = wallet.balance;
+        }
+
+        if (walletReferenceId) task.walletReferenceId = walletReferenceId;
+
+        let job;
+        try {
+            job = await enqueueTreatmentJob(
+                this.getQueueType(),
+                task,
+                walletReferenceId ? { jobId: walletReferenceId } : {}
+            );
+        } catch (error) {
+            if (this.walletService && walletReferenceId) {
+                try { await this.walletService.rollback(walletReferenceId); } catch (e) {
+                    console.error(`[MotionTreatment] wallet rollback failed: ${e.message}`);
+                }
+            }
+            throw error;
+        }
 
         return {
             jobId: job.id,
@@ -292,6 +406,7 @@ export class MotionTreatment {
             status:    "queued",
             mode:      task.mode,
             model:     task.model_name,
+            balance:   task.remainingBalance ?? null,
         };
     }
 }

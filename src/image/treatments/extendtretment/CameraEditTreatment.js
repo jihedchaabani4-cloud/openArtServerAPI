@@ -179,7 +179,7 @@ export class CameraTreatment extends BaseEditTreatment {
     steps = 40,
     guidance_scale = 14,
 
-    reference_workflow_ids = [],
+    reference_media_ids = [],
 
     userId,
     project_id,
@@ -196,10 +196,10 @@ export class CameraTreatment extends BaseEditTreatment {
     tilt     = Math.min(90,  Math.max(-90, tilt));
     zoom     = Math.min(5,   Math.max(1, zoom));
 
-    // ── Build references from workflows ────────────────────────────────────
+    // ── Build references from workflows/media ────────────────────────────────
     const references = await resolveReferences(this.db, {
       baseWorkflowId:       workflow_id,
-      referenceWorkflowIds: reference_workflow_ids,
+      referenceMediaIds:    reference_media_ids,
     });
 
     // ── Prepare task ──────────────────────────────────────────────────────

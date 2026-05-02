@@ -138,7 +138,7 @@ export const IMAGE_ROUTES = {
 
 
     // ── GPT Image 2 (wavespeed) ───────────────────────────────────────────────
-    "gpt-image-2":  fromRegistry("gpt_image_2_wavespeed", true, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 10, editBaseCredits: 12 }),
+    "gpt-image-2":  fromRegistry("gpt_image_2_wavespeed", true, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 4000, editBaseCredits: 4500 }),
 
     // ── RunwayML (wavespeed) ─────────────────────────────────────────────────
     "runway_gen4_image":       fromRegistry("runway_gen4_image_wavespeed", true, true, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 14, editBaseCredits: 16 }),

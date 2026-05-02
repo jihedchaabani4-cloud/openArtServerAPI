@@ -22,7 +22,7 @@ export const generateEdit = async (req, res) => {
             project_id,
             session_id,
             workflow_id,
-            reference_workflow_ids,
+            reference_media_ids,
             model_name,
         } = req.body;
 
@@ -59,7 +59,7 @@ export const generateEdit = async (req, res) => {
             project_id: finalProjectId,
             session_id: finalSessionId,
             workflow_id,
-            reference_workflow_ids: reference_workflow_ids || [],
+            reference_media_ids: reference_media_ids || [],
             model_name,
             userId,
         });

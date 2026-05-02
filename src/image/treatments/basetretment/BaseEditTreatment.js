@@ -3,6 +3,7 @@ import { calculateImageCredits, getImageModel, ROUTED_IMAGE_MODELS } from "#imag
 import { verifyAndClampParams }                                      from "../../utils/treatmentUtils.js";
 import { appendMediaToWorkflow, markMediaStatus, markMediaFailed }   from "#db/workflowMediaOps.js";
 import { enqueueTreatmentJob }                                       from "#queue/treatmentJob.js";
+import { skipIfMediaAlreadyDone }                                    from "#utils/skipIfMediaAlreadyDone.js";
 import { processPrompt }                                             from "#services/promptServiceV2.js"; // 🔥
 
 export class BaseEditTreatment {
@@ -95,6 +96,23 @@ console.log("input_assets ************************** ", input_assets);
       steps, guidance_scale, ratio, quality, count: 1,
     });
 
+    // ── NEW: Check Wallet Balance before DB writes ────────────────────────
+    let holdAmount = 0;
+    let pricingDetails = null;
+    if (this.walletService && userId) {
+      pricingDetails = calculateImageCredits({
+        modelKey: model_name || "z_image",
+        quality: verified.quality || "standard",
+        count: 1,
+        operation: "edit",
+      });
+      holdAmount = pricingDetails.credits;
+
+      if (holdAmount > 0) {
+        await this.walletService.checkSufficientFunds(userId, holdAmount);
+      }
+    }
+
     // 4. Size
     const sizeInfo = this._getStandardSize(verified.ratio, verified.quality);
 
@@ -161,6 +179,9 @@ console.log("input_assets ************************** ", input_assets);
       configId:  config.id,
       workflow:  wf,
       mediaId:   media.id,
+      // Pricing and wallet state
+      walletHoldAmount: holdAmount,
+      pricingDetails,
     };
   }
 
@@ -245,6 +266,14 @@ console.log("input_assets ************************** ", input_assets);
   // ─────────────────────────────────────────────────────────
   async runJob(task) {
     try {
+      const duplicateSkip = await skipIfMediaAlreadyDone(this.db, task.mediaId);
+      if (duplicateSkip) {
+        if (this.walletService && task.walletReferenceId) {
+          await this.walletService.commitHoldIdempotent(task.walletReferenceId);
+        }
+        return duplicateSkip;
+      }
+
       const optimized = await this.optimizePrompt(task);
       const result = await this.run({
         ...task,
@@ -253,7 +282,7 @@ console.log("input_assets ************************** ", input_assets);
       });
 
       if (this.walletService && task.walletReferenceId) {
-        await this.walletService.commit(task.walletReferenceId);
+        await this.walletService.commitHoldIdempotent(task.walletReferenceId);
       }
 
       return result;
@@ -376,46 +405,40 @@ console.log("input_assets ************************** ", input_assets);
       throw error;
     }
 
+    const userId = input?.userId || input?.user_id;
     const shouldHoldCredits =
       !!this.walletService &&
-      !!(input?.userId || input?.user_id) &&
+      !!userId &&
       !!task?.configId &&
-      Number.isFinite(this.imageHoldAmountPerAsset) &&
-      this.imageHoldAmountPerAsset > 0;
+      (task.walletHoldAmount > 0);
 
     let walletReferenceId = null;
-    let holdAmount = 0;
 
     if (shouldHoldCredits) {
       walletReferenceId = task.configId;
-      const pricing = calculateImageCredits({
-        modelKey:  task?.model_name || input?.model_name,
-        quality:   task?.quality    || input?.quality || "standard",
-        count:     1,
-        operation: "edit",
-      });
-      holdAmount = pricing.credits;
 
       await this.walletService.hold({
-        userId:      input.userId || input.user_id,
-        amount:      holdAmount,
+        userId: userId,
+        amount: task.walletHoldAmount,
         referenceId: walletReferenceId,
         metadata: {
           treatment:       this.getQueueType(),
-          model_name:      task?.model_name      || input?.model_name  || null,
-          prompt:          task?.prompt          || input?.prompt       || null,
-          project_id:      task?.project_id      || input?.project_id  || null,
-          session_id:      task?.session_id      || input?.session_id  || null,
-          workflow_id:     task?.workflow?.id    || input?.workflow_id  || null,
-          pricingVersion:  pricing.pricingVersion,
-          pricingBreakdown: pricing.breakdown,
+          model_name:      task.model_name      || input?.model_name  || null,
+          prompt:          task.prompt          || input?.prompt       || null,
+          project_id:      task.project_id      || input?.project_id  || null,
+          session_id:      task.session_id      || input?.session_id  || null,
+          workflow_id:     task.workflow?.id    || input?.workflow_id  || null,
+          pricingVersion:  task.pricingDetails?.pricingVersion,
+          pricingBreakdown: task.pricingDetails?.breakdown,
         },
       });
+
+      const wallet = await this.walletService.getWalletOrThrow(userId);
+      task.remainingBalance = wallet.balance;
     }
 
     if (walletReferenceId) {
       task.walletReferenceId = walletReferenceId;
-      task.walletHoldAmount  = holdAmount;
     }
 
     let job;
@@ -442,6 +465,7 @@ console.log("input_assets ************************** ", input_assets);
       workflows: [task.workflow],
       provider:  task.model_name,
       status:    "queued",
+      balance:   task.remainingBalance ?? null,
     };
   }
 }

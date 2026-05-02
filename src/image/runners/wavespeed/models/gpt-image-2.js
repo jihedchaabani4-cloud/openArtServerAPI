@@ -14,7 +14,7 @@ class GptImage2T2i extends WavespeedImageRunner {
             tier:           "pro",
             supportedRatios: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
             tags:           ["gpt", "creative", "high-quality"],
-            pricing:        { image: 10 },
+            pricing:        { image: 400 },
             modes:          ["t2i"],
         });
     }
@@ -51,7 +51,7 @@ class GptImage2Edit extends WavespeedImageRunner {
             displayName:   "GPT Image 2 Edit",
             category:      "image",
             tier:          "pro",
-            pricing:       { image: 12 },
+            pricing:       { image: 400 },
             modes:         ["i2i"],
             hidden:        true,
         });

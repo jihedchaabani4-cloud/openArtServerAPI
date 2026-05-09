@@ -28,6 +28,7 @@ async function handleSheetRequest(req, res, sheetType) {
         const queued = await elementSheetTreatment.execute({
             sheetType,
             prompt,
+            userText: prompt,
             features,
             references: references || [],
             model_name,

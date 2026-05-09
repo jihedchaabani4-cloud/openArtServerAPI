@@ -82,20 +82,13 @@ async function resolveUserFromCookies(req, res) {
 }
 
 async function createProfile(userId, extra = {}) {
-  const { data: existingProfile, error: existingProfileError } = await supabase
+  // Use upsert to avoid race conditions on concurrent creation attempts
+  const { data, error } = await supabase
     .from("profiles")
-    .select("id")
-    .eq("id", userId)
-    .maybeSingle();
-
-  if (existingProfileError) throw existingProfileError;
-  if (existingProfile) return existingProfile;
-
-  const { error } = await supabase
-    .from("profiles")
-    .insert({ id: userId, credits: INITIAL_ACCOUNT_CREDITS, ...extra });
+    .upsert({ id: userId, credits: INITIAL_ACCOUNT_CREDITS, ...extra }, { onConflict: ["id"] });
 
   if (error) throw error;
+  return data?.[0] ?? null;
 }
 
 async function ensureUserAccount(userId, extra = {}) {

@@ -10,6 +10,12 @@ export const requireAuth = async (req, res, next) => {
         let token = req.cookies?.access_token;
         const refreshToken = req.cookies?.refresh_token;
 
+        // Allow Authorization: Bearer <token> header for API clients (preferred)
+        const authHeader = req.headers?.authorization || req.headers?.Authorization;
+        if (!token && authHeader && typeof authHeader === "string" && authHeader.toLowerCase().startsWith("bearer ")) {
+            token = authHeader.split(" ")[1].trim();
+        }
+
         if (!token && !refreshToken) {
             return next(new AppError("Authentication required. Please log in.", 401));
         }

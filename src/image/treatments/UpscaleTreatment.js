@@ -6,6 +6,8 @@ import { enqueueTreatmentJob } from "#queue/treatmentJob.js";
 import { skipIfMediaAlreadyDone } from "#utils/skipIfMediaAlreadyDone.js";
 
 export class UpscaleTreatment {
+    static DEFAULT_MODEL = "topaz_image_upscale";
+
     constructor({ storageService, db, walletService = null }) {
         this.storageService = storageService;
         this.db = db;

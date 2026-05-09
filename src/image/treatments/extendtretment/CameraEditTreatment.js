@@ -165,6 +165,11 @@ const NEGATIVE_PROMPT = [
 // ─── CameraTreatment ──────────────────────────────────────────────────────
 
 export class CameraTreatment extends BaseEditTreatment {
+  static DEFAULT_MODEL = "gpt-image-2";
+  static DEFAULT_PARAMS = {
+    quality: "2k",
+    operation: "edit"
+  };
 
   async prepare({
     rotation = 0,     // 0 → 360

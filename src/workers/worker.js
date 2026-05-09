@@ -93,10 +93,14 @@ worker.on("error", (err) => {
     return;
   }
 
-  // Rate limit hit — pause the worker immediately to stop the flood
+  // Rate limit hit — pause the worker immediately to stop the flood (Dev mode only)
   if (msg.includes("max requests limit exceeded")) {
-    console.error("🛑 [Worker] Upstash rate limit reached! Pausing worker...");
-    worker.pause().catch(console.error);
+    if (process.env.NODE_ENV === "development") {
+      console.error("🛑 [Worker] Upstash rate limit reached! Pausing worker... (Dev mode)");
+      worker.pause().catch(console.error);
+    } else {
+      console.error("🛑 [Worker] Upstash rate limit reached! (Prod mode - not pausing)");
+    }
     return;
   }
 

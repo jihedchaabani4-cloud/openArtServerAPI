@@ -431,6 +431,7 @@ export class VideoTreatment {
 
         if (this.walletService && userId && task.configId && task.walletHoldAmount > 0) {
             walletReferenceId = task.configId;
+            
             await this.walletService.hold({
                 userId,
                 amount: task.walletHoldAmount,

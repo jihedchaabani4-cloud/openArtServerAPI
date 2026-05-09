@@ -13,7 +13,7 @@ function videoModelInfoToPayload(key, route) {
         description: info.description || "",
         category:    info.category || "video",
         tier:        info.tier,
-        pricing:     info.pricing,
+        pricing:     route.pricing,
         tags:        info.tags || [],
         supportedModes: info.supportedModes || [],
         support:     info.support || {},
@@ -36,14 +36,13 @@ router.get("/", (req, res) => {
         .filter(([_, route]) => route.type === IMAGE_MODEL_TYPES.GENERATED && route.open !== false && !route.hidden)
         .map(([key, route]) => {
             const group = route.group;
-        console.log("--- IMAGE MODEL ROUTE ---", group);
         return {
             key,
             displayName: group.displayName,
             description: group.description || "",
             category:    group.category,
             tier:        group.tier,
-            pricing:     group.pricing,
+            pricing:     route.pricing,
             tags:        group.tags || [],
             support:     group.support || {},
             supportsEdit: route.supportsEdit,
@@ -99,7 +98,7 @@ router.get("/:key", (req, res) => {
                 description: imageGroup.group.description || "",
                 category:    imageGroup.group.category,
                 tier:        imageGroup.group.tier,
-                pricing:     imageGroup.group.pricing,
+                pricing:     imageGroup.pricing,
                 tags:        imageGroup.group.tags || [],
                 support:     imageGroup.group.support || {},
                 supportsEdit: imageGroup.supportsEdit,

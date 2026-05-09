@@ -113,9 +113,24 @@ function fromRegistry(
 export const IMAGE_ROUTES = {
 
     // ── NanoBanana (wavespeed) ────────────────────────────────────────────────
-    "nanobana":     fromRegistry("nanobana_wavespeed", false, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 8, editBaseCredits: 9 }),
-    "nanobana2":    fromRegistry("nanobana2_wavespeed", false, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 9, editBaseCredits: 10 }),
-    "nanobana_pro": fromRegistry("nanobana_pro_wavespeed", true, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 12, editBaseCredits: 14 }),
+    "nanobana": fromRegistry("nanobana_wavespeed", false, false, IMAGE_MODEL_TYPES.GENERATED, {
+        table: {
+            generated: { standard: 8,  hd: 11, "2k": 16, "4k": 26 },
+            edit:      { standard: 9,  hd: 12, "2k": 18, "4k": 30 },
+        }
+    }),
+    "nanobana2": fromRegistry("nanobana2_wavespeed", false, false, IMAGE_MODEL_TYPES.GENERATED, {
+        table: {
+            generated: { standard: 9,  hd: 12, "2k": 18, "4k": 28 },
+            edit:      { standard: 10, hd: 14, "2k": 20, "4k": 32 },
+        }
+    }),
+    "nanobana_pro": fromRegistry("nanobana_pro_wavespeed", true, false, IMAGE_MODEL_TYPES.GENERATED, {
+        table: {
+            generated: { standard: 12, hd: 16, "2k": 24, "4k": 40 },
+            edit:      { standard: 14, hd: 18, "2k": 28, "4k": 46 },
+        }
+    }),
 
     // ── Nano Banana (google native) ───────────────────────────────────────────
     // "nanobana_2_0_google": fromRegistry("nanobana_2_0_google"),
@@ -124,25 +139,74 @@ export const IMAGE_ROUTES = {
     // "nanobana_pro_google": fromRegistry("nanobana_pro_google"),
 
     // ── Imagen 4 (google native) ─────────────────────────────────────────────
-    "imagen_4":       fromRegistry("imagen_4_google", false, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 11, editBaseCredits: 12 }),
-    "imagen_4_ultra": fromRegistry("imagen_4_ultra_google", true, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 15, editBaseCredits: 17 }),
-    "imagen_4_fast":  fromRegistry("imagen_4_fast_google", false, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 8, editBaseCredits: 9 }),
+    "imagen_4": fromRegistry("imagen_4_google", false, false, IMAGE_MODEL_TYPES.GENERATED, {
+        table: {
+            generated: { standard: 11, hd: 15, "2k": 22, "4k": 36 },
+            edit:      { standard: 12, hd: 16, "2k": 24, "4k": 40 },
+        }
+    }),
+    "imagen_4_ultra": fromRegistry("imagen_4_ultra_google", true, false, IMAGE_MODEL_TYPES.GENERATED, {
+        table: {
+            generated: { standard: 15, hd: 20, "2k": 30, "4k": 50 },
+            edit:      { standard: 17, hd: 23, "2k": 34, "4k": 56 },
+        }
+    }),
+    "imagen_4_fast": fromRegistry("imagen_4_fast_google", false, false, IMAGE_MODEL_TYPES.GENERATED, {
+        table: {
+            generated: { standard: 8,  hd: 10, "2k": 14, "4k": 22 },
+            edit:      { standard: 9,  hd: 11, "2k": 16, "4k": 26 },
+        }
+    }),
 
     // ── SeaDream (wavespeed) ──────────────────────────────────────────────────
-    "seedream-standard": fromRegistry("seedream_standard_wavespeed", false, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 9, editBaseCredits: 10 }),
-    "seedream-pro":      fromRegistry("seedream_pro_wavespeed", false, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 12, editBaseCredits: 14 }),
+    "seedream-standard": fromRegistry("seedream_standard_wavespeed", false, false, IMAGE_MODEL_TYPES.GENERATED, {
+        table: {
+            generated: { standard: 9,  hd: 12, "2k": 18, "4k": 30 },
+            edit:      { standard: 10, hd: 14, "2k": 20, "4k": 34 },
+        }
+    }),
+    "seedream-pro": fromRegistry("seedream_pro_wavespeed", false, false, IMAGE_MODEL_TYPES.GENERATED, {
+        table: {
+            generated: { standard: 12, hd: 16, "2k": 24, "4k": 40 },
+            edit:      { standard: 14, hd: 18, "2k": 28, "4k": 46 },
+        }
+    }),
 
     // ── Z-Image (wavespeed) ───────────────────────────────────────────────────
-    "z_image":      fromRegistry("z_image_wavespeed", false, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 10, editBaseCredits: 12 }),
-    "z_image_base": fromRegistry("z_image_base_wavespeed", false, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 7, editBaseCredits: 8 }),
-
+    "z_image": fromRegistry("z_image_wavespeed", false, false, IMAGE_MODEL_TYPES.GENERATED, {
+        table: {
+            generated: { standard: 10, hd: 14, "2k": 20, "4k": 34 },
+            edit:      { standard: 12, hd: 16, "2k": 24, "4k": 38 },
+        }
+    }),
+    "z_image_base": fromRegistry("z_image_base_wavespeed", false, false, IMAGE_MODEL_TYPES.GENERATED, {
+        table: {
+            generated: { standard: 7,  hd: 9,  "2k": 14, "4k": 22 },
+            edit:      { standard: 8,  hd: 10, "2k": 16, "4k": 26 },
+        }
+    }),
 
     // ── GPT Image 2 (wavespeed) ───────────────────────────────────────────────
-    "gpt-image-2":  fromRegistry("gpt_image_2_wavespeed", true, false, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 4000, editBaseCredits: 4500 }),
+    "gpt-image-2": fromRegistry("gpt_image_2_wavespeed", true, false, IMAGE_MODEL_TYPES.GENERATED, {
+        table: {
+            generated: { standard: 4000, hd: 5000, "2k": 6000, "4k": 8000 },
+            edit:      { standard: 4500, hd: 5500, "2k": 6500, "4k": 9000 },
+        }
+    }),
 
     // ── RunwayML (wavespeed) ─────────────────────────────────────────────────
-    "runway_gen4_image":       fromRegistry("runway_gen4_image_wavespeed", true, true, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 14, editBaseCredits: 16 }),
-    "runway_gen4_image_turbo": fromRegistry("runway_gen4_image_turbo_wavespeed", false, true, IMAGE_MODEL_TYPES.GENERATED, { generatedBaseCredits: 11, editBaseCredits: 13 }),
+    "runway_gen4_image": fromRegistry("runway_gen4_image_wavespeed", true, true, IMAGE_MODEL_TYPES.GENERATED, {
+        table: {
+            generated: { standard: 14, hd: 18, "2k": 28, "4k": 46 },
+            edit:      { standard: 16, hd: 21, "2k": 32, "4k": 52 },
+        }
+    }),
+    "runway_gen4_image_turbo": fromRegistry("runway_gen4_image_turbo_wavespeed", false, true, IMAGE_MODEL_TYPES.GENERATED, {
+        table: {
+            generated: { standard: 11, hd: 14, "2k": 20, "4k": 34 },
+            edit:      { standard: 13, hd: 16, "2k": 24, "4k": 38 },
+        }
+    }),
 
     // ── Topaz (replicate) ───────────────────────────────────────────────────
     "topaz_image_upscale": fromRegistry(
@@ -213,16 +277,25 @@ export function calculateImageCredits({
     const pricing = route.pricing || {};
     const qualityKey = normalizeQualityKey(quality);
     const quantity = Math.max(1, Number(count) || 1);
-    const baseCredits =
-        operation === "edit"
-            ? pricing.editBaseCredits
-            : pricing.generatedBaseCredits;
-    const qualityMultiplier =
-        pricing.qualityMultipliers?.[qualityKey] ??
-        DEFAULT_IMAGE_QUALITY_MULTIPLIERS[qualityKey] ??
-        1;
+    const op = operation === "edit" ? "edit" : "generated";
 
-    const credits = roundCredits(baseCredits * qualityMultiplier * quantity);
+    let credits = 0;
+    let baseCredits = 0;
+    let qualityMultiplier = 1;
+
+    // ── Exact Table Pricing (e.g. generated @ standard = 8 credits) ──
+    if (pricing.table && pricing.table[op] && pricing.table[op][qualityKey] !== undefined) {
+        credits = roundCredits(pricing.table[op][qualityKey] * quantity);
+    }
+    // ── Fallback Math Pricing ──
+    else {
+        baseCredits = op === "edit" ? pricing.editBaseCredits : pricing.generatedBaseCredits;
+        qualityMultiplier =
+            pricing.qualityMultipliers?.[qualityKey] ??
+            DEFAULT_IMAGE_QUALITY_MULTIPLIERS[qualityKey] ??
+            1;
+        credits = roundCredits(baseCredits * qualityMultiplier * quantity);
+    }
 
     return {
         credits,

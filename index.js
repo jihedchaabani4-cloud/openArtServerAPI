@@ -5,6 +5,7 @@ import cookieParser from "cookie-parser";
 import morgan from "morgan";
 
 import apiRouter from "./src/api/routes.js";
+import { walletService } from "./src/container.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -56,6 +57,16 @@ app.use((err, req, res, next) => {
 // ── Start server ─────────────────────────────────────────────
 app.listen(PORT, () => {
     console.log(`\n🚀 Open Art API running on http://localhost:${PORT}\n`);
+    
+    // ── Start Cron Jobs ──────────────────────────────────────────
+    if (walletService) {
+        setInterval(() => {
+            walletService.expireStaleHolds().catch(err => {
+                console.error("[Cron] Failed to expire stale holds:", err.message);
+            });
+        }, 10 * 60 * 1000); // Every 10 minutes
+        console.log("🕒 [Cron] Started Stale Holds expiration cron job (runs every 10m).");
+    }
 });
 
 export default app;

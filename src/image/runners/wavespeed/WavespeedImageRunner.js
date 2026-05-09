@@ -32,7 +32,7 @@ export class WavespeedImageRunner extends BaseModel {
         console.log(`\n📤 [Wavespeed] Outgoing Request:`);
         console.log(`   Model:   ${this.modelName}`);
         console.log(`   Size:    ${cleanPayload.size || "N/A"}`);
-        console.log(`   Prompt:  "${cleanPayload.prompt?.substring(0, 100)}${cleanPayload.prompt?.length > 100 ? "..." : ""}"`);
+        console.log(`   Prompt:  "${cleanPayload.prompt?.substring(0, 500)}${cleanPayload.prompt?.length > 500 ? "..." : ""}"`);
         if (cleanPayload.image) console.log(`   Image:   Attached (${cleanPayload.image.substring(0, 30)}...)`);
         if (cleanPayload.images) console.log(`   Images:  ${cleanPayload.images.length} attached`);
 

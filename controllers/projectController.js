@@ -12,7 +12,7 @@ function videoModelInfoToPayload(key, route) {
         description:    info.description || "",
         category:       info.category || "video",
         tier:           info.tier,
-        pricing:        info.pricing,
+        pricing:        route.pricing,
         tags:           info.tags || [],
         supportedModes: info.supportedModes || [],
         support:        info.support || {},
@@ -36,7 +36,7 @@ function getModelConfig() {
             description: group.description || "",
             category:    group.category,
             tier:        group.tier,
-            pricing:     group.pricing,
+            pricing:     route.pricing,
             tags:        group.tags || [],
             support:     group.support || {},
             supportsEdit: route.supportsEdit,
@@ -57,6 +57,8 @@ function getModelConfig() {
     };
 }
 
+import { APP_PRICING, APP_CONFIGS } from "../src/config/pricing.js";
+
 export const getProjectData = async (req, res) => {
     try {
         const { project_id } = req.params;
@@ -66,6 +68,10 @@ export const getProjectData = async (req, res) => {
                 result: { data: { json: {
                     projectContents: { sessions: [], workflows: [], media: [] },
                     modelConfig,
+                        appConfig: {
+                            changeLogId: "2026-03-19-v1-3f4e036c-6a67-467f-a0e6-25cff0a0a8ab",
+                            pricing: APP_PRICING,
+                        },
                 }}},
             });
         }
@@ -261,7 +267,10 @@ export const getProjectData = async (req, res) => {
                     json: {
                         projectName,
                         projectId:  project_id,
-                        appConfig:  { changeLogId: "2026-03-19-v1-3f4e036c-6a67-467f-a0e6-25cff0a0a8ab" },
+                        appConfig:  { 
+                            changeLogId: "2026-03-19-v1-3f4e036c-6a67-467f-a0e6-25cff0a0a8ab",
+                            pricing: APP_PRICING,
+                        },
                         modelConfig,
                         projectContents: {
                             sessions:  formattedSessions,

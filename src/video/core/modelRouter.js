@@ -111,32 +111,59 @@ function fromRegistry(
 
 // ── Route Table ───────────────────────────────────────────────────────────────
 export const MODEL_ROUTES = {
-    // ── Google Models ─────────────────────────────────────────────────────────
-    "nanobana_google": fromRegistry("nanobana_google", "Nano Banana Video", false, false, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 16, perSecondCredits: 3 }),
-    "veo_google":      fromRegistry("veo_google", "Google Veo 3.1", false, false, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 26, perSecondCredits: 6 }),
 
     // ── Kling v2.6 ───────────────────────────────────────────────────────────
-    "kling_v2":      fromRegistry("kling_v2_wavespeed", "Kling v2.6", false, true, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 20, perSecondCredits: 4 }),
-    "kling_v2_pro":  fromRegistry("kling_v2_pro_wavespeed", "Kling v2.6 Pro", false, true, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 26, perSecondCredits: 5 }),
+    "kling_v2":      fromRegistry("kling_v2_wavespeed", "Kling v2.6", false, true, VIDEO_MODEL_TYPES.GENERATED, { 
+        table: {
+            "720p":  { 5: 14, 10: 28 },
+            "1080p": { 5: 20, 10: 40 }
+        }
+    }),
+    "kling_v2_pro":  fromRegistry("kling_v2_pro_wavespeed", "Kling v2.6 Pro", false, true, VIDEO_MODEL_TYPES.GENERATED, { 
+        table: {
+            "720p":  { 5: 35, 10: 70 },
+            "1080p": { 5: 50, 10: 100 }
+        }
+    }),
 
 
     // ── Kling v3.0 ───────────────────────────────────────────────────────────
-    "kling_v3":     fromRegistry("kling_v3_wavespeed", "Kling v3.0", false, true, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 24, perSecondCredits: 5 }),
-    "kling_v3_pro": fromRegistry("kling_v3_pro_wavespeed", "Kling v3.0 Pro", false, true, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 30, perSecondCredits: 6 }),
+    "kling_v3":     fromRegistry("kling_v3_wavespeed", "Kling v3.0", false, true, VIDEO_MODEL_TYPES.GENERATED, { 
+        table: {
+            "720p":  { 3: 25, 5: 42, 10: 84, 15: 126 },
+            "1080p": { 3: 35, 5: 60, 10: 120, 15: 180 }
+        }
+    }),
+    "kling_v3_pro": fromRegistry("kling_v3_pro_wavespeed", "Kling v3.0 Pro", false, true, VIDEO_MODEL_TYPES.GENERATED, { 
+        table: {
+            "720p":  { 3: 34, 5: 56, 10: 112, 15: 168 },
+            "1080p": { 3: 45, 5: 80, 10: 160, 15: 240 }
+        }
+    }),
 
     // ── Kling O3 ─────────────────────────────────────────────────────────────
-    "kling_o3":     fromRegistry("kling_o3_wavespeed", "Kling O3", true, true, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 28, perSecondCredits: 6 }),
-    "kling_o3_pro": fromRegistry("kling_o3_pro_wavespeed", "Kling O3 Pro", false, true, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 34, perSecondCredits: 7 }),
+    "kling_o3":     fromRegistry("kling_o3_wavespeed", "Kling O3", true, true, VIDEO_MODEL_TYPES.GENERATED, { 
+        table: {
+            "720p":  { 5: 84, 10: 168 },
+            "1080p": { 5: 120, 10: 240 }
+        }
+    }),
+    "kling_o3_pro": fromRegistry("kling_o3_pro_wavespeed", "Kling O3 Pro", false, true, VIDEO_MODEL_TYPES.GENERATED, { 
+        table: {
+            "720p":  { 5: 112, 10: 224 },
+            "1080p": { 5: 150, 10: 300 }
+        }
+    }),
 
 
     // ── Seedance v1.5 Pro ───────────────────────────────────────────────────
-    "seedance_v15_pro":       fromRegistry("seedance_v15_pro_wavespeed", "Seedance v1.5 Pro", true, false, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 22, perSecondCredits: 5 }),
-    "seedance_v15_pro_fast":  fromRegistry("seedance_v15_pro_fast_wavespeed", "Seedance v1.5 Pro Fast", false, false, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 18, perSecondCredits: 4 }),
-    "seedance_v15_pro_spicy": fromRegistry("seedance_v15_pro_spicy_wavespeed", "Seedance v1.5 Pro Spicy", true, false, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 24, perSecondCredits: 5 }),
+    "seedance_v15_pro":       fromRegistry("seedance_v15_pro_wavespeed", "Seedance v1.5 Pro", true, false, VIDEO_MODEL_TYPES.GENERATED, { table: { "720p": { 4: 30, 5: 40, 10: 80 }, "1080p": { 4: 40, 5: 55, 10: 110 } } }),
+    "seedance_v15_pro_fast":  fromRegistry("seedance_v15_pro_fast_wavespeed", "Seedance v1.5 Pro Fast", false, false, VIDEO_MODEL_TYPES.GENERATED, { table: { "720p": { 4: 30, 5: 40, 10: 80 }, "1080p": { 4: 40, 5: 55, 10: 110 } } }),
+    "seedance_v15_pro_spicy": fromRegistry("seedance_v15_pro_spicy_wavespeed", "Seedance v1.5 Pro Spicy", true, false, VIDEO_MODEL_TYPES.GENERATED, { table: { "720p": { 4: 30, 5: 40, 10: 80 }, "1080p": { 4: 40, 5: 55, 10: 110 } } }),
 
     // ── RunwayML Gen-4 ───────────────────────────────────────────────────────
-    "runway_gen4_turbo": fromRegistry("runway_gen4_turbo_wavespeed", "RunwayML Gen-4 Turbo", false, true, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 26, perSecondCredits: 6 }),
-    "runway_gen4_aleph": fromRegistry("runway_gen4_aleph_wavespeed", "RunwayML Gen-4 Aleph", true, true, VIDEO_MODEL_TYPES.GENERATED, { baseCredits: 32, perSecondCredits: 7 }),
+    "runway_gen4_turbo": fromRegistry("runway_gen4_turbo_wavespeed", "RunwayML Gen-4 Turbo", false, true, VIDEO_MODEL_TYPES.GENERATED, { table: { "720p": { 5: 75, 10: 150 }, "1080p": { 5: 100, 10: 200 } } }),
+    "runway_gen4_aleph": fromRegistry("runway_gen4_aleph_wavespeed", "RunwayML Gen-4 Aleph", true, true, VIDEO_MODEL_TYPES.GENERATED, { table: { "720p": { 5: 75, 10: 150 }, "1080p": { 5: 100, 10: 200 } } }),
 
     // ── Topaz Video Models ───────────────────────────────────────────────────
     "topaz_video_upscale": fromRegistry("topaz_video_upscale_replicate", "Topaz Video Upscale", false, false, VIDEO_MODEL_TYPES.UPSCALE, { baseCredits: 12, perSecondCredits: 3 }, true, true),
@@ -215,16 +242,29 @@ export function calculateVideoCredits({
     const seconds = normalizeDurationSeconds(durationSeconds);
     const resolutionKey = normalizeResolutionKey(resolution);
     const quantity = Math.max(1, Number(count) || 1);
-    const baseCredits = pricing.baseCredits ?? 20;
-    const perSecondCredits = pricing.perSecondCredits ?? 4;
-    const resolutionMultiplier =
-        pricing.resolutionMultipliers?.[resolutionKey] ??
-        DEFAULT_VIDEO_RESOLUTION_MULTIPLIERS[resolutionKey] ??
-        1;
+    
+    let credits = 0;
+    let baseCredits = 0;
+    let perSecondCredits = 0;
+    let resolutionMultiplier = 1;
 
-    const credits = roundCredits(
-        (baseCredits + perSecondCredits * seconds) * resolutionMultiplier * quantity
-    );
+    // ── Exact Table Pricing (e.g. 5s @ 720p = 45 credits) ──
+    if (pricing.table && pricing.table[resolutionKey] && pricing.table[resolutionKey][seconds] !== undefined) {
+        credits = roundCredits(pricing.table[resolutionKey][seconds] * quantity);
+    } 
+    // ── Fallback Math Pricing (e.g. base + time * perSecond) ──
+    else {
+        baseCredits = pricing.baseCredits ?? 20;
+        perSecondCredits = pricing.perSecondCredits ?? 4;
+        resolutionMultiplier =
+            pricing.resolutionMultipliers?.[resolutionKey] ??
+            DEFAULT_VIDEO_RESOLUTION_MULTIPLIERS[resolutionKey] ??
+            1;
+
+        credits = roundCredits(
+            (baseCredits + perSecondCredits * seconds) * resolutionMultiplier * quantity
+        );
+    }
 
     return {
         credits,

@@ -232,6 +232,11 @@ const NEGATIVE_PROMPT = [
 // ─── LightingTreatment ────────────────────────────────────────────────────
 
 export class LightingTreatment extends BaseEditTreatment {
+  static DEFAULT_MODEL = "gpt-image-2";
+  static DEFAULT_PARAMS = {
+    quality: "2k",
+    operation: "edit"
+  };
 
   async prepare({
     angle      = 0,        // 0 → 360
@@ -241,9 +246,9 @@ export class LightingTreatment extends BaseEditTreatment {
     brightness = 60,       // 0 → 100 (scene exposure)
     color      = "#ffffff",
 
-    model_name     = "nano-banana-pro",
+    model_name     = DEFAULT_MODEL,
     ratio,
-    quality,
+    quality=DEFAULT_PARAMS.quality,
     seed,
     steps,
     guidance_scale,

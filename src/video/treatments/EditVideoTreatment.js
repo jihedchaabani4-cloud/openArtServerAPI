@@ -7,6 +7,13 @@ import { skipIfMediaAlreadyDone } from "#utils/skipIfMediaAlreadyDone.js";
 import { processVideoPrompt } from "#services/promptServiceV2.js";
 
 export class EditVideoTreatment {
+    static DEFAULT_MODEL = "kling_v3";
+    static DEFAULT_PARAMS = {
+        resolution: "1080p",
+        durationSeconds: 5,
+        operation: "edit"
+    };
+
     constructor({ promptService, storageService, db, walletService = null }) {
         this.promptService  = promptService;
         this.storageService = storageService;
@@ -26,7 +33,7 @@ export class EditVideoTreatment {
         const {
             video_workflow_id,      // ID of the video to edit
             reference_media_ids = [], // Array of media ID strings (No roles)
-            prompt = "", model, ratio = "16:9", duration = "5s",
+            prompt = "", model=this.DEFAULT_MODEL, ratio = this.DEFAULT_PARAMS.ratio, duration= this.DEFAULT_PARAMS.durationSeconds,
             project_id, session_id, userId,
             video_resolution, cfgScale, negativePrompt, multiPrompt, keepOriginalSound, sound
         } = input;

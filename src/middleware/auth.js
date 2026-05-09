@@ -16,7 +16,10 @@ export const requireAuth = async (req, res, next) => {
             token = authHeader.split(" ")[1].trim();
         }
 
+        console.log(`[Auth Middleware] Path: ${req.path}, Has Token: ${!!token}, Has Refresh Token: ${!!refreshToken}`);
+
         if (!token && !refreshToken) {
+            console.log(`[Auth Middleware] Rejecting because no tokens found in cookies or headers`);
             return next(new AppError("Authentication required. Please log in.", 401));
         }
 

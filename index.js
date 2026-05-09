@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3001;
 
 // ── Middleware ──────────────────────────────────────────────
 const allowedOrigins = [
-    process.env.FRONTEND_URL,
+    process.env.FRONTEND_URL ? process.env.FRONTEND_URL.replace(/\/$/, '') : null,
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:3001", // In case Next.js moved to 3001
@@ -47,9 +47,18 @@ app.use((req, res) => {
 
 // ── Global error handler ─────────────────────────────────────
 app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(err.status || 500).json({
+    const statusCode = err.statusCode || 500;
+    
+    // Only log the full stack trace for actual server crashes (500), not for normal 401/404 errors
+    if (statusCode === 500) {
+        console.error(err.stack);
+    } else {
+        console.warn(`[${statusCode}] ${err.message}`);
+    }
+
+    res.status(statusCode).json({
         ok: false,
+        status: err.status || 'error',
         message: err.message || "Internal Server Error",
     });
 });

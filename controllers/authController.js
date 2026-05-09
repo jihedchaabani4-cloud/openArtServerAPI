@@ -7,7 +7,8 @@ const BASE_URL = process.env.BASE_URL || "http://localhost:5000";
 const COOKIE_OPTS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
-  sameSite: "lax",
+  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+  path: "/",
 };
 
 const INITIAL_ACCOUNT_CREDITS = Number(

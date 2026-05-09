@@ -1,13 +1,13 @@
 import { supabase } from "#lib/supabase.js";
 import { walletService } from "#container.js";
 
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
-const BASE_URL = process.env.BASE_URL || "http://localhost:5000";
+const FRONTEND_URL = process.env.FRONTEND_URL;
+const BASE_URL = process.env.BASE_URL;
 
 const COOKIE_OPTS = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+  secure: true,
+  sameSite: "none",
   path: "/",
 };
 

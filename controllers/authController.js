@@ -142,6 +142,10 @@ export async function login(req, res) {
       return res.status(401).json({ error: "Invalid credentials." });
     }
 
+    // Clear any existing session before setting the new one
+    // This ensures switching accounts always starts fresh
+    clearAuthCookies(res);
+
     setAuthCookies(res, data.session);
     return res.status(200).json({ user: { id: data.user.id } });
   } catch (err) {

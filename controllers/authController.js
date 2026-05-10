@@ -4,6 +4,8 @@ import { walletService } from "#container.js";
 const FRONTEND_URL = process.env.FRONTEND_URL;
 const BASE_URL = process.env.BASE_URL;
 
+// cross-origin cookies: frontend on Vercel, API on separate server
+// sameSite=none + secure=true required for cookies to work cross-domain
 const COOKIE_OPTS = {
   httpOnly: true,
   secure: true,
@@ -214,6 +216,11 @@ export async function googleCallback(req, res) {
 }
 
 export async function getMe(req, res) {
+  // Prevent browser from caching this response — critical after OAuth login
+  // Without this, the browser returns a stale 304 ("not modified") and the
+  // frontend never sees the newly logged-in user.
+  res.setHeader("Cache-Control", "no-store");
+
   try {
     const user = await resolveUserFromCookies(req, res);
 

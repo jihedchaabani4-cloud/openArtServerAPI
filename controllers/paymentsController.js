@@ -2,6 +2,8 @@ import crypto from "crypto";
 import { walletService } from "../src/container.js";
 import { supabase } from "../lib/supabase.js";
 
+const SENSITIVE_PACKAGE_FIELDS = new Set(["variant_id", "checkout_url"]);
+
 // ─── Signature Verification ───────────────────────────────────────────────────
 
 /**
@@ -42,6 +44,7 @@ async function fetchPackagesFromDB() {
         .from("credit_packages")
         .select("*")
         .eq("is_active", true)
+        .order("sort_order", { ascending: true })
         .order("credits", { ascending: true });
 
     if (error) {
@@ -50,6 +53,12 @@ async function fetchPackagesFromDB() {
     }
 
     return data ?? [];
+}
+
+function toPublicPackage(pkg = {}) {
+    return Object.fromEntries(
+        Object.entries(pkg).filter(([key]) => !SENSITIVE_PACKAGE_FIELDS.has(key))
+    );
 }
 
 /**
@@ -79,8 +88,8 @@ export async function getCreditPackages(req, res) {
             return res.status(503).json({ ok: false, message: "Could not load packages" });
         }
 
-        // Strip sensitive fields before sending to client
-        const safe = packages.map(({ variant_id, checkout_url, ...rest }) => rest);
+        // Return every public DB column automatically, while redacting only sensitive checkout fields.
+        const safe = packages.map(toPublicPackage);
 
         return res.status(200).json({ ok: true, packages: safe });
     } catch (err) {

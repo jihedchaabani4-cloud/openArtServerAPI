@@ -1,6 +1,16 @@
 import crypto from "crypto";
 import { walletService } from "../src/container.js";
 import { supabase } from "../lib/supabase.js";
+import {
+    IMAGE_ROUTES,
+    IMAGE_MODEL_TYPES,
+    calculateImageCredits,
+} from "../src/image/core/modelRouter.js";
+import {
+    MODEL_ROUTES,
+    VIDEO_MODEL_TYPES,
+    calculateVideoCredits,
+} from "../src/video/core/modelRouter.js";
 
 const SENSITIVE_PACKAGE_FIELDS = new Set(["variant_id", "checkout_url"]);
 
@@ -61,6 +71,88 @@ function toPublicPackage(pkg = {}) {
     );
 }
 
+function floorMediaCount(packageCredits, modelCredits) {
+    const credits = Number(packageCredits) || 0;
+    const cost = Number(modelCredits) || 0;
+
+    if (cost <= 0) {
+        return 0;
+    }
+
+    return Math.floor(credits / cost);
+}
+
+function buildImageComparison(packages) {
+    return Object.entries(IMAGE_ROUTES)
+        .filter(([_, route]) => route.type === IMAGE_MODEL_TYPES.GENERATED && route.open !== false && !route.hidden)
+        .map(([key, route]) => {
+            const group = route.group || {};
+            const price = calculateImageCredits({
+                modelKey: key,
+                quality: "standard",
+                operation: "generated",
+            });
+            const creditsPerGeneration = price.credits;
+
+            return {
+                key,
+                displayName: group.displayName || key,
+                category: "image",
+                creditsPerGeneration,
+                unitLabel: "image",
+                basis: {
+                    operation: "generated",
+                    quality: "standard",
+                },
+                packageCounts: packages.map((pkg) => ({
+                    packageId: pkg.id,
+                    credits: pkg.credits,
+                    count: floorMediaCount(pkg.credits, creditsPerGeneration),
+                })),
+            };
+        })
+        .sort((a, b) => a.creditsPerGeneration - b.creditsPerGeneration);
+}
+
+function buildVideoComparison(packages) {
+    return Object.entries(MODEL_ROUTES)
+        .filter(([_, route]) => route.type === VIDEO_MODEL_TYPES.GENERATED && route.open !== false && !route.hidden)
+        .map(([key, route]) => {
+            const info = route.info || {};
+            const price = calculateVideoCredits({
+                modelKey: key,
+                durationSeconds: 5,
+                resolution: "720p",
+            });
+            const creditsPerGeneration = price.credits;
+
+            return {
+                key,
+                displayName: info.displayName || key,
+                category: "video",
+                creditsPerGeneration,
+                unitLabel: "video",
+                basis: {
+                    durationSeconds: 5,
+                    resolution: "720p",
+                },
+                packageCounts: packages.map((pkg) => ({
+                    packageId: pkg.id,
+                    credits: pkg.credits,
+                    count: floorMediaCount(pkg.credits, creditsPerGeneration),
+                })),
+            };
+        })
+        .sort((a, b) => a.creditsPerGeneration - b.creditsPerGeneration);
+}
+
+function buildModelsComparison(packages) {
+    return {
+        image: buildImageComparison(packages),
+        video: buildVideoComparison(packages),
+    };
+}
+
 /**
  * Builds a variantId → credits map from DB packages.
  * Used during webhook processing to know how many credits to add.
@@ -90,8 +182,9 @@ export async function getCreditPackages(req, res) {
 
         // Return every public DB column automatically, while redacting only sensitive checkout fields.
         const safe = packages.map(toPublicPackage);
+        const modelsComparison = buildModelsComparison(safe);
 
-        return res.status(200).json({ ok: true, packages: safe });
+        return res.status(200).json({ ok: true, packages: safe, modelsComparison });
     } catch (err) {
         console.error("[Payments] getCreditPackages error:", err);
         return res.status(500).json({ ok: false, message: "Internal server error" });

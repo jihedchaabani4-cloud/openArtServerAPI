@@ -189,8 +189,8 @@ export const IMAGE_ROUTES = {
     // ── GPT Image 2 (wavespeed) ───────────────────────────────────────────────
     "gpt-image-2": fromRegistry("gpt_image_2_wavespeed", true, false, IMAGE_MODEL_TYPES.GENERATED, {
         table: {
-            generated: { standard: 4000, hd: 5000, "2k": 6000, "4k": 8000 },
-            edit:      { standard: 4500, hd: 5500, "2k": 6500, "4k": 9000 },
+            generated: { standard: 12, hd: 15, "2k": 18, "4k": 22 },
+            edit:      { standard: 12, hd: 15, "2k": 18, "4k": 22 },
         }
     }),
 

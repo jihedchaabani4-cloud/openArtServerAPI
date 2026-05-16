@@ -4,7 +4,29 @@ import { walletService } from "#container.js";
 const FRONTEND_URL = process.env.FRONTEND_URL;
 const BASE_URL = process.env.BASE_URL;
 const FRONTEND_ORIGIN = new URL(FRONTEND_URL).origin;
-const POPUP_SUCCESS_HTML = `<!doctype html>
+function resolveFrontendOrigin(rawOrigin) {
+  if (typeof rawOrigin !== "string" || !rawOrigin.trim()) {
+    return FRONTEND_ORIGIN;
+  }
+
+  try {
+    const parsed = new URL(rawOrigin);
+    return parsed.origin;
+  } catch {
+    return FRONTEND_ORIGIN;
+  }
+}
+
+function resolveFrontendUrl(frontendOrigin, rawReturnTo) {
+  const returnTo = typeof rawReturnTo === "string" && rawReturnTo.startsWith("/")
+    ? rawReturnTo
+    : "/";
+
+  return `${frontendOrigin}${returnTo}`;
+}
+
+function renderPopupSuccessHtml(frontendOrigin, redirectUrl) {
+  return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -15,7 +37,7 @@ const POPUP_SUCCESS_HTML = `<!doctype html>
       (function () {
         try {
           if (window.opener && !window.opener.closed) {
-            window.opener.postMessage({ type: "oauth-login-success" }, ${JSON.stringify(FRONTEND_ORIGIN)});
+            window.opener.postMessage({ type: "oauth-login-success" }, ${JSON.stringify(frontendOrigin)});
           }
         } catch (error) {
           console.error("Popup auth message failed:", error);
@@ -23,13 +45,14 @@ const POPUP_SUCCESS_HTML = `<!doctype html>
 
         window.close();
         setTimeout(function () {
-          window.location.replace(${JSON.stringify(FRONTEND_URL)});
+          window.location.replace(${JSON.stringify(redirectUrl)});
         }, 300);
       })();
     </script>
     <p style="opacity: 0.8;">Login successful. You can close this window.</p>
   </body>
 </html>`;
+}
 
 // cross-origin cookies: frontend on Vercel, API on separate server
 // sameSite=none + secure=true required for cookies to work cross-domain
@@ -186,10 +209,12 @@ export async function login(req, res) {
 export async function googleRedirect(req, res) {
   try {
     const isPopup = req.query?.popup === "1";
+    const frontendOrigin = resolveFrontendOrigin(req.query?.frontendOrigin);
+    const returnTo = typeof req.query?.returnTo === "string" ? req.query.returnTo : "/";
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${BASE_URL}/api/auth/callback${isPopup ? "?popup=1" : ""}`,
+        redirectTo: `${BASE_URL}/api/auth/callback?popup=${isPopup ? "1" : "0"}&frontendOrigin=${encodeURIComponent(frontendOrigin)}&returnTo=${encodeURIComponent(returnTo)}`,
       },
     });
 
@@ -205,10 +230,12 @@ export async function googleRedirect(req, res) {
 export async function microsoftRedirect(req, res) {
   try {
     const isPopup = req.query?.popup === "1";
+    const frontendOrigin = resolveFrontendOrigin(req.query?.frontendOrigin);
+    const returnTo = typeof req.query?.returnTo === "string" ? req.query.returnTo : "/";
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: "azure",
       options: {
-        redirectTo: `${BASE_URL}/api/auth/callback${isPopup ? "?popup=1" : ""}`,
+        redirectTo: `${BASE_URL}/api/auth/callback?popup=${isPopup ? "1" : "0"}&frontendOrigin=${encodeURIComponent(frontendOrigin)}&returnTo=${encodeURIComponent(returnTo)}`,
         scopes: "openid profile email",
       },
     });
@@ -223,7 +250,7 @@ export async function microsoftRedirect(req, res) {
 }
 
 export async function googleCallback(req, res) {
-  const { code, popup } = req.query;
+  const { code, popup, frontendOrigin: rawFrontendOrigin, returnTo } = req.query;
 
   if (!code) return res.status(400).json({ error: "Missing authorization code." });
 
@@ -237,11 +264,14 @@ export async function googleCallback(req, res) {
     setAuthCookies(res, session);
     await ensureUserAccount(user.id, { email: user.email });
 
+    const frontendOrigin = resolveFrontendOrigin(rawFrontendOrigin);
+    const redirectUrl = resolveFrontendUrl(frontendOrigin, returnTo);
+
     if (popup === "1") {
-      return res.status(200).send(POPUP_SUCCESS_HTML);
+      return res.status(200).send(renderPopupSuccessHtml(frontendOrigin, redirectUrl));
     }
 
-    return res.redirect(`${FRONTEND_URL}/`);
+    return res.redirect(redirectUrl);
   } catch (err) {
     console.error("[Auth] Google callback error:", err);
     return res.status(500).json({ error: "Internal server error." });

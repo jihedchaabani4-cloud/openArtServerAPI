@@ -140,7 +140,7 @@ export const MODELS = {
     // ─── GPT Image 2 ──────────────────────────────────────────────────────────
     "gpt_image_2_wavespeed": {
         displayName: "GPT Image 2",
-        icon: IMAGE_ICONS.nanobana, // Or a specific GPT icon if available
+        icon: IMAGE_ICONS.gpt,
         description: "High-quality text-to-image and editing powered by GPT Image 2",
         category: "image", tier: "pro",
         pricing:  { per_image: 13 },

@@ -1,8 +1,12 @@
 const ICONS = {
     nanobana:   "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/minimax.svg",
+    google:     "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/google.svg",
+    gpt:        "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/openai.svg",
     seedream:   "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/baichuan.svg",
+    seedance:   "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/baichuan.svg",
     zimage:     "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/zhipu.svg",
     kling:      "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/kling.svg",
+    runway:     "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/runway.svg",
     wan:        "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/runway.svg",
     hailuo:     "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/minimax-color.svg",
     cinema:     "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/stability-color.svg",
@@ -16,12 +20,15 @@ export const getModelMetadata = (modelName) => {
     
     if (name.includes("cinema"))   return { label: "Cinema", iconUrl: ICONS.cinema };
     if (name.includes("nanobana")) return { label: "NanoBanana", iconUrl: ICONS.nanobana };
+    if (name.includes("gpt-image") || name.includes("gpt_image") || name.includes("openai")) return { label: "GPT Image", iconUrl: ICONS.gpt };
+    if (name.includes("google") || name.includes("veo") || name.includes("imagen")) return { label: "Google", iconUrl: ICONS.google };
     if (name.includes("seedream")) return { label: "SeaDream", iconUrl: ICONS.seedream };
+    if (name.includes("seedance")) return { label: "Seedance", iconUrl: ICONS.seedance };
     if (name.includes("z-image") || name.includes("z_image"))  return { label: "Z-Image", iconUrl: ICONS.zimage };
     if (name.includes("kling"))    return { label: "Kling", iconUrl: ICONS.kling };
+    if (name.includes("runway"))   return { label: "Runway", iconUrl: ICONS.runway };
     if (name.includes("wan"))      return { label: "Wan", iconUrl: ICONS.wan };
     if (name.includes("hailuo"))   return { label: "Hailuo", iconUrl: ICONS.hailuo };
-    if (name.includes("seedance")) return { label: "SeaDream", iconUrl: ICONS.default };
 
     return { label: "Standard", iconUrl: ICONS.default };
 };

@@ -10,7 +10,7 @@ import * as seedream from "./models/seedream.js";
 import * as zImage   from "./models/z-image.js";
 import * as runway   from "./models/runway.js";
 import * as gptImage from "./models/gpt-image-2.js";
-import * as minimax from "./models/minimax.js";
+import * as minimax  from "./models/minimax.js";
 import { IMAGE_ICONS } from "../../utils/imageIcons.js";
 
 const R_BASIC    = ["1:1", "16:9", "9:16", "3:2", "3:4"];
@@ -104,8 +104,6 @@ export const MODELS = {
         i2i:      zImage.img2img,
     },
 
-
-
     // ─── RunwayML ─────────────────────────────────────────────────────────────
     "runway_gen4_image_wavespeed": {
         displayName: "RunwayML Gen-4 Image",
@@ -154,18 +152,21 @@ export const MODELS = {
         t2i:      gptImage.t2i,
         i2i:      gptImage.edit,
     },
+
+    // ─── Minimax ──────────────────────────────────────────────────────────────
     "minimax_wavespeed": {
-        displayName: "Minimax Image-to-Image",
+        displayName: "Minimax Image-01",
         icon: IMAGE_ICONS.minimax,
-        description: "High quality image-to-image model by Minimax",
+        description: "High quality text-to-image and editing by Minimax",
         category: "image", tier: "pro",
-        pricing:  { per_image: 0.12 },
-        tags:     ["pro", "minimax", "image-to-image"],
+        pricing:  { per_image: 0.10 },
+        tags:     ["pro", "minimax", "photoreal"],
         support:  { 
             ratio: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"], 
             quality: ["1k", "2k", "4k"], 
-            references: { min: 1, max: 1 } 
+            references: { min: 0, max: 1 } 
         },
+        t2i:      minimax.t2i,
         i2i:      minimax.img2img,
     },
 };

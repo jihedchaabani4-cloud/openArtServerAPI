@@ -16,6 +16,43 @@ function sizeFromRatio(ratio = "1:1") {
     return map[ratio] || map["1:1"];
 }
 
+class MinimaxTextToImage extends WavespeedImageRunner {
+    constructor() {
+        super({
+            modelName:     "minimax/image-01/text-to-image",
+            provider:      "wavespeed",
+            type:          "t2i",
+            maxReferences: 0,
+            capabilities:  [CAPS.TEXT, CAPS.OUTPUTS_IMAGE],
+            displayName:   "Minimax Text-to-Image",
+            category:      "image",
+            tier:          "pro",
+            pricing:       { image: 10 }, // Pro price point
+            modes:         ["t2i"],
+        });
+    }
+
+    adapt(form) {
+        const { width, height } = sizeFromRatio(form.ratio || form.aspectRatio);
+        return {
+            prompt: form.prompt,
+            width:  form.width  || width,
+            height: form.height || height,
+        };
+    }
+
+    toPayload({ prompt, width, height }) {
+        return {
+            enable_base64_output: false,
+            enable_sync_mode: false,
+            num_images: 1,
+            prompt: prompt,
+            prompt_optimizer: false,
+            size: `${width || 1024}*${height || 1024}`,
+        };
+    }
+}
+
 class MinimaxImageToImage extends WavespeedImageRunner {
     constructor() {
         super({
@@ -57,4 +94,5 @@ class MinimaxImageToImage extends WavespeedImageRunner {
     }
 }
 
+export const t2i = new MinimaxTextToImage();
 export const img2img = new MinimaxImageToImage();

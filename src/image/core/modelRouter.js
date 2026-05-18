@@ -229,6 +229,17 @@ export const IMAGE_ROUTES = {
             }
         }
     ),
+    "minimax/image-01/text-to-image": fromRegistry(
+        "minimax_wavespeed",
+        false,
+        false,
+        IMAGE_MODEL_TYPES.GENERATED,
+        {
+            table: {
+                generated: { standard: 10, hd: 14, "2k": 20, "4k": 32 }
+            }
+        }
+    ),
 };
 
 

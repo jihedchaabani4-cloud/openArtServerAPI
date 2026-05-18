@@ -218,25 +218,15 @@ export const IMAGE_ROUTES = {
         true,  // isOpen
         true   // isHidden — backend-only, never shown to users
     ),
-    "minimax/image-01/image-to-image": fromRegistry(
+    "minimax": fromRegistry(
         "minimax_wavespeed",
         true,
         false,
         IMAGE_MODEL_TYPES.GENERATED,
         {
             table: {
-                edit: { standard: 12, hd: 16, "2k": 24, "4k": 40 }
-            }
-        }
-    ),
-    "minimax/image-01/text-to-image": fromRegistry(
-        "minimax_wavespeed",
-        false,
-        false,
-        IMAGE_MODEL_TYPES.GENERATED,
-        {
-            table: {
-                generated: { standard: 10, hd: 14, "2k": 20, "4k": 32 }
+                generated: { standard: 10, hd: 14, "2k": 20, "4k": 32 },
+                edit:      { standard: 12, hd: 16, "2k": 24, "4k": 40 }
             }
         }
     ),

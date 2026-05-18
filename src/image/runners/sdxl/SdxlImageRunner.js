@@ -20,7 +20,7 @@ export class SdxlImageRunner extends BaseModel {
                     headers: { 
                         'Content-Type': 'application/json',
                         'ngrok-skip-browser-warning': 'true',
-                        'User-Agent': 'OpenArt-AI-Studio'
+                        'User-Agent': `${process.env.APP_NAME || 'Labveil'}-AI-Studio`
                     },
                     body: JSON.stringify(payload),
                     signal: createTimeoutSignal(policy.requestTimeoutMs),

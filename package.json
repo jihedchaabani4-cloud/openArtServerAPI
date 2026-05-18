@@ -1,7 +1,7 @@
 {
-    "name": "open-art-api",
+    "name": "labveil-api",
     "version": "1.0.0",
-    "description": "Express.js API for Open Art AI Influencer Studio",
+    "description": "Express.js API for Labveil AI Influencer Studio",
     "main": "index.js",
     "type": "module",
     "imports": {

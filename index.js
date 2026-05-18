@@ -66,7 +66,8 @@ app.use((err, req, res, next) => {
 
 // ── Start server ─────────────────────────────────────────────
 app.listen(PORT, () => {
-    console.log(`\n🚀 Open Art API running on http://localhost:${PORT}\n`);
+    const appName = process.env.APP_NAME || "Labveil";
+    console.log(`\n🚀 ${appName} API running on http://localhost:${PORT}\n`);
     
     // ── Start Cron Jobs ──────────────────────────────────────────
     if (walletService) {

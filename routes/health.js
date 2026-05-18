@@ -3,7 +3,8 @@ const router = express.Router();
 
 // GET /api/health
 router.get("/", (req, res) => {
-    res.json({ ok: true, message: "Open Art API is running 🎨" });
+    const appName = process.env.APP_NAME || "Labveil";
+    res.json({ ok: true, message: `${appName} API is running 🎨` });
 });
 
 export default router;

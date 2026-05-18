@@ -8,10 +8,11 @@ export const IMAGE_ICONS = {
     gpt:      "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/openai.svg",
     openai:   "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/openai.svg",
 
-    // ByteDance / Zhipu / Runway families
+    // ByteDance / Zhipu / Runway/ Minimax families
     seedream: "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/baichuan.svg",
     zimage:   "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/zhipu.svg",
     runway:   "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/runway.svg",
+    minimax:  "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/minimax.svg",
 
     // Stability / SDXL family
     cinema:   "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/stability-color.svg",

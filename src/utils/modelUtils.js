@@ -9,6 +9,7 @@ const ICONS = {
     runway:     "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/runway.svg",
     wan:        "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/runway.svg",
     hailuo:     "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/minimax-color.svg",
+    minimax:    "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/minimax-color.svg",
     cinema:     "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/stability-color.svg",
     default:    "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/lobe.svg",
 };
@@ -29,6 +30,7 @@ export const getModelMetadata = (modelName) => {
     if (name.includes("runway"))   return { label: "Runway", iconUrl: ICONS.runway };
     if (name.includes("wan"))      return { label: "Wan", iconUrl: ICONS.wan };
     if (name.includes("hailuo"))   return { label: "Hailuo", iconUrl: ICONS.hailuo };
+    if (name.includes("minimax"))  return { label: "Minimax", iconUrl: ICONS.minimax };
 
     return { label: "Standard", iconUrl: ICONS.default };
 };

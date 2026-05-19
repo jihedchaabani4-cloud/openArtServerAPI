@@ -18,7 +18,7 @@ import { BaseGenerateImageTreatment } from "../basetretment/BaseGenerateImageTre
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SHEET_DEFAULTS = {
-  CHARACTER: { model_name: "gpt-image-2", ratio: "3:2", quality: "2k", steps: 40, guidance_scale: 9.0 },
+  CHARACTER: { model_name: "minimax", ratio: "3:2", quality: "2k", steps: 40, guidance_scale: 9.0 },
   LOCATION:  { model_name: "gpt-image-2",     ratio: "3:2", quality: "2k", steps: 30, guidance_scale: 7.5 },
   PRODUCT:   { model_name: "gpt-image-2",     ratio: "3:2", quality: "2k", steps: 30, guidance_scale: 7.5 },
 };

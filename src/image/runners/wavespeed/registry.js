@@ -11,6 +11,7 @@ import * as zImage   from "./models/z-image.js";
 import * as runway   from "./models/runway.js";
 import * as gptImage from "./models/gpt-image-2.js";
 import * as minimax  from "./models/minimax.js";
+import * as pruna    from "./models/pruna-ai.js";
 import { IMAGE_ICONS } from "../../utils/imageIcons.js";
 
 const R_BASIC    = ["1:1", "16:9", "9:16", "3:2", "3:4"];
@@ -168,5 +169,22 @@ export const MODELS = {
         },
         t2i:      minimax.t2i,
         i2i:      minimax.img2img,
+    },
+
+    // ─── Pruna AI ─────────────────────────────────────────────────────────────
+    "pruna_ai_wavespeed": {
+        displayName: "Pruna AI Image",
+        icon: IMAGE_ICONS.nanobana || "",
+        description: "High-quality text-to-image and editing powered by Pruna AI",
+        category: "image", tier: "pro",
+        pricing:  { per_image: 0.10 },
+        tags:     ["pruna", "creative", "high-quality"],
+        support:  { 
+            ratio: ["match_input_image", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"], 
+            quality: ["1k", "2k"],
+            references: { min: 0, max: 5 } 
+        },
+        t2i:      pruna.t2i,
+        i2i:      pruna.edit,
     },
 };

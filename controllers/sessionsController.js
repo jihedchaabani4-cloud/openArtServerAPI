@@ -74,15 +74,38 @@ export const remove = async (req, res) => {
         const { id } = req.params;
         const userId = req.user.id;
 
-        // Verify ownership
+        // Verify ownership and fetch project_id in one query
         const { data: session } = await supabase
             .from("session")
-            .select("id, project:project!project_id(user_id)")
+            .select("id, project_id, project:project!project_id(user_id)")
             .eq("id", id)
             .single();
 
         if (!session || session.project?.user_id !== userId) {
             return res.status(403).json({ ok: false, message: "Unauthorized access to this session" });
+        }
+
+        // Count remaining sessions for this project
+        const { count } = await supabase
+            .from("session")
+            .select("id", { count: "exact", head: true })
+            .eq("project_id", session.project_id);
+
+        let replacementSession = null;
+
+        // If this is the last session, create a replacement before deleting
+        if (count <= 1) {
+            const { data: newSession, error: newSessionError } = await supabase
+                .from("session")
+                .insert([{ name: "Untitled", project_id: session.project_id }])
+                .select()
+                .single();
+
+            if (newSessionError) {
+                console.error("Auto-session creation error:", newSessionError);
+                return res.status(500).json({ ok: false, message: "Could not create replacement session" });
+            }
+            replacementSession = newSession;
         }
 
         const { error } = await supabase
@@ -91,7 +114,8 @@ export const remove = async (req, res) => {
             .eq("id", id);
 
         if (error) throw error;
-        res.json({ ok: true });
+
+        res.json({ ok: true, replacementSession: replacementSession || null });
     } catch (error) {
         console.error("deleteSession error:", error);
         res.status(500).json({ ok: false, message: error.message });

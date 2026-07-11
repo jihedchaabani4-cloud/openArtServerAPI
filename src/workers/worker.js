@@ -3,6 +3,7 @@ import { Worker, UnrecoverableError } from "bullmq";
 import { workerRedisConnection } from "../queue/redis.js";
 import { QUEUE_NAME } from "../queue/queue.js";
 import { resolveTreatment, treatmentDeps } from "../treatments/treatmentRegistry.js";
+import { processWorkflowJob, WORKFLOW_ARCHITECTURE_JOB_TYPE } from "../workflows/workflowJobProcessor.js";
 
 function isPermanentJobError(error) {
   const message = String(error?.message || error || "").toLowerCase();
@@ -35,6 +36,10 @@ export const worker = isEnabled ? new Worker(
 
     if (!type || !payload) {
       throw new Error(`Invalid job payload for job ${job.id}. Expected { type, payload }.`);
+    }
+
+    if (type === WORKFLOW_ARCHITECTURE_JOB_TYPE) {
+      return processWorkflowJob(payload);
     }
 
     const treatment = resolveTreatment(type, treatmentDeps);

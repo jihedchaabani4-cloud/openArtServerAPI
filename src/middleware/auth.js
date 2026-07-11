@@ -6,6 +6,12 @@ import { AppError } from "../utils/AppError.js";
  * Blocks the request with 401 Unauthorized if token is missing or invalid.
  */
 export const requireAuth = async (req, res, next) => {
+    // ── DEV BYPASS ─────────────────────────────────────────────────────────────
+    if (process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) {
+        req.user = { id: "7d40bff4-7cac-4f2d-8994-2642c90e40e4" }; // use a valid project/user owner ID if needed, or dev-user-id
+        return next();
+    }
+
     try {
         let token = req.cookies?.access_token;
         const refreshToken = req.cookies?.refresh_token;

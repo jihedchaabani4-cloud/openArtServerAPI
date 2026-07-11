@@ -1,0 +1,20 @@
+id: character-sheet
+version: 1.0.0
+applies_to: [prompt-builder]
+description: Multi-view character reference sheet.
+
+parameters_schema:
+  views:
+    type: array
+    default: [front, side, back]
+  style:
+    type: string
+    default: realistic
+
+pipeline:
+  - resolveCharacters
+  - resolveReferences
+  - applyCharacterTemplate
+  - applyPoseTemplate
+  - applySheetLayout
+  - enhancePrompt

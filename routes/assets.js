@@ -5,9 +5,9 @@ import { extractMediaMetadata } from "../src/utils/MediaMetadataExtractor.js";
 import { supabase } from "../lib/supabase.js";
 import { createWorkflowWithMedia, markMediaStatus } from "../src/db/workflowMediaOps.js";
 import { requireAuth } from "../src/middleware/auth.js";
+import { autoCreateProjectAndSession } from "../lib/helpers.js";
 
 const router = Router();
-
 router.use(requireAuth);
 
 // ─── Multer ────────────────────────────────────────────────────────────────
@@ -88,8 +88,8 @@ function validateMedia(metadata, mime) {
 router.post("/upload", upload.single("file"), async (req, res) => {
     try {
         const userId    = req.user.id;
-        const projectId = req.body?.project_id || null;
-        const sessionId = req.body?.session_id || null;
+        let projectId = req.body?.project_id || null;
+        let sessionId = req.body?.session_id || null;
 
         if (!projectId) {
             return res.status(400).json({
@@ -117,6 +117,11 @@ router.post("/upload", upload.single("file"), async (req, res) => {
                 error: "You are not allowed to upload assets to this project.",
             });
         }
+
+        // Ensure session exists
+        const ensured = await autoCreateProjectAndSession(userId, projectId, sessionId);
+        projectId = ensured.project_id;
+        sessionId = ensured.session_id;
 
         let buffer, mime;
 

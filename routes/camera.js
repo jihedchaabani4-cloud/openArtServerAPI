@@ -1,30 +1,38 @@
 import express from "express";
+import { randomUUID } from "node:crypto";
+import { db, workflowStorageGateway } from "../src/container.js";
 import { autoCreateProjectAndSession } from "../lib/helpers.js";
 import { normalizeImageModelName } from "../lib/modelRegistryKeys.js";
-import { editVideoTreatment, promptService, cameraTreatment } from "../src/container.js";
+import { promptService } from "../src/container.js";
 import { requireAuth } from "../src/middleware/auth.js";
 import { CameraTask } from "../src/video/tasks/CameraTask.js";
+import { buildCameraPrompt } from "../src/v2/utils/legacyPromptBuilders.js";
+
+// V2 Imports
+import { loadRegistries } from "../src/v2/registry/registryLoader.js";
+import { compileWorkflow } from "../src/v2/compiler/compileWorkflow.js";
+import { startWorkflowRun } from "../src/v2/runner/workflowRunner.js";
+import { buildV1CompatibleResponse, mapEditImageV1, mapEditVideoV1 } from "../src/v2/utils/v1PayloadMapper.js";
+import { resolveReferences } from "../src/image/utils/resolveReferences.js";
 
 const router = express.Router();
-
 router.use(requireAuth);
+
+let cachedRegistries = null;
+function getRegistries() {
+    if (!cachedRegistries) cachedRegistries = loadRegistries();
+    return cachedRegistries;
+}
 
 // ── POST /api/camera/change-angles ─────────────────────────────────────────
 router.post("/change-angles", async (req, res) => {
     const media_type = (req.body.media_type || "image").toLowerCase();
-
-    if (media_type === "video") {
-        return handleVideoCamera(req, res);
-    }
+    if (media_type === "video") return handleVideoCamera(req, res);
     return handleImageCamera(req, res);
 });
 
-// ── POST /api/camera/video ──────────────────────────────────────────────────
 router.post("/video", (req, res) => handleVideoCamera(req, res));
-
-// ── POST /api/camera/image ──────────────────────────────────────────────────
 router.post("/image", (req, res) => handleImageCamera(req, res));
-
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Handlers
@@ -51,33 +59,59 @@ async function handleImageCamera(req, res) {
         const { project_id: finalProjectId, session_id: finalSessionId } =
             await autoCreateProjectAndSession(userId, project_id, session_id, false);
 
-        const treatment = cameraTreatment;
+        const sourceMedia = await db.media.findLatestByWorkflow(workflow_id);
+        if (!sourceMedia) {
+            return res.status(404).json({ ok: false, message: "Source media not found." });
+        }
 
-        const queued = await treatment.execute({
-            rotation, tilt, zoom,
-            ratio,
-            quality: quality || "1k",
-            project_id:  finalProjectId,
-            session_id:  finalSessionId,
-            workflow_id: workflow_id,
-            reference_workflow_ids,
-
-            model_name: normalizedModelName,
-            userId,
+        const resolvedReferences = await resolveReferences(db, {
+            baseWorkflowId: workflow_id,
+            referenceMediaIds: reference_workflow_ids,
         });
+
+        const finalPrompt = buildCameraPrompt(rotation || 0, tilt || 0, zoom || 3);
+        
+        const payload = {
+            prompt: finalPrompt,
+            model_name: normalizedModelName,
+            references: resolvedReferences,
+        };
+
+        const v2Input = mapEditImageV1(payload, sourceMedia);
+        
+        const runId = randomUUID();
+        const v2WorkflowId = "edit-image-v1";
+        const registries = getRegistries();
+        const workflowDef = registries.workflows[v2WorkflowId];
+        if (!workflowDef) throw new Error(`V2 Workflow ${v2WorkflowId} not found`);
+        const plan = compileWorkflow(workflowDef, registries);
+
+        const placeholder = await workflowStorageGateway.createMediaPlaceholder({
+            runId,
+            nodeType: "media-transform",
+            userId,
+            workflowId: v2WorkflowId,
+            input: v2Input,
+        });
+
+        const runtimeInput = {
+            ...v2Input,
+            userId,
+            _v1PlaceholderIds: placeholder ? [placeholder] : [],
+        };
+
+        const runResult = await startWorkflowRun(plan, runtimeInput, runId);
 
         return res.json({
             ok: true,
             media_type: "image",
-            batchId: queued.batchId || null,
-            configId: queued.configId,
-            workflows: queued.workflows,
-            status: queued.status,
-            provider: queued.provider,
-            project_id: finalProjectId,
-            session_id: finalSessionId,
-            taskId: queued.jobId,
-            jobId: queued.jobId,
+            ...buildV1CompatibleResponse({
+                runId: runResult.run_id,
+                v1WorkflowId: placeholder?.workflowId,
+                v1MediaId: placeholder?.mediaId,
+                projectId: finalProjectId,
+                sessionId: finalSessionId,
+            }),
         });
 
     } catch (error) {
@@ -117,50 +151,63 @@ async function handleVideoCamera(req, res) {
         const { project_id: finalProjectId, session_id: finalSessionId } =
             await autoCreateProjectAndSession(userId, project_id, session_id, is_new_project);
 
+        const sourceMedia = await db.media.findLatestByWorkflow(finalWfId);
+        if (!sourceMedia) {
+            return res.status(404).json({ ok: false, message: "Source media not found." });
+        }
+
         console.log(`\n🎥 [Camera/Video] Target move: "${rawCameraText}"`);
         const cameraTask = new CameraTask({ promptService });
         const { cameraPrompt, cameraControl } = await cameraTask.execute({ cameraText: rawCameraText });
         const finalPrompt = CameraTask.mergeIntoPrompt(prompt, cameraPrompt);
-        console.log("cameraPrompt", cameraPrompt);
-        console.log("cameraControl", cameraControl);
-        console.log("finalPrompt", finalPrompt);
-        console.log(`   - Resolved camera_prompt: "${cameraPrompt}"`);
-        console.log(`   - Resolved cameraControl: ${JSON.stringify(cameraControl)}`);
-        console.log(`   - Final Prompt for edit:  "${finalPrompt}"`);
-
-        const queued = await editVideoTreatment.execute({
+        
+        const payload = {
             model,
             prompt: finalPrompt,
-            cameraControl: cameraControl,
             camera_control: cameraControl,
             ratio,
             duration,
             references,
-            project_id:    finalProjectId,
-            session_id:    finalSessionId,
-            video_workflow_id: finalWfId,
-            reference_workflow_ids: references.map(r => r.workflow_id || r.id || r.media_id || r.asset_id).filter(Boolean),
+        };
+
+        const v2Input = mapEditVideoV1(payload, sourceMedia);
+        
+        const runId = randomUUID();
+        const v2WorkflowId = "edit-video-v1";
+        const registries = getRegistries();
+        const workflowDef = registries.workflows[v2WorkflowId];
+        if (!workflowDef) throw new Error(`V2 Workflow ${v2WorkflowId} not found`);
+        const plan = compileWorkflow(workflowDef, registries);
+
+        const placeholder = await workflowStorageGateway.createMediaPlaceholder({
+            runId,
+            nodeType: "media-transform",
             userId,
+            workflowId: v2WorkflowId,
+            input: v2Input,
         });
 
-        const result = {
-            batchId:   queued.batchId ?? null,
-            configId:  queued.configId,
-            workflows: queued.workflows,
-            status:    queued.status,
-            mode:      queued.mode,
-            model:     queued.model,
-            taskId:    queued.jobId,
-            jobId:     queued.jobId,
+        const runtimeInput = {
+            ...v2Input,
+            userId,
+            _v1PlaceholderIds: placeholder ? [placeholder] : [],
         };
+
+        const runResult = await startWorkflowRun(plan, runtimeInput, runId);
+        
+        const result = buildV1CompatibleResponse({
+            runId: runResult.run_id,
+            v1WorkflowId: placeholder?.workflowId,
+            v1MediaId: placeholder?.mediaId,
+            projectId: finalProjectId,
+            sessionId: finalSessionId,
+        });
 
         return res.json({
             ok: true,
             media_type: "video",
             ...result,
-            data:       result,
-            project_id: finalProjectId,
-            session_id: finalSessionId,
+            data: result,
             camera_prompt: cameraPrompt,
             camera_control: cameraControl,
         });
@@ -172,3 +219,4 @@ async function handleVideoCamera(req, res) {
 }
 
 export default router;
+

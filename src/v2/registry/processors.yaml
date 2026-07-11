@@ -1,0 +1,39 @@
+resolveCharacters:
+  network: false
+  description: Loads character assets into context.characters
+
+resolveReferences:
+  network: false
+  description: Loads and tags reference images by role
+
+applyCharacterTemplate:
+  network: false
+  description: Injects character description into prompt template
+
+applyPoseTemplate:
+  network: false
+  description: Injects pose/view instructions per context.views
+
+applyCameraStyle:
+  network: false
+  description: Injects camera angle/lens instructions
+
+buildStoryboardLayout:
+  network: false
+  description: Adds panel grid layout instructions
+
+applySheetLayout:
+  network: false
+  description: Adds character-sheet grid layout instructions
+
+applyComposition:
+  network: false
+  description: Adds poster composition instructions
+
+applyTypographyArea:
+  network: false
+  description: Reserves title-text safe zones for posters
+
+enhancePrompt:
+  network: true
+  description: LLM call to polish/enrich assembled prompt

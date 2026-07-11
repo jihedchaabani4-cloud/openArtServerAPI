@@ -1,0 +1,19 @@
+id: storyboard
+version: 1.0.0
+applies_to: [prompt-builder]
+description: Multi-panel storyboard layout.
+
+parameters_schema:
+  panel_count:
+    type: number
+    default: 6
+  aspect_ratio:
+    type: string
+    default: "16:9"
+
+pipeline:
+  - resolveCharacters
+  - resolveReferences
+  - applyCameraStyle
+  - buildStoryboardLayout
+  - enhancePrompt

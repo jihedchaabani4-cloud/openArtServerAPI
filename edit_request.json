@@ -1,0 +1,1 @@
+{"workflow_id":"edit-image-v1","input":{"prompt":"remove background","source_asset":{"id":"asset_123","url":"https://placehold.co/1024x1024.png","type":"image","width":1024,"height":1024,"description":"a fluffy orange cat sitting on a couch"},"style":"clean white background","model":"flux-kontext"}}

@@ -1,0 +1,43 @@
+id: simple-image-v1
+name: Simple Image
+version: 1.0.0
+description: Generate a simple image from a prompt.
+
+metadata:
+  category: image
+  tags: [image, simple, generation]
+  author: system
+
+input_schema:
+  required: [prompt]
+  properties:
+    prompt: { type: string }
+    characters: { type: array }
+    references: { type: array }
+    style: { type: string }
+    model: { type: string }
+
+nodes:
+  build_prompt:
+    type: prompt-builder
+    user_inputs:
+      prompt: "${input.prompt}"
+      characters: "${input.characters}"
+      references: "${input.references}"
+      style: "${input.style}"
+
+  generate:
+    type: image-generation
+    depends_on: [build_prompt]
+    inputs:
+      prompt: "${build_prompt.output.finalPrompt}"
+      references: "${build_prompt.output.context.references}"
+      model: "${input.model}"
+    config:
+      width: 1024
+      height: 1024
+      count: 1
+
+outputs:
+  main_asset: "${generate.output.assets}"
+  model_used: "${input.model}"

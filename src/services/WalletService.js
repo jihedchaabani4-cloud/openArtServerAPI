@@ -10,6 +10,16 @@ export class WalletError extends Error {
 
 export class WalletService {
   HOLD_TTL_SECONDS = 60 * 60;
+  METADATA_MAX_BYTES = 4096; // FIX: was undefined — validateMetadata() silently skipped size check
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // DEPLOYED SUPABASE RPCs (copy-paste these into Supabase SQL Editor)
+  // ═══════════════════════════════════════════════════════════════════════
+  // hold_credits, commit_transaction, rollback_transaction,
+  // credit_wallet, expire_stale_holds
+  //
+  // See bottom of this file for full CREATE OR REPLACE FUNCTION scripts.
+  // ═══════════════════════════════════════════════════════════════════════
 
   constructor(supabaseUrl, supabaseServiceKey) {
     this.supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -187,19 +197,52 @@ export class WalletService {
     return true;
   }
 
-  async getTransactions(userId, limit = 20, offset = 0) {
+  /**
+   * Get paginated transaction history for a user.
+   *
+   * Uses cursor-based pagination (stable on a live append-only table):
+   *   - Cursor = { before: ISO-8601 timestamp, beforeId: UUID }
+   *   - Returns limit+1 rows to detect if a next page exists
+   *
+   * Falls back to offset pagination if before/beforeId are not provided
+   * (for backwards compatibility with internal callers).
+   *
+   * @returns {{ transactions: Array, nextCursor: {before, beforeId} | null }}
+   */
+  async getTransactions(userId, limit = 20, before = null, beforeId = null) {
     const wallet = await this.getWalletOrThrow(userId);
 
-    const { data, error } = await this.supabase
+    let query = this.supabase
       .from("transactions")
       .select("*")
       .eq("wallet_id", wallet.id)
       .order("created_at", { ascending: false })
-      .range(offset, offset + limit - 1);
+      .order("id", { ascending: false })
+      .limit(limit + 1); // Fetch one extra to determine if there's a next page
 
+    // Apply cursor filter when both cursor components are provided
+    if (before && beforeId) {
+      // Return rows where created_at < before, OR created_at = before AND id < beforeId
+      query = query.or(
+        `created_at.lt.${before},and(created_at.eq.${before},id.lt.${beforeId})`
+      );
+    }
+
+    const { data, error } = await query;
     if (error) throw new WalletError(error.message, "DB_ERROR");
 
-    return data ?? [];
+    const rows = data ?? [];
+    const hasNextPage = rows.length > limit;
+    if (hasNextPage) rows.pop(); // Remove the extra sentinel row
+
+    const nextCursor = hasNextPage && rows.length > 0
+      ? {
+          before: rows[rows.length - 1].created_at,
+          beforeId: rows[rows.length - 1].id,
+        }
+      : null;
+
+    return { transactions: rows, nextCursor };
   }
 
   // ─────────────────────────────────────────────

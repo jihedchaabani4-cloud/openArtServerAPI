@@ -1,0 +1,49 @@
+id: character-sheet-v1
+name: Character Sheet
+version: 1.0.0
+description: Generate a professional character sheet from a description.
+
+metadata:
+  category: character
+  tags: [character, sheet, concept-art]
+  author: system
+
+input_schema:
+  required: [prompt]
+  properties:
+    prompt: { type: string }
+    characters: { type: array }
+    references: { type: array }
+    style: { type: string }
+
+default_model: chatgpt-2
+
+nodes:
+  build_prompt:
+    type: prompt-builder
+    user_inputs:
+      prompt: "${input.prompt}"
+      characters: "${input.characters}"
+      references: "${input.references}"
+      style: "${input.style}"
+    config:
+      skills: [character-sheet]
+      skill_parameters:
+        views: [front, side, back]
+        style: realistic
+
+  generate:
+    type: image-generation
+    depends_on: [build_prompt]
+    inputs:
+      prompt: "${build_prompt.output.finalPrompt}"
+      references: "${build_prompt.output.context.references}"
+    config:
+      width: 1024
+      height: 1024
+      count: 4
+      model: chatgpt-2          # ← server-enforced default model
+
+outputs:
+  main_asset: "${generate.output.assets}"
+  model_used: "${generate.output.metadata.model}"

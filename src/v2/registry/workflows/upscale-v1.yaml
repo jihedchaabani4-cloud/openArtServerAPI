@@ -1,0 +1,26 @@
+id: upscale-v1
+version: "1.0.0"
+description: "Upscales an existing image or video asset using AI enhancement."
+
+inputs:
+  source_asset:
+    type: object
+    required: true
+    description: "The asset to upscale (must contain a url field)."
+  factor:
+    type: number
+    required: false
+    default: 2
+    description: "Upscale factor (e.g. 2 = 2x, 4 = 4x)."
+
+nodes:
+  - id: upscale_node
+    type: upscale
+    resolved_inputs:
+      factor: 2
+    bindings:
+      source_asset: "input.source_asset"
+      factor: "input.factor"
+
+outputs:
+  main_asset: "upscale_node.output.enhancedAsset"

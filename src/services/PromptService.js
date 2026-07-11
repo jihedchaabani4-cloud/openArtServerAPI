@@ -64,52 +64,85 @@ export class PromptService {
             wasEnhanced: false,
         };
 
-                    const modeHint = mode === "video"
-                        ? "for an AI video generation model (describe motion, camera, atmosphere)"
-                        : "for an AI image generation model (describe visuals, lighting, composition, style)";
+        const modeHint = mode === "video"
+            ? "for an AI video generation model (focus on motion, camera movement, atmosphere, time flow)"
+            : "for an AI image generation model (focus on visuals, lighting, composition, color palette, artistic style)";
 
-                    const systemPrompt = `
-            You are an expert AI Prompt Engineer and multilingual translator specialized in generative AI.
+        const systemPrompt = `
+You are a world-class AI Prompt Engineer and professional multilingual translator, specialized in generative AI image and video creation.
 
-            YOUR TASKS (in order):
-            1. DETECT the language of the user's input (may be Arabic, Tunisian Darija, French, mixed, or English).
-            2. TRANSLATE to fluent English if the input is not already English.
-            3. FIX any incomplete or broken words, typos, or half-written expressions.
-            4. ENHANCE the result ${modeHint}. Add descriptive visual details, lighting, mood, and style keywords — but preserve the user's core intent. Keep it under 120 words.
-            5. Return ONLY a valid JSON object matching this schema:
+You have EXPERT knowledge of:
+- Tunisian Darija (Tunisian Arabic dialect) — including slang, mixed French-Arabic expressions, and regional idioms
+- Modern Standard Arabic (MSA / Fusha)
+- Maghrebi dialects (Algerian, Moroccan)
+- French, English, and mixed multilingual inputs
 
-            {
-                "optimized_prompt": string,       // the final English, enhanced, clean prompt
-                "original_language": string,      // detected language code (e.g. "ar", "fr", "en", "tn-darija")
-                "was_translated": boolean,        // true if translation was needed
-                "was_enhanced": boolean,          // true if you added or fixed content
-                "changes_summary": string         // one-line summary of what you changed (or "none")
-            }
+YOUR TASKS (execute in strict order):
 
-            RULES:
-            - NEVER refuse. Always return a result.
-            - NEVER add inappropriate or NSFW content.
-            - If input is already a perfect English prompt, still return it cleaned up with minor enhancements.
-            - Keep the user's creative vision. Do not replace their idea with something else.
-            - If the user wrote a single word or very short phrase, expand it into a descriptive prompt.
-            `;
+1. DETECT the language/dialect of the user's input with high precision.
+   - Distinguish between: Tunisian Darija, MSA Arabic, French, English, mixed code-switching, or other.
 
-        const userPrompt = `User input: "${prompt}"`;
+2. TRANSLATE the SEMANTIC MEANING — not word-for-word — into fluent, natural English.
+   - Preserve the user's INTENT and CREATIVE VISION above all.
+   - If the user wrote "bnet" → understand it means "girls/women". If they wrote "mrigel" → "men/guys".
+   - If they wrote "film" or "cinéma" in Darija context → understand it as a cinematic/movie scene.
+   - Do NOT translate idioms literally. Translate their MEANING.
+
+3. FIX incomplete words, typos, half-written expressions, or code-switching artifacts.
+
+4. ENHANCE the translated result ${modeHint}.
+   - Add rich visual descriptors: lighting conditions, mood, atmosphere, color grading, artistic style
+   - Reference cinematic or artistic styles when appropriate (e.g. "golden hour lighting", "bokeh background", "cyberpunk aesthetic")
+   - Keep the enhanced prompt under 150 words
+   - NEVER replace the user's core idea with something else
+
+5. Return ONLY a valid JSON object:
+{
+  "optimized_prompt": string,      // final English enhanced prompt ready for AI generation
+  "original_language": string,     // detected language (e.g. "tn-darija", "ar", "fr", "en", "fr-ar-mixed")
+  "was_translated": boolean,       // true if any translation was performed
+  "was_enhanced": boolean,         // true if visual details were added
+  "changes_summary": string        // brief summary of what changed (e.g. "Translated from Tunisian Darija, added cinematic lighting")
+}
+
+RULES:
+- NEVER refuse. ALWAYS return a result, no matter how short or ambiguous the input.
+- NEVER add NSFW or inappropriate content.
+- If the input is already perfect English, still return it with minor cinematic enhancements.
+- A single word like "قطوس" (Tunisian for cat) → translate as "cat" then enhance with visual details.
+`;
+
+        const userPrompt = `User input: "${prompt}"
+
+Translate the semantic meaning and enhance it as a professional AI generation prompt.`;
 
         try {
-            const result = await this.textProvider.completeJSON({ systemPrompt, userPrompt, temperature: 0.5 });
+            const result = await this.textProvider.completeJSON({ systemPrompt, userPrompt, temperature: 0.4 });
+            const optimized = result.optimized_prompt || prompt;
+
+            // ── Print final prompt for visibility ────────────────────────
+            console.log(`\n🌍 [PromptOptimizer] Language detected: ${result.original_language || 'unknown'}`);
+            if (result.was_translated) {
+                console.log(`🔄 [PromptOptimizer] Translated from: "${prompt.substring(0, 60)}..."`);
+            }
+            console.log(`✨ [PromptOptimizer] Final prompt:\n   → "${optimized}"`);
+            if (result.changes_summary && result.changes_summary !== 'none') {
+                console.log(`📝 [PromptOptimizer] Changes: ${result.changes_summary}`);
+            }
+            console.log();
+
             return {
-                optimized:        result.optimized_prompt  || prompt,
+                optimized,
                 originalLanguage: result.original_language || "en",
                 wasTranslated:    result.was_translated    ?? false,
                 wasEnhanced:      result.was_enhanced      ?? false,
                 changesSummary:   result.changes_summary   || "none",
             };
         } catch (e) {
-            console.error("[PromptService] optimizePrompt failed:", e);
+            console.error("[PromptService] optimizePrompt failed:", e.message);
             return {
                 optimized:        prompt,
-                originalLanguage: "en",
+                originalLanguage: "unknown",
                 wasTranslated:    false,
                 wasEnhanced:      false,
                 changesSummary:   "none",

@@ -20,8 +20,14 @@
     "scripts": {
         "start": "node index.js",
         "start:worker": "node src/workers/worker.js",
+        "start:v2-worker": "node src/v2/queue/v2WorkflowWorker.js",
+        "architecture:validate": "node scripts/architecture/validateArchitecture.mjs && node scripts/architecture/checkRegistryWorkflowResolution.mjs && node scripts/architecture/checkProviderResolver.mjs && node scripts/architecture/checkWorkflowLifecycle.mjs && node scripts/architecture/checkWorkflowFailures.mjs && node scripts/architecture/checkInternalWorkflowCall.mjs && node scripts/architecture/checkWorkflowCallParity.mjs && node scripts/architecture/checkStrictParity.mjs",
+        "v2:validate": "node scripts/v2/validateV2.mjs",
         "dev:api": "nodemon index.js",
         "dev:worker": "nodemon --delay 1500 src/workers/worker.js",
+        "dev:v2-worker": "nodemon --delay 1500 src/v2/queue/v2WorkflowWorker.js",
+        "start:wallet-worker": "node src/workers/walletWorker.js",
+        "dev:wallet-worker": "nodemon --delay 1500 src/workers/walletWorker.js",
         "dev": "concurrently \"npm run dev:api\" \"npm run dev:worker\""
     },
     "dependencies": {
@@ -45,6 +51,7 @@
         "sharp": "^0.34.5",
         "socket.io": "^4.8.3",
         "uuid": "^9.0.1",
+        "yaml": "^2.8.0",
         "zod": "^4.3.6"
     },
     "devDependencies": {

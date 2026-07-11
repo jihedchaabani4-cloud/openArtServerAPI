@@ -1,0 +1,48 @@
+id: edit-video-v1
+version: "1.0.0"
+description: "Applies editing, motion effects, or extensions to an existing video using AI."
+
+inputs:
+  prompt:
+    type: string
+    required: true
+    description: "Text description of the desired transformation."
+  source_asset:
+    type: object
+    required: true
+    description: "The source video asset (must contain a url field)."
+  mode:
+    type: string
+    required: false
+    default: "video_to_video"
+    description: "Transform mode — currently only 'video_to_video' is supported."
+  duration:
+    type: number
+    required: false
+    default: 5
+    description: "Target video duration in seconds."
+  references:
+    type: array
+    required: false
+    default: []
+    description: "Optional reference assets (images or styles) to guide the edit."
+  camera_control:
+    type: object
+    required: false
+    description: "Optional camera control parameters."
+
+nodes:
+  - id: edit_node
+    type: media-transform
+    resolved_inputs:
+      mode: "video_to_video"
+    bindings:
+      prompt: "input.prompt"
+      source_asset: "input.source_asset"
+      mode: "input.mode"
+      duration: "input.duration"
+      references: "input.references"
+      camera_control: "input.camera_control"
+
+outputs:
+  main_asset: "edit_node.output.asset"

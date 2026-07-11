@@ -1,36 +1,45 @@
 /**
  * Centralized Pricing Configuration
  * Defines the default base prices and multipliers for all generation tools and studio apps.
+ *
+ * NOTE: Legacy treatment classes have been removed. The default model/param
+ * constants they exported are now inlined here.
  */
-
-import { CameraTreatment } from "../image/treatments/extendtretment/CameraEditTreatment.js";
-import { LightingTreatment } from "../image/treatments/extendtretment/LightingTreatment.js";
-import { UpscaleTreatment } from "../image/treatments/UpscaleTreatment.js";
-import { EditVideoTreatment } from "../video/treatments/EditVideoTreatment.js";
-import { ElementSheetTreatment, SHEET_DEFAULTS } from "../image/treatments/extendtretment/ElementSheetTreatment.js";
 
 import { calculateImageCredits, calculateUpscaleCredits } from "../image/core/modelRouter.js";
 import { calculateVideoCredits } from "../video/core/modelRouter.js";
 
+// ── Inlined defaults (previously exported from deleted V1 Treatment classes) ──
+const CAMERA_DEFAULTS    = { model: "gpt-image-2",          params: { quality: "2k", operation: "edit" } };
+const LIGHTING_DEFAULTS  = { model: "gpt-image-2",          params: { quality: "2k", operation: "edit" } };
+const UPSCALE_DEFAULTS   = { model: "topaz_image_upscale",   params: {} };
+const EDIT_VIDEO_DEFAULTS = { model: "kling_v3",             params: { resolution: "1080p", durationSeconds: 5, operation: "edit" } };
+
+const SHEET_DEFAULTS = {
+    CHARACTER: { model_name: "minimax",       ratio: "3:2", quality: "2k", steps: 40, guidance_scale: 9.0 },
+    LOCATION:  { model_name: "gpt-image-2",   ratio: "3:2", quality: "2k", steps: 30, guidance_scale: 7.5 },
+    PRODUCT:   { model_name: "gpt-image-2",   ratio: "3:2", quality: "2k", steps: 30, guidance_scale: 7.5 },
+};
+
 export const APP_PRICING = {
     camera: calculateImageCredits({ 
-        modelKey: CameraTreatment.DEFAULT_MODEL, 
-        ...CameraTreatment.DEFAULT_PARAMS 
+        modelKey: CAMERA_DEFAULTS.model, 
+        ...CAMERA_DEFAULTS.params 
     }).credits,
     
     camera_video: calculateVideoCredits({ 
-        modelKey: EditVideoTreatment.DEFAULT_MODEL, 
-        ...EditVideoTreatment.DEFAULT_PARAMS 
+        modelKey: EDIT_VIDEO_DEFAULTS.model, 
+        ...EDIT_VIDEO_DEFAULTS.params 
     }).credits, 
     
     lighting: calculateImageCredits({ 
-        modelKey: LightingTreatment.DEFAULT_MODEL, 
-        ...LightingTreatment.DEFAULT_PARAMS 
+        modelKey: LIGHTING_DEFAULTS.model, 
+        ...LIGHTING_DEFAULTS.params 
     }).credits,
     
     upscale: calculateUpscaleCredits({ 
-        modelKey: UpscaleTreatment.DEFAULT_MODEL, 
-        ...UpscaleTreatment.DEFAULT_PARAMS 
+        modelKey: UPSCALE_DEFAULTS.model, 
+        ...UPSCALE_DEFAULTS.params 
     }).credits,
 
     character_sheet: calculateImageCredits({
@@ -54,20 +63,20 @@ export const APP_PRICING = {
 
 export const APP_CONFIGS = {
     camera: { 
-        defaultModel: CameraTreatment.DEFAULT_MODEL, 
-        defaultParams: CameraTreatment.DEFAULT_PARAMS 
+        defaultModel: CAMERA_DEFAULTS.model, 
+        defaultParams: CAMERA_DEFAULTS.params 
     },
     camera_video: { 
-        defaultModel: EditVideoTreatment.DEFAULT_MODEL, 
-        defaultParams: EditVideoTreatment.DEFAULT_PARAMS 
+        defaultModel: EDIT_VIDEO_DEFAULTS.model, 
+        defaultParams: EDIT_VIDEO_DEFAULTS.params 
     },
     lighting: { 
-        defaultModel: LightingTreatment.DEFAULT_MODEL, 
-        defaultParams: LightingTreatment.DEFAULT_PARAMS 
+        defaultModel: LIGHTING_DEFAULTS.model, 
+        defaultParams: LIGHTING_DEFAULTS.params 
     },
     upscale: { 
-        defaultModel: UpscaleTreatment.DEFAULT_MODEL, 
-        defaultParams: UpscaleTreatment.DEFAULT_PARAMS 
+        defaultModel: UPSCALE_DEFAULTS.model, 
+        defaultParams: UPSCALE_DEFAULTS.params 
     },
     character_sheet: {
         defaultModel: SHEET_DEFAULTS.CHARACTER.model_name,
@@ -82,4 +91,3 @@ export const APP_CONFIGS = {
         defaultParams: { quality: SHEET_DEFAULTS.PRODUCT.quality, operation: "generated" }
     }
 };
-

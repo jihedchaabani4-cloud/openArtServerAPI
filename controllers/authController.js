@@ -1,15 +1,15 @@
-import { supabase } from "#lib/supabase.js";
+import { supabase, createRequestBoundClient } from "#lib/supabase.js";
 import { walletService } from "#container.js";
 
 const FRONTEND_URL = process.env.FRONTEND_URL;
 const BASE_URL = process.env.BASE_URL;
 
 // cross-origin cookies: frontend on Vercel, API on separate server
-// sameSite=none + secure=true required for cookies to work cross-domain
+// sameSite=none + secure=true required for cookies to work cross-domain in production
 const COOKIE_OPTS = {
   httpOnly: true,
-  secure: true,
-  sameSite: "none",
+  secure: process.env.NODE_ENV === "production",
+  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
   path: "/",
 };
 
@@ -158,7 +158,8 @@ export async function login(req, res) {
 
 export async function googleRedirect(req, res) {
   try {
-    const { data, error } = await supabase.auth.signInWithOAuth({
+    const client = createRequestBoundClient(req, res);
+    const { data, error } = await client.auth.signInWithOAuth({
       provider: "google",
       options: {
         redirectTo: `${BASE_URL}/api/auth/callback`,
@@ -176,7 +177,8 @@ export async function googleRedirect(req, res) {
 
 export async function microsoftRedirect(req, res) {
   try {
-    const { data, error } = await supabase.auth.signInWithOAuth({
+    const client = createRequestBoundClient(req, res);
+    const { data, error } = await client.auth.signInWithOAuth({
       provider: "azure",
       options: {
         redirectTo: `${BASE_URL}/api/auth/callback`,
@@ -199,7 +201,8 @@ export async function googleCallback(req, res) {
   if (!code) return res.status(400).json({ error: "Missing authorization code." });
 
   try {
-    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+    const client = createRequestBoundClient(req, res);
+    const { data, error } = await client.auth.exchangeCodeForSession(code);
 
     if (error) return res.status(500).json({ error: error.message });
 

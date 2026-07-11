@@ -1,6 +1,64 @@
-// controllers/videoController.js — HTTP handler; domain treatment: src/video/treatments/VideoTreatment.js
-import { videoTreatment, motionTreatment, editVideoTreatment, promptService } from "../src/container.js";
-import { isVideoModelRegistered, isModelHidden } from "../lib/modelRegistryKeys.js";
+import { randomUUID } from "node:crypto";
+import { isVideoModelRegistered } from "../lib/modelRegistryKeys.js";
+import { findMigrationInventoryItem, LEGACY_PATH_STATUSES } from "../src/registry/migrationInventory.js";
+import { startWorkflow } from "./workflowArchitectureController.js";
+import { db, workflowStorageGateway } from "../src/container.js";
+
+// V2 Imports
+import { loadRegistries } from "../src/v2/registry/registryLoader.js";
+import { compileWorkflow } from "../src/v2/compiler/compileWorkflow.js";
+import { startWorkflowRun } from "../src/v2/runner/workflowRunner.js";
+import { 
+    mapVideoGenerationV1, 
+    mapEditVideoV1, 
+    mapMotionControlV1, 
+    buildV1CompatibleResponse 
+} from "../src/v2/utils/v1PayloadMapper.js";
+
+let cachedRegistries = null;
+function getRegistries() {
+    if (!cachedRegistries) cachedRegistries = loadRegistries();
+    return cachedRegistries;
+}
+
+/**
+ * Helper to run a V2 workflow and return the V1-compatible response.
+ */
+async function executeV2VideoWorkflow({ 
+    workflowId, nodeType, v2Input, userId, projectId, sessionId, req 
+}) {
+    const runId = randomUUID();
+    const registries = getRegistries();
+    const workflowDef = registries.workflows[workflowId];
+    if (!workflowDef) throw new Error(`V2 Workflow ${workflowId} not found`);
+    const plan = compileWorkflow(workflowDef, registries);
+
+    // Phase 1 — Pre-create placeholder
+    const placeholder = await workflowStorageGateway.createMediaPlaceholder({
+        runId,
+        nodeType,
+        userId,
+        workflowId,
+        input: v2Input,
+    });
+
+    const runtimeInput = {
+        ...v2Input,
+        userId,
+        _v1PlaceholderIds: placeholder ? [placeholder] : [],
+    };
+
+    console.log(`🚀 [VideoController] Starting V2 run ${runId} for workflow ${workflowId}`);
+    const runResult = await startWorkflowRun(plan, runtimeInput, runId);
+
+    return buildV1CompatibleResponse({
+        runId: runResult.run_id,
+        v1WorkflowId: placeholder?.workflowId,
+        v1MediaId: placeholder?.mediaId,
+        projectId,
+        sessionId,
+    });
+}
 
 /**
  * generateVideo
@@ -8,25 +66,21 @@ import { isVideoModelRegistered, isModelHidden } from "../lib/modelRegistryKeys.
  * POST /api/video/generate  (deprecated alias)
  */
 export const generateVideo = async (req, res) => {
-    try {
-        const {
-            model,
-            model_name,
-            prompt,
-            ratio          = "16:9",
-            duration       = "5s",
-            sound,
-            negativePrompt = "",
-            multiPrompt,
-            keepOriginalSound,
-            references     = [],
-            reference_media_ids = [],
-            image_workflow_id,
-            project_id,
-            session_id,
-            is_new_project,
-        } = req.body;
+    const item = findMigrationInventoryItem("video-generation");
+    if (item && item.legacyPathStatus !== LEGACY_PATH_STATUSES.ACTIVE) {
+        const forceRollback = req.headers["x-force-rollback"] === "true" || req.query?.rollback === "true";
+        if (forceRollback && item.legacyPathStatus === LEGACY_PATH_STATUSES.ROLLBACK_WINDOW) {
+            console.warn("⚠️ [VideoController] Rolling back to legacy video-generation path (active rollback window)");
+        } else {
+            console.log("ℹ️ [VideoController] Delegating video-generation legacy path request to workflow runner");
+            req.body = req.body || {};
+            req.body.featureId = "video-generation";
+            return startWorkflow(req, res);
+        }
+    }
 
+    try {
+        const { model, model_name, prompt, references = [], project_id, session_id } = req.body;
         const rawModel = (model ?? model_name ?? "").trim();
         const activeModel = rawModel || undefined;
 
@@ -34,10 +88,10 @@ export const generateVideo = async (req, res) => {
             return res.status(400).json({ ok: false, message: "Model not found" });
         }
 
-        if (!prompt?.trim())
+        if (!prompt?.trim()) {
             return res.status(400).json({ ok: false, message: "prompt is required" });
+        }
 
-        // ✅ Guard: reject raw Base64 references — assets must be pre-uploaded via /api/assets/upload
         const hasBase64 = references.some(r => typeof r.url === 'string' && r.url.startsWith('data:'));
         if (hasBase64) {
             return res.status(400).json({
@@ -46,53 +100,22 @@ export const generateVideo = async (req, res) => {
             });
         }
 
-        console.log(`\n📥 [VideoController] generate request received:`);
-        console.log(`   - Model: ${activeModel ?? "(default)"}`);
-        console.log(`   - Prompt: "${prompt}"`);
-        console.log(`   - Ratio: ${ratio}, Duration: ${duration}`);
-        console.log(`   - 📸 References Attached: ${references.length}`);
+        console.log(`\n📥 [VideoController] generate request received: Model: ${activeModel ?? "(default)"}, Prompt: "${prompt}"`);
 
-        const userId = req.user.id;
-
-        const finalProjectId = project_id;
-        const finalSessionId = session_id;
-
-        const payload = {
-            model: activeModel,
-            prompt,
-            ratio,
-            duration,
-            sound,
-            negativePrompt,
-            multiPrompt,
-            keepOriginalSound,
-            references,
-            image_workflow_id,
-            reference_media_ids,
-            project_id: finalProjectId,
-            session_id: finalSessionId,
-            userId,
-        };
-
-        const queued = await videoTreatment.execute(payload);
-
-        const result = {
-            batchId:   queued.batchId,
-            configId:  queued.configId,
-            workflows: queued.workflows,
-            status:    queued.status,
-            mode:      queued.mode,
-            model:     isModelHidden(queued.model) ? null : queued.model,
-            taskId:    queued.jobId,
-            jobId:     queued.jobId,
-        };
+        const v2Input = mapVideoGenerationV1(req.body);
+        const responseData = await executeV2VideoWorkflow({
+            workflowId: "cinematic-video-v1",
+            nodeType: "video-generation",
+            v2Input,
+            userId: req.user.id,
+            projectId: project_id,
+            sessionId: session_id,
+            req
+        });
 
         res.json({
-            ok: true,
-            ...result,               // batchId, configId, workflows, status, mode, model
-            data: result,            // also keep nested for backward compat
-            project_id: finalProjectId,
-            session_id: finalSessionId,
+            ...responseData,
+            data: responseData, // keeping nested for backward compat
         });
 
     } catch (error) {
@@ -107,24 +130,7 @@ export const generateVideo = async (req, res) => {
  */
 export const extendVideo = async (req, res) => {
     try {
-        const {
-            model,
-            model_name,
-            prompt,
-            ratio          = "16:9",
-            duration       = "5s",
-            sound,
-            negativePrompt = "",
-            multiPrompt,
-            keepOriginalSound,
-            workflow_id,
-            video_workflow_id,
-            reference_media_ids = [],
-            project_id,
-            session_id,
-            media_id,
-        } = req.body;
-
+        const { model, model_name, workflow_id, video_workflow_id, media_id, project_id, session_id } = req.body;
         const rawModel = (model ?? model_name ?? "").trim();
         const activeModel = rawModel || undefined;
 
@@ -140,59 +146,28 @@ export const extendVideo = async (req, res) => {
         const references = req.body.references || [];
         const hasBase64 = references.some(r => typeof r.url === 'string' && r.url.startsWith('data:'));
         if (hasBase64) {
-            return res.status(400).json({
-                ok: false,
-                message: "Base64 references are not accepted."
-            });
+            return res.status(400).json({ ok: false, message: "Base64 references are not accepted." });
         }
 
-        console.log(`\n📥 [VideoController] extendVideo request received:`);
-        console.log(`   - Model: ${activeModel ?? "(default)"}`);
-        console.log(`   - Prompt: "${prompt}"`);
-        console.log(`   - Extending workflow ID: ${workflow_id}`);
+        const sourceMedia = await db.media.findLatestByWorkflow(finalWfId);
+        if (!sourceMedia) {
+            return res.status(404).json({ ok: false, message: "Source media not found for workflow" });
+        }
 
-        const userId = req.user.id;
-
-        const finalProjectId = project_id;
-        const finalSessionId = session_id;
-
-        const payload = {
-            model: activeModel,
-            prompt,
-            ratio,
-            duration,
-            sound,
-            negativePrompt,
-            multiPrompt,
-            keepOriginalSound,
-            references,
-            project_id: finalProjectId,
-            session_id: finalSessionId,
-            video_workflow_id: video_workflow_id || workflow_id,
-            reference_media_ids,
-            userId,
-            section: "video_generator"
-        };
-
-        const queued = await editVideoTreatment.execute(payload);
-
-        const result = {
-            batchId:   queued.batchId ?? null,
-            configId:  queued.configId,
-            workflows: queued.workflows,
-            status:    queued.status,
-            mode:      queued.mode,
-            model:     isModelHidden(queued.model) ? null : queued.model,
-            taskId:    queued.jobId,
-            jobId:     queued.jobId,
-        };
+        const v2Input = mapEditVideoV1(req.body, sourceMedia);
+        const responseData = await executeV2VideoWorkflow({
+            workflowId: "edit-video-v1",
+            nodeType: "media-transform",
+            v2Input,
+            userId: req.user.id,
+            projectId: project_id,
+            sessionId: session_id,
+            req
+        });
 
         res.json({
-            ok: true,
-            ...result,               
-            data: result,            
-            project_id: finalProjectId,
-            session_id: finalSessionId,
+            ...responseData,
+            data: responseData,
         });
 
     } catch (error) {
@@ -207,28 +182,9 @@ export const extendVideo = async (req, res) => {
  */
 export const editVideo = async (req, res) => {
     try {
-        const {
-            model,
-            model_name,
-            prompt,
-            ratio          = "16:9",
-            duration       = "5s",
-            sound,
-            negativePrompt = "",
-            multiPrompt,
-            keepOriginalSound,
-            workflow_id,
-            video_workflow_id,
-            reference_media_ids = [],
-            project_id,
-            session_id,
-            media_id,
-        } = req.body;
-
+        const { model, model_name, workflow_id, video_workflow_id, project_id, session_id } = req.body;
         const rawModel = (model ?? model_name ?? "").trim();
         const activeModel = rawModel || undefined;
-
-        // ── Regular Edit ─────────────────────────────────────────────────────
 
         if (activeModel != null && activeModel !== "" && !isVideoModelRegistered(activeModel)) {
             return res.status(400).json({ ok: false, message: "Model not found" });
@@ -242,59 +198,28 @@ export const editVideo = async (req, res) => {
         const references = req.body.references || [];
         const hasBase64 = references.some(r => typeof r.url === 'string' && r.url.startsWith('data:'));
         if (hasBase64) {
-            return res.status(400).json({
-                ok: false,
-                message: "Base64 references are not accepted."
-            });
+            return res.status(400).json({ ok: false, message: "Base64 references are not accepted." });
         }
 
-        console.log(`\n📥 [VideoController] editVideo request received:`);
-        console.log(`   - Model: ${activeModel ?? "(default)"}`);
-        console.log(`   - Prompt: "${prompt}"`);
-        console.log(`   - Editing workflow ID: ${workflow_id}`);
+        const sourceMedia = await db.media.findLatestByWorkflow(finalWfId);
+        if (!sourceMedia) {
+            return res.status(404).json({ ok: false, message: "Source media not found for workflow" });
+        }
 
-        const userId = req.user.id;
-
-        const finalProjectId = project_id;
-        const finalSessionId = session_id;
-
-        const payload = {
-            model: activeModel,
-            prompt,
-            ratio,
-            duration,
-            sound,
-            negativePrompt,
-            multiPrompt,
-            keepOriginalSound,
-            references,
-            project_id: finalProjectId,
-            session_id: finalSessionId,
-            video_workflow_id: video_workflow_id || workflow_id,
-            reference_media_ids,
-            userId,
-            section: "video_generator"
-        };
-
-        const queued = await editVideoTreatment.execute(payload);
-
-        const result = {
-            batchId:   queued.batchId ?? null,
-            configId:  queued.configId,
-            workflows: queued.workflows,
-            status:    queued.status,
-            mode:      queued.mode,
-            model:     isModelHidden(queued.model) ? null : queued.model,
-            taskId:    queued.jobId,
-            jobId:     queued.jobId,
-        };
+        const v2Input = mapEditVideoV1(req.body, sourceMedia);
+        const responseData = await executeV2VideoWorkflow({
+            workflowId: "edit-video-v1",
+            nodeType: "media-transform",
+            v2Input,
+            userId: req.user.id,
+            projectId: project_id,
+            sessionId: session_id,
+            req
+        });
 
         res.json({
-            ok: true,
-            ...result,               
-            data: result,            
-            project_id: finalProjectId,
-            session_id: finalSessionId,
+            ...responseData,
+            data: responseData,
         });
 
     } catch (error) {
@@ -311,34 +236,22 @@ export const motionControl = async (req, res) => {
     try {
         const {
             model,
-            prompt            = "",
-            ratio             = "16:9",
-            duration          = "5s",
             image_workflow_id,
             video_workflow_id,
-            references        = [],
+            references = [],
             project_id,
             session_id,
-            reference_media_ids = [],
-            is_new_project,
         } = req.body;
 
-        const rawModel = (model || "").trim();
-        const activeModel = rawModel || undefined;
-
+        const activeModel = (model || "").trim() || undefined;
         if (activeModel && !isVideoModelRegistered(activeModel)) {
             return res.status(400).json({ ok: false, message: "Model not found" });
         }
 
-        const userId = req.user.id;
-        const finalProjectId = project_id;
-        const finalSessionId = session_id;
-
-        // Resolve URLs
         let image_url = req.body.image_url;
         let video_url = req.body.video_url;
 
-        // Extract from references array if available (from PromptBar)
+        // Extract from references array
         if (!image_url && references?.length) {
             const img = references.find(r => r.role === 'mc_image' || r.type === 'image');
             if (img) image_url = img.url;
@@ -348,14 +261,14 @@ export const motionControl = async (req, res) => {
             if (vid) video_url = vid.url;
         }
 
-        // Fallback to resolving workflow IDs if URLs are still missing
+        // Fallback to workflow IDs
         if (!image_url && image_workflow_id) {
-            console.log(`🔍 [VideoController] Resolving image motion input from workflow ID...`);
-            image_url = await motionTreatment.db.workflows.getPrimaryMediaUrl(image_workflow_id);
+            const media = await db.media.findLatestByWorkflow(image_workflow_id);
+            image_url = media?.url;
         }
         if (!video_url && video_workflow_id) {
-            console.log(`🔍 [VideoController] Resolving video motion input from workflow ID...`);
-            video_url = await motionTreatment.db.workflows.getPrimaryMediaUrl(video_workflow_id);
+            const media = await db.media.findLatestByWorkflow(video_workflow_id);
+            video_url = media?.url;
         }
 
         if (!image_url || !video_url) {
@@ -365,46 +278,20 @@ export const motionControl = async (req, res) => {
             });
         }
 
-        const payload = {
-            model: activeModel,
-            prompt,
-            ratio,
-            duration,
-            image_url,
-            video_url,
-            project_id: finalProjectId,
-            session_id: finalSessionId,
-            video_workflow_id,
-            image_workflow_id,
-            reference_media_ids,
-            userId,
-            section: "motion"
-        };
-
-        console.log(`\n📥 [VideoController] motionControl request received:`);
-        console.log(`   - Model: ${activeModel ?? "(default)"}`);
-        console.log(`   - Resolved Image: ${image_url ? "Yes" : "No"}`);
-        console.log(`   - Resolved Video: ${video_url ? "Yes" : "No"}`);
-
-        const queued = await motionTreatment.execute(payload);
-
-        const resultData = {
-            batchId:   null,
-            configId:  queued.configId,
-            workflows: queued.workflows,
-            status:    queued.status,
-            mode:      queued.mode,
-            model:     isModelHidden(queued.model) ? null : queued.model,
-            taskId:    queued.jobId,
-            jobId:     queued.jobId,
-        };
+        const v2Input = mapMotionControlV1(req.body, image_url, video_url);
+        const responseData = await executeV2VideoWorkflow({
+            workflowId: "edit-video-v1",
+            nodeType: "media-transform",
+            v2Input,
+            userId: req.user.id,
+            projectId: project_id,
+            sessionId: session_id,
+            req
+        });
 
         res.json({
-            ok: true,
-            ...resultData,
-            data: resultData,
-            project_id: finalProjectId,
-            session_id: finalSessionId,
+            ...responseData,
+            data: responseData,
         });
 
     } catch (error) {

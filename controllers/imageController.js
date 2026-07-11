@@ -1,141 +1,152 @@
-import { normalizeImageModelName, isImageModelRegistered, isModelHidden } from "../lib/modelRegistryKeys.js";
-import { db, imageTreatmentV2, editImageTreatment } from "../src/container.js";
+import { randomUUID } from "node:crypto";
+import { normalizeImageModelName, isImageModelRegistered } from "../lib/modelRegistryKeys.js";
+import { db, mediaWorkflowLifecycleService } from "../src/container.js";
+import { findMigrationInventoryItem, LEGACY_PATH_STATUSES } from "../src/registry/migrationInventory.js";
+import { startWorkflow } from "./workflowArchitectureController.js";
+
+// V2 Imports
+import { loadRegistries } from "../src/v2/registry/registryLoader.js";
+import { compileWorkflow } from "../src/v2/compiler/compileWorkflow.js";
+import { startWorkflowRun } from "../src/v2/runner/workflowRunner.js";
+import { mapImageGenerationV1, mapEditImageV1, buildV1CompatibleResponse } from "../src/v2/utils/v1PayloadMapper.js";
+
+let cachedRegistries = null;
+function getRegistries() {
+    if (!cachedRegistries) {
+        cachedRegistries = loadRegistries();
+    }
+    return cachedRegistries;
+}
+
 /**
  * generateV2
  * POST /api/images/generatedV2
- * Modern flow: prepare task -> enqueue BullMQ job -> worker runs treatment
+ * Modern flow using V2 Engine (simple-image-v1)
  */
 export const generateV2 = async (req, res) => {
-    try {
-        let { 
-            prompt, negative_prompt, ratio, quality, resolution, 
-            edit_type, count, num_images,
-            project_id, session_id,
-            references,
-            model_name,
-        } = req.body;
-        // 1. Validation & Normalization
-        console.log("$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$",references)
-        console.log(`🚀 [ImageController] generateV2 | Incoming Body:`, JSON.stringify(req.body, null, 2));
-        quality = quality || resolution;
-        count   = count   || num_images || 1;
+    const item = findMigrationInventoryItem("image-generation");
+    if (item && item.legacyPathStatus !== LEGACY_PATH_STATUSES.ACTIVE) {
+        const forceRollback = req.headers["x-force-rollback"] === "true" || req.query?.rollback === "true";
+        if (forceRollback && item.legacyPathStatus === LEGACY_PATH_STATUSES.ROLLBACK_WINDOW) {
+            console.warn("⚠️ [ImageController] Rolling back to legacy image-generation path (active rollback window)");
+        } else {
+            console.log("ℹ️ [ImageController] Delegating image-generation legacy path request to workflow runner");
+            req.body = req.body || {};
+            req.body.featureId = "image-generation";
+            return startWorkflow(req, res);
+        }
+    }
 
-        model_name = normalizeImageModelName(model_name);
+    try {
+        console.log(`🚀 [ImageController] generateV2 | Incoming Body:`, JSON.stringify(req.body, null, 2));
+
+        const model_name = normalizeImageModelName(req.body.model_name);
         if (model_name != null && model_name !== "" && !isImageModelRegistered(model_name)) {
             return res.status(400).json({ ok: false, message: "Model not found" });
         }
 
-        if (!prompt) {
+        if (!req.body.prompt) {
             return res.status(400).json({ ok: false, message: "Prompt is required" });
         }
 
         const userId = req.user.id;
-        // 3. Resolve Project/Session
-        const finalProjectId = project_id;
-        const finalSessionId = session_id;
+        const v2Input = mapImageGenerationV1(req.body);
+        const runId = randomUUID();
+        const workflowId = "simple-image-v1";
 
-        console.log(`🚀 [ImageController] generateV2 | User:${userId} | Mode: Redis Queue`);
+        const registries = getRegistries();
+        const workflowDef = registries.workflows[workflowId];
+        if (!workflowDef) throw new Error(`V2 Workflow ${workflowId} not found`);
+        const plan = compileWorkflow(workflowDef, registries);
 
-        // 4. PREPARE (Creates DB placeholders & returns JSON descriptor)
-        const queued = await imageTreatmentV2.execute({
-            prompt,
-            negative_prompt,
-            ratio,
-            quality,
-            edit_type,
-            count,
-            project_id: finalProjectId,
-            session_id: finalSessionId,
-            references,
-            model_name,
+        const placeholders = await mediaWorkflowLifecycleService.startPlaceholders({
             userId,
+            nodeType: "image-generation",
+            input: v2Input,
+            count: v2Input.count,
+            runId,
+            workflowId,
         });
-        console.log(`✅ [ImageController] Task enqueued | BullMQ ID:${queued.jobId} | Treatment:${imageTreatmentV2.constructor.name}`);
 
-        // 6. Respond immediately
-        res.json({ 
-            ok: true,
-            status:    queued.status,
-            taskId:    queued.jobId,
-            jobId:     queued.jobId,
-            batchId:   queued.batchId,
-            configId:  queued.configId,
-            workflows: queued.workflows,
-            project_id: finalProjectId,
-            session_id: finalSessionId,
-            balance:   queued.balance
-        });
+        const runtimeInput = {
+            ...v2Input,
+            userId,
+            _v1PlaceholderIds: placeholders,
+        };
+
+        console.log(`🚀 [ImageController] generateV2 | Starting V2 run ${runId}`);
+        const runResult = await startWorkflowRun(plan, runtimeInput, runId);
+
+        const firstPh = placeholders[0] || {};
+        res.json(buildV1CompatibleResponse({
+            runId: runResult.run_id,
+            v1WorkflowId: firstPh.workflowId,
+            v1MediaId: firstPh.mediaId,
+            projectId: req.body.project_id,
+            sessionId: req.body.session_id,
+        }));
 
     } catch (error) {
         console.error("❌ [ImageController] generateV2 error:", error);
-        if (error?.name === "WalletError") {
-            const status =
-                error.code === "INSUFFICIENT_FUNDS" || error.code === "WALLET_NOT_FOUND" ? 400 :
-                error.code === "DUPLICATE_TRANSACTION" ? 409 : 500;
-            return res.status(status).json({ ok: false, code: error.code, message: error.message });
-        }
         res.status(500).json({ ok: false, message: error.message });
     }
 };
 
-
-
-
-
 /**
  * generateEdit - POST /api/images/generated/edit
  * Specialized for editing an existing workflow.
+ * Modern flow using V2 Engine (edit-image-v1)
  */
 export const generateEdit = async (req, res) => {
     try {
-        let { 
-            prompt, negative_prompt, ratio, quality, resolution, 
-            edit_type, strength, 
-            project_id, session_id, workflow_id, media_id,
-            references, model_name 
-        } = req.body;
-
-        if (!workflow_id) {
+        if (!req.body.workflow_id) {
             return res.status(400).json({ ok: false, message: "workflow_id is required" });
         }
 
-        model_name = normalizeImageModelName(model_name);
+        const model_name = normalizeImageModelName(req.body.model_name);
         if (model_name != null && model_name !== "" && !isImageModelRegistered(model_name)) {
             return res.status(400).json({ ok: false, message: "Model not found" });
         }
 
         const userId = req.user.id;
+        const sourceMedia = await db.media.findLatestByWorkflow(req.body.workflow_id);
+        if (!sourceMedia) {
+            return res.status(404).json({ ok: false, message: "Source media not found for workflow" });
+        }
 
-        const finalProjectId = project_id;
-        const finalSessionId = session_id;
+        const v2Input = mapEditImageV1(req.body, sourceMedia);
+        const runId = randomUUID();
+        const workflowId = "edit-image-v1";
 
-        const treatment = editImageTreatment;
+        const registries = getRegistries();
+        const workflowDef = registries.workflows[workflowId];
+        if (!workflowDef) throw new Error(`V2 Workflow ${workflowId} not found`);
+        const plan = compileWorkflow(workflowDef, registries);
 
-        const result = await treatment.execute({
-            prompt,
-            negative_prompt,
-            ratio,
-            quality: quality || resolution,
-            edit_type: edit_type || "edit",
-            strength,
-            project_id: finalProjectId,
-            session_id: finalSessionId,
-            workflow_id,
-            media_id,
-            references,
-            model_name,
+        const placeholder = await mediaWorkflowLifecycleService.startPlaceholder({
+            runId,
+            nodeType: "media-transform",
             userId,
-            mask_selection: req.body.mask_selection, // Added mask_selection support
+            workflowId,
+            input: v2Input,
         });
 
-        res.json({ 
-            ok: true, 
-            ...result,
-            model: result.model && isModelHidden(result.model) ? null : result.model,
-            taskId: result.jobId,
-            project_id: finalProjectId,
-            session_id: finalSessionId
-        });
+        const runtimeInput = {
+            ...v2Input,
+            userId,
+            _v1PlaceholderIds: placeholder ? [placeholder] : [],
+        };
+
+        console.log(`🚀 [ImageController] generateEdit | Starting V2 run ${runId}`);
+        const runResult = await startWorkflowRun(plan, runtimeInput, runId);
+
+        res.json(buildV1CompatibleResponse({
+            runId: runResult.run_id,
+            v1WorkflowId: placeholder?.workflowId,
+            v1MediaId: placeholder?.mediaId,
+            projectId: req.body.project_id,
+            sessionId: req.body.session_id,
+        }));
 
     } catch (error) {
         console.error("❌ [ImageController] generateEdit error:", error);

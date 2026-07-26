@@ -1,0 +1,10 @@
+id: brand-mascot
+mediaType: image
+template: null
+requiresPrompt: true
+defaultPrompt: "Generate a brand mascot campaign image matching the provided character reference."
+skills:
+  - base-generation
+  - character-consistency
+  - branding/luxury
+  - lighting/studio

@@ -1,0 +1,10 @@
+id: base-generation
+version: 1.0.0
+applies_to: [prompt-builder]
+description: Foundational prompt moderation, optimization, and negative prompt generation.
+
+pipeline:
+  - resolveReferences
+  - moderationSafety
+  - optimizeVisualPrompt
+  - generateNegativePrompt

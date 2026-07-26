@@ -1,0 +1,11 @@
+id: lighting/cinematic
+label: Cinematic Lighting
+category: lighting
+media_types: [image, video]
+prompt_instruction: |
+  Apply dramatic cinematic lighting:
+  - Volumetric light rays and deep atmospheric haze
+  - High contrast between highlights and shadows (Rembrandt-style)
+  - Warm key light (golden hour tones) with cool fill light for dramatic depth
+  - Subtle lens flare integrated naturally into the scene
+  - Film-grade color grading with rich, deep tones and lifted blacks

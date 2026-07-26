@@ -1,0 +1,11 @@
+id: lighting/studio
+label: Professional Studio Lighting
+category: lighting
+media_types: [image]
+prompt_instruction: |
+  Apply clean professional studio lighting:
+  - Classic three-point lighting setup (key, fill, rim)
+  - Soft diffused light with minimal harsh shadows
+  - Even exposure across the subject with gentle gradients
+  - Clean neutral or gradient background illumination
+  - Commercial-grade clarity and brightness throughout

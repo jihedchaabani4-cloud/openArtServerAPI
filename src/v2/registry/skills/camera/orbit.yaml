@@ -1,0 +1,11 @@
+id: camera/orbit
+label: Orbit Camera Movement
+category: camera
+media_types: [video]
+prompt_instruction: |
+  Apply a smooth continuous 360-degree orbit camera movement:
+  - Camera rotates slowly around the central subject in a circular arc path
+  - Subject remains perfectly centered and in sharp focus throughout the orbit
+  - Camera height stays level during the rotation (no tilt or elevation variation)
+  - Motion is fluid and eased — no sudden jerks, cuts, or acceleration spikes
+  - Full or partial orbit completes smoothly within the video duration

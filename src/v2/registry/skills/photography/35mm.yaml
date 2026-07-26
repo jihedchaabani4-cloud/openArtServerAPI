@@ -1,0 +1,11 @@
+id: photography/35mm
+label: 35mm Film Photography
+category: photography
+media_types: [image]
+prompt_instruction: |
+  Apply authentic 35mm photographic film aesthetic:
+  - Simulated shot on analog 35mm film camera
+  - Natural film grain at medium intensity (ISO 400 simulation)
+  - Slightly desaturated shadows with warm, rich midtones
+  - Subtle chromatic aberration and vignetting at image edges
+  - Classic photojournalistic depth of field with natural bokeh

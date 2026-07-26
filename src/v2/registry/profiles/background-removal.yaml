@@ -1,0 +1,11 @@
+id: background-removal
+mediaType: image
+template: null
+requiresPrompt: false
+defaultPrompt: |
+  Remove the background from the provided image completely and precisely.
+  Preserve the subject with perfect edge accuracy, including fine details like hair, fur, transparent materials, and soft edges.
+  Keep all subject colors, textures, reflections, and micro-details fully intact.
+  Output: the subject cleanly isolated on a fully transparent background with no fringe artifacts.
+skills:
+  - safety/content-moderation

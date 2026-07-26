@@ -1,0 +1,13 @@
+id: character-sheet
+mediaType: image
+template: character-sheet
+requiresPrompt: true
+defaultPrompt: |
+  Generate a professional character model reference sheet for the provided reference character.
+  Maintain exact same identity, costume, accessories, and visual style consistently across all views.
+skills:
+  - base-generation
+  - character-consistency
+  - layout/pose-sheet
+  - lighting/studio
+  - quality/realism

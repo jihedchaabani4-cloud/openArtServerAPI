@@ -1,0 +1,12 @@
+id: branding/commercial-ad
+label: Commercial Advertisement
+category: branding
+media_types: [image, video]
+prompt_instruction: |
+  Apply commercial advertising visual standards:
+  - Product or subject is the clear hero element in the composition
+  - Clean, distraction-free background that complements the subject
+  - Bright, inviting color palette appropriate for mass-market appeal
+  - Clear visual hierarchy guiding the viewer to the key message
+  - Professional retouching quality throughout
+  - Lifestyle context that makes the product aspirational

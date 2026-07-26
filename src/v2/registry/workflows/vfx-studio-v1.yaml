@@ -1,0 +1,36 @@
+id: vfx-studio-v1
+version: "1.0.0"
+description: VFX Studio image transformation
+
+metadata:
+  category: creative
+  tags: [creative, vfx, transform]
+  author: system
+
+input_schema:
+  required: [prompt, source_asset]
+  properties:
+    prompt: { type: string }
+    source_asset: { type: object }
+    strength: { type: number }
+
+nodes:
+  build_prompt:
+    type: prompt-builder
+    user_inputs:
+      prompt: "${input.prompt}"
+      source_asset: "${input.source_asset}"
+
+  transform:
+    type: image-generation
+    depends_on: [build_prompt]
+    inputs:
+      prompt: "${build_prompt.output.finalPrompt}"
+      source_asset: "${input.source_asset}"
+      strength: "${input.strength}"
+    config:
+      mode: image_edit
+      model: "flux-kontext"
+
+outputs:
+  asset: "${transform.output.asset}"

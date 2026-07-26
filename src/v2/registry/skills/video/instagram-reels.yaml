@@ -1,0 +1,12 @@
+id: video/instagram-reels
+label: Instagram Reels Format
+category: video
+media_types: [video]
+prompt_instruction: |
+  Format the video for Instagram Reels mobile consumption:
+  - Strict 9:16 vertical aspect ratio optimized for full-screen mobile viewing
+  - Strong, attention-grabbing visual hook within the first 1-2 seconds to stop scrolling
+  - Dynamic pacing with visual scene changes every 2-3 seconds
+  - Bold, high-contrast color palette optimized for small mobile screens in daylight
+  - Safe zone reserved at the bottom third of the frame for text/CTA overlays
+  - High energy, visually exciting tempo matching trending Reels aesthetics

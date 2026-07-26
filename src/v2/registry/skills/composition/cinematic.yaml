@@ -1,0 +1,11 @@
+id: composition/cinematic
+label: Cinematic Composition
+category: composition
+media_types: [image, video]
+prompt_instruction: |
+  Apply professional cinematic composition rules:
+  - Rule of thirds — subject positioned at golden intersection points
+  - Strong leading lines guiding the viewer's eye toward the subject
+  - Selective depth of field with creamy bokeh background blur
+  - Foreground elements framing the main subject naturally
+  - Cinematic widescreen aspect ratio framing and headroom

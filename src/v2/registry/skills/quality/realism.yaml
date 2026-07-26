@@ -1,0 +1,11 @@
+id: quality/realism
+label: Photorealistic Quality
+category: quality
+media_types: [image]
+prompt_instruction: |
+  Apply photorealistic rendering quality standards:
+  - Hyper-realistic skin texture, visible pores, and micro-surface details
+  - Physically accurate material reflections (metal, glass, fabric, skin, leather)
+  - Correct ambient occlusion and soft shadow contact on all surfaces
+  - Fine individual hair strands with natural light interaction
+  - Natural, biologically accurate eye reflections and corneal highlights

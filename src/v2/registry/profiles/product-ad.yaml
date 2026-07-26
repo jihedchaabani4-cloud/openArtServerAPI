@@ -1,0 +1,10 @@
+id: product-ad
+mediaType: image
+template: null
+requiresPrompt: true
+defaultPrompt: "Create a professional product advertisement for the provided product."
+skills:
+  - base-generation
+  - branding/commercial-ad
+  - lighting/commercial
+  - quality/realism

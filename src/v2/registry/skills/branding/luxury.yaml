@@ -1,0 +1,12 @@
+id: branding/luxury
+label: Luxury Brand Aesthetic
+category: branding
+media_types: [image, video]
+prompt_instruction: |
+  Apply premium luxury brand visual language:
+  - Rich, deep color palette (matte black, gold accent highlights, champagne, deep navy)
+  - Minimalist compositions with generous negative space and a clean focal point
+  - Premium material textures (high-quality leather, polished marble, brushed metal, soft silk draping)
+  - Safe zone for elegant typography treatment at the lower third
+  - High-end advertising industry visual standards
+  - Exclusive, aspirational, and highly sophisticated atmosphere

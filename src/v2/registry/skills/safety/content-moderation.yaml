@@ -1,0 +1,12 @@
+id: safety/content-moderation
+label: Content Safety Moderation
+category: safety
+media_types: [image, video]
+prompt_instruction: |
+  Apply strict content safety guidelines during compilation:
+  - Reject any explicitly sexual content, pornography, or graphic nudity
+  - Reject extreme graphic gore, torture, or gratuitous real-world violence
+  - Reject any content that sexualizes minors in any form whatsoever
+  - Reject content promoting terrorism, real-world harm, or self-harm
+  - Reject realistic depictions of illegal activities targeting real individuals
+  - Permit artistic nudity in clearly non-sexual, classical art contexts

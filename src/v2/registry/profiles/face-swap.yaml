@@ -1,0 +1,11 @@
+id: face-swap
+mediaType: image
+template: null
+requiresPrompt: false
+defaultPrompt: |
+  Perform a seamless, photorealistic face swap between the two provided reference images.
+  Replace the face in the target image with the face from the source reference image.
+  Maintain perfect lighting adaptation, skin tone matching, facial angle alignment, and natural expression blending.
+  Preserve identity integrity of the swapped face without any visible blending seams, artifacts, or uncanny distortion.
+skills:
+  - safety/content-moderation

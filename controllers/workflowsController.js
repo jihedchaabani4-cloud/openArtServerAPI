@@ -1,6 +1,7 @@
 import { supabase } from "../lib/supabase.js";
 import { assertMediaUsable } from "../lib/mediaGuards.js";
 import { storageService } from "../src/container.js";
+import elementRepository from "../src/db/ElementRepository.js";
 
 function extractPath(url) {
     if (!url || typeof url !== "string") return null;
@@ -156,8 +157,9 @@ export const patchWorkflow = async (req, res) => {
             return res.status(403).json({ ok: false, message: "Unauthorized access to this workflow" });
         }
 
-        const { display_name, primary_media_id, favorited } = req.body || {};
+        const { display_name, primary_media_id, favorited, description, keywords, guidelines } = req.body || {};
         const updates = {};
+        const elementUpdates = {};
 
         if (display_name !== undefined) {
             const cleanedName = String(display_name || "").trim();
@@ -172,12 +174,24 @@ export const patchWorkflow = async (req, res) => {
             updates.favorited = !!favorited;
         }
 
-        if (Object.keys(updates).length === 0) {
+        if (description !== undefined) elementUpdates.description = description;
+        if (keywords !== undefined) elementUpdates.keywords = keywords;
+        if (guidelines !== undefined) elementUpdates.guidelines = guidelines;
+
+        if (Object.keys(updates).length === 0 && Object.keys(elementUpdates).length === 0) {
             return res.status(400).json({ ok: false, message: "No supported workflow fields provided" });
         }
 
-        const workflow = await updateWorkflow(id, updates);
-        return res.json({ ok: true, workflow });
+        const workflow = Object.keys(updates).length > 0
+            ? await updateWorkflow(id, updates)
+            : await getWorkflow(id);
+
+        let element = null;
+        if (Object.keys(elementUpdates).length > 0) {
+            element = await elementRepository.updateByWorkflowId(id, elementUpdates);
+        }
+
+        return res.json({ ok: true, workflow, element });
     } catch (err) {
         console.error(`❌ Error patching workflow ${req.params.id}:`, err);
         return res.status(500).json({ ok: false, message: err.message });

@@ -1,0 +1,15 @@
+id: instagram-reels
+label: Instagram Reels
+sections:
+  - name: "Hook (0–2s)"
+    instruction: "Create a visually striking opening hook that immediately captures attention within the first 2 seconds. Show the most exciting or beautiful visual element first — never start with a slow or static frame."
+    order: 1
+  - name: "Core Scene"
+    instruction: "Develop the main narrative content dynamically. Showcase the product, character, or concept in an engaging and visually compelling way with movement and energy."
+    order: 2
+  - name: "Product / Message Highlight"
+    instruction: "Bring the key product or core message into clear, close-up focus. Include a detail shot, branding element, or the primary visual CTA message."
+    order: 3
+  - name: "CTA Ending"
+    instruction: "Conclude with a clear visual call-to-action. Reserve the bottom third of the frame for text overlay space. End on an energetic or satisfying visual note."
+    order: 4

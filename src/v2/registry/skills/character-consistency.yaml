@@ -1,0 +1,12 @@
+id: character-consistency
+label: Character Identity Consistency
+category: character
+media_types: [image]
+prompt_instruction: |
+  Maintain strict character identity consistency across all views and panels:
+  - Same face structure, facial bone geometry, and distinctive features across all angles
+  - Same hair color, style, length, texture, and parting throughout every view
+  - Same costume, accessories, belts, shoes, and clothing details in every panel
+  - Same body proportions, build, and height across all poses
+  - Same skin tone, complexion, and texture consistency throughout
+  - Use the provided reference image as the absolute identity anchor — do not drift

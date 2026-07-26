@@ -1,0 +1,11 @@
+id: lighting/commercial
+label: Commercial Product Lighting
+category: lighting
+media_types: [image, video]
+prompt_instruction: |
+  Apply luxury commercial product lighting:
+  - Bright, perfectly diffused softbox illumination
+  - Clean product highlights with crisp specular reflections
+  - Minimal shadow with soft, controllable shadow placement
+  - Premium advertising-grade exposure and white balance
+  - Maximum product detail visibility with edge-to-edge clarity

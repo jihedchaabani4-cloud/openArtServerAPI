@@ -20,7 +20,10 @@ function normalizeError(error, fallback = "Generation failed") {
   return error.message || fallback;
 }
 
-function inferStepId(nodeType, input = {}) {
+function inferStepId(nodeType, input = {}, stepIdOverride = null) {
+  if (stepIdOverride) return stepIdOverride;
+  if (input?.step_id) return input.step_id;
+  if (input?.stepId) return input.stepId;
   if (nodeType === "media-transform") return "EDIT";
   if (nodeType === "video-generation") return "VID";
   if (nodeType === "upscale") return "UPSCALE";
@@ -109,6 +112,7 @@ export class MediaWorkflowLifecycleService {
     workflowId = null,
     displayName = null,
     workflowType = "GENERATION",
+    stepId = null,
   }) {
     if (!this.bridge || !userId) return null;
 
@@ -117,15 +121,18 @@ export class MediaWorkflowLifecycleService {
       if (!projectId) return null;
 
       const sessionId = input.session_id || input.sessionId || null;
-      const stepId = inferStepId(nodeType, input);
+      const effectiveStepId = inferStepId(nodeType, input, stepId);
+      const effectiveWorkflowType = (workflowType && workflowType !== "GENERATION")
+        ? workflowType
+        : (workflowId === "character-sheet-v1" ? "ELEMENT_SHEET" : "GENERATION");
 
       const { workflow, media } = await this.bridge.createV1Placeholder({
         userId,
         projectId,
         sessionId,
         displayName: displayName || buildDisplayName(input),
-        workflowType,
-        stepId,
+        workflowType: effectiveWorkflowType,
+        stepId: effectiveStepId,
         config: buildGenerationConfig(nodeType, input),
       });
 

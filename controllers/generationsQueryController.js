@@ -187,7 +187,7 @@ export const getAssets = async (req, res) => {
         }
 
         if (projectData.user_id && projectData.user_id !== userId) {
-            if (process.env.NODE_ENV !== "production" || process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) {
+            if (process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) {
                 console.warn(`⚠️ [GenerationsQueryController] Dev access granted for user ${userId} on project ${project_id}`);
             } else {
                 return res.status(403).json({ ok: false, message: "Unauthorized access to this project" });

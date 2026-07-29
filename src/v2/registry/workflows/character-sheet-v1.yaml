@@ -1,7 +1,7 @@
 id: character-sheet-v1
 name: Character Sheet
 version: 1.0.0
-description: Generate a professional character sheet from a description.
+description: Generate a professional 3-view character sheet with LLM prompt intelligence.
 
 metadata:
   category: character
@@ -15,14 +15,26 @@ input_schema:
     characters: { type: array }
     references: { type: array }
     style: { type: string }
+    model: { type: string }
 
-default_model: chatgpt-2
+default_model: nanobana
 
 nodes:
+  llm_enrich:
+    type: llm
+    user_inputs:
+      userPrompt: "${input.prompt}"
+    config:
+      skills: [llm/translation, llm/character-description, llm/json-output]
+      jsonMode: true
+      parameters:
+        style: "${input.style}"
+
   build_prompt:
     type: prompt-builder
+    depends_on: [llm_enrich]
     user_inputs:
-      prompt: "${input.prompt}"
+      prompt: "${llm_enrich.output.json.description}"
       characters: "${input.characters}"
       references: "${input.references}"
       style: "${input.style}"
@@ -38,12 +50,14 @@ nodes:
     inputs:
       prompt: "${build_prompt.output.finalPrompt}"
       references: "${build_prompt.output.context.references}"
+      model: "${input.model}"
     config:
       width: 1024
       height: 1024
       count: 4
-      model: chatgpt-2          # ← server-enforced default model
 
 outputs:
+  character_title: "${llm_enrich.output.json.title}"
+  character_description: "${llm_enrich.output.json.description}"
   main_asset: "${generate.output.assets}"
   model_used: "${generate.output.metadata.model}"

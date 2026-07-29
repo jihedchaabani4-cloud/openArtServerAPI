@@ -19,6 +19,9 @@ import { run as buildStoryboardLayout } from "./buildStoryboardLayout.js";
 import { run as applyComposition } from "./applyComposition.js";
 import { run as applyTypographyArea } from "./applyTypographyArea.js";
 import { run as enhancePrompt } from "./enhancePrompt.js";
+import { run as moderationSafety } from "./moderationSafety.js";
+import { run as generateNegativePrompt } from "./generateNegativePrompt.js";
+import { run as optimizeVisualPrompt } from "./optimizeVisualPrompt.js";
 
 /** @type {Record<string, (context: object, parameters: object, deps: object) => Promise<object>>} */
 export const processorRegistry = {
@@ -32,6 +35,9 @@ export const processorRegistry = {
   applyComposition,
   applyTypographyArea,
   enhancePrompt,
+  moderationSafety,
+  generateNegativePrompt,
+  optimizeVisualPrompt,
 };
 
 /**

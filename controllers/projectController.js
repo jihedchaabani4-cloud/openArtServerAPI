@@ -89,7 +89,7 @@ export const getProjectData = async (req, res) => {
         }
 
         if (projectData.user_id && projectData.user_id !== userId) {
-            if (process.env.NODE_ENV !== "production" || process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) {
+            if (process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) {
                 console.warn(`⚠️ [ProjectController] Dev access granted for user ${userId} on project ${project_id} (owned by ${projectData.user_id})`);
             } else {
                 return res.status(403).json({ ok: false, message: "Unauthorized access to this project" });
@@ -127,18 +127,51 @@ export const getProjectData = async (req, res) => {
             return [];
         });
 
-        const formattedWorkflows = (workflows || []).map(wf => ({
-            name:          wf.id,
-            projectId:     project_id,
-            workflow_type: wf.workflow_type,
-            metadata: {
-                displayName:    wf.display_name,
-                createTime:     wf.create_time,
-                primaryMediaId: wf.primary_media_id || "",
-                sessionId:      wf.session_id,
-                favorited:      !!wf.favorited,
-            },
-        }));
+        // ── 3.1 Elements ─────────────────────────────────────────────
+        const workflowIds = (workflows || []).map(w => w.id);
+        let elementMap = {};
+        let elementsList = [];
+        if (workflowIds.length > 0) {
+            const { data: elements, error: elemErr } = await supabase
+                .from("element")
+                .select("*")
+                .in("workflow_id", workflowIds);
+
+            if (elemErr) {
+                console.warn("⚠️ Element query warning:", elemErr.message);
+            } else if (elements) {
+                elementsList = elements;
+                elements.forEach(elem => {
+                    elementMap[elem.workflow_id] = elem;
+                });
+            }
+        }
+
+        const formattedWorkflows = (workflows || []).map(wf => {
+            const elem = elementMap[wf.id] || {};
+            return {
+                id:            wf.id,
+                name:          wf.id,
+                projectId:     project_id,
+                workflow_type: wf.workflow_type,
+                element_type:  elem.element_type || "object",
+                description:   elem.description || wf.metadata?.description || "",
+                keywords:      elem.keywords || wf.metadata?.keywords || [],
+                guidelines:    elem.guidelines || wf.metadata?.guidelines || [],
+                element:       elem,
+                metadata: {
+                    displayName:    elem.name || wf.display_name,
+                    createTime:     wf.create_time,
+                    primaryMediaId: wf.primary_media_id || "",
+                    sessionId:      wf.session_id,
+                    favorited:      !!wf.favorited,
+                    elementType:    elem.element_type || "object",
+                    description:    elem.description || wf.metadata?.description || "",
+                    keywords:       elem.keywords || wf.metadata?.keywords || [],
+                    guidelines:     elem.guidelines || wf.metadata?.guidelines || [],
+                },
+            };
+        });
 
         // ── 4. Media ───────────────────────────────────────────────
         const { data: mediaItems, error: mediaError } = await supabase
@@ -193,12 +226,16 @@ export const getProjectData = async (req, res) => {
             // ── mediaObject ───────────────────────────────────────
             const mediaObject = {
                 name:           m.id,
+                id:             m.id,
                 url:            m.url,
+                file_url:       m.url,
                 status:         m.status || (m.url ? "success" : "processing"),
                 error:          m.error_message || null,
                 projectId:      project_id,
                 workflowId:     m.workflow_id,
-                workflowStepId: isUpload ? "upload" : (m.step_id || "GEN"),
+                workflow_id:    m.workflow_id,
+                step_id:        m.step_id,
+                workflowStepId: m.step_id || (isUpload ? "upload" : "GEN"),
 
                 generationConfig: config ? {
                     prompt:         config.prompt          || "",
@@ -279,6 +316,7 @@ export const getProjectData = async (req, res) => {
                             sessions:  formattedSessions,
                             workflows: formattedWorkflows,
                             media:     formattedMedia,
+                            elements:  elementsList,
                         },
                     },
                 },

@@ -1,0 +1,12 @@
+id: llm/translation
+version: 1.0.0
+applies_to: [llm]
+category: system
+priority: 20
+description: Translates non-English user input to English before processing.
+
+prompt_instruction: |
+  LANGUAGE RULE:
+  If the user's input is not in English, silently translate it to English
+  before processing. Preserve all creative intent, nuance, and meaning.
+  Never mention that you translated the input.

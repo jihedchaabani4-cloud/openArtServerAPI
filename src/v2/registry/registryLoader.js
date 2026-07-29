@@ -45,24 +45,33 @@ export function loadRegistries(registryRoot = path.join(__dirname, ".")) {
 
   /** @type {Record<string, import('../contracts/skill.js').SkillDefinition>} */
   const skills = {};
-  for (const file of fs.readdirSync(skillsDir)) {
-    if (!file.endsWith(".yaml")) continue;
-    const skill = readYamlFile(path.join(skillsDir, file));
-    if (!skill?.id) {
-      throw new Error(`Skill file ${file} missing id.`);
-    }
-    skills[skill.id] = skill;
-    for (const processorName of skill.pipeline || []) {
-      if (!processors[processorName]) {
-        throw new Error(`Skill "${skill.id}" references unknown processor "${processorName}".`);
-      }
-    }
-    for (const nodeType of skill.applies_to || []) {
-      if (!nodes[nodeType]) {
-        throw new Error(`Skill "${skill.id}" applies_to unknown node type "${nodeType}".`);
+
+  function readSkillsRecursively(dir) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        readSkillsRecursively(fullPath);
+      } else if (entry.isFile() && entry.name.endsWith(".yaml")) {
+        const skill = readYamlFile(fullPath);
+        if (!skill?.id) {
+          throw new Error(`Skill file ${fullPath} missing id.`);
+        }
+        skills[skill.id] = skill;
+        for (const processorName of skill.pipeline || []) {
+          if (!processors[processorName]) {
+            throw new Error(`Skill "${skill.id}" references unknown processor "${processorName}".`);
+          }
+        }
+        for (const nodeType of skill.applies_to || []) {
+          if (!nodes[nodeType]) {
+            throw new Error(`Skill "${skill.id}" applies_to unknown node type "${nodeType}".`);
+          }
+        }
       }
     }
   }
+
+  readSkillsRecursively(skillsDir);
 
   /** @type {Record<string, import('../contracts/workflow.js').WorkflowDefinition>} */
   const workflows = {};

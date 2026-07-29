@@ -3,9 +3,10 @@ import { promptBuilderManifest } from "./promptBuilderManifest.js";
 import { imageGenerationManifest } from "./imageGenerationManifest.js";
 import { videoGenerationManifest } from "./videoGenerationManifest.js";
 import { upscaleManifest } from "./upscaleManifest.js";
+import { llmManifest } from "./llmManifest.js";
 
 /**
- * Registers all 5 node type manifests into the global registry.
+ * Registers node type manifests into the global registry.
  */
 export function registerAllManifests() {
   clearManifestRegistry();
@@ -14,7 +15,8 @@ export function registerAllManifests() {
     promptBuilderManifest,
     imageGenerationManifest,
     videoGenerationManifest,
-    upscaleManifest
+    upscaleManifest,
+    llmManifest
   ];
 
   for (const manifest of manifests) {

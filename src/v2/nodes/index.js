@@ -3,6 +3,7 @@ import { executeImageGeneration } from "./imageGenerationNode.js";
 import { executeVideoGeneration } from "./videoGenerationNode.js";
 import { executeUpscale } from "./upscaleNode.js";
 import { executeMediaTransform } from "./mediaTransformNode.js";
+import { executeLLM } from "./llmNode.js";
 
 const registry = {
   "prompt-builder": executePromptBuilder,
@@ -10,6 +11,7 @@ const registry = {
   "video-generation": executeVideoGeneration,
   "upscale": executeUpscale,
   "media-transform": executeMediaTransform,
+  "llm": executeLLM,
 };
 
 /**

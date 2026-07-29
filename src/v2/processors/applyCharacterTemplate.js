@@ -17,11 +17,25 @@ export async function run(context, parameters, _deps) {
 
   const characterBlock = characters
     .map((char) => {
-      const traits =
-        Array.isArray(char.traits) && char.traits.length > 0
-          ? `, ${char.traits.join(", ")}`
-          : "";
-      return `[Character: ${char.name}${traits}] ${char.description || ""}`.trim();
+      let traitList = [];
+      if (Array.isArray(char.traits)) {
+        traitList = char.traits.filter(Boolean);
+      } else if (typeof char.traits === "object" && char.traits !== null) {
+        const walk = (obj) => {
+          for (const val of Object.values(obj)) {
+            if (val && typeof val === "object") walk(val);
+            else if (val && (typeof val === "string" || typeof val === "number")) {
+              const str = String(val).trim();
+              if (str) traitList.push(str);
+            }
+          }
+        };
+        walk(char.traits);
+      }
+
+      const traitsStr = traitList.length > 0 ? `, ${traitList.join(", ")}` : "";
+      const charName = char.name ? `${char.name}` : "Character";
+      return `[${charName}${traitsStr}] ${char.description || ""}`.trim();
     })
     .join(" | ");
 

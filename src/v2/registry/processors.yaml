@@ -37,3 +37,15 @@ applyTypographyArea:
 enhancePrompt:
   network: true
   description: LLM call to polish/enrich assembled prompt
+
+moderationSafety:
+  network: true
+  description: Moderates the user prompt and checks content safety
+
+generateNegativePrompt:
+  network: false
+  description: Generates negative prompt parameters
+
+optimizeVisualPrompt:
+  network: true
+  description: Translates multilingual prompts and enriches visual density

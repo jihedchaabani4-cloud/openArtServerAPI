@@ -136,7 +136,7 @@ export class ElementRepository {
             return this.resolveRecord(idOrWorkflowId);
         }
 
-        let query = supabase.from("element").update(patch).select().single();
+        let query = supabase.from("element").update(patch);
 
         if (UUID_REGEX.test(String(idOrWorkflowId))) {
             query = query.or(`id.eq.${idOrWorkflowId},workflow_id.eq.${idOrWorkflowId}`);
@@ -144,9 +144,12 @@ export class ElementRepository {
             query = query.eq("workflow_id", idOrWorkflowId);
         }
 
-        const { data, error } = await query;
-        if (error) throw error;
-        return data;
+        const { data, error } = await query.select();
+        if (error) {
+            console.error(`[ElementRepository] update error for id ${idOrWorkflowId}:`, error);
+            throw error;
+        }
+        return data?.[0] || null;
     }
 
     async updateByWorkflowId(workflowId, updates) {

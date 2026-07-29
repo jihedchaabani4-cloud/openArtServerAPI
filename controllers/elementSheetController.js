@@ -32,12 +32,22 @@ async function handleSheetRequest(req, res, sheetType) {
             });
         }
 
-        const userId = req.user?.id || "e54d7d5f-9c49-457d-83b7-ac8484bceb80";
+        const userId = req.user.id;
         const v2Payload = mapElementSheetV1(req.body, sheetType);
         
         const runId = randomUUID();
         const v2WorkflowId = v2Payload.workflowId;
         const v2Input = v2Payload.input;
+
+        console.log(`\n================================================================`);
+        console.log(`🎭 [character-sheet-v1] USE CASE EXECUTING: ${sheetType} SHEET GENERATION`);
+        console.log(`📌 Workflow ID: ${v2WorkflowId}`);
+        console.log(`📌 Run ID: ${runId}`);
+        console.log(`📌 Project ID: ${project_id}`);
+        console.log(`📌 User Prompt: "${v2Input.prompt ? v2Input.prompt.slice(0, 120) + '...' : '(No Prompt)'}"`);
+        console.log(`📌 Reference Images: ${v2Input.references?.length || 0} attached`);
+        console.log(`📌 Character Traits:`, JSON.stringify(v2Input.characters?.[0]?.traits || {}));
+        console.log(`================================================================\n`);
 
         const registries = getRegistries();
         const workflowDef = registries.workflows[v2WorkflowId];
@@ -47,7 +57,7 @@ async function handleSheetRequest(req, res, sheetType) {
         // Phase 1 — Pre-create placeholder
         const placeholder = await workflowStorageGateway.createMediaPlaceholder({
             runId,
-            nodeType: "image-generation", // Element sheet uses image generator under the hood
+            nodeType: "image-generation",
             userId,
             workflowId: v2WorkflowId,
             input: v2Input,
@@ -59,7 +69,7 @@ async function handleSheetRequest(req, res, sheetType) {
             _v1PlaceholderIds: placeholder ? [placeholder] : [],
         };
 
-        console.log(`🚀 [elementSheetController] Starting V2 run ${runId}`);
+        console.log(`🚀 [character-sheet-v1] Starting DAG Execution Plan (Run: ${runId})`);
         const runResult = await startWorkflowRun(plan, runtimeInput, runId);
 
         res.json(buildV1CompatibleResponse({
@@ -81,11 +91,3 @@ async function handleSheetRequest(req, res, sheetType) {
 /** POST /api/element-sheet/character */
 export const createCharacterSheet = (req, res) =>
     handleSheetRequest(req, res, "CHARACTER");
-
-/** POST /api/element-sheet/location */
-export const createLocationSheet = (req, res) =>
-    handleSheetRequest(req, res, "LOCATION");
-
-/** POST /api/element-sheet/product */
-export const createProductSheet = (req, res) =>
-    handleSheetRequest(req, res, "PRODUCT");

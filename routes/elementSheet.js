@@ -12,16 +12,4 @@ router.use(requireAuth);
  */
 router.post("/character", elementSheetController.createCharacterSheet);
 
-/**
- * @route POST /api/element-sheet/location
- * @desc Create a structured location generation sheet
- */
-router.post("/location", elementSheetController.createLocationSheet);
-
-/**
- * @route POST /api/element-sheet/product
- * @desc Create a structured product generation sheet
- */
-router.post("/product", elementSheetController.createProductSheet);
-
 export default router;

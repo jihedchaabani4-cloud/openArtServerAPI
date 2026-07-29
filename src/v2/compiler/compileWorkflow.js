@@ -119,7 +119,7 @@ export function compileWorkflow(workflow, registries) {
           );
         }
         resolvedSkillVersions[skillId] = skill.version;
-        for (const processorName of skill.pipeline) {
+        for (const processorName of skill.pipeline || []) {
           if (!registries.processors[processorName]) {
             errors.push(
               new CompilationError("UNKNOWN_PROCESSOR", `Skill "${skillId}" references unknown processor "${processorName}".`, {
@@ -153,7 +153,7 @@ export function compileWorkflow(workflow, registries) {
     for (const skillId of skills) {
       const skill = registries.skills[skillId];
       if (!skill) continue;
-      for (const processorName of skill.pipeline) {
+      for (const processorName of skill.pipeline || []) {
         const processor = registries.processors[processorName];
         if (processor) {
           resolvedProcessors.push({ name: processorName, network: processor.network });
@@ -167,6 +167,9 @@ export function compileWorkflow(workflow, registries) {
     const bindings = {};
 
     const staticConfig = { ...(nodeConfig.config || {}) };
+    if (skills.length > 0) {
+      resolved_inputs.skills = skills;
+    }
     delete staticConfig.skills;
     const skillParameters = staticConfig.skill_parameters || {};
     delete staticConfig.skill_parameters;

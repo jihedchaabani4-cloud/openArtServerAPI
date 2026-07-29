@@ -1,5 +1,6 @@
 import { workflowRunner } from "../container.js";
 import { requireWorkflow } from "./workflowRegistry.js";
+import "./registerWorkflows.js";
 
 export const WORKFLOW_ARCHITECTURE_JOB_TYPE = "WorkflowArchitectureJob";
 

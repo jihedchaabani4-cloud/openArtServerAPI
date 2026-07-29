@@ -177,28 +177,31 @@ export function mapUpscaleV1(v1Body, sourceAsset) {
 }
 
 // ─────────────────────────────────────────────────────
-// Element Sheet  →  character-sheet-v1
+// Character Sheet  →  character-sheet-v1
 // ─────────────────────────────────────────────────────
 
 /**
- * Maps a V1 element sheet body to V2 character-sheet-v1 (or equivalent) workflow inputs.
+ * Maps a Character Sheet request body to V2 character-sheet-v1 workflow inputs.
  */
-export function mapElementSheetV1(v1Body, sheetType) {
-  const { prompt, features, model_name, references = [] } = v1Body;
-  const sheetWorkflowMap = {
-    CHARACTER: "character-sheet-v1",
-    LOCATION: "character-sheet-v1",   // reuses character sheet workflow for location
-    PRODUCT: "character-sheet-v1",    // reuses character sheet workflow for product
-  };
+export function mapCharacterSheetV1(v1Body) {
+  const { prompt, features, model_name, references = [], project_id, projectId } = v1Body;
   return {
-    workflowId: sheetWorkflowMap[sheetType] || "character-sheet-v1",
+    workflowId: "character-sheet-v1",
     input: {
       prompt: prompt || "",
-      model: normalizeImageModelName(model_name) || null,
-      characters: features ? [{ name: sheetType, description: prompt, traits: features }] : [],
+      model: normalizeImageModelName(model_name) || "nanobana",
+      characters: features ? [{ name: "CHARACTER", description: prompt, traits: features }] : [],
       references,
+      project_id: project_id || projectId || null,
     },
   };
+}
+
+/**
+ * Legacy alias for mapCharacterSheetV1
+ */
+export function mapElementSheetV1(v1Body, sheetType = "CHARACTER") {
+  return mapCharacterSheetV1(v1Body);
 }
 
 // ─────────────────────────────────────────────────────
@@ -230,6 +233,8 @@ export function buildV1CompatibleResponse({ runId, v1WorkflowId, v1MediaId, proj
     batchId: null,
     configId: null,
     workflows,
+    workflow: workflows[0] || null,
+    v1WorkflowId: v1WorkflowId || null,
     project_id: projectId,
     session_id: sessionId,
   };

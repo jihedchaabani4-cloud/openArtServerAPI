@@ -90,6 +90,11 @@ export async function executeNodeJob(runId, nodeId) {
     // 3. Resolve inputs
     const resolvedInputs = await resolveInputsForNode(run, nodeConfig, nodeRuns);
 
+    console.log(`\n----------------------------------------------------------------`);
+    console.log(`⚡ [character-sheet-v1 Execution Engine]`);
+    console.log(`▶ Stage 1: Resolving inputs for Node "${nodeId}" (${nodeConfig.type})`);
+    console.log(`   Resolved Inputs:`, JSON.stringify(resolvedInputs, null, 2));
+
     // 4. Update status in database to running and set started_at if attempt is 1
     await runRepo.updateNodeRun(runId, nodeId, {
       status: "running",
@@ -124,6 +129,7 @@ export async function executeNodeJob(runId, nodeId) {
       forceProvider: nodeRun.provider_override || null,
     };
 
+    console.log(`💳 ▶ Stage 2: Reserving billing & preparing placeholders for Node "${nodeId}"`);
     await reserveNodeBilling({
       run,
       nodeConfig,
@@ -131,10 +137,6 @@ export async function executeNodeJob(runId, nodeId) {
       attempt: nodeRun.attempt,
     });
 
-    // Phase 1 — Create or reuse V1 media placeholders BEFORE the provider is called.
-    // If the controller pre-created placeholders (passed via run.input._v1PlaceholderIds),
-    // we reuse those so the HTTP response can include them immediately.
-    // Otherwise we create new placeholders here.
     const preCreatedPlaceholders = run.input?._v1PlaceholderIds;
     if (preCreatedPlaceholders && preCreatedPlaceholders.length > 0 && isProviderBackedNodeType(nodeConfig?.type)) {
       placeholders = preCreatedPlaceholders;
@@ -147,9 +149,11 @@ export async function executeNodeJob(runId, nodeId) {
       });
     }
 
+    console.log(`🎨 ▶ Stage 3: Executing Processor "${nodeConfig.type}" for Node "${nodeId}"...`);
     const output = await executeNode(nodeConfig.type, resolvedInputs, ctx);
+    console.log(`   Processor Output Preview:`, JSON.stringify(output, null, 2).slice(0, 300) + '...');
 
-    // Phase 2 (success) — Finalize placeholders with actual URL and status='success'.
+    console.log(`💾 ▶ Stage 4: Finalizing & persisting outputs for Node "${nodeId}"...`);
     await finalizeNodeMediaOutputs({
       runId,
       nodeId,
@@ -160,6 +164,10 @@ export async function executeNodeJob(runId, nodeId) {
       placeholders,
     });
     await settleNodeBilling({ runId, nodeId, nodeConfig, attempt: nodeRun.attempt });
+
+    const durationMs = Date.now() - startedAt;
+    console.log(`✅ ▶ Stage 5: Node "${nodeId}" COMPLETED successfully in ${durationMs}ms`);
+    console.log(`----------------------------------------------------------------\n`);
 
     // 6. On success: update node status, complete it, and trigger orchestrator
     await runRepo.updateNodeRun(runId, nodeId, {
@@ -173,7 +181,7 @@ export async function executeNodeJob(runId, nodeId) {
         executionId: runId,
         traceId: runId,
         operation: `node.complete`,
-        durationMs: Date.now() - startedAt,
+        durationMs,
         metadata: { nodeId, attempt: nodeRun.attempt }
       });
     }

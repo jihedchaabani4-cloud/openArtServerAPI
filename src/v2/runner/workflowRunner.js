@@ -11,7 +11,8 @@ const PROVIDER_BACKED_NODE_TYPES = new Set([
   "image-generation",
   "video-generation",
   "upscale",
-  "media-transform",  // ← AJOUTÉ: pour les edits
+  "media-transform",
+  "llm",
 ]);
 
 let billingGateway = null;
@@ -50,6 +51,8 @@ function estimateNodeBillingAmount(nodeConfig, resolvedInputs = {}) {
       return Math.max(1, Number(resolvedInputs.factor ?? nodeConfig?.resolved_inputs?.factor ?? 2));
     case "media-transform":
       return 1; // 1 credit per transform operation
+    case "llm":
+      return 1; // 1 credit per LLM execution
     default:
       return 0;
   }
@@ -206,8 +209,13 @@ export async function startWorkflowRun(plan, runtimeInput, runId = null) {
     message: `Initialized workflow run ${finalRunId} for ${plan.workflow_id}`
   });
 
-  // Enqueue the run job to begin execution orchestration
-  await enqueueWorkflowRun(finalRunId);
+  // Enqueue the run job to begin execution orchestration (with inline fallback)
+  try {
+    await enqueueWorkflowRun(finalRunId);
+  } catch (err) {
+    console.warn(`[workflowRunner] Queue enqueue notice: ${err.message}. Triggering inline orchestration fallback...`);
+    executeOrchestration(finalRunId).catch((e) => console.error("Inline orchestration error:", e));
+  }
 
   return { run_id: finalRunId, status: "pending" };
 }
@@ -342,7 +350,14 @@ export async function executeOrchestration(runId) {
         status: "running",
         started_at: new Date().toISOString()
       });
-      await enqueueNodeExecute(runId, node.id);
+      
+      try {
+        await enqueueNodeExecute(runId, node.id);
+      } catch (err) {
+        console.warn(`[workflowRunner] Queue node enqueue notice (${node.id}): ${err.message}. Triggering inline node execution...`);
+        executeNodeJob(runId, node.id).then(() => executeOrchestration(runId)).catch((e) => console.error("Inline node execution error:", e));
+      }
+      
       enqueuedAny = true;
 
       logV2Event({

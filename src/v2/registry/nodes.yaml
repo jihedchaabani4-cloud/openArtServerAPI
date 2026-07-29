@@ -77,3 +77,26 @@ media-transform:
     max_attempts: 2
     backoff: linear
     fallback_provider: fal
+
+llm:
+  skill_aware: true
+  inputs:
+    skills: { type: array, required: true }
+    userPrompt: { type: string, required: true }
+    images: { type: array, default: [] }
+    model: { type: string }
+    temperature: { type: number, default: 0.7 }
+    jsonMode: { type: boolean, default: false }
+    schema: { type: object }
+    parameters: { type: object, default: {} }
+    systemPromptOverride: { type: string }
+  outputs:
+    text: { type: string }
+    json: { type: object }
+    usage: { type: object }
+    model: { type: string }
+    provider: { type: string }
+    skillsUsed: { type: array }
+  retry:
+    max_attempts: 2
+    backoff: linear

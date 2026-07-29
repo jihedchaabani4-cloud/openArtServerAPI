@@ -8,6 +8,7 @@
 import { randomUUID } from "node:crypto";
 import * as elementService from "../src/services/elementService.js";
 import { addImageToElement as addImageToElementSvc } from "../src/services/elementService.js";
+import { ElementAnalysisService } from "../src/services/ElementAnalysisService.js";
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
@@ -213,3 +214,36 @@ export async function updateElement(req, res) {
         return res.status(statusCode).json({ error: true, message: err.message });
     }
 }
+
+// ─── POST /api/v2/elements/analyze ──────────────────────────────────────────
+
+const analysisService = new ElementAnalysisService();
+
+export async function analyzeElement(req, res) {
+    const traceId = randomUUID();
+    const start   = Date.now();
+
+    try {
+        const { projectId, workflowId, imageUrls = [], elementName, elementType } = req.body;
+
+        const result = await analysisService.analyzeElement({
+            projectId,
+            workflowId,
+            imageUrls,
+            elementName: elementName || "Element",
+            elementType: elementType || "object",
+        });
+
+        const durationMs = Date.now() - start;
+        console.log(JSON.stringify(structuredLog({ traceId, operation: "POST /api/v2/elements/analyze", durationMs, status: "success" })));
+
+        return res.json({ status: "success", ...result });
+
+    } catch (err) {
+        const durationMs = Date.now() - start;
+        const statusCode = err.statusCode || 500;
+        console.error(JSON.stringify(structuredLog({ traceId, operation: "POST /api/v2/elements/analyze", durationMs, status: "error", errorCode: statusCode, message: err.message })));
+        return res.status(statusCode).json({ error: true, message: err.message });
+    }
+}
+

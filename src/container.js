@@ -16,6 +16,7 @@ import { WorkflowRepository }         from "#db/WorkflowRepository.js";
 import { MediaRepository }            from "#db/MediaRepository.js";
 import { GenerationConfigRepository } from "#db/GenerationConfigRepository.js";
 import { DnaRepository }              from "#db/DnaRepository.js";
+import { CharacterRepository }        from "#db/CharacterRepository.js";
 
 // VideoTreatment and GenerateImageTreatment removed — V2 adapters now route directly to model runners.
 import { MODELS as IMAGE_MODELS } from "#image/core/registry.js";
@@ -89,8 +90,8 @@ export const db = {
     workflows: new WorkflowRepository(),  // table: workflow
     media:     new MediaRepository(),     // table: media
     configs:   new GenerationConfigRepository(), // tables: generation_config + generation_config_reference
-    dna:       new DnaRepository(),       // table: dna
-    characters: new DnaRepository(),       // alias for resolveReferences helper
+    dna:        new DnaRepository(),       // table: dna
+    characters: new CharacterRepository(), // Dedicated Character Domain Repository
 };
 
 // ─── Workflow Architecture (feature 008) ─────────────────────────────────────

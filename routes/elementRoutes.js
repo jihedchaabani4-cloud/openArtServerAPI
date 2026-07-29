@@ -18,6 +18,7 @@ import {
     deleteElement,
     addImageToElement,
     updateElement,
+    analyzeElement,
 } from "../controllers/elementController.js";
 import promptBuilderProService from "../src/services/promptBuilderProService.js";
 import elementRepository from "../src/db/ElementRepository.js";
@@ -27,6 +28,7 @@ const router = express.Router();
 // ─── POST /api/v2/elements ────────────────────────────────────────────────────
 
 router.post("/", createElement);
+router.post("/analyze", analyzeElement);
 
 // ─── GET /api/v2/elements/project/:projectId ──────────────────────────────────
 // IMPORTANT: must be declared before /:id to avoid route collision

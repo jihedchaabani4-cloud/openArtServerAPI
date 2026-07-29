@@ -8,6 +8,7 @@ import { registerProviders } from "../providers/providerRegistry.js";
 import { createV2ImageAdapter } from "./providers/adapters/imageAdapter.js";
 import { createV2VideoAdapter } from "./providers/adapters/videoAdapter.js";
 import { createV2UpscaleAdapter } from "./providers/adapters/upscaleAdapter.js";
+import { registerFirstSliceWorkflows } from "../workflows/registerWorkflows.js";
 
 /**
  * Bootstrap the V2 Composable Workflow Engine.
@@ -27,5 +28,14 @@ export function bootstrapV2() {
     createV2UpscaleAdapter({ providerId: "topaz", cost: 5, latencyMs: 2000, qualityTier: "standard" }),
   ], { replace: true });
 
+  registerFirstSliceWorkflows({ replace: true });
+
   console.log("[Bootstrap V2] V2 Workflow Engine successfully bootstrapped.");
+
+  // Import worker to activate BullMQ queue processing
+  import("./queue/v2WorkflowWorker.js").then(() => {
+    console.log("[Bootstrap V2] V2 Workflow Worker queue listener active.");
+  }).catch((err) => {
+    console.warn("[Bootstrap V2] V2 Workflow Worker queue listener warning:", err.message);
+  });
 }

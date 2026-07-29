@@ -14,15 +14,23 @@ import { storageService } from "./StorageService.js";
 import { createWorkflow } from "../../controllers/workflowsController.js";
 
 
+import { ElementAnalysisService } from "./ElementAnalysisService.js";
+
 const mediaRepo    = new MediaRepository();
 const workflowRepo = new WorkflowRepository();
+const analysisService = new ElementAnalysisService();
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
 /**
  * Validate element creation inputs. Throws with a human-readable message if invalid.
  */
-function validateCreateInputs({ name, sourceImages }) {
+function validateCreateInputs({ name, sourceImages, projectId }) {
+    if (!projectId) {
+        const err = new Error("projectId is required to create an element");
+        err.statusCode = 400;
+        throw err;
+    }
     if (!name || typeof name !== "string" || name.trim().length === 0) {
         const err = new Error("Element name is required");
         err.statusCode = 400;
@@ -64,7 +72,7 @@ export async function createElement({ name, sourceImages, description, projectId
 
     try {
         // Step 1 — Validate
-        validateCreateInputs({ name, sourceImages });
+        validateCreateInputs({ name, sourceImages, projectId });
 
         const safeUserId = userId || "anonymous";
 
@@ -120,6 +128,17 @@ export async function createElement({ name, sourceImages, description, projectId
         });
 
 
+
+        // Step 7 — Trigger async Vision AI analysis to populate keywords and taste profile description
+        analysisService.analyzeElement({
+            projectId,
+            workflowId: workflow_id,
+            imageUrls: storageUrls,
+            elementName: name.trim(),
+            elementType,
+        }).catch((err) => {
+            console.warn(`[elementService] Background vision analysis error:`, err.message);
+        });
 
         const durationMs = Date.now() - start;
         console.log(`[elementService] createElement success`, { traceId, operation: "createElement", durationMs, status: "success", elementId: element.id });

@@ -24,7 +24,7 @@ export const upscale = async (req, res) => {
             return res.status(400).json({ ok: false, message: "workflow_id is required" });
         }
 
-        const userId = req.user?.id || 'e54d7d5f-9c49-457d-83b7-ac8484bceb80';
+        const userId = req.user.id;
 
         // Resolve media, project and session from workflow on the server
         const sourceMedia = await db.media.findLatestByWorkflow(workflow_id);

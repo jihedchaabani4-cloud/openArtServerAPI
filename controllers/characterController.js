@@ -62,7 +62,7 @@ export async function createCharacter(req, res) {
             nodeType: "image-generation",
             userId,
             workflowId: v2WorkflowId,
-            workflowType: "ELEMENT_SHEET",
+            workflowType: "CHARACTER",
             stepId: "character_sheet",
             input: v2Input,
         });

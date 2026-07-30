@@ -598,3 +598,38 @@ auth.users
 └──────────────────────────────────────────────────────────────────────────────┘
 
 */
+
+-- ╔═════════════════════════════════════════════════════════════════════════════╗
+-- ║ TABLE: characters                                                           ║
+-- ║ Description: Character entities with turnaround URLs, traits and metadata   ║
+-- ╚═════════════════════════════════════════════════════════════════════════════╝
+CREATE TABLE public.characters (
+  id uuid NOT NULL DEFAULT gen_random_uuid (),
+  user_id uuid NOT NULL,
+  project_id uuid NULL,
+  workflow_id uuid NULL,
+  name character varying(255) NOT NULL,
+  title character varying(255) NULL,
+  description text NULL,
+  archetype character varying(100) NULL,
+  gender character varying(50) NULL,
+  style character varying(100) NULL DEFAULT 'cinematic'::character varying,
+  traits jsonb NULL DEFAULT '{}'::jsonb,
+  keywords text[] NULL DEFAULT '{}'::text[],
+  guidelines text[] NULL DEFAULT '{}'::text[],
+  avatar_url text NULL,
+  turnaround_url text NULL,
+  reference_images text[] NULL DEFAULT '{}'::text[],
+  is_favorited boolean NULL DEFAULT false,
+  status character varying(50) NULL DEFAULT 'ready'::character varying,
+  created_at timestamp with time zone NULL DEFAULT now(),
+  updated_at timestamp with time zone NULL DEFAULT now(),
+  CONSTRAINT characters_pkey PRIMARY KEY (id),
+  CONSTRAINT characters_project_id_fkey FOREIGN KEY (project_id) REFERENCES project (id) ON DELETE CASCADE,
+  CONSTRAINT characters_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users (id) ON DELETE CASCADE,
+  CONSTRAINT characters_workflow_id_fkey FOREIGN KEY (workflow_id) REFERENCES workflow (id) ON DELETE SET NULL
+) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_characters_user_id ON public.characters USING btree (user_id) TABLESPACE pg_default;
+CREATE INDEX IF NOT EXISTS idx_characters_project_id ON public.characters USING btree (project_id) TABLESPACE pg_default;
+

@@ -38,8 +38,8 @@ export async function uploadMedia(input, { userId, projectId, index = 0, filenam
     const type = detectInputType(input);
     const ts = Date.now();
     const path = filename
-        ? `${userId}/elements/${projectId}/${filename}`
-        : `${userId}/elements/${projectId}/${ts}-${index}.jpg`;
+        ? `elements/${userId}/${projectId}/${filename}`
+        : `elements/${userId}/${projectId}/${ts}-${index}.jpg`;
 
     try {
         if (type === "url") {

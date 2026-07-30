@@ -158,21 +158,31 @@ const verifyWorkflowOwnership = async (workflowId, userId, req = null) => {
 
 // ── PATCH /api/workflows/:id ────────────────────────────────────────────────────
 export const patchWorkflow = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const userId = req.user?.id;
+    const { id } = req.params;
+    const userId = req.user?.id;
+    console.log(`\n======================================================`);
+    console.log(`📡 [SERVER BACKEND] PATCH /api/workflows/${id} received`);
+    console.log(`👤 User ID: ${userId || "Unauthenticated"}`);
+    console.log(`📦 Request Body:`, JSON.stringify(req.body, null, 2));
 
-        if (!(await verifyWorkflowOwnership(id, userId, req))) {
+    try {
+        const isAuthorized = await verifyWorkflowOwnership(id, userId, req);
+        console.log(`🔐 Ownership Verification Result: ${isAuthorized ? "AUTHORIZED ✅" : "DENIED ❌"}`);
+
+        if (!isAuthorized) {
+            console.warn(`⛔ [SERVER BACKEND] 403 Forbidden: User ${userId} does not own workflow ${id}`);
             return res.status(403).json({ ok: false, message: "Unauthorized access to this workflow" });
         }
 
-        const { display_name, primary_media_id, favorited, description, keywords, guidelines } = req.body || {};
+        const { display_name, name, primary_media_id, favorited, description, keywords, guidelines, metadata } = req.body || {};
         const updates = {};
         const elementUpdates = {};
 
-        if (display_name !== undefined) {
-            const cleanedName = String(display_name || "").trim();
+        const targetName = display_name !== undefined ? display_name : name;
+        if (targetName !== undefined) {
+            const cleanedName = String(targetName || "").trim();
             updates.display_name = cleanedName || "Untitled Workflow";
+            console.log(`✏️ [SERVER BACKEND] Setting display_name to: "${updates.display_name}"`);
         }
 
         if (primary_media_id !== undefined) {
@@ -183,26 +193,73 @@ export const patchWorkflow = async (req, res) => {
             updates.favorited = !!favorited;
         }
 
-        if (description !== undefined) elementUpdates.description = description;
+        if (description !== undefined) {
+            const cleanedDesc = String(description || "").trim();
+            const existingWf = await getWorkflow(id);
+            updates.metadata = { ...(existingWf?.metadata || {}), ...(updates.metadata || {}), description: cleanedDesc };
+            console.log(`✏️ [SERVER BACKEND] Setting description in metadata to: "${cleanedDesc}"`);
+        }
+
+        if (metadata !== undefined) {
+            const existingWf = await getWorkflow(id);
+            updates.metadata = { ...(existingWf?.metadata || {}), ...(updates.metadata || {}), ...metadata };
+        }
+
+        // Only populate elementUpdates for element-specific fields (keywords/guidelines)
         if (keywords !== undefined) elementUpdates.keywords = keywords;
         if (guidelines !== undefined) elementUpdates.guidelines = guidelines;
 
         if (Object.keys(updates).length === 0 && Object.keys(elementUpdates).length === 0) {
+            console.warn(`⚠️ [SERVER BACKEND] 400 Bad Request: No supported workflow fields provided in body`);
             return res.status(400).json({ ok: false, message: "No supported workflow fields provided" });
         }
 
+        console.log(`🔄 [SERVER BACKEND] Executing database update for workflow ${id}:`, updates);
         const workflow = Object.keys(updates).length > 0
             ? await updateWorkflow(id, updates)
             : await getWorkflow(id);
 
+        // Synchronize dedicated 'public.characters' table if name is updated
+        if (targetName !== undefined) {
+            try {
+                const cleanedName = String(targetName || "").trim();
+                console.log(`🎭 [SERVER BACKEND] Syncing name "${cleanedName}" to public.characters table for workflow_id ${id}...`);
+                const { data: charData, error: charErr } = await supabase
+                    .from("characters")
+                    .update({
+                        name: cleanedName || "Untitled Character",
+                        title: cleanedName || "Untitled Character",
+                        updated_at: new Date().toISOString(),
+                    })
+                    .or(`workflow_id.eq.${id},id.eq.${id}`);
+
+                if (charErr) {
+                    console.warn(`⚠️ [SERVER BACKEND] 'characters' table update notice:`, charErr.message);
+                } else {
+                    console.log(`✅ [SERVER BACKEND] 'characters' table updated successfully:`, charData);
+                }
+            } catch (cErr) {
+                console.warn(`⚠️ [SERVER BACKEND] 'characters' table sync error:`, cErr.message);
+            }
+        }
+
         let element = null;
         if (Object.keys(elementUpdates).length > 0) {
+            console.log(`🔄 [SERVER BACKEND] Updating element details for workflow ${id}:`, elementUpdates);
             element = await elementRepository.updateByWorkflowId(id, elementUpdates);
         }
 
+        console.log(`✅ [SERVER BACKEND] Successfully updated workflow ${id}:`, {
+            id: workflow?.id || id,
+            display_name: workflow?.display_name,
+            name: workflow?.name,
+        });
+        console.log(`======================================================\n`);
+
         return res.json({ ok: true, workflow, element });
     } catch (err) {
-        console.error(`❌ Error patching workflow ${req.params.id}:`, err);
+        console.error(`❌ [SERVER BACKEND] Error patching workflow ${req.params.id}:`, err);
+        console.log(`======================================================\n`);
         return res.status(500).json({ ok: false, message: err.message });
     }
 };

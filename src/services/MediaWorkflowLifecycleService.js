@@ -31,9 +31,14 @@ function inferStepId(nodeType, input = {}, stepIdOverride = null) {
 }
 
 function buildDisplayName(input = {}) {
-  const rawPrompt = (input?.prompt || "").trim();
-  if (!rawPrompt) return "Untitled Generation";
-  return rawPrompt.length > 60 ? `${rawPrompt.slice(0, 60)}…` : rawPrompt;
+  const name = input?.name || input?.title || input?.concept || input?.prompt || "";
+  const raw = String(name).trim();
+  if (!raw) {
+    return input?.type === "character" || input?.workflowId === "character-sheet-v1" || input?.stepId === "character_sheet"
+      ? "Untitled Character"
+      : "Untitled Element";
+  }
+  return raw.length > 60 ? `${raw.slice(0, 60)}…` : raw;
 }
 
 function buildGenerationConfig(nodeType, input = {}) {
@@ -263,7 +268,8 @@ export class MediaWorkflowLifecycleService {
 
     for (let i = 0; i < placeholders.length; i++) {
       const placeholder = placeholders[i];
-      const asset = assets[i];
+      // If assets has fewer items (e.g. 1 asset for multiple placeholders), reuse single asset
+      const asset = assets[i] || (assets.length === 1 ? assets[0] : null);
       if (!placeholder?.mediaId) continue;
 
       const ok = await this.completePlaceholder(placeholder.mediaId, asset);

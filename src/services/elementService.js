@@ -106,7 +106,7 @@ export async function createElement({ name, sourceImages, description, projectId
                 step_id:    "CAE",           // Create Asset — Element
                 width:      1024,
                 height:     1024,
-                status:     "completed",     // Instant completed state for element references
+                status:     "success",       // Canonical success state
             });
             mediaRecords.push(media);
         }

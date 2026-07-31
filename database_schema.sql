@@ -611,6 +611,7 @@ CREATE TABLE public.characters (
   name character varying(255) NOT NULL,
   title character varying(255) NULL,
   description text NULL,
+  character_info text NULL,
   archetype character varying(100) NULL,
   gender character varying(50) NULL,
   style character varying(100) NULL DEFAULT 'cinematic'::character varying,

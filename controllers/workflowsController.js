@@ -1,4 +1,4 @@
-import { supabase } from "../lib/supabase.js";
+import { supabase, supabaseAdmin } from "../lib/supabase.js";
 import { assertMediaUsable } from "../lib/mediaGuards.js";
 import { storageService } from "../src/container.js";
 import elementRepository from "../src/db/ElementRepository.js";
@@ -180,9 +180,13 @@ export const patchWorkflow = async (req, res) => {
 
         const targetName = display_name !== undefined ? display_name : name;
         if (targetName !== undefined) {
-            const cleanedName = String(targetName || "").trim();
-            updates.display_name = cleanedName || "Untitled Workflow";
-            console.log(`✏️ [SERVER BACKEND] Setting display_name to: "${updates.display_name}"`);
+            const cleanedName = String(targetName || "").replace(/^@+/, "").trim();
+            if (cleanedName.length > 0) {
+                updates.display_name = cleanedName;
+                console.log(`✏️ [SERVER BACKEND] Setting display_name to: "${updates.display_name}"`);
+            } else {
+                console.warn(`⚠️ [SERVER BACKEND] Empty character name received. Keeping existing display_name in DB.`);
+            }
         }
 
         if (primary_media_id !== undefined) {
@@ -193,23 +197,14 @@ export const patchWorkflow = async (req, res) => {
             updates.favorited = !!favorited;
         }
 
-        if (description !== undefined) {
-            const cleanedDesc = String(description || "").trim();
-            const existingWf = await getWorkflow(id);
-            updates.metadata = { ...(existingWf?.metadata || {}), ...(updates.metadata || {}), description: cleanedDesc };
-            console.log(`✏️ [SERVER BACKEND] Setting description in metadata to: "${cleanedDesc}"`);
+        let hasDescriptionUpdate = false;
+        const descVal = description !== undefined ? description : character_info;
+        if (descVal !== undefined) {
+            hasDescriptionUpdate = true;
+            console.log(`✏️ [SERVER BACKEND] Received description update for character...`);
         }
 
-        if (metadata !== undefined) {
-            const existingWf = await getWorkflow(id);
-            updates.metadata = { ...(existingWf?.metadata || {}), ...(updates.metadata || {}), ...metadata };
-        }
-
-        // Only populate elementUpdates for element-specific fields (keywords/guidelines)
-        if (keywords !== undefined) elementUpdates.keywords = keywords;
-        if (guidelines !== undefined) elementUpdates.guidelines = guidelines;
-
-        if (Object.keys(updates).length === 0 && Object.keys(elementUpdates).length === 0) {
+        if (Object.keys(updates).length === 0 && Object.keys(elementUpdates).length === 0 && !hasDescriptionUpdate) {
             console.warn(`⚠️ [SERVER BACKEND] 400 Bad Request: No supported workflow fields provided in body`);
             return res.status(400).json({ ok: false, message: "No supported workflow fields provided" });
         }
@@ -219,22 +214,66 @@ export const patchWorkflow = async (req, res) => {
             ? await updateWorkflow(id, updates)
             : await getWorkflow(id);
 
-        // Synchronize dedicated 'public.characters' table if name is updated
-        if (targetName !== undefined) {
+        // Synchronize dedicated 'public.characters' table if name or description is updated
+        if (targetName !== undefined || descVal !== undefined) {
             try {
-                const cleanedName = String(targetName || "").trim();
-                console.log(`🎭 [SERVER BACKEND] Syncing name "${cleanedName}" to public.characters table for workflow_id ${id}...`);
-                const { data: charData, error: charErr } = await supabase
+                const charPayload = { updated_at: new Date().toISOString() };
+                if (targetName !== undefined) {
+                    const cleanedName = String(targetName || "").replace(/^@+/, "").trim();
+                    if (cleanedName.length > 0) {
+                        charPayload.name = cleanedName;
+                        charPayload.title = cleanedName;
+                    }
+                }
+                if (descVal !== undefined) {
+                    const cleanedDesc = String(descVal || "").trim();
+                    charPayload.description = cleanedDesc;
+                    charPayload.character_info = cleanedDesc;
+                }
+
+                console.log(`🎭 [SERVER BACKEND] Syncing payload to public.characters table for workflow_id ${id}:`, charPayload);
+                let { data: charData, error: charErr } = await supabaseAdmin
                     .from("characters")
-                    .update({
-                        name: cleanedName || "Untitled Character",
-                        title: cleanedName || "Untitled Character",
-                        updated_at: new Date().toISOString(),
-                    })
-                    .or(`workflow_id.eq.${id},id.eq.${id}`);
+                    .update(charPayload)
+                    .or(`workflow_id.eq.${id},id.eq.${id}`)
+                    .select()
+                    .maybeSingle();
 
                 if (charErr) {
                     console.warn(`⚠️ [SERVER BACKEND] 'characters' table update notice:`, charErr.message);
+                }
+
+                if (!charData) {
+                    console.log(`ℹ️ [SERVER BACKEND] No existing row in 'public.characters' table, upserting for workflow ${id}...`);
+                    const { data: wfRow } = await supabaseAdmin
+                        .from("workflow")
+                        .select("id, project_id, user_id, display_name")
+                        .eq("id", id)
+                        .maybeSingle();
+
+                    const upsertPayload = {
+                        id,
+                        workflow_id: id,
+                        project_id: wfRow?.project_id || null,
+                        user_id: user_id || wfRow?.user_id || "64950918-266f-42c7-a6d3-c13f87bbbcb8",
+                        name: charPayload.name || wfRow?.display_name || "Untitled Character",
+                        title: charPayload.title || wfRow?.display_name || "Untitled Character",
+                        description: charPayload.description || "",
+                        character_info: charPayload.character_info || "",
+                        ...charPayload,
+                    };
+
+                    const { data: upsertedChar, error: upErr } = await supabaseAdmin
+                        .from("characters")
+                        .upsert(upsertPayload, { onConflict: "id" })
+                        .select()
+                        .maybeSingle();
+
+                    if (upErr) {
+                        console.warn(`⚠️ [SERVER BACKEND] 'characters' upsert error:`, upErr.message);
+                    } else {
+                        console.log(`✅ [SERVER BACKEND] Successfully upserted 'public.characters' row:`, upsertedChar);
+                    }
                 } else {
                     console.log(`✅ [SERVER BACKEND] 'characters' table updated successfully:`, charData);
                 }

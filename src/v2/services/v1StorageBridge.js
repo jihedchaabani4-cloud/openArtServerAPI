@@ -82,8 +82,8 @@ export class V1StorageBridge {
       mediaData,
     });
 
-    // Auto-create row in public.characters table for character workflows
-    if (workflowType === "CHARACTER" || stepId === "character_sheet") {
+    // Auto-create row in public.characters table ONLY for character workflows
+    if (workflowType === "CHARACTER") {
       try {
         const charName = displayName || config?.prompt?.slice(0, 50) || "Untitled Character";
         await this.db.projects.client().from("characters").insert({
@@ -93,6 +93,7 @@ export class V1StorageBridge {
           name: charName,
           title: charName,
           description: config?.prompt || "",
+          character_info: config?.prompt || "",
           status: "ready",
         });
         console.log(`[V1StorageBridge] Created 'public.characters' row for workflow=${workflow.id}`);

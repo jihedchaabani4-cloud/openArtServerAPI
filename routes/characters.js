@@ -20,6 +20,12 @@ router.post("/character", characterController.createCharacter);
 router.post("/generate-description", characterController.generateCharacterDescription);
 
 /**
+ * @route PATCH /api/characters/:characterId
+ * @desc Unified dedicated API to update character fields (name, description, character_info, turnaround_url, etc.)
+ */
+router.patch("/:characterId", characterController.updateCharacter);
+
+/**
  * @route POST   /api/characters/:characterId/media  — attach a detail image
  * @route DELETE /api/characters/:characterId/media/:mediaId — remove a detail image
  */

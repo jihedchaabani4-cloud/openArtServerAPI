@@ -20,6 +20,7 @@ router.post("/detach-media", workflowsController.detachMediaToNewWorkflow);
 router.patch("/workflows/like", workflowsController.bulkToggleLike);
 router.delete("/workflows", workflowsController.bulkDeleteWorkflows);
 router.patch("/workflows/:id", workflowsController.patchWorkflow);
+router.patch("/:id", workflowsController.patchWorkflow);
 router.patch("/workflows/:id/move", workflowsController.moveWorkflow);
 router.patch("/workflows/:id/like", workflowsController.toggleLike);
 router.patch("/workflows/:id/primary-media", workflowsController.setPrimaryMedia);

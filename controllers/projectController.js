@@ -1,4 +1,4 @@
-import { supabase } from "../lib/supabase.js";
+import { supabase, supabaseAdmin } from "../lib/supabase.js";
 import { MODEL_FAMILIES, getModelMetadata } from "../src/utils/modelUtils.js";
 import { getWorkflows } from "./workflowsController.js";
 import { MODEL_ROUTES } from "#video/core/modelRouter.js";
@@ -127,9 +127,10 @@ export const getProjectData = async (req, res) => {
             return [];
         });
 
-        // ── 3.1 Elements ─────────────────────────────────────────────
+        // ── 3.1 Elements & Characters ──────────────────────────────────
         const workflowIds = (workflows || []).map(w => w.id);
         let elementMap = {};
+        let characterMap = {};
         let elementsList = [];
         if (workflowIds.length > 0) {
             const { data: elements, error: elemErr } = await supabase
@@ -145,28 +146,45 @@ export const getProjectData = async (req, res) => {
                     elementMap[elem.workflow_id] = elem;
                 });
             }
+
+            const { data: chars, error: charErr } = await supabaseAdmin
+                .from("characters")
+                .select("*");
+
+            if (charErr) {
+                console.warn("⚠️ Characters query warning:", charErr.message);
+            } else if (chars) {
+                chars.forEach(c => {
+                    if (c.workflow_id) characterMap[c.workflow_id] = c;
+                    if (c.id) characterMap[c.id] = c;
+                });
+            }
         }
 
         const formattedWorkflows = (workflows || []).map(wf => {
             const elem = elementMap[wf.id] || {};
+            const char = characterMap[wf.id] || {};
+            const desc = char.character_info || char.description || elem.description || "";
             return {
                 id:            wf.id,
                 name:          wf.id,
                 projectId:     project_id,
                 workflow_type: wf.workflow_type,
                 element_type:  elem.element_type || "object",
-                description:   elem.description || wf.metadata?.description || "",
+                description:   desc,
+                character_info: desc,
                 keywords:      elem.keywords || wf.metadata?.keywords || [],
                 guidelines:    elem.guidelines || wf.metadata?.guidelines || [],
                 element:       elem,
+                character:     char,
                 metadata: {
-                    displayName:    elem.name || wf.display_name,
+                    displayName:    char.name || char.title || elem.name || wf.display_name,
                     createTime:     wf.create_time,
                     primaryMediaId: wf.primary_media_id || "",
                     sessionId:      wf.session_id,
                     favorited:      !!wf.favorited,
                     elementType:    elem.element_type || "object",
-                    description:    elem.description || wf.metadata?.description || "",
+                    description:    desc,
                     keywords:       elem.keywords || wf.metadata?.keywords || [],
                     guidelines:     elem.guidelines || wf.metadata?.guidelines || [],
                 },

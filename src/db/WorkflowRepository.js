@@ -1,5 +1,5 @@
 import { BaseRepository } from "./BaseRepository.js";
-import { createWorkflow, updateWorkflow, getWorkflows, getWorkflow } from "../../controllers/workflowsController.js";
+import { supabase } from "../../lib/supabase.js";
 
 export class WorkflowRepository extends BaseRepository {
     constructor() {
@@ -8,15 +8,46 @@ export class WorkflowRepository extends BaseRepository {
 
     /**
      * Creates a workflow (one variation inside a batch, or a standalone upload).
-     * @param {Object} data - payload
-     * @param {Object} options - extra options (e.g., select)
+     * Repository-pure: no imports from controller layer.
+     * @param {Object} data - workflow fields
+     * @param {Object} [options] - extra options (e.g., select)
      */
     async createWorkflow(data, options = {}) {
-        return await createWorkflow(data, options);
+        const {
+            project_id, session_id, display_name, primary_media_id,
+            variation_index, workflow_type,
+        } = data;
+
+        const newWorkflow = {
+            project_id:       project_id       || null,
+            session_id:       session_id       || null,
+            display_name:     display_name     || "Untitled Workflow",
+            variation_index:  variation_index  || 0,
+            primary_media_id: primary_media_id || null,
+        };
+
+        if (workflow_type) newWorkflow.workflow_type = workflow_type;
+
+        const { select = "*" } = options;
+
+        const { data: created, error } = await supabase
+            .from(this.tableName)
+            .insert(newWorkflow)
+            .select(select)
+            .single();
+
+        if (error) throw error;
+        return created;
     }
 
     async getWorkflow(id) {
-        return await getWorkflow(id);
+        const { data, error } = await supabase
+            .from(this.tableName)
+            .select("*")
+            .eq("id", id)
+            .single();
+        if (error) throw error;
+        return data;
     }
 
     /**
@@ -24,7 +55,11 @@ export class WorkflowRepository extends BaseRepository {
      * Called once per workflow after generation/upload succeeds.
      */
     async updatePrimaryMedia(workflow_id, media_id) {
-        await updateWorkflow(workflow_id, { primary_media_id: media_id });
+        const { error } = await supabase
+            .from(this.tableName)
+            .update({ primary_media_id: media_id })
+            .eq("id", workflow_id);
+        if (error) throw error;
     }
 
     async findByBatch(batch_id, options = {}) {
@@ -38,11 +73,23 @@ export class WorkflowRepository extends BaseRepository {
     }
 
     async findBySession(session_id, options = {}) {
-        return await getWorkflows({ session_id }, options);
+        const { select = "*", order = { column: "create_time", ascending: false } } = options;
+        let query = supabase.from(this.tableName).select(select);
+        if (order) query = query.order(order.column, { ascending: order.ascending });
+        query = query.eq("session_id", session_id);
+        const { data, error } = await query;
+        if (error) throw error;
+        return data;
     }
 
     async findByProject(project_id, options = {}) {
-        return await getWorkflows({ project_id }, options);
+        const { select = "*", order = { column: "create_time", ascending: false } } = options;
+        let query = supabase.from(this.tableName).select(select);
+        if (order) query = query.order(order.column, { ascending: order.ascending });
+        query = query.eq("project_id", project_id);
+        const { data, error } = await query;
+        if (error) throw error;
+        return data;
     }
 
     /**

@@ -27,6 +27,9 @@ import { DnaTreatment } from "./dna/DnaTreatment.js";
 import { WorkflowEventRecorder } from "./infrastructure/events/workflowEventRecorder.js";
 import { WorkflowBillingGateway } from "./infrastructure/billing/workflowBillingGateway.js";
 import { MediaWorkflowLifecycleService } from "#services/MediaWorkflowLifecycleService.js";
+import { WorkflowService } from "#services/WorkflowService.js";
+import { CharacterService } from "#services/CharacterService.js";
+import { ProjectReadService } from "#services/ProjectReadService.js";
 import { WorkflowStorageGateway } from "./infrastructure/storage/workflowStorageGateway.js";
 import { WorkflowQueueGateway } from "./infrastructure/queue/workflowQueueGateway.js";
 import { WorkflowExecutionRepository } from "./workflows/workflowExecutionRepository.js";
@@ -130,6 +133,20 @@ export const dnaTreatment = new DnaTreatment({
     textProvider: promptService.textProvider,
     db
 });
+
+// ─── Domain Services (feature 024-unify-domain-crud) ─────────────────────────
+// WorkflowService: canonical domain owner for all workflow & media CRUD
+export const workflowService = new WorkflowService({ db, storageService });
+
+// CharacterService: owns character entity CRUD; delegates workflow cleanup to workflowService
+export const characterService = new CharacterService({
+    db,
+    storageService,
+    workflowService,
+});
+
+// ProjectReadService: owns unified project-data read aggregation
+export const projectReadService = new ProjectReadService({ db });
 
 // ─── Provider Registry (V2 adapters registered in bootstrap.js) ─────────────
 // Image and Video providers are registered by bootstrapV2() in v2/bootstrap.js.

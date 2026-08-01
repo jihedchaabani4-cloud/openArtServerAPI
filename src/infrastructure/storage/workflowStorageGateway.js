@@ -83,12 +83,21 @@ export class WorkflowStorageGateway {
           generation_type: isEdit ? "IMAGE_TO_IMAGE" : "TEXT_ONLY",
         };
 
+        const derivedWorkflowType =
+          input?.workflow_type ||
+          input?.workflowType ||
+          (workflowId === "character-sheet-v1" || input?.type === "character"
+            ? "CHARACTER"
+            : workflowId === "element-sheet-v1"
+              ? "ELEMENT_SHEET"
+              : "GENERATION");
+
         const { workflow, media } = await bridge.createV1Workflow({
           userId,
           projectId,
           sessionId,
           displayName,
-          workflowType: "GENERATION",
+          workflowType: derivedWorkflowType,
           asset,
           config,
           stepId,

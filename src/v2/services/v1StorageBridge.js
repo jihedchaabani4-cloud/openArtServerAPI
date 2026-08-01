@@ -45,7 +45,7 @@ export class V1StorageBridge {
       config = null,
     } = params;
 
-    const validWfType = workflowType === "CHARACTER" ? "ELEMENT_SHEET" : workflowType;
+    const validWfType = workflowType;
 
     const workflowData = {
       project_id: projectId,
@@ -261,6 +261,25 @@ export class V1StorageBridge {
       mediaData,
       setAsPrimary: true,
     });
+
+    if (workflowType === "CHARACTER") {
+      try {
+        const charName = displayName || config?.prompt?.slice(0, 50) || "Untitled Character";
+        await this.db.projects.client().from("characters").insert({
+          user_id: userId,
+          project_id: projectId,
+          workflow_id: workflow.id,
+          name: charName,
+          title: charName,
+          description: config?.prompt || "",
+          character_info: config?.prompt || "",
+          status: "ready",
+        });
+        console.log(`[V1StorageBridge] Created 'public.characters' row for workflow=${workflow.id}`);
+      } catch (charErr) {
+        console.warn(`[V1StorageBridge] Notice creating 'public.characters' row:`, charErr.message);
+      }
+    }
 
     return { workflow, media };
   }

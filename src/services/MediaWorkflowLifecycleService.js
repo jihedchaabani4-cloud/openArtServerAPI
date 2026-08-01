@@ -129,7 +129,7 @@ export class MediaWorkflowLifecycleService {
       const effectiveStepId = inferStepId(nodeType, input, stepId);
       const effectiveWorkflowType = (workflowType && workflowType !== "GENERATION")
         ? workflowType
-        : (workflowId === "character-sheet-v1" ? "ELEMENT_SHEET" : "GENERATION");
+        : (workflowId === "character-sheet-v1" ? "CHARACTER" : "GENERATION");
 
       const { workflow, media } = await this.bridge.createV1Placeholder({
         userId,

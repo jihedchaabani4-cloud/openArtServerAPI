@@ -62,6 +62,33 @@ export class StorageService {
         }
     }
 
+    async deleteFiles(paths = []) {
+        const uniquePaths = [...new Set((paths || []).filter(Boolean))];
+
+        if (!uniquePaths.length) {
+            return { deletedCount: 0, failures: [] };
+        }
+
+        const results = await Promise.allSettled(
+            uniquePaths.map((path) => this.delete(path))
+        );
+
+        const failures = results
+            .map((result, index) => (result.status === "rejected"
+                ? { path: uniquePaths[index], error: result.reason }
+                : null))
+            .filter(Boolean);
+
+        if (failures.length) {
+            console.warn("⚠️ Storage batch delete completed with failures:", failures);
+        }
+
+        return {
+            deletedCount: uniquePaths.length - failures.length,
+            failures,
+        };
+    }
+
     remove(path) {
         return this.delete(path);
     }

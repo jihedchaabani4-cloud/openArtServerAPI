@@ -156,6 +156,78 @@ const verifyWorkflowOwnership = async (workflowId, userId, req = null) => {
     return Boolean(result && result.length === 1);
 };
 
+const deleteStoragePaths = async (filePaths = []) => {
+    const normalizedPaths = [...new Set((filePaths || []).filter(Boolean))];
+
+    if (!normalizedPaths.length) {
+        return { deletedCount: 0, failures: [] };
+    }
+
+    if (typeof storageService.deleteFiles === "function") {
+        return storageService.deleteFiles(normalizedPaths);
+    }
+
+    const results = await Promise.allSettled(
+        normalizedPaths.map((path) => storageService.delete(path))
+    );
+
+    const failures = results
+        .map((result, index) => (result.status === "rejected"
+            ? { path: normalizedPaths[index], error: result.reason }
+            : null))
+        .filter(Boolean);
+
+    return {
+        deletedCount: normalizedPaths.length - failures.length,
+        failures,
+    };
+};
+
+const deleteWorkflowResources = async (workflowId) => {
+    const { data: mediaItems, error: mediaError } = await supabase
+        .from("media")
+        .select("id, url")
+        .eq("workflow_id", workflowId);
+
+    if (mediaError) throw mediaError;
+
+    const mediaIds = (mediaItems || []).map((media) => media.id).filter(Boolean);
+    const filePaths = (mediaItems || [])
+        .map((media) => extractPath(media.url))
+        .filter(Boolean);
+
+    if (mediaIds.length) {
+        const { error: refsError } = await supabase
+            .from("generation_config_reference")
+            .delete()
+            .in("ref_media_id", mediaIds);
+
+        if (refsError) throw refsError;
+    }
+
+    const { error: mediaDeleteError } = await supabase
+        .from("media")
+        .delete()
+        .eq("workflow_id", workflowId);
+
+    if (mediaDeleteError) throw mediaDeleteError;
+
+    const { error: workflowDeleteError } = await supabase
+        .from("workflow")
+        .delete()
+        .eq("id", workflowId);
+
+    if (workflowDeleteError) throw workflowDeleteError;
+
+    const storageResult = await deleteStoragePaths(filePaths);
+
+    return {
+        workflowId,
+        deletedMediaCount: mediaIds.length,
+        storageFailures: storageResult.failures || [],
+    };
+};
+
 // ── PATCH /api/workflows/:id ────────────────────────────────────────────────────
 export const patchWorkflow = async (req, res) => {
     const { id } = req.params;
@@ -314,50 +386,14 @@ export const deleteWorkflow = async (req, res) => {
             return res.status(403).json({ ok: false, message: "Unauthorized access to this workflow" });
         }
 
-        res.json({ ok: true, message: "Deletion in progress" });
+        const result = await deleteWorkflowResources(id);
 
-        (async () => {
-            try {
-                // 1. جيب media
-                const { data: mediaItems } = await supabase
-                    .from("media")
-                    .select("id, url")
-                    .eq("workflow_id", id);
-
-                if (mediaItems?.length) {
-                    const mediaIds = mediaItems.map(m => m.id);
-                    const filePaths = mediaItems
-                        .map(m => extractPath(m.url))
-                        .filter(Boolean);
-
-                    // 2. امسح references
-                    await supabase
-                        .from("generation_config_reference")
-                        .delete()
-                        .in("ref_media_id", mediaIds);
-
-                    // 3. امسح media
-                    await supabase
-                        .from("media")
-                        .delete()
-                        .eq("workflow_id", id);
-
-                    // 4. امسح storage
-                    if (filePaths.length) {
-                        await storageService.deleteFiles(filePaths);
-                    }
-                }
-
-                // 5. امسح workflow
-                await supabase
-                    .from("workflow")
-                    .delete()
-                    .eq("id", id);
-
-            } catch (err) {
-                console.error("Delete Error:", err);
-            }
-        })();
+        return res.json({
+            ok: true,
+            deleted_workflow_id: result.workflowId,
+            deleted_media_count: result.deletedMediaCount,
+            storage_failures: result.storageFailures.length,
+        });
     } catch (err) {
         return res.status(500).json({ ok: false, message: err.message });
     }
@@ -377,51 +413,17 @@ export const bulkDeleteWorkflows = async (req, res) => {
             return res.status(403).json({ ok: false, message: "Unauthorized access to one or more workflows" });
         }
 
-        res.json({
+        const results = [];
+        for (const workflowId of ownedIds) {
+            results.push(await deleteWorkflowResources(workflowId));
+        }
+
+        return res.json({
             ok: true,
-            message: "Bulk deletion in progress",
             workflow_ids: ownedIds,
             count: ownedIds.length,
+            results,
         });
-
-        (async () => {
-            for (const workflowId of ownedIds) {
-                try {
-                    const { data: mediaItems } = await supabase
-                        .from("media")
-                        .select("id, url")
-                        .eq("workflow_id", workflowId);
-
-                    if (mediaItems?.length) {
-                        const mediaIds = mediaItems.map((m) => m.id);
-                        const filePaths = mediaItems
-                            .map((m) => extractPath(m.url))
-                            .filter(Boolean);
-
-                        await supabase
-                            .from("generation_config_reference")
-                            .delete()
-                            .in("ref_media_id", mediaIds);
-
-                        await supabase
-                            .from("media")
-                            .delete()
-                            .eq("workflow_id", workflowId);
-
-                        if (filePaths.length) {
-                            await storageService.deleteFiles(filePaths);
-                        }
-                    }
-
-                    await supabase
-                        .from("workflow")
-                        .delete()
-                        .eq("id", workflowId);
-                } catch (err) {
-                    console.error(`Bulk delete error for workflow ${workflowId}:`, err);
-                }
-            }
-        })();
     } catch (err) {
         return res.status(500).json({ ok: false, message: err.message });
     }
@@ -786,8 +788,21 @@ export const deleteMedia = async (req, res) => {
             return res.status(403).json({ ok: false, message: "Unauthorized access to this media" });
         }
 
+        const { data: mediaRec, error: mediaFetchError } = await supabase
+            .from("media")
+            .select("id, workflow_id, url")
+            .eq("id", media_id)
+            .maybeSingle();
+
+        if (mediaFetchError) throw mediaFetchError;
+
         // Clean up references
-        await supabase.from("generation_config_reference").delete().eq("ref_media_id", media_id);
+        const { error: refsError } = await supabase
+            .from("generation_config_reference")
+            .delete()
+            .eq("ref_media_id", media_id);
+
+        if (refsError) throw refsError;
 
         const { data, error } = await supabase
             .from("media")
@@ -797,7 +812,59 @@ export const deleteMedia = async (req, res) => {
             .single();
 
         if (error) throw error;
-        return res.json({ ok: true, deleted: data });
+
+        await deleteStoragePaths([extractPath(mediaRec?.url)]);
+
+        // If this was the last media in the workflow, delete the parent workflow as well
+        let workflowDeleted = false;
+        let nextPrimaryMediaId = null;
+        if (mediaRec?.workflow_id) {
+            const { data: remainingMedia, error: remainingError } = await supabase
+                .from("media")
+                .select("id")
+                .eq("workflow_id", mediaRec.workflow_id)
+                .order("create_time", { ascending: true });
+
+            if (remainingError) throw remainingError;
+
+            if (!remainingMedia?.length) {
+                const { error: workflowDeleteError } = await supabase
+                    .from("workflow")
+                    .delete()
+                    .eq("id", mediaRec.workflow_id);
+
+                if (workflowDeleteError) throw workflowDeleteError;
+
+                workflowDeleted = true;
+                console.log(`🧹 [DeleteMedia] Empty workflow ${mediaRec.workflow_id} cleaned up.`);
+            } else {
+                const { data: workflowRecord, error: workflowFetchError } = await supabase
+                    .from("workflow")
+                    .select("primary_media_id")
+                    .eq("id", mediaRec.workflow_id)
+                    .maybeSingle();
+
+                if (workflowFetchError) throw workflowFetchError;
+
+                if (workflowRecord?.primary_media_id === media_id) {
+                    nextPrimaryMediaId = remainingMedia[0]?.id || null;
+
+                    const { error: primaryUpdateError } = await supabase
+                        .from("workflow")
+                        .update({ primary_media_id: nextPrimaryMediaId })
+                        .eq("id", mediaRec.workflow_id);
+
+                    if (primaryUpdateError) throw primaryUpdateError;
+                }
+            }
+        }
+
+        return res.json({
+            ok: true,
+            deleted: data,
+            workflow_deleted: workflowDeleted,
+            next_primary_media_id: nextPrimaryMediaId,
+        });
     } catch (err) {
         console.error(`❌ Error deleting media ${req.params.media_id}:`, err);
         return res.status(500).json({ ok: false, message: err.message });

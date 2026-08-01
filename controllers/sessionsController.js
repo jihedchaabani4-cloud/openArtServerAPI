@@ -7,7 +7,15 @@ export const create = async (req, res) => {
         if (!project_id) return res.status(400).json({ ok: false, message: "project_id is required" });
 
         const userId = req.user.id;
-        const sessionName = session_name || name || "Untitled";
+        let sessionName = session_name || name;
+
+        if (!sessionName || sessionName.trim() === "" || sessionName === "Untitled" || sessionName === "Auto Session") {
+            const { count } = await supabase
+                .from("session")
+                .select("*", { count: "exact", head: true })
+                .eq("project_id", project_id);
+            sessionName = `Session ${(count || 0) + 1}`;
+        }
 
         // Verify project ownership
         const { data: project } = await supabase

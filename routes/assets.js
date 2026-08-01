@@ -167,6 +167,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
                 project_id:      projectId,
                 session_id:      sessionId,
                 display_name:    req.file?.originalname || "Upload",
+                workflow_type:   req.body?.workflow_type || "UPLOAD",
                 variation_index: null,
             },
             mediaData: {
@@ -180,7 +181,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
             initialStatus: "processing",
         });
 
-        console.log(`📤 [AssetsRoute] Media record created (processing) → media:${mediaRecord.id}, workflow:${wf.id}`);
+        console.log(`📤 [Backend AssetsRoute] Workflow & Media created (processing) → media:${mediaRecord.id}, workflow:${wf.id}, workflow_type:${wf.workflow_type || 'UPLOAD'}`);
 
         // 2. Upload file to storage
         let publicUrl;
@@ -196,18 +197,19 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         await db.media.updateFields(mediaRecord.id, { url: publicUrl });
         await markMediaStatus(db, mediaRecord.id, "success");
 
-        console.log(`✅ [AssetsRoute] Upload complete → media:${mediaRecord.id}`);
+        console.log(`✅ [Backend AssetsRoute] Upload complete → media:${mediaRecord.id}, url:${publicUrl}`);
 
         return res.json({
-            ok:          true,
-            url:         publicUrl,
-            media_id:    mediaRecord.id,
-            workflow_id: wf.id,
-            asset_id:    mediaRecord.id, // backward compat alias
-            type:        isVideo ? "video" : "image",
-            width:       width,
-            height:      height,
-            ratio:       ratio,
+            ok:            true,
+            url:           publicUrl,
+            media_id:      mediaRecord.id,
+            workflow_id:   wf.id,
+            workflow_type: "UPLOAD",
+            asset_id:      mediaRecord.id, // backward compat alias
+            type:          isVideo ? "video" : "image",
+            width:         width,
+            height:        height,
+            ratio:         ratio,
             resolution:  resolution,
             size:        size,
         });

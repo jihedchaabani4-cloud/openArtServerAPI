@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { workflowStorageGateway, characterService } from "../src/container.js";
+import { workflowStorageGateway, characterService, mediaWorkflowLifecycleService } from "../src/container.js";
 
 // V2 Imports
 import { loadRegistries } from "../src/v2/registry/registryLoader.js";
@@ -54,15 +54,12 @@ export async function createCharacter(req, res) {
         if (!workflowDef) throw new Error(`V2 Workflow ${v2WorkflowId} not found`);
         const plan = compileWorkflow(workflowDef, registries);
 
-        // Phase 1 — Pre-create placeholder
-        const placeholder = await workflowStorageGateway.createMediaPlaceholder({
-            runId,
-            nodeType: "image-generation",
+        // Phase 1 — Explicit domain placeholder creation
+        const placeholder = await mediaWorkflowLifecycleService.createCharacterPlaceholder({
             userId,
-            workflowId: v2WorkflowId,
-            workflowType: "CHARACTER",
-            stepId: "character_sheet",
             input: v2Input,
+            runId,
+            displayName: v2Input.name || v2Input.title || v2Input.prompt,
         });
 
         const runtimeInput = {
@@ -235,6 +232,23 @@ export async function updateCharacter(req, res) {
 
     } catch (err) {
         console.error(`❌ [characterController] updateCharacter error:`, err);
+        return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+    }
+}
+
+/**
+ * DELETE /api/characters/:characterId
+ * Removes character entity and delegates workflow/media cleanup to CharacterService -> WorkflowLifecycleService.
+ */
+export async function deleteCharacter(req, res) {
+    try {
+        const { characterId } = req.params;
+        const userId = req.user?.id;
+
+        const result = await characterService.deleteCharacter({ characterId, userId, req });
+        return res.json({ ok: true, ...result });
+    } catch (err) {
+        console.error(`❌ [characterController] deleteCharacter error:`, err);
         return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
     }
 }

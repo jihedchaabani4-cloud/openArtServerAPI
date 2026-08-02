@@ -24,6 +24,7 @@ router.post("/generate-description", characterController.generateCharacterDescri
  * @desc Unified dedicated API to update character fields (name, description, character_info, turnaround_url, etc.)
  */
 router.patch("/:characterId", characterController.updateCharacter);
+router.delete("/:characterId", characterController.deleteCharacter);
 
 /**
  * @route POST   /api/characters/:characterId/media  — attach a detail image

@@ -95,7 +95,7 @@ export async function runRetryFallbackCheck() {
   const runId = submitResult.run_id;
 
   console.log(`Polling status for run ${runId}...`);
-  let maxAttempts = 30;
+  let maxAttempts = 60;
   let runState = null;
   
   while (maxAttempts > 0) {

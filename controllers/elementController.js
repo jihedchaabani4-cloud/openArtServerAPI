@@ -132,7 +132,8 @@ export async function deleteElement(req, res) {
 
     try {
         const { id } = req.params;
-        await elementService.deleteElement(id);
+        const userId = req.user?.id;
+        await elementService.deleteElement(id, userId);
 
         const durationMs = Date.now() - start;
         console.log(JSON.stringify(structuredLog({ traceId, operation: "DELETE /api/v2/elements/:id", durationMs, status: "success" })));

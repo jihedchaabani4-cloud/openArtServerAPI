@@ -27,7 +27,7 @@ import { DnaTreatment } from "./dna/DnaTreatment.js";
 import { WorkflowEventRecorder } from "./infrastructure/events/workflowEventRecorder.js";
 import { WorkflowBillingGateway } from "./infrastructure/billing/workflowBillingGateway.js";
 import { MediaWorkflowLifecycleService } from "#services/MediaWorkflowLifecycleService.js";
-import { WorkflowService } from "#services/WorkflowService.js";
+import { WorkflowLifecycleService } from "#services/WorkflowLifecycleService.js";
 import { CharacterService } from "#services/CharacterService.js";
 import { ProjectReadService } from "#services/ProjectReadService.js";
 import { WorkflowStorageGateway } from "./infrastructure/storage/workflowStorageGateway.js";
@@ -135,8 +135,8 @@ export const dnaTreatment = new DnaTreatment({
 });
 
 // ─── Domain Services (feature 024-unify-domain-crud) ─────────────────────────
-// WorkflowService: canonical domain owner for all workflow & media CRUD
-export const workflowService = new WorkflowService({ db, storageService });
+// WorkflowLifecycleService: canonical domain owner for all workflow & media CRUD
+export const workflowService = new WorkflowLifecycleService({ db, storageService });
 
 // CharacterService: owns character entity CRUD; delegates workflow cleanup to workflowService
 export const characterService = new CharacterService({

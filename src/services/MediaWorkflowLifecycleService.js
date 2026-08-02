@@ -106,6 +106,52 @@ export class MediaWorkflowLifecycleService {
   }
 
   /**
+   * Domain-specific creation: Character Placeholder
+   */
+  async createCharacterPlaceholder({ userId, input = {}, runId = null, displayName = null, stepId = "character_sheet" }) {
+    return this.startPlaceholder({
+      userId,
+      nodeType: "image-generation",
+      input,
+      runId,
+      workflowId: "character-sheet-v1",
+      displayName: displayName || input.name || input.title || input.prompt || "Untitled Character",
+      workflowType: "CHARACTER",
+      stepId,
+    });
+  }
+
+  /**
+   * Domain-specific creation: Element Placeholder
+   */
+  async createElementPlaceholder({ userId, input = {}, runId = null, displayName = null, stepId = "CAE" }) {
+    return this.startPlaceholder({
+      userId,
+      nodeType: "image-generation",
+      input,
+      runId,
+      workflowId: "element-sheet-v1",
+      displayName: displayName || input.name || "Untitled Element",
+      workflowType: "ELEMENT_SHEET",
+      stepId,
+    });
+  }
+
+  /**
+   * Domain-specific creation: Generation Placeholder
+   */
+  async createGenerationPlaceholder({ userId, nodeType = "image-generation", input = {}, runId = null, displayName = null, stepId = null }) {
+    return this.startPlaceholder({
+      userId,
+      nodeType,
+      input,
+      runId,
+      workflowType: "GENERATION",
+      stepId,
+    });
+  }
+
+  /**
    * Phase 1 — create one workflow + media placeholder.
    * @returns {{ workflowId: string, mediaId: string } | null}
    */
@@ -127,9 +173,7 @@ export class MediaWorkflowLifecycleService {
 
       const sessionId = input.session_id || input.sessionId || null;
       const effectiveStepId = inferStepId(nodeType, input, stepId);
-      const effectiveWorkflowType = (workflowType && workflowType !== "GENERATION")
-        ? workflowType
-        : (workflowId === "character-sheet-v1" ? "CHARACTER" : "GENERATION");
+      const effectiveWorkflowType = workflowType || (workflowId === "character-sheet-v1" ? "CHARACTER" : "GENERATION");
 
       const { workflow, media } = await this.bridge.createV1Placeholder({
         userId,

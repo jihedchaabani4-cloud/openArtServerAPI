@@ -22,8 +22,11 @@ import {
 } from "../controllers/elementController.js";
 import promptBuilderProService from "../src/services/promptBuilderProService.js";
 import elementRepository from "../src/db/ElementRepository.js";
+import { requireAuth } from "../src/middleware/auth.js";
 
 const router = express.Router();
+
+router.use(requireAuth);
 
 // ─── POST /api/v2/elements ────────────────────────────────────────────────────
 

@@ -53,11 +53,24 @@ export class CharacterService {
             const characterId = workflowId || randomUUID();
             const charName    = name || "Untitled Character";
 
+            const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            let safeUserId = userId;
+            if (!safeUserId || !UUID_REGEX.test(safeUserId)) {
+                const { data: proj } = await supabaseAdmin
+                    .from("project")
+                    .select("user_id")
+                    .eq("id", projectId)
+                    .maybeSingle();
+                if (proj?.user_id) {
+                    safeUserId = proj.user_id;
+                }
+            }
+
             const upsertPayload = {
                 id:             characterId,
                 workflow_id:    characterId,
                 project_id:     projectId,
-                user_id:        userId,
+                user_id:        safeUserId,
                 name:           charName,
                 title:          charName,
                 description:    description || "",
@@ -73,13 +86,30 @@ export class CharacterService {
 
             if (charErr) {
                 console.warn(`⚠️ [CharacterService] createCharacter upsert notice:`, charErr.message);
+                // Fallback: if user_id FK failed, try using project owner's user_id
+                const { data: proj } = await supabaseAdmin
+                    .from("project")
+                    .select("user_id")
+                    .eq("id", projectId)
+                    .maybeSingle();
+                if (proj?.user_id && proj.user_id !== safeUserId) {
+                    upsertPayload.user_id = proj.user_id;
+                    const { data: retryChar, error: retryErr } = await supabaseAdmin
+                        .from("characters")
+                        .upsert(upsertPayload, { onConflict: "id" })
+                        .select()
+                        .maybeSingle();
+                    if (retryErr) {
+                        console.error(`❌ [CharacterService] createCharacter fallback failed:`, retryErr.message);
+                    }
+                }
             }
 
-            // Explicitly ensure workflow_type in workflow table is set to "CHARACTER"
-            if (characterId) {
+            // Ensure display_name on workflow container is updated if needed
+            if (characterId && charName) {
                 await supabaseAdmin
                     .from("workflow")
-                    .update({ workflow_type: "CHARACTER" })
+                    .update({ display_name: charName })
                     .eq("id", characterId);
             }
 

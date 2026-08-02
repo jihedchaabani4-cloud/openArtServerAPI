@@ -11,8 +11,7 @@ import { MediaRepository } from "../db/MediaRepository.js";
 import { WorkflowRepository } from "../db/WorkflowRepository.js";
 import { uploadMediaBatch } from "./mediaStorageService.js";
 import { storageService } from "./StorageService.js";
-import { createWorkflow } from "../../controllers/workflowsController.js";
-
+import { workflowService } from "../container.js";
 
 import { ElementAnalysisService } from "./ElementAnalysisService.js";
 
@@ -88,7 +87,7 @@ export async function createElement({ name, sourceImages, description, projectId
         );
 
         // Step 3 — Create workflow container
-        const workflow = await createWorkflow({
+        const workflow = await workflowRepo.createWorkflow({
             project_id:    projectId,
             workflow_type: "ELEMENT_SHEET",
             display_name:  name.trim(),
@@ -262,54 +261,34 @@ export async function getElementById(id) {
  * @param {string} id
  * @returns {Promise<boolean>}
  */
-export async function deleteElement(id) {
+export async function deleteElement(id, userId = null) {
     const traceId = randomUUID();
     const start   = Date.now();
 
     try {
-        const { supabase } = await import("../../lib/supabase.js");
+        const { supabaseAdmin } = await import("../../lib/supabase.js");
 
-        // Safely search for element by element.id OR workflow_id using maybeSingle (never throws on 0 rows)
-        const { data: element } = await supabase
+        // Safely search for element by element.id OR workflow_id
+        const { data: element } = await supabaseAdmin
             .from("element")
-            .select("*")
+            .select("id, workflow_id")
             .or(`id.eq.${id},workflow_id.eq.${id}`)
             .maybeSingle();
 
+        const targetWorkflowId = element?.workflow_id || id;
 
+        // 1. Delete element domain record
         if (element) {
-            // Fetch and delete storage files
-            const mediaRecords = await mediaRepo.findByWorkflow(element.workflow_id);
-            for (const media of mediaRecords) {
-                if (media.url) {
-                    try {
-                        const urlParts = media.url.split("/object/public/generated_images/");
-                        if (urlParts.length > 1) {
-                            await storageService.delete(urlParts[1]);
-                        }
-                    } catch (storageErr) {
-                        console.warn(`[elementService] deleteElement: failed to delete storage file`, { url: media.url, error: storageErr.message });
-                    }
-                }
-            }
-
-            // Delete workflow directly (FK CASCADE removes workflow, element, and media)
-            const { supabase } = await import("../../lib/supabase.js");
-
-            await supabase.from("workflow").delete().eq("id", element.workflow_id);
-        } else {
-            // Delete workflow directly by ID
-            const { supabase } = await import("../../lib/supabase.js");
-
-            await supabase.from("workflow").delete().eq("id", id);
+            await supabaseAdmin.from("element").delete().eq("id", element.id);
         }
+
+        // 2. Delegate full workflow + media + storage cleanup to workflowService
+        await workflowService.deleteWorkflow({ workflowId: targetWorkflowId, userId });
 
         const durationMs = Date.now() - start;
         console.log(`[elementService] deleteElement success`, { traceId, operation: "deleteElement", durationMs, status: "success", id });
 
         return true;
-
-
     } catch (err) {
         console.error(`[elementService] deleteElement error`, { traceId, operation: "deleteElement", status: "error", message: err.message });
         throw err;

@@ -1,6 +1,6 @@
 /**
  * Element Service
- * All element business logic: create, list, get, delete, and resolve @ElementName context.
+ * All element business logic: create, list, get, update, delete, analyze, and resolve @ElementName context.
  * V1 Simplified — direct save, no AI sheet generation.
  * Feature: 018-element-reference-system
  */
@@ -10,9 +10,7 @@ import elementRepository from "../db/ElementRepository.js";
 import { MediaRepository } from "../db/MediaRepository.js";
 import { WorkflowRepository } from "../db/WorkflowRepository.js";
 import { uploadMediaBatch } from "./mediaStorageService.js";
-import { storageService } from "./StorageService.js";
 import { workflowService } from "../container.js";
-
 import { ElementAnalysisService } from "./ElementAnalysisService.js";
 
 const mediaRepo    = new MediaRepository();
@@ -75,16 +73,10 @@ export async function createElement({ name, sourceImages, description, projectId
 
         const safeUserId = userId || "anonymous";
 
-        // Step 2 — Upload only local/base64 images; pass http URLs through directly
-        const storageUrls = await Promise.all(
-            sourceImages.map(async (src) => {
-                if (typeof src === "string" && (src.startsWith("http://") || src.startsWith("https://"))) {
-                    return src; // Already hosted — skip re-upload (avoids RLS issues)
-                }
-                const [uploaded] = await uploadMediaBatch([src], { userId: safeUserId, projectId });
-                return uploaded;
-            })
-        );
+        // Step 2 — Upload ALL images (URLs, base64, buffers) to Supabase Storage.
+        // External http/https URLs are fetched and re-uploaded so that media.url
+        // always points to our own storage bucket — never to an external host.
+        const storageUrls = await uploadMediaBatch(sourceImages, { userId: safeUserId, projectId });
 
         // Step 3 — Create workflow container
         const workflow = await workflowRepo.createWorkflow({
@@ -126,8 +118,6 @@ export async function createElement({ name, sourceImages, description, projectId
             tags,
         });
 
-
-
         // Step 7 — Trigger async Vision AI analysis to populate keywords and taste profile description
         analysisService.analyzeElement({
             projectId,
@@ -168,8 +158,6 @@ export async function createElement({ name, sourceImages, description, projectId
                 source_images_count:  mediaRecords.length,
             }
         };
-
-
 
     } catch (err) {
         const durationMs = Date.now() - start;
@@ -231,7 +219,7 @@ export async function getElementById(id) {
     const traceId = randomUUID();
 
     try {
-        const element = await elementRepository.findById(id);
+        const element = await elementRepository.resolveRecord(id);
         if (!element) return null;
 
         // Fetch all media records for this element's workflow
@@ -253,12 +241,46 @@ export async function getElementById(id) {
     }
 }
 
+// ─── Update Element ───────────────────────────────────────────────────────────
+
+/**
+ * Update Element details with validation and repository delegation.
+ * @param {string} id - Element ID or Workflow ID
+ * @param {Object} patchData - Updates to apply (name, description, keywords, guidelines)
+ * @returns {Promise<Object>} Updated element record
+ */
+export async function updateElement(id, patchData = {}) {
+    const traceId = randomUUID();
+    const start   = Date.now();
+
+    if (patchData.element_type !== undefined || patchData.type !== undefined || patchData.elementType !== undefined) {
+        const err = new Error("Security Error: Element type is immutable and cannot be changed after creation.");
+        err.statusCode = 400;
+        throw err;
+    }
+
+    const existing = await elementRepository.resolveRecord(id);
+    if (!existing) {
+        const err = new Error(`Element not found: ${id}`);
+        err.statusCode = 404;
+        throw err;
+    }
+
+    const updated = await elementRepository.update(id, patchData);
+
+    const durationMs = Date.now() - start;
+    console.log(`[elementService] updateElement success`, { traceId, operation: "updateElement", durationMs, status: "success", id });
+
+    return updated;
+}
+
 // ─── Delete Element ───────────────────────────────────────────────────────────
 
 /**
  * Delete an element and its associated storage files.
  * DB cascade handles workflow + media record deletion via FK.
  * @param {string} id
+ * @param {string} [userId]
  * @returns {Promise<boolean>}
  */
 export async function deleteElement(id, userId = null) {
@@ -266,20 +288,12 @@ export async function deleteElement(id, userId = null) {
     const start   = Date.now();
 
     try {
-        const { supabaseAdmin } = await import("../../lib/supabase.js");
-
-        // Safely search for element by element.id OR workflow_id
-        const { data: element } = await supabaseAdmin
-            .from("element")
-            .select("id, workflow_id")
-            .or(`id.eq.${id},workflow_id.eq.${id}`)
-            .maybeSingle();
-
+        const element = await elementRepository.resolveRecord(id);
         const targetWorkflowId = element?.workflow_id || id;
 
-        // 1. Delete element domain record
+        // 1. Delete element domain record via repository
         if (element) {
-            await supabaseAdmin.from("element").delete().eq("id", element.id);
+            await elementRepository.deleteById(element.id);
         }
 
         // 2. Delegate full workflow + media + storage cleanup to workflowService
@@ -295,6 +309,20 @@ export async function deleteElement(id, userId = null) {
     }
 }
 
+// ─── Analyze Element ──────────────────────────────────────────────────────────
+
+/**
+ * Trigger AI vision analysis for an element.
+ */
+export async function analyzeElement({ projectId, workflowId, imageUrls, elementName, elementType }) {
+    return analysisService.analyzeElement({
+        projectId,
+        workflowId,
+        imageUrls,
+        elementName: elementName || "Element",
+        elementType: elementType || "object",
+    });
+}
 
 // ─── Get Element Context For Prompt ──────────────────────────────────────────
 
@@ -378,7 +406,7 @@ export async function addImageToElement({ elementId, imageUrl, projectId, userId
         step_id: "CAE",
         width: 1024,
         height: 1024,
-        status: "completed",
+        status: "success",
     });
 
     return media;
@@ -388,7 +416,9 @@ export default {
     createElement,
     listProjectElements,
     getElementById,
+    updateElement,
     deleteElement,
+    analyzeElement,
     getElementContextForPrompt,
     addImageToElement,
 };

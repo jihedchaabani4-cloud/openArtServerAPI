@@ -6,7 +6,6 @@ import { loadRegistries } from "../src/v2/registry/registryLoader.js";
 import { compileWorkflow } from "../src/v2/compiler/compileWorkflow.js";
 import { startWorkflowRun } from "../src/v2/runner/workflowRunner.js";
 import { buildV1CompatibleResponse } from "../src/v2/utils/v1PayloadMapper.js";
-import { llmService } from "../src/services/LLMService.js";
 
 let cachedRegistries = null;
 function getRegistries() {
@@ -98,57 +97,18 @@ export async function createCharacter(req, res) {
 
 // ─── Character Description Generator ─────────────────────────────────────────
 
-const CHARACTER_GENERATOR_SYSTEM_PROMPT = `
-You are an elite haute-couture AI Art Director and Master Character Designer for high-budget cinematic films and editorial fashion houses.
-Your task: Given a character concept, archetype, or brief description (such as "The Eccentric", "The Botanical Visionary", "The Wicked", or a custom user prompt), generate an ultra-rich, highly descriptive, editorial character description.
-
-Focus heavily on:
-1. Facial geometry, anatomical features, skin texture, and unique biological/sub-dermal details.
-2. Architectural hair/headpiece design and editorial posture.
-3. Outfit materials, structural tailoring, fabrics (waxy leaves, felted wool, translucent fibers, wet-look surfaces).
-4. Cinematic lighting, color mood, and authoritative visual presence.
-
-CRITICAL OUTPUT REQUIREMENT:
-You MUST return your response as a valid JSON object with this schema:
-{
-  "title": "A short 2-4 word evocative character name/title",
-  "description": "A 3-5 sentence ultra-detailed, editorial character description ready for high-end AI generation.",
-  "keywords": ["5-10 concise factual visual identity keywords"]
-}
-Do NOT include any markdown code blocks or extra text outside the JSON object.
-`;
-
 /**
  * POST /api/character-sheet/generate-description
  * Generates an ultra-detailed, haute-couture editorial character prompt/description from a short brief or archetype.
+ * Delegates fully to CharacterService.generateDescription() — no LLM calls or system prompts in the controller.
  */
 export async function generateCharacterDescription(req, res) {
     try {
         const { concept, archetype, style } = req.body;
-        const inputConcept = concept || archetype || "The Eccentric";
 
-        console.log(`[characterController] Generating editorial character description for: "${inputConcept}"`);
+        const result = await characterService.generateDescription({ concept, archetype, style });
 
-        const promptText = `Generate a masterwork character description for the concept: "${inputConcept}". ${style ? `Incorporate style influences: ${style}.` : ""}`;
-
-        const result = await llmService.generate({
-            prompt: promptText,
-            systemInstruction: CHARACTER_GENERATOR_SYSTEM_PROMPT,
-            jsonMode: true,
-        });
-
-        const parsed = result.json || {};
-        const description = parsed.description || result.raw || "A visionary character with striking anatomical features and high-fashion editorial presence.";
-        const title = parsed.title || inputConcept;
-        const keywords = Array.isArray(parsed.keywords) ? parsed.keywords : [];
-
-        return res.json({
-            success: true,
-            title,
-            description,
-            keywords,
-            model: result.model,
-        });
+        return res.json({ success: true, ...result });
     } catch (err) {
         console.error("❌ [characterController] generateCharacterDescription error:", err);
         return res.status(500).json({ success: false, message: err.message });

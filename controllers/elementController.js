@@ -8,7 +8,6 @@
 import { randomUUID } from "node:crypto";
 import * as elementService from "../src/services/elementService.js";
 import { addImageToElement as addImageToElementSvc } from "../src/services/elementService.js";
-import { ElementAnalysisService } from "../src/services/ElementAnalysisService.js";
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
@@ -54,7 +53,6 @@ export async function createElement(req, res) {
         console.log(JSON.stringify(structuredLog({ traceId, operation: "POST /api/v2/elements", durationMs, status: "success" })));
 
         return res.status(201).json({ status: "created", ...result });
-
 
     } catch (err) {
         const durationMs = Date.now() - start;
@@ -148,6 +146,7 @@ export async function deleteElement(req, res) {
         return res.status(statusCode).json({ message: err.message });
     }
 }
+
 // ─── POST /api/v2/elements/:id/images ────────────────────────────────────────
 
 /**
@@ -179,12 +178,10 @@ export async function addImageToElement(req, res) {
     }
 }
 
-import elementRepository from "../src/db/ElementRepository.js";
-
 // ─── PATCH /api/v2/elements/:id ──────────────────────────────────────────────
 
 /**
- * Update Element details (element_type, name, description).
+ * Update Element details (delegates all validation and persistence to elementService).
  */
 export async function updateElement(req, res) {
     const traceId = randomUUID();
@@ -194,14 +191,7 @@ export async function updateElement(req, res) {
         const { id } = req.params;
         const patchData = req.body || {};
 
-        if (patchData.element_type !== undefined || patchData.type !== undefined || patchData.elementType !== undefined) {
-            return res.status(400).json({
-                error: true,
-                message: "Security Error: Element type is immutable and cannot be changed after creation."
-            });
-        }
-
-        const updated = await elementRepository.update(id, patchData);
+        const updated = await elementService.updateElement(id, patchData);
 
         const durationMs = Date.now() - start;
         console.log(JSON.stringify(structuredLog({ traceId, operation: "PATCH /api/v2/elements/:id", durationMs, status: "success" })));
@@ -218,8 +208,9 @@ export async function updateElement(req, res) {
 
 // ─── POST /api/v2/elements/analyze ──────────────────────────────────────────
 
-const analysisService = new ElementAnalysisService();
-
+/**
+ * Trigger vision AI analysis (delegates execution to elementService).
+ */
 export async function analyzeElement(req, res) {
     const traceId = randomUUID();
     const start   = Date.now();
@@ -227,12 +218,12 @@ export async function analyzeElement(req, res) {
     try {
         const { projectId, workflowId, imageUrls = [], elementName, elementType } = req.body;
 
-        const result = await analysisService.analyzeElement({
+        const result = await elementService.analyzeElement({
             projectId,
             workflowId,
             imageUrls,
-            elementName: elementName || "Element",
-            elementType: elementType || "object",
+            elementName,
+            elementType,
         });
 
         const durationMs = Date.now() - start;
@@ -247,4 +238,3 @@ export async function analyzeElement(req, res) {
         return res.status(statusCode).json({ error: true, message: err.message });
     }
 }
-

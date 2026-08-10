@@ -4,8 +4,16 @@
  * Controllers become thin HTTP adapters; all character business logic lives here.
  *
  * Clean Architecture Boundary:
- *   - CharacterService manages Character entity operations (`characters` table).
- *   - Workflow deletion and media resource cleanup is strictly delegated to `WorkflowService`.
+ *   - CharacterService manages Character entity operations (`characters` table)
+ *     via CharacterRepository (db.characters).
+ *   - Workflow/media reads delegate to WorkflowRepository (db.workflows) and
+ *     MediaRepository (db.media).
+ *   - Project lookups delegate to ProjectRepository (db.projects).
+ *   - Storage uploads delegate to StorageService.
+ *   - Workflow deletion and media resource cleanup delegate to WorkflowService.
+ *   - LLM description generation delegates to LLMService.
+ *
+ * NO direct supabase / supabaseAdmin calls in this service.
  *
  * Methods:
  *   - createCharacter
@@ -13,26 +21,52 @@
  *   - addMediaToCharacter
  *   - removeMediaFromCharacter
  *   - deleteCharacter
+ *   - generateDescription
  *
  * Feature: 024-unify-domain-crud
  * Contract: specs/024-unify-domain-crud/contracts/domain-crud-contract.md
  */
 
 import { randomUUID } from "node:crypto";
-import { supabase, supabaseAdmin } from "../../lib/supabase.js";
+import { llmService } from "./LLMService.js";
 import { crudOperationLog, CrudServiceError } from "../utils/crudOperationLog.js";
+
+// ── LLM prompt (moved from characterController) ───────────────────────────────
+
+const CHARACTER_GENERATOR_SYSTEM_PROMPT = `
+You are an elite haute-couture AI Art Director and Master Character Designer for high-budget cinematic films and editorial fashion houses.
+Your task: Given a character concept, archetype, or brief description (such as "The Eccentric", "The Botanical Visionary", "The Wicked", or a custom user prompt), generate an ultra-rich, highly descriptive, editorial character description.
+
+Focus heavily on:
+1. Facial geometry, anatomical features, skin texture, and unique biological/sub-dermal details.
+2. Architectural hair/headpiece design and editorial posture.
+3. Outfit materials, structural tailoring, fabrics (waxy leaves, felted wool, translucent fibers, wet-look surfaces).
+4. Cinematic lighting, color mood, and authoritative visual presence.
+
+CRITICAL OUTPUT REQUIREMENT:
+You MUST return your response as a valid JSON object with this schema:
+{
+  "title": "A short 2-4 word evocative character name/title",
+  "description": "A 3-5 sentence ultra-detailed, editorial character description ready for high-end AI generation.",
+  "keywords": ["5-10 concise factual visual identity keywords"]
+}
+Do NOT include any markdown code blocks or extra text outside the JSON object.
+`;
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export class CharacterService {
     /**
      * @param {Object} deps
      * @param {Object} deps.db               - Repository map from container
+     *                                         (db.characters, db.workflows, db.media, db.projects)
      * @param {Object} deps.storageService   - StorageService instance
      * @param {Object} deps.workflowService  - WorkflowService instance
      */
     constructor({ db, storageService, workflowService }) {
-        this.db               = db;
-        this.storageService   = storageService;
-        this.workflowService  = workflowService;
+        this.db              = db;
+        this.storageService  = storageService;
+        this.workflowService = workflowService;
     }
 
     // ── createCharacter ──────────────────────────────────────────────────────
@@ -53,17 +87,12 @@ export class CharacterService {
             const characterId = workflowId || randomUUID();
             const charName    = name || "Untitled Character";
 
+            // Resolve userId — fall back to project owner if userId is not a valid UUID
             const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
             let safeUserId = userId;
             if (!safeUserId || !UUID_REGEX.test(safeUserId)) {
-                const { data: proj } = await supabaseAdmin
-                    .from("project")
-                    .select("user_id")
-                    .eq("id", projectId)
-                    .maybeSingle();
-                if (proj?.user_id) {
-                    safeUserId = proj.user_id;
-                }
+                const proj = await this.db.projects.findById(projectId).catch(() => null);
+                if (proj?.user_id) safeUserId = proj.user_id;
             }
 
             const upsertPayload = {
@@ -78,39 +107,24 @@ export class CharacterService {
                 updated_at:     new Date().toISOString(),
             };
 
-            const { data: char, error: charErr } = await supabaseAdmin
-                .from("characters")
-                .upsert(upsertPayload, { onConflict: "id" })
-                .select()
-                .maybeSingle();
-
-            if (charErr) {
-                console.warn(`⚠️ [CharacterService] createCharacter upsert notice:`, charErr.message);
-                // Fallback: if user_id FK failed, try using project owner's user_id
-                const { data: proj } = await supabaseAdmin
-                    .from("project")
-                    .select("user_id")
-                    .eq("id", projectId)
-                    .maybeSingle();
+            // Upsert character row via repository (bypasses RLS via admin client)
+            let char = await this.db.characters.upsert(upsertPayload).catch(async (err) => {
+                console.warn(`⚠️ [CharacterService] createCharacter upsert notice:`, err.message);
+                // Fallback: re-try with confirmed project owner's user_id
+                const proj = await this.db.projects.findById(projectId).catch(() => null);
                 if (proj?.user_id && proj.user_id !== safeUserId) {
                     upsertPayload.user_id = proj.user_id;
-                    const { data: retryChar, error: retryErr } = await supabaseAdmin
-                        .from("characters")
-                        .upsert(upsertPayload, { onConflict: "id" })
-                        .select()
-                        .maybeSingle();
-                    if (retryErr) {
+                    return this.db.characters.upsert(upsertPayload).catch((retryErr) => {
                         console.error(`❌ [CharacterService] createCharacter fallback failed:`, retryErr.message);
-                    }
+                        return null;
+                    });
                 }
-            }
+                return null;
+            });
 
-            // Ensure display_name on workflow container is updated if needed
+            // Sync display_name on the workflow container
             if (characterId && charName) {
-                await supabaseAdmin
-                    .from("workflow")
-                    .update({ display_name: charName })
-                    .eq("id", characterId);
+                await this.db.workflows.updateFields(characterId, { display_name: charName }).catch(() => null);
             }
 
             crudOperationLog({
@@ -154,11 +168,8 @@ export class CharacterService {
                     charUpdates.title = cleanName;
                     wfUpdates.display_name = cleanName;
                 } else {
-                    const { data: existingChar } = await supabaseAdmin
-                        .from("characters")
-                        .select("name, title")
-                        .or(`id.eq.${characterId},workflow_id.eq.${characterId}`)
-                        .maybeSingle();
+                    // Preserve existing name if empty string provided
+                    const existingChar = await this.db.characters.findByCharacterId(characterId).catch(() => null);
                     const fallbackName = existingChar?.name || existingChar?.title || "Untitled Character";
                     charUpdates.name  = fallbackName;
                     charUpdates.title = fallbackName;
@@ -176,40 +187,31 @@ export class CharacterService {
             const turnaroundVal = updates.turnaround_url || updates.body_sheet_url;
             if (turnaroundVal !== undefined) charUpdates.turnaround_url = turnaroundVal;
 
-            if (updates.avatar_url !== undefined) charUpdates.avatar_url = updates.avatar_url;
+            if (updates.avatar_url !== undefined)  charUpdates.avatar_url  = updates.avatar_url;
+            if (updates.archetype  !== undefined)  charUpdates.archetype   = updates.archetype;
+            if (updates.gender     !== undefined)  charUpdates.gender      = updates.gender;
+            if (updates.style      !== undefined)  charUpdates.style       = updates.style;
 
-            if (updates.archetype !== undefined) charUpdates.archetype = updates.archetype;
-            if (updates.gender !== undefined)    charUpdates.gender    = updates.gender;
-            if (updates.style !== undefined)     charUpdates.style     = updates.style;
-
-            if (updates.traits !== undefined)       charUpdates.traits     = updates.traits;
-            if (updates.keywords !== undefined)     charUpdates.keywords   = updates.keywords;
-            if (updates.guidelines !== undefined)   charUpdates.guidelines = updates.guidelines;
+            if (updates.traits     !== undefined)  charUpdates.traits      = updates.traits;
+            if (updates.keywords   !== undefined)  charUpdates.keywords    = updates.keywords;
+            if (updates.guidelines !== undefined)  charUpdates.guidelines  = updates.guidelines;
             if (updates.more_details !== undefined) {
                 charUpdates.traits = { ...(charUpdates.traits || {}), more_details: updates.more_details };
             }
 
-            if (updates.status !== undefined)       charUpdates.status       = updates.status;
+            if (updates.status       !== undefined) charUpdates.status       = updates.status;
             if (updates.is_favorited !== undefined) charUpdates.is_favorited = !!updates.is_favorited;
-            if (updates.favorited !== undefined)    charUpdates.is_favorited = !!updates.favorited;
+            if (updates.favorited    !== undefined) charUpdates.is_favorited = !!updates.favorited;
 
-            let { data: updatedChar, error: charErr } = await supabaseAdmin
-                .from("characters")
-                .update(charUpdates)
-                .or(`id.eq.${characterId},workflow_id.eq.${characterId}`)
-                .select()
-                .maybeSingle();
-
-            if (charErr) {
-                console.warn(`⚠️ [CharacterService] updateCharacter notice:`, charErr.message);
-            }
+            // Try update first; if no row found, upsert with workflow context
+            let updatedChar = await this.db.characters.updateCharacterFields(characterId, charUpdates).catch((err) => {
+                console.warn(`⚠️ [CharacterService] updateCharacter notice:`, err.message);
+                return null;
+            });
 
             if (!updatedChar) {
-                const { data: wfRow } = await supabaseAdmin
-                    .from("workflow")
-                    .select("id, project_id, user_id")
-                    .eq("id", characterId)
-                    .maybeSingle();
+                // Character row may not exist yet — resolve from workflow and upsert
+                const wfRow = await this.db.workflows.getWorkflow(characterId).catch(() => null);
 
                 const insertPayload = {
                     id:             characterId,
@@ -223,28 +225,15 @@ export class CharacterService {
                     ...charUpdates,
                 };
 
-                const { data: insertedChar, error: insertErr } = await supabaseAdmin
-                    .from("characters")
-                    .upsert(insertPayload, { onConflict: "id" })
-                    .select()
-                    .maybeSingle();
-
-                if (insertErr) {
+                updatedChar = await this.db.characters.upsert(insertPayload).catch((insertErr) => {
                     console.warn(`⚠️ [CharacterService] upsert notice:`, insertErr.message);
-                } else {
-                    updatedChar = insertedChar;
-                }
+                    return null;
+                });
             }
 
             let updatedWf = null;
             if (Object.keys(wfUpdates).length > 0) {
-                const { data: wfRes } = await supabaseAdmin
-                    .from("workflow")
-                    .update(wfUpdates)
-                    .eq("id", characterId)
-                    .select()
-                    .maybeSingle();
-                updatedWf = wfRes;
+                updatedWf = await this.db.workflows.updateFields(characterId, wfUpdates).catch(() => null);
             }
 
             crudOperationLog({
@@ -285,13 +274,9 @@ export class CharacterService {
                 });
             }
 
-            const { data: wf, error: wfErr } = await supabaseAdmin
-                .from("workflow")
-                .select("id, project_id")
-                .eq("id", characterId)
-                .maybeSingle();
-
-            if (wfErr || !wf) {
+            // Verify the character's workflow container exists
+            const wf = await this.db.workflows.getWorkflow(characterId).catch(() => null);
+            if (!wf) {
                 throw new CrudServiceError("Character workflow not found", {
                     statusCode: 404, errorCode: "NOT_FOUND", traceId, operation: "addMediaToCharacter",
                 });
@@ -302,22 +287,18 @@ export class CharacterService {
             let resolvedHeight = 1024;
 
             if (mediaId) {
-                const { data: sourceMedia, error: sourceErr } = await supabaseAdmin
-                    .from("media")
-                    .select("*")
-                    .eq("id", mediaId)
-                    .maybeSingle();
-
-                if (sourceErr || !sourceMedia) {
+                // Resolve dimensions/URL from existing media record
+                const sourceMedia = await this.db.media.findById(mediaId).catch(() => null);
+                if (!sourceMedia) {
                     throw new CrudServiceError(`Media with ID ${mediaId} not found`, {
                         statusCode: 404, errorCode: "NOT_FOUND", traceId, operation: "addMediaToCharacter",
                     });
                 }
-
                 resolvedUrl    = sourceMedia.url;
                 resolvedWidth  = sourceMedia.width  || 1024;
                 resolvedHeight = sourceMedia.height || 1024;
             } else if (imageUrl && imageUrl.startsWith("data:")) {
+                // Upload base64 data URI to storage
                 const newMediaId = randomUUID();
                 const ext = imageUrl.startsWith("data:image/png")
                     ? "png"
@@ -328,31 +309,20 @@ export class CharacterService {
                 resolvedUrl = await this.storageService.upload(storagePath, imageUrl);
             }
 
-            const newRecordId = randomUUID();
-            const { data: mediaRow, error: mediaErr } = await supabaseAdmin
-                .from("media")
-                .insert({
-                    id:          newRecordId,
-                    workflow_id: wf.id,
-                    project_id:  wf.project_id || projectId,
-                    url:         resolvedUrl,
-                    step_id:     "character_detail",
-                    width:       resolvedWidth,
-                    height:      resolvedHeight,
-                    status:      "success",
-                })
-                .select()
-                .single();
-
-            if (mediaErr) {
-                throw new CrudServiceError(mediaErr.message, {
-                    statusCode: 500, errorCode: "DB_ERROR", traceId, operation: "addMediaToCharacter",
-                });
-            }
+            // Create the media record via repository
+            const mediaRow = await this.db.media.createMedia({
+                workflow_id: wf.id,
+                project_id:  wf.project_id || projectId,
+                url:         resolvedUrl,
+                step_id:     "character_detail",
+                width:       resolvedWidth,
+                height:      resolvedHeight,
+                status:      "success",
+            });
 
             crudOperationLog({
                 traceId, operation: "addMediaToCharacter", status: "ok",
-                durationMs: Date.now() - start, characterId, newMediaId: newRecordId,
+                durationMs: Date.now() - start, characterId, newMediaId: mediaRow.id,
             });
 
             return { media: { ...mediaRow, url: resolvedUrl } };
@@ -374,17 +344,8 @@ export class CharacterService {
         crudOperationLog({ traceId, operation: "removeMediaFromCharacter", characterId, mediaId });
 
         try {
-            const { error } = await supabase
-                .from("media")
-                .delete()
-                .eq("id", mediaId)
-                .eq("workflow_id", characterId);
-
-            if (error) {
-                throw new CrudServiceError(error.message, {
-                    statusCode: 500, errorCode: "DB_ERROR", traceId, operation: "removeMediaFromCharacter",
-                });
-            }
+            // Scoped delete — only removes media if it belongs to this character's workflow
+            await this.db.media.deleteByIdAndWorkflow(mediaId, characterId);
 
             crudOperationLog({
                 traceId, operation: "removeMediaFromCharacter", status: "ok",
@@ -420,17 +381,12 @@ export class CharacterService {
                 });
             }
 
-            // 1. Delete character domain record from public.characters
-            const { error: charDeleteErr } = await supabaseAdmin
-                .from("characters")
-                .delete()
-                .or(`id.eq.${characterId},workflow_id.eq.${characterId}`);
-
-            if (charDeleteErr) {
+            // 1. Delete character domain record via repository
+            await this.db.characters.deleteById(characterId).catch((charDeleteErr) => {
                 console.warn(`⚠️ [CharacterService] deleteCharacter characters row notice:`, charDeleteErr.message);
-            }
+            });
 
-            // 2. Delegate workflow/media resources cleanup directly to WorkflowService
+            // 2. Delegate workflow/media resources cleanup to WorkflowService
             const result = await this.workflowService.deleteWorkflow({ workflowId: characterId, userId, req });
 
             crudOperationLog({
@@ -443,6 +399,56 @@ export class CharacterService {
             crudOperationLog({
                 traceId, operation: "deleteCharacter", status: "error",
                 durationMs: Date.now() - start, errorCode: err.errorCode || 500, message: err.message,
+            });
+            throw err;
+        }
+    }
+
+    // ── generateDescription ──────────────────────────────────────────────────
+
+    /**
+     * Generates an ultra-detailed, editorial character description from a brief concept.
+     * Uses LLMService (Gemini → Groq fallback) with a haute-couture art direction prompt.
+     *
+     * @param {Object} params
+     * @param {string} [params.concept]   - Free-form character concept
+     * @param {string} [params.archetype] - Character archetype
+     * @param {string} [params.style]     - Style influences
+     * @returns {{ title, description, keywords, model }}
+     */
+    async generateDescription({ concept, archetype, style } = {}) {
+        const traceId = randomUUID();
+        const start   = Date.now();
+
+        crudOperationLog({ traceId, operation: "generateDescription" });
+
+        try {
+            const inputConcept = concept || archetype || "The Eccentric";
+            const promptText = `Generate a masterwork character description for the concept: "${inputConcept}". ${
+                style ? `Incorporate style influences: ${style}.` : ""
+            }`;
+
+            const result = await llmService.generate({
+                prompt: promptText,
+                systemInstruction: CHARACTER_GENERATOR_SYSTEM_PROMPT,
+                jsonMode: true,
+            });
+
+            const parsed      = result.json || {};
+            const description = parsed.description || result.raw || "A visionary character with striking anatomical features and high-fashion editorial presence.";
+            const title       = parsed.title || inputConcept;
+            const keywords    = Array.isArray(parsed.keywords) ? parsed.keywords : [];
+
+            crudOperationLog({
+                traceId, operation: "generateDescription", status: "ok",
+                durationMs: Date.now() - start,
+            });
+
+            return { title, description, keywords, model: result.model };
+        } catch (err) {
+            crudOperationLog({
+                traceId, operation: "generateDescription", status: "error",
+                durationMs: Date.now() - start, message: err.message,
             });
             throw err;
         }

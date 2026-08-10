@@ -170,6 +170,23 @@ export class ElementRepository {
 
         return this.findByWorkflowId(idOrWorkflowId);
     }
+
+    async deleteById(idOrWorkflowId) {
+        let query = supabase.from("element").delete();
+
+        if (UUID_REGEX.test(String(idOrWorkflowId))) {
+            query = query.or(`id.eq.${idOrWorkflowId},workflow_id.eq.${idOrWorkflowId}`);
+        } else {
+            query = query.eq("workflow_id", idOrWorkflowId);
+        }
+
+        const { data, error } = await query.select();
+        if (error) {
+            console.error(`[ElementRepository] deleteById error for ${idOrWorkflowId}:`, error);
+            throw error;
+        }
+        return data?.[0] || null;
+    }
 }
 
 export const elementRepository = new ElementRepository();

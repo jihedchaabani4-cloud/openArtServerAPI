@@ -117,4 +117,19 @@ export class MediaRepository extends BaseRepository {
         if (error) throw error;
         return data;
     }
+
+    /**
+     * Deletes a media record by id AND workflow_id (scoped delete).
+     * Prevents accidental deletion of media belonging to a different workflow.
+     * @param {string} mediaId
+     * @param {string} workflowId
+     */
+    async deleteByIdAndWorkflow(mediaId, workflowId) {
+        const { error } = await this.client()
+            .from(this.tableName)
+            .delete()
+            .eq("id", mediaId)
+            .eq("workflow_id", workflowId);
+        if (error) throw error;
+    }
 }

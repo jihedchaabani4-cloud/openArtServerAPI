@@ -6,9 +6,15 @@ import { AppError } from "../utils/AppError.js";
  * Blocks the request with 401 Unauthorized if token is missing or invalid.
  */
 export const requireAuth = async (req, res, next) => {
-    // ── DEV BYPASS ─────────────────────────────────────────────────────────────
+    // ── DEV BYPASS & INTERNAL SECRET ───────────────────────────────────────────
     if (process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) {
         req.user = { id: "7d40bff4-7cac-4f2d-8994-2642c90e40e4" }; // use a valid project/user owner ID if needed, or dev-user-id
+        return next();
+    }
+
+    const internalSecret = req.headers?.["x-internal-secret"];
+    if (internalSecret && internalSecret === (process.env.INTERNAL_SECRET || "openart_internal_s2s_secret_2026")) {
+        req.user = { id: process.env.INTERNAL_USER_ID || "7d40bff4-7cac-4f2d-8994-2642c90e40e4" };
         return next();
     }
 

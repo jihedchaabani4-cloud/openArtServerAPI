@@ -75,4 +75,42 @@ export class GenerationConfigRepository extends BaseRepository {
         if (error) throw error;
         return data;
     }
+
+    /**
+     * Batch-fetches multiple generation_configs with their full references (including ref_media join).
+     * Used by GenerationService.#buildLibraryPayload to enrich library payloads efficiently.
+     * @param {string[]} ids
+     */
+    async findByIdsWithReferences(ids) {
+        if (!ids || ids.length === 0) return [];
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select(`
+                id,
+                prompt,
+                model,
+                aspect_ratio,
+                generation_type,
+                seed,
+                visibility,
+                references:generation_config_reference!generation_config_reference_generation_config_id_fkey(
+                    id,
+                    position,
+                    input_type,
+                    ref_media_id,
+                    ref_media:media(
+                        id,
+                        workflow_id,
+                        url,
+                        width,
+                        height,
+                        status,
+                        create_time
+                    )
+                )
+            `)
+            .in("id", ids);
+        if (error) throw error;
+        return data || [];
+    }
 }

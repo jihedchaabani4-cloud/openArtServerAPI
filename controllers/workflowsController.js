@@ -10,6 +10,7 @@ import { workflowService, projectReadService } from "../src/container.js";
 export const getWorkflows = async (filters = {}, options = {}) => {
     try {
         const { select = "*", order = { column: "create_time", ascending: false } } = options;
+        // TODO(027): migrate getWorkflows supabase.from("workflow") to WorkflowRepository.findByFilters()
         let query = supabase.from("workflow").select(select);
 
         if (order) query = query.order(order.column, { ascending: order.ascending });

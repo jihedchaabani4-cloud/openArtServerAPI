@@ -1,47 +1,48 @@
-import { deleteOne, updateOne } from "../lib/supabaseCrud.js";
-import { supabase } from "../lib/supabase.js";
+/**
+ * generationsMutationController.js
+ * Thin HTTP adapter — all mutation logic delegated to GenerationService.
+ * Feature: 026-backend-platform-layer-refactor
+ */
 
-// In the new schema:
-// A "generation group" is a `generation`.
-// An "item" is a `collection_item` pointing to a `media`.
+import { generationService } from "../src/container.js";
 
 export const deleteGeneration = async (req, res) => {
     try {
-        await deleteOne("generations", req.params.id);
-        res.json({ ok: true });
+        const result = await generationService.deleteGeneration(req.user?.id, req.params.id);
+        res.json(result);
     } catch (err) {
-        res.status(500).json({ ok: false, message: err.message });
+        res.status(err.statusCode || 500).json({ ok: false, message: err.message });
     }
 };
 
 export const deleteItem = async (req, res) => {
     try {
-        // Assume req.params.id is the collection_item id.
+        // collection_item deletion — not yet migrated to GenerationService (follow-up spec)
+        // TODO: move to GenerationService.deleteCollectionItem() in a follow-up spec
+        const { deleteOne } = await import("../lib/supabaseCrud.js");
         await deleteOne("collection_items", req.params.id);
         res.json({ ok: true });
-    } catch (error) {
-        console.error("❌ deleteItem error:", error);
-        res.status(500).json({ ok: false, message: error.message });
+    } catch (err) {
+        console.error("❌ deleteItem error:", err);
+        res.status(500).json({ ok: false, message: err.message });
     }
 };
 
 export const updateGeneration = async (req, res) => {
     try {
-        const data = await updateOne("generations", req.params.id, req.body);
-        res.json({ ok: true, data });
+        const result = await generationService.updateGeneration(req.user?.id, req.params.id, req.body);
+        res.json(result);
     } catch (err) {
-        res.status(500).json({ ok: false, message: err.message });
+        res.status(err.statusCode || 500).json({ ok: false, message: err.message });
     }
 };
 
 export const toggleLike = async (req, res) => {
     try {
-        // The new schema doesn't have `is_liked` natively. 
-        // A common pattern is storing it in `metadata` on `media_versions` or we skip it if it's not strictly specified in the new schema yet.
-        // As a placeholder, we return OK to not break the frontend until the schema natively supports favorites.
+        // is_liked not natively supported in new schema yet — placeholder
         res.json({ ok: true, note: "is_liked not natively supported in new schema yet." });
-    } catch (error) {
-        console.error("❌ toggleLike error:", error);
-        res.status(500).json({ ok: false, message: error.message });
+    } catch (err) {
+        console.error("❌ toggleLike error:", err);
+        res.status(500).json({ ok: false, message: err.message });
     }
 };

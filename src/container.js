@@ -1,9 +1,9 @@
 import "dotenv/config";
 import { PromptService } from "#services/PromptService.js";
-import { StorageService } from "#services/StorageService.js";
-import { VisionService } from "#services/VisionService.js";
-import { WalletService } from "#services/WalletService.js";
-import { PricingService } from "#services/PricingService.js";
+import { StorageService } from "#platform/storage/StorageService.js";
+import { VisionService } from "#platform/ai/VisionService.js";
+import { WalletService } from "#platform/billing/WalletService.js";
+import { PricingService } from "#platform/billing/PricingService.js";
 import { FailedOpsService } from "#services/FailedOpsService.js";
 import { createClient } from "@supabase/supabase-js";
 import { redisConnection } from "#queue/redis.js";
@@ -26,10 +26,14 @@ export { IMAGE_MODELS };
 import { DnaTreatment } from "./dna/DnaTreatment.js";
 import { WorkflowEventRecorder } from "./infrastructure/events/workflowEventRecorder.js";
 import { WorkflowBillingGateway } from "./infrastructure/billing/workflowBillingGateway.js";
-import { MediaWorkflowLifecycleService } from "#services/MediaWorkflowLifecycleService.js";
-import { WorkflowLifecycleService } from "#services/WorkflowLifecycleService.js";
-import { CharacterService } from "#services/CharacterService.js";
-import { ProjectReadService } from "#services/ProjectReadService.js";
+import { MediaWorkflowLifecycleService } from "#platform/media/MediaLifecycleService.js";
+import { WorkflowLifecycleService } from "#platform/workflow/WorkflowService.js";
+import { CharacterService } from "#domain/character/CharacterService.js";
+import { ProjectReadService } from "#domain/project/ProjectReadService.js";
+import { GenerationService } from "#domain/generation/GenerationService.js";
+import { AuthorizationService } from "#platform/security/AuthorizationService.js";
+import { TenantAccessService } from "#platform/security/TenantAccessService.js";
+import { AuditService } from "#platform/security/AuditService.js";
 import { WorkflowStorageGateway } from "./infrastructure/storage/workflowStorageGateway.js";
 import { WorkflowQueueGateway } from "./infrastructure/queue/workflowQueueGateway.js";
 import { WorkflowExecutionRepository } from "./workflows/workflowExecutionRepository.js";
@@ -147,6 +151,14 @@ export const characterService = new CharacterService({
 
 // ProjectReadService: owns unified project-data read aggregation
 export const projectReadService = new ProjectReadService({ db });
+
+// GenerationService: owns all generation read/mutation queries (feature 026)
+export const generationService = new GenerationService({ db });
+
+// ─── Platform Security Services (feature 026) ────────────────────────────────
+export const authorizationService = new AuthorizationService();
+export const tenantAccessService = new TenantAccessService({ db });
+export const auditService = new AuditService();
 
 // ─── Provider Registry (V2 adapters registered in bootstrap.js) ─────────────
 // Image and Video providers are registered by bootstrapV2() in v2/bootstrap.js.

@@ -132,4 +132,41 @@ export class MediaRepository extends BaseRepository {
             .eq("workflow_id", workflowId);
         if (error) throw error;
     }
+
+    /**
+     * Fetches multiple media records by their IDs in one query.
+     * Used by GenerationService to resolve primary media for a batch of workflows.
+     */
+    async findByIds(ids) {
+        if (!ids || ids.length === 0) return [];
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("id, workflow_id, generation_config_id, step_id, url, width, height, status, error_message, create_time")
+            .in("id", ids);
+        if (error) throw error;
+        return data || [];
+    }
+
+    /**
+     * Paginated media query scoped to a project.
+     * Used by GenerationService.getAssets.
+     * @param {string}  projectId
+     * @param {Object}  opts
+     * @param {string}  [opts.sessionId]  - optional workflow session filter
+     * @param {number}  [opts.limit=30]
+     * @param {number}  [opts.offset=0]
+     */
+    async findByProjectPaginated(projectId, { sessionId, limit = 30, offset = 0 } = {}) {
+        let query = this.client()
+            .from(this.tableName)
+            .select("id, url, width, height, step_id, workflow_id, create_time")
+            .eq("project_id", projectId)
+            .order("create_time", { ascending: false })
+            .range(Number(offset), Number(offset) + Number(limit) - 1);
+        // Note: session_id filtering on media goes through workflow join; kept as-is per original controller behaviour
+        const { data, error } = await query;
+        if (error) throw error;
+        return data || [];
+    }
 }
+

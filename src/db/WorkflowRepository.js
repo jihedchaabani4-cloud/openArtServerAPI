@@ -144,4 +144,79 @@ export class WorkflowRepository extends BaseRepository {
 
         return firstMedia || null;
     }
+
+    /**
+     * Paginated workflow query scoped to multiple project IDs.
+     * Returns { workflows, total } for library listing.
+     * Used by GenerationService.getUserLibrary.
+     */
+    async findByProjectsPaginated(projectIds, { sessionId, limit = 30, offset = 0 } = {}) {
+        if (!projectIds || projectIds.length === 0) return { workflows: [], total: 0 };
+
+        // Total count
+        let countQ = this.client()
+            .from(this.tableName)
+            .select("id", { count: "exact", head: true })
+            .in("project_id", projectIds);
+        if (sessionId) countQ = countQ.eq("session_id", sessionId);
+        const { count: total, error: countErr } = await countQ;
+        if (countErr) throw countErr;
+
+        // Data page
+        let dataQ = this.client()
+            .from(this.tableName)
+            .select("id, project_id, session_id, display_name, variation_index, primary_media_id, favorited, workflow_type, create_time")
+            .in("project_id", projectIds)
+            .order("create_time", { ascending: false })
+            .range(Number(offset), Number(offset) + Number(limit) - 1);
+        if (sessionId) dataQ = dataQ.eq("session_id", sessionId);
+        const { data: workflows, error: dataErr } = await dataQ;
+        if (dataErr) throw dataErr;
+
+        return { workflows: workflows || [], total: total || 0 };
+    }
+
+    /**
+     * Finds a single workflow by ID, enforcing that it belongs to one of the given projectIds.
+     * Ownership-safe single workflow lookup.
+     * Used by GenerationService.getWorkflowDetail.
+     */
+    async findByIdInProjects(workflowId, projectIds) {
+        if (!projectIds || projectIds.length === 0) return null;
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("id, project_id, session_id, display_name, variation_index, primary_media_id, favorited, workflow_type, create_time")
+            .eq("id", workflowId)
+            .in("project_id", projectIds)
+            .maybeSingle();
+        if (error) throw error;
+        return data || null;
+    }
+
+    /**
+     * Deletes a workflow by ID.
+     * Used by GenerationService.deleteGeneration.
+     */
+    async deleteById(workflowId) {
+        const { error } = await this.client()
+            .from(this.tableName)
+            .delete()
+            .eq("id", workflowId);
+        if (error) throw error;
+    }
+
+    /**
+     * Updates a workflow by ID with the provided patch.
+     * Used by GenerationService.updateGeneration.
+     */
+    async updateById(workflowId, patch) {
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .update(patch)
+            .eq("id", workflowId)
+            .select()
+            .single();
+        if (error) throw error;
+        return data;
+    }
 }

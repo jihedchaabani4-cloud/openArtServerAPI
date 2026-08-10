@@ -15,6 +15,7 @@
 
 import { getProcessor } from "../processors/registry.js";
 import { cloneWorkflowContext as deepCopyContext } from "../contracts/context.js";
+import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 
 /**
  * Build a description string from a source asset for edit context.
@@ -69,19 +70,25 @@ function buildEditPromptPrefix(editContext) {
 export async function executePromptBuilder(resolvedInputs, ctx) {
   const { registries, deps = {} } = ctx;
 
+  // ── Safety: validate & sanitise inputs before any context building ────────
+  const safe = NodeSafetyService.assertPromptBuilderInputs(
+    resolvedInputs,
+    ctx.nodeId ?? "prompt-builder",
+  );
+
   // ── Step 1: Parameter Resolver ───────────────────────────────────────────
   // Build initial WorkflowContext from resolved inputs
-  const sourceAsset = resolvedInputs.source_asset ?? null;
+  const sourceAsset = safe.source_asset;
 
   const initialContext = deepCopyContext({
-    prompt: resolvedInputs.prompt ?? "",
-    characters: resolvedInputs.characters ?? [],
-    references: resolvedInputs.references ?? [],
-    style: resolvedInputs.style ?? null,
-    source_asset: sourceAsset,          // ← NEW: image being edited
+    prompt: safe.prompt,
+    characters: safe.characters,
+    references: safe.references,
+    style:      safe.style,
+    source_asset: sourceAsset,
     layout: null,
     metadata: {
-      runId: ctx.runId,
+      runId:  ctx.runId,
       nodeId: ctx.nodeId,
       userId: ctx.userId,
     },

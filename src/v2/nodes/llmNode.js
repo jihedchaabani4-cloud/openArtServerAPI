@@ -16,6 +16,7 @@
 import llmService from "../../services/LLMService.js";
 import { loadSkills } from "../registry/skillLoader.js";
 import { logV2Event } from "../logging/v2Logger.js";
+import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 
 /**
  * Renders template strings by replacing {{param}} placeholders with parameter values.
@@ -86,22 +87,15 @@ export async function executeLLM(resolvedInputs, ctx) {
   const { runId, nodeId, traceId } = ctx;
   const started = Date.now();
 
-  // ── Step 1: Input Validation ──────────────────────────────────────────────
-  let skillIds = Array.isArray(resolvedInputs.skills) && resolvedInputs.skills.length > 0
-    ? resolvedInputs.skills
+  // ── Safety: validate & sanitise all inputs before any LLM call ────────────
+  const safe = NodeSafetyService.assertLLMInputs(resolvedInputs, nodeId);
+
+  // Resolve skill IDs (support legacy single-skill object format)
+  let skillIds = safe.skills.length > 0
+    ? safe.skills
     : (resolvedInputs.skill?.id ? [resolvedInputs.skill.id] : []);
-  const userPrompt = resolvedInputs.userPrompt ?? "";
-  const images = Array.isArray(resolvedInputs.images) ? resolvedInputs.images : [];
-  const jsonMode = Boolean(resolvedInputs.jsonMode);
-  const parameters = resolvedInputs.parameters ?? {};
 
-  if (!resolvedInputs.systemPromptOverride && skillIds.length === 0) {
-    throw new Error(`LLM Node (${nodeId}): skills must be a non-empty array when systemPromptOverride is not provided.`);
-  }
-
-  if (typeof userPrompt !== "string" || !userPrompt.trim()) {
-    throw new Error(`LLM Node (${nodeId}): userPrompt is required and cannot be empty.`);
-  }
+  const { userPrompt, images, jsonMode, parameters } = safe;
 
   logV2Event({
     traceId,

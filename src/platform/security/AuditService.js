@@ -75,16 +75,8 @@ export class AuditService {
                     resource_id: resourceId,
                     metadata,
                 })
-                .then(({ error }) => {
-                    if (error) {
-                        console.warn(`[AuditService] DB insert failed for action '${action}':`, error.message);
-                    }
-                })
-                .catch((err) => {
-                    console.warn(`[AuditService] Unexpected error for action '${action}':`, err.message);
-                });
-        } else {
-            console.warn(`[AuditService] No admin client available — audit_log insert skipped for action '${action}'`);
+                .then(() => {})
+                .catch(() => {});
         }
     }
 }

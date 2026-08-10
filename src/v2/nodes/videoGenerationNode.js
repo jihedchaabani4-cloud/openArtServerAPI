@@ -11,6 +11,7 @@
 import { selectProvider } from "../providers/router.js";
 import { MEDIA_CAPABILITIES } from "../../workflows/workflowConstants.js";
 import { logV2Event } from "../logging/v2Logger.js";
+import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 
 /**
  * @param {object} inputs - { prompt, duration, aspect_ratio, motion_strength }
@@ -19,6 +20,10 @@ import { logV2Event } from "../logging/v2Logger.js";
  */
 export async function executeVideoGeneration(inputs, ctx) {
   const { runId, nodeId, traceId, forceProvider = null } = ctx;
+
+  // ── Safety: validate & sanitise all inputs before any provider work ────────
+  const safe = NodeSafetyService.assertVideoInputs(inputs, nodeId);
+
   const started = Date.now();
 
   logV2Event({
@@ -37,18 +42,18 @@ export async function executeVideoGeneration(inputs, ctx) {
   );
   const providerId = decision.selectedProvider;
 
-  // ── Execute generation ───────────────────────────────────────────────────
+  // ── Execute generation (use sanitised safe inputs) ────────────────────────
   const providerResult = await adapter.execute({
     capabilityId: MEDIA_CAPABILITIES.VIDEO_GENERATION,
-    model: inputs.model ?? null,
-    mode: inputs.mode ?? "t2v",
-    prompt: inputs.prompt,
-    duration: inputs.duration ?? 5,
-    fps: inputs.fps ?? 24,
-    aspect_ratio: inputs.aspect_ratio ?? "16:9",
-    motion_strength: inputs.motion_strength ?? null,
-    startFrame: inputs.startFrame ?? null,
-    references: inputs.references ?? [],
+    model:           safe.model,
+    mode:            safe.mode,
+    prompt:          safe.prompt,
+    duration:        safe.duration,
+    fps:             safe.fps,
+    aspect_ratio:    safe.aspect_ratio,
+    motion_strength: safe.motion_strength,
+    startFrame:      safe.startFrame,
+    references:      safe.references,
   });
 
   // ── Normalize output ─────────────────────────────────────────────────────
@@ -58,7 +63,7 @@ export async function executeVideoGeneration(inputs, ctx) {
     id: firstOutput.id ?? `vid-${Date.now()}`,
     type: "video",
     url: firstOutput.url ?? "",
-    duration: firstOutput.duration ?? inputs.duration ?? 5,
+    duration: firstOutput.duration ?? safe.duration,
     metadata: { ...(firstOutput.metadata ?? {}), provider: providerId },
   };
 

@@ -16,17 +16,15 @@
 
 import { selectProvider } from "../providers/router.js";
 import { MEDIA_CAPABILITIES } from "../../workflows/workflowConstants.js";
+import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 
 export async function executeMediaTransform(inputs, ctx) {
-  // Validate source_asset
-  const sourceAsset = inputs.source_asset;
-  if (!sourceAsset || !sourceAsset.url) {
-    throw new Error("media-transform: source_asset.url is required");
-  }
+  // ── Safety: validate & sanitise all inputs before any provider work ────────
+  const safe = NodeSafetyService.assertTransformInputs(inputs, ctx.nodeId ?? "media-transform");
 
-  // Resolve provider for transform mode
-  const mode = inputs.mode || "image_edit";
-  const model = inputs.model || null;
+  const sourceAsset = safe.source_asset;
+  const mode        = safe.mode;
+  const model       = safe.model;
 
   // Map mode to capability
   const capabilityMap = {
@@ -55,16 +53,16 @@ export async function executeMediaTransform(inputs, ctx) {
     );
   }
 
-  // Build transform payload
+  // Build transform payload (use sanitised safe inputs)
   const transformPayload = {
     capabilityId,
-    prompt: inputs.prompt,
-    image: sourceAsset.url,            // ← Source image (OBLIGATOIRE)
+    prompt:    safe.prompt,
+    image:     sourceAsset.url,
     image_url: sourceAsset.url,
-    width: inputs.width ?? sourceAsset.width ?? 1024,
-    height: inputs.height ?? sourceAsset.height ?? 1024,
-    strength: inputs.strength ?? 0.75,
-    references: inputs.references ?? [],
+    width:     safe.width,
+    height:    safe.height,
+    strength:  safe.strength,
+    references: safe.references,
     mode,
     model,
   };

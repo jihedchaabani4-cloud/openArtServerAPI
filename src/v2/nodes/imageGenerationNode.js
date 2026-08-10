@@ -11,6 +11,7 @@
 import { selectProvider } from "../providers/router.js";
 import { MEDIA_CAPABILITIES } from "../../workflows/workflowConstants.js";
 import { logV2Event } from "../logging/v2Logger.js";
+import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 
 /**
  * @param {object} inputs - { prompt, width, height, count, seed, style }
@@ -29,6 +30,10 @@ export async function executeImageGeneration(inputs, ctx) {
   }
 
   const { runId, nodeId, traceId } = ctx;
+
+  // ── Safety: validate & sanitise all inputs before any provider work ────────
+  const safe = NodeSafetyService.assertImageInputs(inputs, nodeId);
+
   const started = Date.now();
 
   logV2Event({
@@ -51,17 +56,17 @@ export async function executeImageGeneration(inputs, ctx) {
 
   const providerId = decision.selectedProvider;
 
-  // ── Execute generation ───────────────────────────────────────────────────
+  // ── Execute generation (use sanitised safe inputs) ────────────────────────
   const providerResult = await adapter.execute({
     capabilityId: MEDIA_CAPABILITIES.IMAGE_GENERATION,
-    prompt: inputs.prompt,
-    width: inputs.width ?? 1024,
-    height: inputs.height ?? 1024,
-    count: inputs.count ?? 1,
-    seed: inputs.seed ?? null,
-    style: inputs.style ?? null,
-    references: inputs.references ?? [],
-    model: inputs.model ?? null,          // ← pass model to adapter
+    prompt: safe.prompt,
+    width:  safe.width,
+    height: safe.height,
+    count:  safe.count,
+    seed:   safe.seed,
+    style:  safe.style,
+    references: safe.references,
+    model:  safe.model,
   });
 
   // ── Normalize outputs → V2 asset shape ──────────────────────────────────
@@ -70,9 +75,9 @@ export async function executeImageGeneration(inputs, ctx) {
     id: item.id ?? `img-${Date.now()}`,
     type: "image",
     url: item.url ?? "",
-    width: item.width ?? inputs.width ?? 1024,
-    height: item.height ?? inputs.height ?? 1024,
-    metadata: { ...(item.metadata ?? {}), provider: providerId, model: item.metadata?.model ?? inputs.model ?? null },
+    width:  item.width  ?? safe.width,
+    height: item.height ?? safe.height,
+    metadata: { ...(item.metadata ?? {}), provider: providerId, model: item.metadata?.model ?? safe.model ?? null },
   }));
 
   const durationMs = Date.now() - started;
@@ -86,7 +91,7 @@ export async function executeImageGeneration(inputs, ctx) {
 
   return {
     assets,
-    metadata: { provider: providerId, model: inputs.model ?? null, decision, latencyMs: durationMs },
+    metadata: { provider: providerId, model: safe.model ?? null, decision, latencyMs: durationMs },
     providerDecision: decision,
   };
 }

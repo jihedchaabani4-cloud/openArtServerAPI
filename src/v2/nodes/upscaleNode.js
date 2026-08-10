@@ -1,6 +1,7 @@
 import { selectProvider } from "../providers/router.js";
 import { MEDIA_CAPABILITIES } from "../../workflows/workflowConstants.js";
 import { logV2Event } from "../logging/v2Logger.js";
+import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 
 /**
  * Upscale Node (T075)
@@ -11,9 +12,13 @@ import { logV2Event } from "../logging/v2Logger.js";
  */
 export async function executeUpscale(inputs, ctx) {
   const { runId, nodeId, traceId, forceProvider = null } = ctx;
-  const inputAsset = inputs.asset || {};
-  const factor = Number(inputs.factor ?? 2) || 2;
-  const started = Date.now();
+
+  // ── Safety: validate & sanitise all inputs before any provider work ────────
+  const safe = NodeSafetyService.assertUpscaleInputs(inputs, nodeId);
+
+  const inputAsset = safe.asset;
+  const factor     = safe.factor;
+  const started    = Date.now();
 
   logV2Event({
     traceId,

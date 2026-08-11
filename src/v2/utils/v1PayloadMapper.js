@@ -39,7 +39,8 @@ export function normalizeAspectRatio(ratio) {
  * Normalizes a count value from V1 body, ensuring at least 1.
  */
 export function normalizeCount(count, num_images) {
-  return Math.max(1, Number(count ?? num_images ?? 1));
+  const val = Number(count ?? num_images ?? 1);
+  return isNaN(val) ? 1 : Math.max(1, val);
 }
 
 // ─────────────────────────────────────────────────────

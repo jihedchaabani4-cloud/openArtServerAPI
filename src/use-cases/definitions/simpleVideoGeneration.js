@@ -1,0 +1,47 @@
+export const simpleVideoGenerationUseCase = {
+  useCaseId: "simple-video-generation",
+  label: "Simple Video Generation",
+  description: "Standard video clip generation flow",
+  category: "generation",
+  type: "flow",
+  thumbnail: "/thumbnails/simple-video.jpg",
+  status: "active",
+  workflowRef: "first-slice-video-generation",
+  billing: {
+    strategy: "per-node",
+  },
+  inputSchema: {
+    prompt: {
+      type: "string",
+      required: true,
+      label: "Prompt",
+      placeholder: "e.g. Slow motion camera orbit around a luxury watch",
+    },
+    mode: {
+      type: "enum",
+      required: false,
+      label: "Generation Mode",
+      options: ["t2v", "i2v"],
+      default: "t2v",
+    },
+    duration: {
+      type: "number",
+      required: false,
+      label: "Duration in Seconds",
+      default: 5,
+      min: 3,
+      max: 60,
+    },
+    aspect_ratio: {
+      type: "enum",
+      required: false,
+      label: "Aspect Ratio",
+      options: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
+      default: "16:9",
+    },
+  },
+  version: "1.0.0",
+  author: "system",
+  tags: ["video", "generation"],
+  visibility: "public",
+};

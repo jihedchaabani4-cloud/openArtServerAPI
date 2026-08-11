@@ -1,0 +1,46 @@
+export const simpleImageGenerationUseCase = {
+  useCaseId: "simple-image-generation",
+  label: "Simple Image Generation",
+  description: "Standard single image generation flow",
+  category: "generation",
+  type: "flow",
+  thumbnail: "/thumbnails/simple-image.jpg",
+  status: "active",
+  workflowRef: "simple-image-v1",
+  billing: {
+    strategy: "per-node",
+  },
+  inputSchema: {
+    prompt: {
+      type: "string",
+      required: true,
+      label: "Prompt",
+      placeholder: "e.g. A majestic lion in golden sunlight",
+    },
+    aspect_ratio: {
+      type: "enum",
+      required: false,
+      label: "Aspect Ratio",
+      options: ["1:1", "16:9", "9:16", "4:3", "3:4", "21:9"],
+      default: "1:1",
+    },
+    count: {
+      type: "number",
+      required: false,
+      label: "Number of Images",
+      default: 1,
+      min: 1,
+      max: 8,
+    },
+    model: {
+      type: "string",
+      required: false,
+      label: "Model Key",
+      default: "fal",
+    },
+  },
+  version: "1.0.0",
+  author: "system",
+  tags: ["image", "generation"],
+  visibility: "public",
+};

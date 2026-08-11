@@ -1,13 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { normalizeImageModelName, isImageModelRegistered } from "../lib/modelRegistryKeys.js";
-import { db, mediaWorkflowLifecycleService } from "../src/container.js";
+import { db, mediaWorkflowLifecycleService, walletService, pricingService } from "../src/container.js";
 import { findMigrationInventoryItem, LEGACY_PATH_STATUSES } from "../src/registry/migrationInventory.js";
 import { startWorkflow } from "./workflowArchitectureController.js";
 
-// V2 Imports
+// V2 & UseCase Imports
 import { loadRegistries } from "../src/v2/registry/registryLoader.js";
-import { compileWorkflow } from "../src/v2/compiler/compileWorkflow.js";
-import { startWorkflowRun } from "../src/v2/runner/workflowRunner.js";
+import { run as runUseCase } from "../src/use-cases/useCaseRunner.js";
 import { mapImageGenerationV1, mapEditImageV1, buildV1CompatibleResponse } from "../src/v2/utils/v1PayloadMapper.js";
 
 let cachedRegistries = null;
@@ -21,7 +20,7 @@ function getRegistries() {
 /**
  * generateV2
  * POST /api/images/generatedV2
- * Modern flow using V2 Engine (simple-image-v1)
+ * Modern flow delegating to standard Use Case Runner (simple-image-generation)
  */
 export const generateV2 = async (req, res) => {
     const item = findMigrationInventoryItem("image-generation");
@@ -54,11 +53,6 @@ export const generateV2 = async (req, res) => {
         const runId = randomUUID();
         const workflowId = "simple-image-v1";
 
-        const registries = getRegistries();
-        const workflowDef = registries.workflows[workflowId];
-        if (!workflowDef) throw new Error(`V2 Workflow ${workflowId} not found`);
-        const plan = compileWorkflow(workflowDef, registries);
-
         const placeholders = await mediaWorkflowLifecycleService.startPlaceholders({
             userId,
             nodeType: "image-generation",
@@ -70,16 +64,22 @@ export const generateV2 = async (req, res) => {
 
         const runtimeInput = {
             ...v2Input,
-            userId,
             _v1PlaceholderIds: placeholders,
         };
 
-        console.log(`🚀 [ImageController] generateV2 | Starting V2 run ${runId}`);
-        const runResult = await startWorkflowRun(plan, runtimeInput, runId);
+        console.log(`🚀 [ImageController] generateV2 | Running Use Case simple-image-generation`);
+        const runResult = await runUseCase({
+            useCaseId: "simple-image-generation",
+            input: runtimeInput,
+            userId,
+            walletService,
+            pricingService,
+            registries: getRegistries(),
+        });
 
         const firstPh = placeholders[0] || {};
         res.json(buildV1CompatibleResponse({
-            runId: runResult.run_id,
+            runId: runResult.executionId,
             v1WorkflowId: firstPh.workflowId,
             v1MediaId: firstPh.mediaId,
             projectId: req.body.project_id,

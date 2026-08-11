@@ -2,12 +2,11 @@ import { randomUUID } from "node:crypto";
 import { isVideoModelRegistered } from "../lib/modelRegistryKeys.js";
 import { findMigrationInventoryItem, LEGACY_PATH_STATUSES } from "../src/registry/migrationInventory.js";
 import { startWorkflow } from "./workflowArchitectureController.js";
-import { db, workflowStorageGateway } from "../src/container.js";
+import { db, workflowStorageGateway, walletService, pricingService } from "../src/container.js";
 
-// V2 Imports
+// V2 & UseCase Imports
 import { loadRegistries } from "../src/v2/registry/registryLoader.js";
-import { compileWorkflow } from "../src/v2/compiler/compileWorkflow.js";
-import { startWorkflowRun } from "../src/v2/runner/workflowRunner.js";
+import { run as runUseCase } from "../src/use-cases/useCaseRunner.js";
 import { 
     mapVideoGenerationV1, 
     mapEditVideoV1, 
@@ -22,16 +21,12 @@ function getRegistries() {
 }
 
 /**
- * Helper to run a V2 workflow and return the V1-compatible response.
+ * Helper to run a V2 video workflow via Use Case Runner and return the V1-compatible response.
  */
 async function executeV2VideoWorkflow({ 
     workflowId, nodeType, v2Input, userId, projectId, sessionId, req 
 }) {
     const runId = randomUUID();
-    const registries = getRegistries();
-    const workflowDef = registries.workflows[workflowId];
-    if (!workflowDef) throw new Error(`V2 Workflow ${workflowId} not found`);
-    const plan = compileWorkflow(workflowDef, registries);
 
     // Phase 1 — Pre-create placeholder
     const placeholder = await workflowStorageGateway.createMediaPlaceholder({
@@ -44,15 +39,21 @@ async function executeV2VideoWorkflow({
 
     const runtimeInput = {
         ...v2Input,
-        userId,
         _v1PlaceholderIds: placeholder ? [placeholder] : [],
     };
 
-    console.log(`🚀 [VideoController] Starting V2 run ${runId} for workflow ${workflowId}`);
-    const runResult = await startWorkflowRun(plan, runtimeInput, runId);
+    console.log(`🚀 [VideoController] Running Use Case simple-video-generation for run ${runId}`);
+    const runResult = await runUseCase({
+        useCaseId: "simple-video-generation",
+        input: runtimeInput,
+        userId,
+        walletService,
+        pricingService,
+        registries: getRegistries(),
+    });
 
     return buildV1CompatibleResponse({
-        runId: runResult.run_id,
+        runId: runResult.executionId,
         v1WorkflowId: placeholder?.workflowId,
         v1MediaId: placeholder?.mediaId,
         projectId,

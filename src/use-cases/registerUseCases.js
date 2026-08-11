@@ -2,6 +2,8 @@ import { registerUseCase, clearUseCaseRegistry } from "./useCaseRegistry.js";
 import { brandMascotUseCase } from "./definitions/brandMascot.js";
 import { productAdVideosUseCase } from "./definitions/productAdVideos.js";
 import { vfxStudioUseCase } from "./definitions/vfxStudio.js";
+import { simpleImageGenerationUseCase } from "./definitions/simpleImageGeneration.js";
+import { simpleVideoGenerationUseCase } from "./definitions/simpleVideoGeneration.js";
 
 /**
  * Registers all pre-defined Use Cases into the global registry.
@@ -11,9 +13,11 @@ export function registerAllUseCases() {
   clearUseCaseRegistry();
 
   const useCases = [
+    simpleImageGenerationUseCase,
+    simpleVideoGenerationUseCase,
     brandMascotUseCase,
     productAdVideosUseCase,
-    vfxStudioUseCase
+    vfxStudioUseCase,
   ];
 
   for (const uc of useCases) {

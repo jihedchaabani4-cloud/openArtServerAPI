@@ -36,9 +36,6 @@ import { TenantAccessService } from "#platform/security/TenantAccessService.js";
 import { AuditService } from "#platform/security/AuditService.js";
 import { WorkflowStorageGateway } from "./infrastructure/storage/workflowStorageGateway.js";
 import { WorkflowQueueGateway } from "./infrastructure/queue/workflowQueueGateway.js";
-import { WorkflowExecutionRepository } from "./workflows/workflowExecutionRepository.js";
-import { WorkflowRunner } from "./workflows/workflowRunner.js";
-import { WorkflowStatusService } from "./workflows/workflowStatusService.js";
 
 // ─── Providers ───────────────────────────────────────────────────────────────
 import { OpenAITextProvider } from "./core/providers/OpenAITextProvider.js";
@@ -111,25 +108,6 @@ export const workflowStorageGateway = new WorkflowStorageGateway({
     lifecycleService: mediaWorkflowLifecycleService,
 });
 export const workflowQueueGateway = new WorkflowQueueGateway();
-export const workflowExecutionRepository = new WorkflowExecutionRepository({ db });
-export const workflowRunner = new WorkflowRunner({
-    executionRepository: workflowExecutionRepository,
-    eventRecorder: workflowEventRecorder,
-    billingGateway: workflowBillingGateway,
-    storageGateway: workflowStorageGateway,
-    queueGateway: workflowQueueGateway,
-    treatmentDeps: () => ({
-        db,
-        storageService,
-        promptService,
-        models: IMAGE_MODELS,
-        dnaTreatment,
-        walletService,
-    }),
-});
-export const workflowStatusService = new WorkflowStatusService({
-    executionRepository: workflowExecutionRepository,
-});
 
 // ─── DNA Treatment ────────────────────────────────────────────────────────────
 

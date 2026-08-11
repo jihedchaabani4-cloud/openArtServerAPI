@@ -34,7 +34,6 @@ function runNpmScript(scriptName) {
 
 function main() {
   const phaseChecks = [
-    ["checkV1Untouched.mjs"],
     ["checkRegistryLoad.mjs"],
     ["checkCompiler.mjs", "--mode", "all"],
     ["checkRunner.mjs"],

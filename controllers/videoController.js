@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { isVideoModelRegistered } from "../lib/modelRegistryKeys.js";
-import { findMigrationInventoryItem, LEGACY_PATH_STATUSES } from "../src/registry/migrationInventory.js";
-import { startWorkflow } from "./workflowArchitectureController.js";
 import { db, workflowStorageGateway, walletService, pricingService } from "../src/container.js";
 
 // V2 & UseCase Imports
@@ -67,15 +65,6 @@ async function executeV2VideoWorkflow({
  * POST /api/video/generate  (deprecated alias)
  */
 export const generateVideo = async (req, res) => {
-    const item = findMigrationInventoryItem("video-generation");
-    const forceRollback = req.headers["x-force-rollback"] === "true" || req.query?.rollback === "true";
-    if (forceRollback && item && item.legacyPathStatus === LEGACY_PATH_STATUSES.ROLLBACK_WINDOW) {
-        console.warn("⚠️ [VideoController] Rolling back to legacy video-generation path (active rollback window)");
-        req.body = req.body || {};
-        req.body.featureId = "video-generation";
-        return startWorkflow(req, res);
-    }
-
     try {
         const { model, model_name, prompt, references = [], project_id, session_id } = req.body;
         const rawModel = (model ?? model_name ?? "").trim();

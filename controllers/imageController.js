@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { normalizeImageModelName, isImageModelRegistered } from "../lib/modelRegistryKeys.js";
 import { db, mediaWorkflowLifecycleService, walletService, pricingService } from "../src/container.js";
-import { findMigrationInventoryItem, LEGACY_PATH_STATUSES } from "../src/registry/migrationInventory.js";
-import { startWorkflow } from "./workflowArchitectureController.js";
 
 // V2 & UseCase Imports
 import { loadRegistries } from "../src/v2/registry/registryLoader.js";
@@ -19,19 +17,10 @@ function getRegistries() {
 
 /**
  * generateV2
- * POST /api/images/generatedV2
+ * POST /api/images/generated
  * Modern flow delegating to standard Use Case Runner (simple-image-generation)
  */
 export const generateV2 = async (req, res) => {
-    const item = findMigrationInventoryItem("image-generation");
-    const forceRollback = req.headers["x-force-rollback"] === "true" || req.query?.rollback === "true";
-    if (forceRollback && item && item.legacyPathStatus === LEGACY_PATH_STATUSES.ROLLBACK_WINDOW) {
-        console.warn("⚠️ [ImageController] Rolling back to legacy image-generation path (active rollback window)");
-        req.body = req.body || {};
-        req.body.featureId = "image-generation";
-        return startWorkflow(req, res);
-    }
-
     try {
         console.log(`🚀 [ImageController] generateV2 | Incoming Body:`, JSON.stringify(req.body, null, 2));
 
@@ -112,34 +101,19 @@ export const generateEdit = async (req, res) => {
 
         const v2Input = mapEditImageV1(req.body, sourceMedia);
         const runId = randomUUID();
-        const workflowId = "edit-image-v1";
 
-        const registries = getRegistries();
-        const workflowDef = registries.workflows[workflowId];
-        if (!workflowDef) throw new Error(`V2 Workflow ${workflowId} not found`);
-        const plan = compileWorkflow(workflowDef, registries);
-
-        const placeholder = await mediaWorkflowLifecycleService.startPlaceholder({
-            runId,
-            nodeType: "media-transform",
-            userId,
-            workflowId,
+        console.log(`🚀 [ImageController] generateEdit | Running Use Case simple-image-fast-v1`);
+        const runResult = await runUseCase({
+            useCaseId: "simple-image-fast-v1",
             input: v2Input,
+            userId,
+            walletService,
+            pricingService,
+            registries: getRegistries(),
         });
 
-        const runtimeInput = {
-            ...v2Input,
-            userId,
-            _v1PlaceholderIds: placeholder ? [placeholder] : [],
-        };
-
-        console.log(`🚀 [ImageController] generateEdit | Starting V2 run ${runId}`);
-        const runResult = await startWorkflowRun(plan, runtimeInput, runId);
-
         res.json(buildV1CompatibleResponse({
-            runId: runResult.run_id,
-            v1WorkflowId: placeholder?.workflowId,
-            v1MediaId: placeholder?.mediaId,
+            runId: runResult.executionId,
             projectId: req.body.project_id,
             sessionId: req.body.session_id,
         }));

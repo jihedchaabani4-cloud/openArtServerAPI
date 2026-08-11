@@ -7,7 +7,7 @@
  * V2 upscale request (asset + factor) and returns an enhanced asset.
  */
 
-import { MEDIA_CAPABILITIES } from "../../../workflows/workflowConstants.js";
+import { MEDIA_CAPABILITIES } from "../../constants/workflowConstants.js";
 import { createStaticProviderAdapter } from "../../../providers/providerAdapterContract.js";
 
 /**

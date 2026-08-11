@@ -1,4 +1,4 @@
-import { MEDIA_CAPABILITIES } from "../../workflows/workflowConstants.js";
+import { MEDIA_CAPABILITIES } from "../../v2/constants/workflowConstants.js";
 import { createStaticProviderAdapter } from "../providerAdapterContract.js";
 
 export function createImageRunnerProviderAdapter({

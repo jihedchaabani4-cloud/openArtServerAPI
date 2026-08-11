@@ -1,6 +1,5 @@
-import { FEATURE_STATUSES, MEDIA_CAPABILITIES } from "../workflows/workflowConstants.js";
+import { FEATURE_STATUSES, MEDIA_CAPABILITIES, createWorkflowError, WORKFLOW_ERROR_CODES } from "../v2/constants/workflowConstants.js";
 import { validateFeatureRegistryEntry, assertRegistryEntryIsMetadataOnly } from "./featureRegistrySchema.js";
-import { createWorkflowError, WORKFLOW_ERROR_CODES } from "../workflows/workflowErrors.js";
 
 const entries = new Map();
 

@@ -1,4 +1,4 @@
-import { createWorkflowError, WORKFLOW_ERROR_CODES } from "../workflows/workflowErrors.js";
+import { createWorkflowError, WORKFLOW_ERROR_CODES } from "../v2/constants/workflowConstants.js";
 import { listProvidersForCapability, getProvider } from "./providerRegistry.js";
 
 const QUALITY_RANK = {

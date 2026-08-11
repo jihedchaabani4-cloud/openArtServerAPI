@@ -9,7 +9,7 @@
  * only job is to call the AI provider API and return the URL.
  */
 
-import { MEDIA_CAPABILITIES } from "../../../workflows/workflowConstants.js";
+import { MEDIA_CAPABILITIES } from "../../constants/workflowConstants.js";
 import { createStaticProviderAdapter } from "../../../providers/providerAdapterContract.js";
 import { resolveProvider, buildProviderPayload, extractOutputUrl } from "../../../image/treatments/basetretment/providerStrategy.js";
 

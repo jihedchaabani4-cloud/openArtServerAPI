@@ -15,7 +15,7 @@
  */
 
 import { selectProvider } from "../providers/router.js";
-import { MEDIA_CAPABILITIES } from "../../workflows/workflowConstants.js";
+import { MEDIA_CAPABILITIES } from "../constants/workflowConstants.js";
 import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 
 export async function executeMediaTransform(inputs, ctx) {

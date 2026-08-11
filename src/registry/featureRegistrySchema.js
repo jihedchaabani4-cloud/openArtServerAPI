@@ -1,5 +1,4 @@
-import { FEATURE_STATUSES, MEDIA_CAPABILITIES } from "../workflows/workflowConstants.js";
-import { createWorkflowError, WORKFLOW_ERROR_CODES } from "../workflows/workflowErrors.js";
+import { FEATURE_STATUSES, MEDIA_CAPABILITIES, createWorkflowError, WORKFLOW_ERROR_CODES } from "../v2/constants/workflowConstants.js";
 
 const allowedFeatureStatuses = new Set(Object.values(FEATURE_STATUSES));
 const allowedCapabilities = new Set(Object.values(MEDIA_CAPABILITIES));

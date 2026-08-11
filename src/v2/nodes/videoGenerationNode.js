@@ -9,7 +9,7 @@
  */
 
 import { selectProvider } from "../providers/router.js";
-import { MEDIA_CAPABILITIES } from "../../workflows/workflowConstants.js";
+import { MEDIA_CAPABILITIES } from "../constants/workflowConstants.js";
 import { logV2Event } from "../logging/v2Logger.js";
 import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 

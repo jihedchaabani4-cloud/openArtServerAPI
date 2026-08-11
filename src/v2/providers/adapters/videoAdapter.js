@@ -9,7 +9,7 @@
  * call the AI provider API and return the video URL.
  */
 
-import { MEDIA_CAPABILITIES } from "../../../workflows/workflowConstants.js";
+import { MEDIA_CAPABILITIES } from "../../constants/workflowConstants.js";
 import { createStaticProviderAdapter } from "../../../providers/providerAdapterContract.js";
 import { getRunner } from "../../../video/core/modelRouter.js";
 

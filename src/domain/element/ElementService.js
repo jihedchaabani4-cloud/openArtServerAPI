@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import elementRepository from "../../db/ElementRepository.js";
 import { MediaRepository } from "../../db/MediaRepository.js";
 import { WorkflowRepository } from "../../db/WorkflowRepository.js";
-import { uploadMediaBatch } from "#services/mediaStorageService.js";
+import { uploadMediaBatch } from "#platform/storage/mediaStorageService.js";
 import { workflowService } from "../../container.js";
 import { ElementAnalysisService } from "./ElementAnalysisService.js";
 

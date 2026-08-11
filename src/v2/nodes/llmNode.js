@@ -13,7 +13,7 @@
  *   8. Output Assembly     → return { text, json, usage, model, provider, skillsUsed }
  */
 
-import llmService from "../../services/LLMService.js";
+import llmService from "#platform/ai/LLMService.js";
 import { loadSkills } from "../registry/skillLoader.js";
 import { logV2Event } from "../logging/v2Logger.js";
 import { NodeSafetyService } from "./safety/NodeSafetyService.js";

@@ -4,7 +4,7 @@ import { RunRepository } from "./runRepository.js";
 import { enqueueWorkflowRun, enqueueNodeExecute } from "../queue/v2WorkflowQueue.js";
 import { getValueAtPath } from "./nodeExecutor.js";
 import { logV2Event } from "../logging/v2Logger.js";
-import { normalizeNodeMediaOutputs } from "../../services/MediaWorkflowLifecycleService.js";
+import { normalizeNodeMediaOutputs } from "#platform/media/MediaLifecycleService.js";
 
 const runRepo = new RunRepository();
 const PROVIDER_BACKED_NODE_TYPES = new Set([

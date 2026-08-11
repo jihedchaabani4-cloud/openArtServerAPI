@@ -10,7 +10,6 @@
         "#core/*": "./src/core/*",
         "#utils/*.js": "./src/utils/*.js",
         "#db/*.js": "./src/db/*.js",
-        "#services/*.js": "./src/services/*.js",
         "#platform/storage/*.js": "./src/platform/storage/*.js",
         "#platform/workflow/*.js": "./src/platform/workflow/*.js",
         "#platform/media/*.js": "./src/platform/media/*.js",

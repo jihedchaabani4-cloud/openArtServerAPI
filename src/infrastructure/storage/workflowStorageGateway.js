@@ -1,4 +1,4 @@
-import { MediaWorkflowLifecycleService } from "../../services/MediaWorkflowLifecycleService.js";
+import { MediaWorkflowLifecycleService } from "#platform/media/MediaLifecycleService.js";
 
 /**
  * Thin adapter over MediaWorkflowLifecycleService for legacy gateway callers.

@@ -1,10 +1,10 @@
 import "dotenv/config";
-import { PromptService } from "#services/PromptService.js";
+import { PromptService } from "#platform/ai/PromptService.js";
 import { StorageService } from "#platform/storage/StorageService.js";
 import { VisionService } from "#platform/ai/VisionService.js";
 import { WalletService } from "#platform/billing/WalletService.js";
 import { PricingService } from "#platform/billing/PricingService.js";
-import { FailedOpsService } from "#services/FailedOpsService.js";
+import { FailedOpsService } from "#platform/billing/FailedOpsService.js";
 import { createClient } from "@supabase/supabase-js";
 import { redisConnection } from "#queue/redis.js";
 

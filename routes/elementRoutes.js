@@ -20,7 +20,7 @@ import {
     updateElement,
     analyzeElement,
 } from "../controllers/elementController.js";
-import promptBuilderProService from "../src/services/promptBuilderProService.js";
+import promptBuilderProService from "../src/domain/element/promptBuilderProService.js";
 import elementRepository from "../src/db/ElementRepository.js";
 import { requireAuth } from "../src/middleware/auth.js";
 

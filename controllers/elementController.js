@@ -6,8 +6,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import * as elementService from "../src/services/elementService.js";
-import { addImageToElement as addImageToElementSvc } from "../src/services/elementService.js";
+import * as elementService from "#domain/element/ElementService.js";
+import { addImageToElement as addImageToElementSvc } from "#domain/element/ElementService.js";
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 

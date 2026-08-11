@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { WalletError } from "../src/services/WalletService.js";
+import { WalletError } from "#platform/billing/WalletService.js";
 
 /**
  * Admin Controller

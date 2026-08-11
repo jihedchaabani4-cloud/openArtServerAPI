@@ -8,9 +8,10 @@ import { registerProviders } from "../providers/providerRegistry.js";
 import { createV2ImageAdapter } from "./providers/adapters/imageAdapter.js";
 import { createV2VideoAdapter } from "./providers/adapters/videoAdapter.js";
 import { createV2UpscaleAdapter } from "./providers/adapters/upscaleAdapter.js";
+import { registerAllUseCases } from "../use-cases/registerUseCases.js";
 
 /**
- * Bootstrap the V2 Composable Workflow Engine.
+ * Bootstrap the V2 Composable Workflow Engine & Use Case Registry.
  * Wires shared gateways and configures runner dependencies.
  */
 export function bootstrapV2() {
@@ -27,7 +28,10 @@ export function bootstrapV2() {
     createV2UpscaleAdapter({ providerId: "topaz", cost: 5, latencyMs: 2000, qualityTier: "standard" }),
   ], { replace: true });
 
-  console.log("[Bootstrap V2] V2 Workflow Engine successfully bootstrapped.");
+  // Register all Use Cases (simple-image-generation, simple-image-fast-v1, simple-image-pro-v1, etc.)
+  registerAllUseCases();
+
+  console.log("[Bootstrap V2] V2 Workflow Engine & Use Cases successfully bootstrapped.");
 
   // Import worker to activate BullMQ queue processing
   import("./queue/v2WorkflowWorker.js").then(() => {

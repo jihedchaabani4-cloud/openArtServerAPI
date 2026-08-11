@@ -76,9 +76,16 @@ export async function run({
   workflowRunner = null,
   registries = null,
 }) {
+  console.log(`\n================================================================`);
+  console.log(`🚀 [UseCaseRunner] Starting Use Case Execution`);
+  console.log(`   Use Case ID : ${useCaseId}`);
+  console.log(`   User ID     : ${userId || "anonymous"}`);
+  console.log(`================================================================`);
+
   // 1. Resolve Use Case
   const useCase = getUseCase(useCaseId);
   if (!useCase) {
+    console.error(`❌ [UseCaseRunner] Error: Use Case "${useCaseId}" not found`);
     const err = new Error(`Use Case "${useCaseId}" not found`);
     err.statusCode = 404;
     err.code = "USE_CASE_NOT_FOUND";
@@ -87,6 +94,7 @@ export async function run({
 
   // 2. Validate input parameters against inputSchema
   validateInputs(input, useCase.inputSchema);
+  console.log(`📥 [UseCaseRunner] Stage 1: Input validation passed against schema.`);
 
   // Map source_url to source_asset object for compatibility with V2 compiler and workflows
   if (input.source_url && !input.source_asset) {
@@ -108,6 +116,7 @@ export async function run({
 
   // 3. Compile V2 workflow associated with the Use Case
   if (!registries || !registries.workflows[useCase.workflowRef]) {
+    console.error(`❌ [UseCaseRunner] Error: Associated workflow "${useCase.workflowRef}" not found in registries`);
     const err = new Error(`Associated workflow "${useCase.workflowRef}" not found in registries`);
     err.statusCode = 404;
     err.code = "WORKFLOW_NOT_FOUND";
@@ -117,7 +126,9 @@ export async function run({
   let plan;
   try {
     plan = compileWorkflowById(useCase.workflowRef, registries);
+    console.log(`⚙️ [UseCaseRunner] Stage 2: Workflow compiled successfully (${useCase.workflowRef})`);
   } catch (compilationErr) {
+    console.error(`❌ [UseCaseRunner] Error compiling workflow "${useCase.workflowRef}":`, compilationErr.message);
     const err = new Error(`Workflow compilation failed: ${compilationErr.message}`);
     err.statusCode = 422;
     err.code = "COMPILATION_FAILED";
@@ -131,12 +142,14 @@ export async function run({
 
   // 5. Estimate total workflow credit cost
   const totalCost = await billingStrategy.estimateTotal(plan, input, pricingService);
+  console.log(`💳 [UseCaseRunner] Stage 3: Billing Strategy (${strategyName}) — Estimated Cost: ${totalCost} credit(s)`);
 
   // 6. Precheck user credit balance
   try {
     await billingStrategy.preCheck(userId, totalCost, walletService);
+    console.log(`✅ [UseCaseRunner] Stage 4: User balance verified.`);
   } catch (billingErr) {
-    // Insufficient credits or wallet error
+    console.error(`❌ [UseCaseRunner] Billing precheck failed:`, billingErr.message);
     const err = new Error(billingErr.message);
     err.statusCode = 402;
     err.code = billingErr.code || "INSUFFICIENT_CREDITS";
@@ -156,7 +169,11 @@ export async function run({
     userId,
   };
 
+  console.log(`🚀 [UseCaseRunner] Stage 5: Dispatching workflow run to V2 Engine...`);
   const runResult = await startWorkflowRunFn(plan, runtimeInput);
+
+  console.log(`🎉 [UseCaseRunner] Execution Started! Run ID: ${runResult.run_id} (Status: ${runResult.status})`);
+  console.log(`================================================================\n`);
 
   return {
     executionId: runResult.run_id,

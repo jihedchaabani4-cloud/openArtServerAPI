@@ -24,16 +24,12 @@ function getRegistries() {
  */
 export const generateV2 = async (req, res) => {
     const item = findMigrationInventoryItem("image-generation");
-    if (item && item.legacyPathStatus !== LEGACY_PATH_STATUSES.ACTIVE) {
-        const forceRollback = req.headers["x-force-rollback"] === "true" || req.query?.rollback === "true";
-        if (forceRollback && item.legacyPathStatus === LEGACY_PATH_STATUSES.ROLLBACK_WINDOW) {
-            console.warn("⚠️ [ImageController] Rolling back to legacy image-generation path (active rollback window)");
-        } else {
-            console.log("ℹ️ [ImageController] Delegating image-generation legacy path request to workflow runner");
-            req.body = req.body || {};
-            req.body.featureId = "image-generation";
-            return startWorkflow(req, res);
-        }
+    const forceRollback = req.headers["x-force-rollback"] === "true" || req.query?.rollback === "true";
+    if (forceRollback && item && item.legacyPathStatus === LEGACY_PATH_STATUSES.ROLLBACK_WINDOW) {
+        console.warn("⚠️ [ImageController] Rolling back to legacy image-generation path (active rollback window)");
+        req.body = req.body || {};
+        req.body.featureId = "image-generation";
+        return startWorkflow(req, res);
     }
 
     try {

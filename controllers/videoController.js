@@ -68,16 +68,12 @@ async function executeV2VideoWorkflow({
  */
 export const generateVideo = async (req, res) => {
     const item = findMigrationInventoryItem("video-generation");
-    if (item && item.legacyPathStatus !== LEGACY_PATH_STATUSES.ACTIVE) {
-        const forceRollback = req.headers["x-force-rollback"] === "true" || req.query?.rollback === "true";
-        if (forceRollback && item.legacyPathStatus === LEGACY_PATH_STATUSES.ROLLBACK_WINDOW) {
-            console.warn("⚠️ [VideoController] Rolling back to legacy video-generation path (active rollback window)");
-        } else {
-            console.log("ℹ️ [VideoController] Delegating video-generation legacy path request to workflow runner");
-            req.body = req.body || {};
-            req.body.featureId = "video-generation";
-            return startWorkflow(req, res);
-        }
+    const forceRollback = req.headers["x-force-rollback"] === "true" || req.query?.rollback === "true";
+    if (forceRollback && item && item.legacyPathStatus === LEGACY_PATH_STATUSES.ROLLBACK_WINDOW) {
+        console.warn("⚠️ [VideoController] Rolling back to legacy video-generation path (active rollback window)");
+        req.body = req.body || {};
+        req.body.featureId = "video-generation";
+        return startWorkflow(req, res);
     }
 
     try {

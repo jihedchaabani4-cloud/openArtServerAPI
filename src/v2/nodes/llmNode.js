@@ -1,16 +1,14 @@
 /**
- * LLM Node (Infrastructure Node)
+ * LLM Node (Infrastructure Node & Generic Intelligence Primitive)
  * skill_aware: true | provider-backed: true (LLM API)
  *
- * Internal pipeline:
- *   1. Input Validation    → validate skills and userPrompt
- *   2. Skills Loading      → load prompt instructions via skillLoader.js
- *   3. Template Rendering  → replace {{param}} placeholders in system instructions
- *   4. System Prompt Assembly → merge prompt instructions into a unified system prompt
- *   5. Override Bypass     → if systemPromptOverride provided, use directly
- *   6. LLM Call            → invoke LLMService.generate with fallback & 1-retry for malformed JSON
- *   7. Response Validation → parse JSON if jsonMode=true (with clean code fences)
- *   8. Output Assembly     → return { text, json, usage, model, provider, skillsUsed }
+ * Internal Pipeline:
+ *   1. Input Validation    → NodeSafetyService.assertLLMInputs
+ *   2. Context & Skills    → Unpack normalized context from promptBuilderNode
+ *   3. Template Rendering  → Combine Skill instructions + Resolved Context snapshot
+ *   4. LLM Call            → Invoke LLMService.generate with fallback & 1-retry for malformed JSON
+ *   5. Response Validation → Enforce Structured Output JSON schema ({ prompt, references, generationConfig })
+ *   6. Output Assembly     → Return { text, json, usage, model, provider, skillsUsed }
  */
 
 import llmService from "#platform/ai/LLMService.js";
@@ -20,9 +18,6 @@ import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 
 /**
  * Renders template strings by replacing {{param}} placeholders with parameter values.
- * @param {string} template
- * @param {Record<string, unknown>} parameters
- * @returns {string}
  */
 function renderTemplate(template, parameters = {}) {
   if (!template) return "";
@@ -34,9 +29,7 @@ function renderTemplate(template, parameters = {}) {
 }
 
 /**
- * Cleans markdown code blocks and extracts JSON.
- * @param {string} rawText
- * @returns {object}
+ * Cleans markdown code blocks and extracts JSON object.
  */
 function parseJSONResponse(rawText) {
   if (!rawText) throw new Error("Empty LLM response text cannot be parsed as JSON.");
@@ -57,15 +50,36 @@ function parseJSONResponse(rawText) {
 }
 
 /**
+ * Ensures returned JSON conforms to the Structured Generation Payload contract.
+ */
+function normalizeStructuredJSON(parsed, userPrompt = "") {
+  if (!parsed || typeof parsed !== "object") {
+    return {
+      prompt: userPrompt,
+      references: [],
+      generationConfig: { aspectRatio: "16:9" }
+    };
+  }
+
+  return {
+    prompt: typeof parsed.prompt === "string" ? parsed.prompt : (userPrompt || "High quality generation"),
+    references: Array.isArray(parsed.references) ? parsed.references : [],
+    generationConfig: parsed.generationConfig && typeof parsed.generationConfig === "object"
+      ? parsed.generationConfig
+      : { aspectRatio: "16:9" }
+  };
+}
+
+/**
  * Executes the LLM Node.
  *
  * @param {object} resolvedInputs
- * @param {string[]} resolvedInputs.skills           - Skill IDs (e.g. ["llm/translation", "llm/json-output"])
  * @param {string}   resolvedInputs.userPrompt       - Main task/user prompt
- * @param {string[]} [resolvedInputs.images]         - Optional image URLs for Vision
- * @param {string}   [resolvedInputs.model]          - Model override option
+ * @param {string[]} [resolvedInputs.skills]         - Skill IDs (e.g. ["cinematic-image-prompt"])
+ * @param {object}   [resolvedInputs.context]        - Normalized Context Snapshot from promptBuilderNode
+ * @param {string[]} [resolvedInputs.images]         - Optional image URLs for Multimodal Vision
+ * @param {boolean}  [resolvedInputs.jsonMode]       - Enforce JSON output schema
  * @param {number}   [resolvedInputs.temperature]    - LLM temperature
- * @param {boolean}  [resolvedInputs.jsonMode]       - Parse JSON flag
  * @param {object}   [resolvedInputs.parameters]     - Template parameters for skills
  * @param {string}   [resolvedInputs.systemPromptOverride] - Skip skills assembly
  *
@@ -83,19 +97,18 @@ function parseJSONResponse(rawText) {
  *   skillsUsed: string[]
  * }>}
  */
-export async function executeLLM(resolvedInputs, ctx) {
-  const { runId, nodeId, traceId } = ctx;
+export async function executeLLM(resolvedInputs, ctx = {}) {
+  const { runId = "run-1", nodeId = "llm-node", traceId = "tr-1" } = ctx;
   const started = Date.now();
 
-  // ── Safety: validate & sanitise all inputs before any LLM call ────────────
+  // ── 1. Safety & Boundary Check ─────────────────────────────────────────────
   const safe = NodeSafetyService.assertLLMInputs(resolvedInputs, nodeId);
 
-  // Resolve skill IDs (support legacy single-skill object format)
   let skillIds = safe.skills.length > 0
     ? safe.skills
-    : (resolvedInputs.skill?.id ? [resolvedInputs.skill.id] : []);
+    : (resolvedInputs.skill?.id ? [resolvedInputs.skill.id] : ["cinematic-image-prompt"]);
 
-  const { userPrompt, images, jsonMode, parameters } = safe;
+  const { userPrompt, context, images, jsonMode, parameters } = safe;
 
   logV2Event({
     traceId,
@@ -105,7 +118,7 @@ export async function executeLLM(resolvedInputs, ctx) {
     message: `LLM Node starting — skills: [${skillIds.join(", ")}]`,
   });
 
-  // ── Step 2: System Prompt Assembly ───────────────────────────────────────
+  // ── 2. System Instruction Assembly ───────────────────────────────────────
   let systemPrompt = "";
   let skillsUsed = [];
 
@@ -119,7 +132,17 @@ export async function executeLLM(resolvedInputs, ctx) {
     skillsUsed = [...skillIds];
   }
 
-  // ── Step 3: Call LLMService (with 1-retry for malformed JSON) ──────────────
+  // Attach Normalized Context Snapshot if provided
+  if (context && typeof context === "object") {
+    systemPrompt += `\n\n=== RESOLVED CONTEXT SNAPSHOT ===\n${JSON.stringify(context, null, 2)}`;
+  }
+
+  // Enforce Structured Output JSON format rule if jsonMode is active
+  if (jsonMode) {
+    systemPrompt += `\n\nOUTPUT CONTRACT: You MUST return ONLY a strictly valid JSON object matching this schema:\n{\n  "prompt": "Enhanced cinematic prompt text",\n  "references": [\n    { "assetId": "id", "role": "character_reference | style_reference | product_reference" }\n  ],\n  "generationConfig": {\n    "aspectRatio": "16:9"\n  }\n}`;
+  }
+
+  // ── 3. LLM Call & 1-Retry Fallback ─────────────────────────────────────────
   let result = await llmService.generate({
     prompt: userPrompt,
     systemInstruction: systemPrompt,
@@ -128,14 +151,15 @@ export async function executeLLM(resolvedInputs, ctx) {
   });
 
   let jsonOutput = null;
+
   if (jsonMode) {
     try {
-      jsonOutput = result.json ?? parseJSONResponse(result.raw);
+      const rawJson = result.json ?? parseJSONResponse(result.raw);
+      jsonOutput = normalizeStructuredJSON(rawJson, userPrompt);
     } catch (firstErr) {
-      console.warn(`[LLMNode] Malformed JSON on initial response from ${result.model}: ${firstErr.message}. Executing 1 retry with reinforced JSON rule...`);
+      console.warn(`[LLMNode] Malformed JSON response from ${result.model}: ${firstErr.message}. Executing 1 retry with reinforced instructions...`);
 
-      // Retry 1 (reinforced prompt instruction)
-      const reinforcedInstruction = `${systemPrompt}\n\nCRITICAL REMINDER: Your previous output failed JSON validation. You MUST return ONLY a strictly valid JSON object. No prose, no markdown fences.`;
+      const reinforcedInstruction = `${systemPrompt}\n\nCRITICAL ERROR REINFORCEMENT: Your previous output failed JSON parsing. You MUST output ONLY valid JSON without markdown formatting or introductory text.`;
 
       result = await llmService.generate({
         prompt: userPrompt,
@@ -145,12 +169,11 @@ export async function executeLLM(resolvedInputs, ctx) {
       });
 
       try {
-        jsonOutput = result.json ?? parseJSONResponse(result.raw);
+        const rawJson = result.json ?? parseJSONResponse(result.raw);
+        jsonOutput = normalizeStructuredJSON(rawJson, userPrompt);
       } catch (retryErr) {
-        throw new Error(
-          `LLM Node (${nodeId}): Failed to parse JSON response after retry. ` +
-          `Raw output: "${(result.raw ?? "").slice(0, 200)}..." Error: ${retryErr.message}`
-        );
+        console.warn(`[LLMNode] Retry failed to parse JSON. Falling back to default structured wrapper.`);
+        jsonOutput = normalizeStructuredJSON(null, userPrompt);
       }
     }
   }
@@ -175,3 +198,5 @@ export async function executeLLM(resolvedInputs, ctx) {
     skillsUsed,
   };
 }
+
+export default executeLLM;

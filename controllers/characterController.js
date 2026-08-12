@@ -1,12 +1,14 @@
-import { characterService, walletService, pricingService } from "../src/container.js";
+import { characterService, walletService, pricingService, workflowStorageGateway } from "../src/container.js";
 import { run as runUseCase } from "../src/use-cases/useCaseRunner.js";
+import { randomUUID } from "node:crypto";
 
 /**
  * POST /api/characters/create & POST /api/characters
  * 
  * 🌟 Unified 2-in-1 Character Creation Flow:
  * 1. Creates character entity record in Supabase DB (name, description, traits).
- * 2. Automatically dispatches character-sheet-v1 UseCase to generate AI reference sheet.
+ * 2. Creates workflow container & media placeholders (status='processing').
+ * 3. Automatically dispatches character-sheet-v1 UseCase to generate AI reference sheet.
  */
 export async function createCharacter(req, res) {
     try {
@@ -32,7 +34,7 @@ export async function createCharacter(req, res) {
         const charName = name || title || "Untitled Character";
         const charDesc = description || prompt || "";
 
-        // ── 1. Create Character Profile in DB ─────────────────────────────────
+        // ── 1. Save Character Profile Entity in DB ────────────────────────────
         const createdResult = await characterService.createCharacter({
             projectId,
             userId,
@@ -40,14 +42,35 @@ export async function createCharacter(req, res) {
             description: charDesc,
         });
 
-        // ── 2. Dispatch AI Character Sheet Generation via UseCase ──────────────
-        const runtimeInput = {
+        const characterId = createdResult.characterId || createdResult.character?.id || randomUUID();
+        const runId = randomUUID();
+        const v2WorkflowId = "character-sheet-v1";
+
+        // ── 2. Create Workflow Container & Media Placeholder (status='processing')
+        const v2Input = {
             prompt: charDesc || charName,
             model: model || model_name || "nanobana",
             characters: [{ name: charName, description: charDesc, traits: traits || {} }],
             references,
             project_id: projectId,
             session_id: req.body.session_id || req.body.sessionId || null,
+        };
+
+        const placeholder = await workflowStorageGateway.createMediaPlaceholder({
+            runId,
+            nodeType: "image-generation",
+            userId,
+            workflowId: characterId,
+            input: v2Input,
+        }).catch((err) => {
+            console.warn("⚠️ [characterController] Placeholder creation notice:", err.message);
+            return null;
+        });
+
+        // ── 3. Dispatch AI Character Sheet Generation via UseCase ──────────────
+        const runtimeInput = {
+            ...v2Input,
+            _v1PlaceholderIds: placeholder ? [placeholder] : [],
         };
 
         const runResult = await runUseCase({
@@ -58,14 +81,21 @@ export async function createCharacter(req, res) {
             pricingService,
         });
 
-        // ── 3. Return Unified Response ─────────────────────────────────────────
+        // ── 4. Return Full Unified Response ────────────────────────────────────
+        const v1WfId = placeholder?.workflowId || characterId;
+        const v1MedId = placeholder?.mediaId || null;
+
         res.json({
             ok: true,
             status: "processing",
-            character: createdResult.character || { id: createdResult.characterId, name: charName },
-            characterId: createdResult.characterId,
+            character: createdResult.character || { id: characterId, name: charName },
+            characterId: characterId,
             taskId: runResult.executionId,
             jobId: runResult.executionId,
+            workflows: v1WfId ? [{ id: v1WfId, primary_media_id: v1MedId }] : [],
+            workflow: v1WfId ? { id: v1WfId, primary_media_id: v1MedId } : null,
+            v1WorkflowId: v1WfId,
+            v1MediaId: v1MedId,
             project_id: projectId,
         });
 

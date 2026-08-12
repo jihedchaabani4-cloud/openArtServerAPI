@@ -41,6 +41,13 @@ export function normalizeCount(count, num_images) {
   return isNaN(val) ? 1 : Math.max(1, val);
 }
 
+function extractMetadata(v1Body) {
+  return {
+    project_id: v1Body.project_id || v1Body.projectId || null,
+    session_id: v1Body.session_id || v1Body.sessionId || null,
+  };
+}
+
 // ─────────────────────────────────────────────────────
 // Image Generation  →  simple-image-v1
 // ─────────────────────────────────────────────────────
@@ -50,6 +57,7 @@ export function normalizeCount(count, num_images) {
  */
 export function mapImageGenerationV1(v1Body) {
   const { prompt, negative_prompt, ratio, aspect_ratio, quality, resolution, count, num_images, model_name, references = [] } = v1Body;
+  const meta = extractMetadata(v1Body);
   return {
     prompt: prompt || "",
     negative_prompt: negative_prompt || "",
@@ -58,6 +66,8 @@ export function mapImageGenerationV1(v1Body) {
     quality: quality || resolution || "standard",
     count: normalizeCount(count, num_images),
     references,
+    project_id: meta.project_id,
+    session_id: meta.session_id,
   };
 }
 
@@ -72,6 +82,7 @@ export function mapImageGenerationV1(v1Body) {
  */
 export function mapEditImageV1(v1Body, sourceAsset) {
   const { prompt, ratio, aspect_ratio, quality, resolution, strength, model_name, references = [] } = v1Body;
+  const meta = extractMetadata(v1Body);
   return {
     prompt: prompt || "",
     model: normalizeImageModelName(model_name) || null,
@@ -83,6 +94,8 @@ export function mapEditImageV1(v1Body, sourceAsset) {
       : null,
     references,
     mode: "image_edit",
+    project_id: meta.project_id,
+    session_id: meta.session_id,
   };
 }
 
@@ -96,6 +109,7 @@ export function mapEditImageV1(v1Body, sourceAsset) {
 export function mapVideoGenerationV1(v1Body) {
   const { prompt, model, model_name, ratio = "16:9", aspect_ratio, duration = "5s", references = [], negativePrompt = "" } = v1Body;
   const rawModel = (model ?? model_name ?? "").trim();
+  const meta = extractMetadata(v1Body);
   return {
     prompt: prompt || "",
     model: rawModel || null,
@@ -103,6 +117,8 @@ export function mapVideoGenerationV1(v1Body) {
     duration: duration,
     negative_prompt: negativePrompt || "",
     references,
+    project_id: meta.project_id,
+    session_id: meta.session_id,
   };
 }
 
@@ -118,6 +134,7 @@ export function mapVideoGenerationV1(v1Body) {
 export function mapEditVideoV1(v1Body, sourceAsset) {
   const { prompt, model, model_name, ratio = "16:9", aspect_ratio, duration = "5s", references = [], camera_control } = v1Body;
   const rawModel = (model ?? model_name ?? "").trim();
+  const meta = extractMetadata(v1Body);
   return {
     prompt: prompt || "",
     model: rawModel || null,
@@ -128,6 +145,8 @@ export function mapEditVideoV1(v1Body, sourceAsset) {
     duration,
     references,
     camera_control: camera_control || null,
+    project_id: meta.project_id,
+    session_id: meta.session_id,
   };
 }
 
@@ -138,6 +157,7 @@ export function mapEditVideoV1(v1Body, sourceAsset) {
 export function mapMotionControlV1(v1Body, imageUrl, videoUrl) {
   const { prompt, model, model_name, ratio = "16:9", aspect_ratio, duration = "5s", references = [] } = v1Body;
   const rawModel = (model ?? model_name ?? "").trim();
+  const meta = extractMetadata(v1Body);
   
   // Combine incoming references with the motion video reference
   const combinedReferences = [...references];
@@ -152,6 +172,8 @@ export function mapMotionControlV1(v1Body, imageUrl, videoUrl) {
     mode: "image_to_video",
     duration,
     references: combinedReferences,
+    project_id: meta.project_id,
+    session_id: meta.session_id,
   };
 }
 
@@ -166,12 +188,15 @@ export function mapMotionControlV1(v1Body, imageUrl, videoUrl) {
  */
 export function mapUpscaleV1(v1Body, sourceAsset) {
   const { upscaleScale = 2, target_resolution } = v1Body;
+  const meta = extractMetadata(v1Body);
   return {
     source_asset: sourceAsset
       ? { url: sourceAsset.url, width: sourceAsset.width, height: sourceAsset.height }
       : null,
     factor: Number(upscaleScale ?? 2),
     target_resolution: target_resolution || null,
+    project_id: meta.project_id,
+    session_id: meta.session_id,
   };
 }
 
@@ -183,7 +208,8 @@ export function mapUpscaleV1(v1Body, sourceAsset) {
  * Maps a Character Sheet request body to V2 character-sheet-v1 workflow inputs.
  */
 export function mapCharacterSheetV1(v1Body) {
-  const { prompt, features, model_name, references = [], project_id, projectId } = v1Body;
+  const { prompt, features, model_name, references = [] } = v1Body;
+  const meta = extractMetadata(v1Body);
   return {
     workflowId: "character-sheet-v1",
     input: {
@@ -191,7 +217,8 @@ export function mapCharacterSheetV1(v1Body) {
       model: normalizeImageModelName(model_name) || "nanobana",
       characters: features ? [{ name: "CHARACTER", description: prompt, traits: features }] : [],
       references,
-      project_id: project_id || projectId || null,
+      project_id: meta.project_id,
+      session_id: meta.session_id,
     },
   };
 }

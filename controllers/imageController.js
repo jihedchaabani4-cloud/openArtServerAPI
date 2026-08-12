@@ -67,8 +67,8 @@ export const generateV2 = async (req, res) => {
             runId: runResult.executionId,
             v1WorkflowId: firstPh.workflowId,
             v1MediaId: firstPh.mediaId,
-            projectId: req.body.project_id,
-            sessionId: req.body.session_id,
+            projectId: req.body.project_id || req.body.projectId || null,
+            sessionId: req.body.session_id || req.body.sessionId || null,
         }));
 
     } catch (error) {
@@ -114,8 +114,8 @@ export const generateEdit = async (req, res) => {
 
         res.json(buildV1CompatibleResponse({
             runId: runResult.executionId,
-            projectId: req.body.project_id,
-            sessionId: req.body.session_id,
+            projectId: req.body.project_id || req.body.projectId || null,
+            sessionId: req.body.session_id || req.body.sessionId || null,
         }));
 
     } catch (error) {

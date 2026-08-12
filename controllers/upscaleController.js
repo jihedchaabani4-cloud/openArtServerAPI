@@ -1,101 +1,56 @@
-import { randomUUID } from "node:crypto";
-import { db, workflowStorageGateway } from "../src/container.js";
-import { assertMediaUsable } from "../lib/mediaGuards.js";
+import { autoCreateProjectAndSession } from "../lib/helpers.js";
 
-// V2 Imports
-import { loadRegistries } from "../src/v2/registry/registryLoader.js";
-import { compileWorkflow } from "../src/v2/compiler/compileWorkflow.js";
-import { startWorkflowRun } from "../src/v2/runner/workflowRunner.js";
+// V2 & UseCase Imports
+import { run as runUseCase } from "../src/use-cases/useCaseRunner.js";
+import { walletService, pricingService } from "../src/container.js";
 
-let cachedRegistries = null;
-function getRegistries() {
-    if (!cachedRegistries) cachedRegistries = loadRegistries();
-    return cachedRegistries;
-}
-
+/**
+ * POST /api/upscale
+ * Dispatches upscale request via upscale-v1 UseCase.
+ */
 export const upscale = async (req, res) => {
     try {
-        const { 
+        const {
             workflow_id,
-            upscaleScale = 2,
-            target_resolution
+            source_asset = null,
+            factor = 2,
+            project_id,
+            session_id,
         } = req.body;
-
-        if (!workflow_id) {
-            return res.status(400).json({ ok: false, message: "workflow_id is required" });
-        }
 
         const userId = req.user.id;
 
-        // Resolve media, project and session from workflow on the server
-        const sourceMedia = await db.media.findLatestByWorkflow(workflow_id);
-        if (!sourceMedia) {
-            return res.status(404).json({ ok: false, message: "No media found for this workflow" });
-        }
-
-        const { media_id, project_id, session_id } = sourceMedia;
-
-        // Server-side security: verify media is usable before upscaling
-        await assertMediaUsable({
-            media_id,
-            workflow_id,
-            project_id,
-            session_id,
-        });
-
-        const v2Input = {
-            source_asset: sourceMedia ? { url: sourceMedia.url, width: sourceMedia.width, height: sourceMedia.height } : null,
-            factor: Number(upscaleScale ?? 2),
-            target_resolution: target_resolution || null,
-            project_id: project_id || null,
-            session_id: session_id || null,
-        };
-
-        const runId = randomUUID();
-        const v2WorkflowId = "upscale-v1";
-
-        const registries = getRegistries();
-        const workflowDef = registries.workflows[v2WorkflowId];
-        if (!workflowDef) throw new Error(`V2 Workflow ${v2WorkflowId} not found`);
-        const plan = compileWorkflow(workflowDef, registries);
-
-        // Phase 1 — Pre-create placeholder
-        const placeholder = await workflowStorageGateway.createMediaPlaceholder({
-            runId,
-            nodeType: "media-transform",
-            userId,
-            workflowId: v2WorkflowId,
-            input: v2Input,
-        });
+        const { project_id: finalProjectId, session_id: finalSessionId } =
+            await autoCreateProjectAndSession(userId, project_id, session_id, false);
 
         const runtimeInput = {
-            ...v2Input,
-            userId,
-            _v1PlaceholderIds: placeholder ? [placeholder] : [],
+            source_asset: source_asset,
+            factor: factor,
+            project_id: finalProjectId,
+            session_id: finalSessionId,
         };
 
-        console.log(`🚀 [UpscaleController] Starting V2 run ${runId}`);
-        const runResult = await startWorkflowRun(plan, runtimeInput, runId);
-
-        const v1WfId = placeholder?.workflowId || null;
-        const v1MedId = placeholder?.mediaId || null;
+        const runResult = await runUseCase({
+            useCaseId: "upscale-v1",
+            input: runtimeInput,
+            userId,
+            walletService,
+            pricingService,
+        });
 
         res.json({
             ok: true,
             status: "processing",
-            taskId: runResult.run_id,
-            jobId: runResult.run_id,
+            taskId: runResult.executionId,
+            jobId: runResult.executionId,
             batchId: null,
             configId: null,
-            workflows: v1WfId ? [{ id: v1WfId, primary_media_id: v1MedId }] : [],
-            workflow: v1WfId ? { id: v1WfId, primary_media_id: v1MedId } : null,
-            v1WorkflowId: v1WfId,
-            project_id: project_id,
-            session_id: session_id,
+            project_id: finalProjectId,
+            session_id: finalSessionId,
         });
 
     } catch (error) {
-        console.error("❌ [UpscaleController] upscale error:", error);
-        res.status(error.statusCode || 500).json({ ok: false, message: error.message });
+        console.error("❌ [upscaleController] upscale error:", error);
+        res.status(500).json({ ok: false, message: error.message });
     }
 };

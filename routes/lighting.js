@@ -1,29 +1,21 @@
 import express from "express";
 import { randomUUID } from "node:crypto";
-import { db, workflowStorageGateway } from "../src/container.js";
+import { db, walletService, pricingService } from "../src/container.js";
 import { autoCreateProjectAndSession } from "../lib/helpers.js";
 import { normalizeImageModelName } from "../lib/modelRegistryKeys.js";
 import { requireAuth } from "../src/middleware/auth.js";
 import { buildLightingPrompt } from "../src/v2/utils/legacyPromptBuilders.js";
 
-// V2 Imports
-import { loadRegistries } from "../src/v2/registry/registryLoader.js";
-import { compileWorkflow } from "../src/v2/compiler/compileWorkflow.js";
-import { startWorkflowRun } from "../src/v2/runner/workflowRunner.js";
+// V2 & UseCase Imports
+import { run as runUseCase } from "../src/use-cases/useCaseRunner.js";
 import { resolveReferences } from "../src/image/utils/resolveReferences.js";
 
 const router = express.Router();
 router.use(requireAuth);
 
-let cachedRegistries = null;
-function getRegistries() {
-    if (!cachedRegistries) cachedRegistries = loadRegistries();
-    return cachedRegistries;
-}
-
 /**
  * POST /api/lighting/change-lighting
- * Relight an existing image with new lighting parameters.
+ * Relight an existing image with new lighting parameters via lighting-control-v1 UseCase.
  */
 router.post("/change-lighting", async (req, res) => {
     try {
@@ -38,8 +30,6 @@ router.post("/change-lighting", async (req, res) => {
         } = req.body;
 
         const normalizedModelName = normalizeImageModelName(model || model_name) || "seedream-pro";
-
-        console.log("[LightingRoute] body:", req.body);
 
         if (!workflow_id) {
             return res.status(400).json({ ok: false, message: "workflow_id is required" });
@@ -68,7 +58,7 @@ router.post("/change-lighting", async (req, res) => {
             color: color || "#ffffff",
         });
 
-        const v2Input = {
+        const runtimeInput = {
             prompt: finalPrompt,
             model: normalizedModelName,
             aspect_ratio: aspect_ratio || ratio || "1:1",
@@ -81,41 +71,21 @@ router.post("/change-lighting", async (req, res) => {
             session_id: finalSessionId,
         };
 
-        const runId = randomUUID();
-        const v2WorkflowId = "edit-image-v1";
-        const registries = getRegistries();
-        const workflowDef = registries.workflows[v2WorkflowId];
-        if (!workflowDef) throw new Error(`V2 Workflow ${v2WorkflowId} not found`);
-        const plan = compileWorkflow(workflowDef, registries);
-
-        const placeholder = await workflowStorageGateway.createMediaPlaceholder({
-            runId,
-            nodeType: "media-transform",
+        const runResult = await runUseCase({
+            useCaseId: "lighting-control-v1",
+            input: runtimeInput,
             userId,
-            workflowId: v2WorkflowId,
-            input: v2Input,
+            walletService,
+            pricingService,
         });
-
-        const runtimeInput = {
-            ...v2Input,
-            userId,
-            _v1PlaceholderIds: placeholder ? [placeholder] : [],
-        };
-
-        const runResult = await startWorkflowRun(plan, runtimeInput, runId);
-        const v1WfId = placeholder?.workflowId || null;
-        const v1MedId = placeholder?.mediaId || null;
 
         res.json({
             ok: true,
             status: "processing",
-            taskId: runResult.run_id,
-            jobId: runResult.run_id,
+            taskId: runResult.executionId,
+            jobId: runResult.executionId,
             batchId: null,
             configId: null,
-            workflows: v1WfId ? [{ id: v1WfId, primary_media_id: v1MedId }] : [],
-            workflow: v1WfId ? { id: v1WfId, primary_media_id: v1MedId } : null,
-            v1WorkflowId: v1WfId,
             project_id: finalProjectId,
             session_id: finalSessionId,
         });

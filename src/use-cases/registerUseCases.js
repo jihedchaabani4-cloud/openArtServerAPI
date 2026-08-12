@@ -6,6 +6,11 @@ import { simpleImageGenerationUseCase } from "./definitions/simpleImageGeneratio
 import { simpleVideoGenerationUseCase } from "./definitions/simpleVideoGeneration.js";
 import { simpleImageGenerationFastUseCase } from "./definitions/simpleImageGenerationFast.js";
 import { simpleImageGenerationProUseCase } from "./definitions/simpleImageGenerationPro.js";
+import { cameraControlUseCase } from "./definitions/cameraControl.js";
+import { lightingControlUseCase } from "./definitions/lightingControl.js";
+import { editImageUseCase } from "./definitions/editImage.js";
+import { upscaleUseCase } from "./definitions/upscale.js";
+import { characterSheetUseCase } from "./definitions/characterSheet.js";
 
 /**
  * Registers all pre-defined Use Cases into the global registry.
@@ -22,6 +27,11 @@ export function registerAllUseCases() {
     brandMascotUseCase,
     productAdVideosUseCase,
     vfxStudioUseCase,
+    cameraControlUseCase,
+    lightingControlUseCase,
+    editImageUseCase,
+    upscaleUseCase,
+    characterSheetUseCase,
   ];
 
   for (const uc of useCases) {

@@ -15,24 +15,22 @@ import { normalizeImageModelName } from "../../../lib/modelRegistryKeys.js";
 // ─────────────────────────────────────────────────────
 
 /**
- * Maps V1 ratio string to V2 aspect_ratio enum.
- * V1 uses "1:1", "16:9", "9:16" etc.
- * V2 uses "SQUARE", "LANDSCAPE", "PORTRAIT", etc.
+ * Maps V1 ratio string to V2 aspect_ratio enum ("1:1", "16:9", "9:16", "4:3", "3:4", "21:9").
  */
 export function normalizeAspectRatio(ratio) {
-  if (!ratio) return "SQUARE";
+  if (!ratio) return "1:1";
   const map = {
-    "1:1": "SQUARE",
-    "4:3": "LANDSCAPE",
-    "3:4": "PORTRAIT",
-    "16:9": "LANDSCAPE",
-    "9:16": "PORTRAIT",
-    "21:9": "LANDSCAPE",
-    "SQUARE": "SQUARE",
-    "LANDSCAPE": "LANDSCAPE",
-    "PORTRAIT": "PORTRAIT",
+    "1:1": "1:1",
+    "4:3": "4:3",
+    "3:4": "3:4",
+    "16:9": "16:9",
+    "9:16": "9:16",
+    "21:9": "21:9",
+    "SQUARE": "1:1",
+    "LANDSCAPE": "16:9",
+    "PORTRAIT": "9:16",
   };
-  return map[ratio] || "SQUARE";
+  return map[ratio] || "1:1";
 }
 
 /**
@@ -51,12 +49,12 @@ export function normalizeCount(count, num_images) {
  * Maps a V1 POST /api/images/generated(V2) body to V2 simple-image-v1 workflow inputs.
  */
 export function mapImageGenerationV1(v1Body) {
-  const { prompt, negative_prompt, ratio, quality, resolution, count, num_images, model_name, references = [] } = v1Body;
+  const { prompt, negative_prompt, ratio, aspect_ratio, quality, resolution, count, num_images, model_name, references = [] } = v1Body;
   return {
     prompt: prompt || "",
     negative_prompt: negative_prompt || "",
     model: normalizeImageModelName(model_name) || "fal",
-    aspect_ratio: normalizeAspectRatio(ratio),
+    aspect_ratio: normalizeAspectRatio(ratio || aspect_ratio),
     quality: quality || resolution || "standard",
     count: normalizeCount(count, num_images),
     references,
@@ -73,11 +71,11 @@ export function mapImageGenerationV1(v1Body) {
  * @param {Object|null} sourceAsset — resolved { url, width, height } from DB
  */
 export function mapEditImageV1(v1Body, sourceAsset) {
-  const { prompt, ratio, quality, resolution, strength, model_name, references = [] } = v1Body;
+  const { prompt, ratio, aspect_ratio, quality, resolution, strength, model_name, references = [] } = v1Body;
   return {
     prompt: prompt || "",
     model: normalizeImageModelName(model_name) || null,
-    aspect_ratio: normalizeAspectRatio(ratio),
+    aspect_ratio: normalizeAspectRatio(ratio || aspect_ratio),
     quality: quality || resolution || "standard",
     strength: strength ?? 0.75,
     source_asset: sourceAsset
@@ -96,12 +94,12 @@ export function mapEditImageV1(v1Body, sourceAsset) {
  * Maps a V1 POST /api/video/generated body to V2 cinematic-video-v1 workflow inputs.
  */
 export function mapVideoGenerationV1(v1Body) {
-  const { prompt, model, model_name, ratio = "16:9", duration = "5s", references = [], negativePrompt = "" } = v1Body;
+  const { prompt, model, model_name, ratio = "16:9", aspect_ratio, duration = "5s", references = [], negativePrompt = "" } = v1Body;
   const rawModel = (model ?? model_name ?? "").trim();
   return {
     prompt: prompt || "",
     model: rawModel || null,
-    aspect_ratio: normalizeAspectRatio(ratio),
+    aspect_ratio: normalizeAspectRatio(ratio || aspect_ratio),
     duration: duration,
     negative_prompt: negativePrompt || "",
     references,
@@ -118,7 +116,7 @@ export function mapVideoGenerationV1(v1Body) {
  * @param {Object|null} sourceAsset — resolved { url } from DB
  */
 export function mapEditVideoV1(v1Body, sourceAsset) {
-  const { prompt, model, model_name, ratio = "16:9", duration = "5s", references = [], camera_control } = v1Body;
+  const { prompt, model, model_name, ratio = "16:9", aspect_ratio, duration = "5s", references = [], camera_control } = v1Body;
   const rawModel = (model ?? model_name ?? "").trim();
   return {
     prompt: prompt || "",
@@ -138,7 +136,7 @@ export function mapEditVideoV1(v1Body, sourceAsset) {
  * Uses the image as the source_asset and the video as a motion reference.
  */
 export function mapMotionControlV1(v1Body, imageUrl, videoUrl) {
-  const { prompt, model, model_name, ratio = "16:9", duration = "5s", references = [] } = v1Body;
+  const { prompt, model, model_name, ratio = "16:9", aspect_ratio, duration = "5s", references = [] } = v1Body;
   const rawModel = (model ?? model_name ?? "").trim();
   
   // Combine incoming references with the motion video reference

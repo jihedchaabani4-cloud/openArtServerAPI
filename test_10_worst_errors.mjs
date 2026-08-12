@@ -116,8 +116,8 @@ async function runWorstErrorsTestSuite() {
     console.log("\n▶️ SCENARIO 6: Malformed Aspect Ratio (e.g. '99999:0' or 'INVALID_RATIO')");
     const normalized1 = normalizeAspectRatio("99999:0");
     const normalized2 = normalizeAspectRatio("INVALID_RATIO");
-    if (normalized1 === "SQUARE" && normalized2 === "SQUARE") {
-      console.log(`  ✓ Safely normalized malformed ratios to default "SQUARE".`);
+    if (normalized1 === "1:1" && normalized2 === "1:1") {
+      console.log(`  ✓ Safely normalized malformed ratios to default "1:1".`);
       passedCount++;
     } else {
       console.error("  ❌ Aspect ratio fallback failed!");

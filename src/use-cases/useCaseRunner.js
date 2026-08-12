@@ -2,6 +2,15 @@ import { getUseCase } from "./useCaseRegistry.js";
 import { compileWorkflowById } from "../v2/compiler/compileWorkflow.js";
 import { createBillingStrategy } from "../v2/billing/billingStrategy.js";
 import { startWorkflowRun } from "../v2/runner/workflowRunner.js";
+import { loadRegistries } from "../v2/registry/registryLoader.js";
+
+let cachedRegistries = null;
+function getRegistries() {
+  if (!cachedRegistries) {
+    cachedRegistries = loadRegistries();
+  }
+  return cachedRegistries;
+}
 
 /**
  * Validates dynamic run input payload against Use Case input schema.
@@ -18,59 +27,41 @@ export function validateInputs(input = {}, schema = {}) {
     }
 
     if (val !== undefined && val !== null && val !== "") {
-      if (fieldConfig.type === "number") {
-        const num = Number(val);
-        if (isNaN(num)) {
-          const err = new Error(`Field "${key}" must be a number`);
-          err.statusCode = 400;
-          throw err;
-        }
-        if (fieldConfig.min !== undefined && num < fieldConfig.min) {
-          const err = new Error(`Field "${key}" must be at least ${fieldConfig.min}`);
-          err.statusCode = 400;
-          throw err;
-        }
-        if (fieldConfig.max !== undefined && num > fieldConfig.max) {
-          const err = new Error(`Field "${key}" must be at most ${fieldConfig.max}`);
-          err.statusCode = 400;
-          throw err;
-        }
-        // Coerce input value to number
-        input[key] = num;
-      } else if (fieldConfig.type === "enum") {
-        if (!Array.isArray(fieldConfig.options) || !fieldConfig.options.includes(val)) {
+      // Type validation
+      if (fieldConfig.type === "number" && isNaN(Number(val))) {
+        const err = new Error(`Field "${key}" must be a number`);
+        err.statusCode = 400;
+        throw err;
+      }
+
+      if (fieldConfig.type === "enum" && Array.isArray(fieldConfig.options)) {
+        if (!fieldConfig.options.includes(val)) {
           const err = new Error(`Field "${key}" must be one of: ${fieldConfig.options.join(", ")}`);
           err.statusCode = 400;
           throw err;
         }
-      } else if (fieldConfig.type === "boolean") {
-        if (typeof val !== "boolean") {
-          if (val === "true") {
-            input[key] = true;
-          } else if (val === "false") {
-            input[key] = false;
-          } else {
-            const err = new Error(`Field "${key}" must be a boolean`);
-            err.statusCode = 400;
-            throw err;
-          }
-        }
       }
-    } else if (fieldConfig.default !== undefined) {
-      // Apply default value if missing
-      input[key] = fieldConfig.default;
     }
   }
+
+  return true;
 }
 
 /**
- * Orchestrates Use Case execution.
- * Handles validation, billing strategy checks, compilation, and workflow startup.
+ * Orchestrates Use Case execution lifecycle.
+ * @param {Object} options
+ * @param {string} options.useCaseId
+ * @param {Object} options.input
+ * @param {string} options.userId
+ * @param {Object} [options.walletService]
+ * @param {Object} [options.pricingService]
+ * @param {Object} [options.workflowRunner]
+ * @param {Object} [options.registries]
  */
 export async function run({
   useCaseId,
   input = {},
-  userId = null,
+  userId,
   walletService = null,
   pricingService = null,
   workflowRunner = null,
@@ -114,8 +105,11 @@ export async function run({
     input.prompt = `Cinematic product advertisement video of ${input.product_name}, ${input.description}. High quality, slow motion, studio lighting.`;
   }
 
-  // 3. Compile V2 workflow associated with the Use Case
-  if (!registries || !registries.workflows[useCase.workflowRef]) {
+  // 3. Automatically resolve registries if omitted
+  const finalRegistries = registries || getRegistries();
+
+  // 4. Compile V2 workflow associated with the Use Case
+  if (!finalRegistries || !finalRegistries.workflows[useCase.workflowRef]) {
     console.error(`❌ [UseCaseRunner] Error: Associated workflow "${useCase.workflowRef}" not found in registries`);
     const err = new Error(`Associated workflow "${useCase.workflowRef}" not found in registries`);
     err.statusCode = 404;
@@ -125,7 +119,7 @@ export async function run({
 
   let plan;
   try {
-    plan = compileWorkflowById(useCase.workflowRef, registries);
+    plan = compileWorkflowById(useCase.workflowRef, finalRegistries);
     console.log(`⚙️ [UseCaseRunner] Stage 2: Workflow compiled successfully (${useCase.workflowRef})`);
   } catch (compilationErr) {
     console.error(`❌ [UseCaseRunner] Error compiling workflow "${useCase.workflowRef}":`, compilationErr.message);
@@ -136,15 +130,15 @@ export async function run({
     throw err;
   }
 
-  // 4. Apply Billing Strategy
+  // 5. Select billing strategy
   const strategyName = useCase.billing?.strategy || "free";
   const billingStrategy = createBillingStrategy(strategyName);
 
-  // 5. Estimate total workflow credit cost
+  // 6. Estimate total workflow credit cost
   const totalCost = await billingStrategy.estimateTotal(plan, input, pricingService);
   console.log(`💳 [UseCaseRunner] Stage 3: Billing Strategy (${strategyName}) — Estimated Cost: ${totalCost} credit(s)`);
 
-  // 6. Precheck user credit balance
+  // 7. Precheck user credit balance
   try {
     await billingStrategy.preCheck(userId, totalCost, walletService);
     console.log(`✅ [UseCaseRunner] Stage 4: User balance verified.`);
@@ -158,7 +152,7 @@ export async function run({
     throw err;
   }
 
-  // 7. Execute workflow plan
+  // 8. Execute workflow plan
   const startWorkflowRunFn = workflowRunner?.startWorkflowRun || workflowRunner || startWorkflowRun;
   if (!startWorkflowRunFn) {
     throw new Error("[UseCaseRunner] workflowRunner dependency is missing");

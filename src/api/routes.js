@@ -28,8 +28,6 @@ router.use('/workflows',       workflowsRouter);
 router.use('/video',           videoRouter);
 router.use('/images',          imagesRouter);
 router.use('/characters',      charactersRouter);
-router.use('/character-sheet', charactersRouter);
-router.use('/element-sheet',   charactersRouter);
 router.use('/projects',     projectsRouter);
 router.use('/sessions',     sessionsRouter);
 router.use('/models',       modelsRouter);

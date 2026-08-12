@@ -6,7 +6,6 @@ import { assertMediaUsable } from "../lib/mediaGuards.js";
 import { loadRegistries } from "../src/v2/registry/registryLoader.js";
 import { compileWorkflow } from "../src/v2/compiler/compileWorkflow.js";
 import { startWorkflowRun } from "../src/v2/runner/workflowRunner.js";
-import { mapUpscaleV1, buildV1CompatibleResponse } from "../src/v2/utils/v1PayloadMapper.js";
 
 let cachedRegistries = null;
 function getRegistries() {
@@ -18,6 +17,8 @@ export const upscale = async (req, res) => {
     try {
         const { 
             workflow_id,
+            upscaleScale = 2,
+            target_resolution
         } = req.body;
 
         if (!workflow_id) {
@@ -42,7 +43,14 @@ export const upscale = async (req, res) => {
             session_id,
         });
 
-        const v2Input = mapUpscaleV1(req.body, sourceMedia);
+        const v2Input = {
+            source_asset: sourceMedia ? { url: sourceMedia.url, width: sourceMedia.width, height: sourceMedia.height } : null,
+            factor: Number(upscaleScale ?? 2),
+            target_resolution: target_resolution || null,
+            project_id: project_id || null,
+            session_id: session_id || null,
+        };
+
         const runId = randomUUID();
         const v2WorkflowId = "upscale-v1";
 
@@ -69,13 +77,22 @@ export const upscale = async (req, res) => {
         console.log(`🚀 [UpscaleController] Starting V2 run ${runId}`);
         const runResult = await startWorkflowRun(plan, runtimeInput, runId);
 
-        res.json(buildV1CompatibleResponse({
-            runId: runResult.run_id,
-            v1WorkflowId: placeholder?.workflowId,
-            v1MediaId: placeholder?.mediaId,
-            projectId: project_id,
-            sessionId: session_id,
-        }));
+        const v1WfId = placeholder?.workflowId || null;
+        const v1MedId = placeholder?.mediaId || null;
+
+        res.json({
+            ok: true,
+            status: "processing",
+            taskId: runResult.run_id,
+            jobId: runResult.run_id,
+            batchId: null,
+            configId: null,
+            workflows: v1WfId ? [{ id: v1WfId, primary_media_id: v1MedId }] : [],
+            workflow: v1WfId ? { id: v1WfId, primary_media_id: v1MedId } : null,
+            v1WorkflowId: v1WfId,
+            project_id: project_id,
+            session_id: session_id,
+        });
 
     } catch (error) {
         console.error("❌ [UpscaleController] upscale error:", error);

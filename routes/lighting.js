@@ -10,7 +10,6 @@ import { buildLightingPrompt } from "../src/v2/utils/legacyPromptBuilders.js";
 import { loadRegistries } from "../src/v2/registry/registryLoader.js";
 import { compileWorkflow } from "../src/v2/compiler/compileWorkflow.js";
 import { startWorkflowRun } from "../src/v2/runner/workflowRunner.js";
-import { buildV1CompatibleResponse, mapEditImageV1 } from "../src/v2/utils/v1PayloadMapper.js";
 import { resolveReferences } from "../src/image/utils/resolveReferences.js";
 
 const router = express.Router();
@@ -32,11 +31,13 @@ router.post("/change-lighting", async (req, res) => {
             angle, elevation, intensity, type, brightness, color,
             project_id, session_id, workflow_id,
             model_name,
+            model,
             ratio,
+            aspect_ratio,
             quality,
         } = req.body;
 
-        const normalizedModelName = normalizeImageModelName(model_name) || "seedream-pro";
+        const normalizedModelName = normalizeImageModelName(model || model_name) || "seedream-pro";
 
         console.log("[LightingRoute] body:", req.body);
 
@@ -67,14 +68,19 @@ router.post("/change-lighting", async (req, res) => {
             color: color || "#ffffff",
         });
 
-        const payload = {
+        const v2Input = {
             prompt: finalPrompt,
-            model_name: normalizedModelName,
+            model: normalizedModelName,
+            aspect_ratio: aspect_ratio || ratio || "1:1",
+            quality: quality || "standard",
+            strength: 0.75,
+            source_asset: sourceMedia ? { url: sourceMedia.url, width: sourceMedia.width, height: sourceMedia.height } : null,
             references: resolvedReferences,
+            mode: "image_edit",
+            project_id: finalProjectId,
+            session_id: finalSessionId,
         };
 
-        const v2Input = mapEditImageV1(payload, sourceMedia);
-        
         const runId = randomUUID();
         const v2WorkflowId = "edit-image-v1";
         const registries = getRegistries();
@@ -97,16 +103,21 @@ router.post("/change-lighting", async (req, res) => {
         };
 
         const runResult = await startWorkflowRun(plan, runtimeInput, runId);
+        const v1WfId = placeholder?.workflowId || null;
+        const v1MedId = placeholder?.mediaId || null;
 
         res.json({
             ok: true,
-            ...buildV1CompatibleResponse({
-                runId: runResult.run_id,
-                v1WorkflowId: placeholder?.workflowId,
-                v1MediaId: placeholder?.mediaId,
-                projectId: finalProjectId,
-                sessionId: finalSessionId,
-            }),
+            status: "processing",
+            taskId: runResult.run_id,
+            jobId: runResult.run_id,
+            batchId: null,
+            configId: null,
+            workflows: v1WfId ? [{ id: v1WfId, primary_media_id: v1MedId }] : [],
+            workflow: v1WfId ? { id: v1WfId, primary_media_id: v1MedId } : null,
+            v1WorkflowId: v1WfId,
+            project_id: finalProjectId,
+            session_id: finalSessionId,
         });
 
     } catch (error) {

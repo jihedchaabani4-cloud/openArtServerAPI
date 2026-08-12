@@ -12,7 +12,6 @@ import { buildCameraPrompt } from "../src/v2/utils/legacyPromptBuilders.js";
 import { loadRegistries } from "../src/v2/registry/registryLoader.js";
 import { compileWorkflow } from "../src/v2/compiler/compileWorkflow.js";
 import { startWorkflowRun } from "../src/v2/runner/workflowRunner.js";
-import { buildV1CompatibleResponse, mapEditImageV1, mapEditVideoV1 } from "../src/v2/utils/v1PayloadMapper.js";
 import { resolveReferences } from "../src/image/utils/resolveReferences.js";
 
 const router = express.Router();
@@ -45,7 +44,9 @@ async function handleImageCamera(req, res) {
             project_id, session_id, workflow_id,
             reference_workflow_ids,
             model_name,
+            model,
             ratio,
+            aspect_ratio,
             quality
         } = req.body;
 
@@ -54,7 +55,7 @@ async function handleImageCamera(req, res) {
         }
 
         const userId = req.user.id;
-        const normalizedModelName = normalizeImageModelName(model_name) || "gpt-image-2";
+        const normalizedModelName = normalizeImageModelName(model || model_name) || "fal";
 
         const { project_id: finalProjectId, session_id: finalSessionId } =
             await autoCreateProjectAndSession(userId, project_id, session_id, false);
@@ -71,14 +72,19 @@ async function handleImageCamera(req, res) {
 
         const finalPrompt = buildCameraPrompt(rotation || 0, tilt || 0, zoom || 3);
         
-        const payload = {
+        const v2Input = {
             prompt: finalPrompt,
-            model_name: normalizedModelName,
+            model: normalizedModelName,
+            aspect_ratio: aspect_ratio || ratio || "1:1",
+            quality: quality || "standard",
+            strength: 0.75,
+            source_asset: sourceMedia ? { url: sourceMedia.url, width: sourceMedia.width, height: sourceMedia.height } : null,
             references: resolvedReferences,
+            mode: "image_edit",
+            project_id: finalProjectId,
+            session_id: finalSessionId,
         };
 
-        const v2Input = mapEditImageV1(payload, sourceMedia);
-        
         const runId = randomUUID();
         const v2WorkflowId = "edit-image-v1";
         const registries = getRegistries();
@@ -101,17 +107,22 @@ async function handleImageCamera(req, res) {
         };
 
         const runResult = await startWorkflowRun(plan, runtimeInput, runId);
+        const v1WfId = placeholder?.workflowId || null;
+        const v1MedId = placeholder?.mediaId || null;
 
         return res.json({
             ok: true,
+            status: "processing",
             media_type: "image",
-            ...buildV1CompatibleResponse({
-                runId: runResult.run_id,
-                v1WorkflowId: placeholder?.workflowId,
-                v1MediaId: placeholder?.mediaId,
-                projectId: finalProjectId,
-                sessionId: finalSessionId,
-            }),
+            taskId: runResult.run_id,
+            jobId: runResult.run_id,
+            batchId: null,
+            configId: null,
+            workflows: v1WfId ? [{ id: v1WfId, primary_media_id: v1MedId }] : [],
+            workflow: v1WfId ? { id: v1WfId, primary_media_id: v1MedId } : null,
+            v1WorkflowId: v1WfId,
+            project_id: finalProjectId,
+            session_id: finalSessionId,
         });
 
     } catch (error) {
@@ -124,9 +135,11 @@ async function handleVideoCamera(req, res) {
     try {
         const {
             model,
+            model_name,
             camera_text,
             prompt        = "",
             ratio         = "16:9",
+            aspect_ratio,
             duration      = "5s",
             references    = [],
             project_id,
@@ -161,17 +174,18 @@ async function handleVideoCamera(req, res) {
         const { cameraPrompt, cameraControl } = await cameraTask.execute({ cameraText: rawCameraText });
         const finalPrompt = CameraTask.mergeIntoPrompt(prompt, cameraPrompt);
         
-        const payload = {
-            model,
+        const v2Input = {
             prompt: finalPrompt,
+            model: (model || model_name || "").trim() || null,
+            source_asset: sourceMedia ? { url: sourceMedia.url, width: sourceMedia.width, height: sourceMedia.height } : null,
+            mode: "video_to_video",
+            duration: duration,
+            references: references,
             camera_control: cameraControl,
-            ratio,
-            duration,
-            references,
+            project_id: finalProjectId,
+            session_id: finalSessionId,
         };
 
-        const v2Input = mapEditVideoV1(payload, sourceMedia);
-        
         const runId = randomUUID();
         const v2WorkflowId = "edit-video-v1";
         const registries = getRegistries();
@@ -195,18 +209,26 @@ async function handleVideoCamera(req, res) {
 
         const runResult = await startWorkflowRun(plan, runtimeInput, runId);
         
-        const result = buildV1CompatibleResponse({
-            runId: runResult.run_id,
-            v1WorkflowId: placeholder?.workflowId,
-            v1MediaId: placeholder?.mediaId,
-            projectId: finalProjectId,
-            sessionId: finalSessionId,
-        });
+        const v1WfId = placeholder?.workflowId || null;
+        const v1MedId = placeholder?.mediaId || null;
+
+        const result = {
+            ok: true,
+            status: "processing",
+            taskId: runResult.run_id,
+            jobId: runResult.run_id,
+            batchId: null,
+            configId: null,
+            workflows: v1WfId ? [{ id: v1WfId, primary_media_id: v1MedId }] : [],
+            workflow: v1WfId ? { id: v1WfId, primary_media_id: v1MedId } : null,
+            v1WorkflowId: v1WfId,
+            project_id: finalProjectId,
+            session_id: finalSessionId,
+        };
 
         return res.json({
-            ok: true,
-            media_type: "video",
             ...result,
+            media_type: "video",
             data: result,
             camera_prompt: cameraPrompt,
             camera_control: cameraControl,
@@ -219,4 +241,3 @@ async function handleVideoCamera(req, res) {
 }
 
 export default router;
-

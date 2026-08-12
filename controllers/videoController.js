@@ -5,12 +5,6 @@ import { db, workflowStorageGateway, walletService, pricingService } from "../sr
 // V2 & UseCase Imports
 import { loadRegistries } from "../src/v2/registry/registryLoader.js";
 import { run as runUseCase } from "../src/use-cases/useCaseRunner.js";
-import { 
-    mapVideoGenerationV1, 
-    mapEditVideoV1, 
-    mapMotionControlV1, 
-    buildV1CompatibleResponse 
-} from "../src/v2/utils/v1PayloadMapper.js";
 
 let cachedRegistries = null;
 function getRegistries() {
@@ -19,7 +13,7 @@ function getRegistries() {
 }
 
 /**
- * Helper to run a V2 video workflow via Use Case Runner and return the V1-compatible response.
+ * Helper to run a V2 video workflow via Use Case Runner and return standard V2 response.
  */
 async function executeV2VideoWorkflow({ 
     workflowId, nodeType, v2Input, userId, projectId, sessionId, req 
@@ -50,13 +44,27 @@ async function executeV2VideoWorkflow({
         registries: getRegistries(),
     });
 
-    return buildV1CompatibleResponse({
-        runId: runResult.executionId,
-        v1WorkflowId: placeholder?.workflowId,
-        v1MediaId: placeholder?.mediaId,
-        projectId,
-        sessionId,
-    });
+    const v1WfId = placeholder?.workflowId || null;
+    const v1MedId = placeholder?.mediaId || null;
+
+    const baseResponse = {
+        ok: true,
+        status: "processing",
+        taskId: runResult.executionId,
+        jobId: runResult.executionId,
+        batchId: null,
+        configId: null,
+        workflows: v1WfId ? [{ id: v1WfId, primary_media_id: v1MedId }] : [],
+        workflow: v1WfId ? { id: v1WfId, primary_media_id: v1MedId } : null,
+        v1WorkflowId: v1WfId,
+        project_id: projectId,
+        session_id: sessionId,
+    };
+
+    return {
+        ...baseResponse,
+        data: baseResponse,
+    };
 }
 
 /**
@@ -88,21 +96,31 @@ export const generateVideo = async (req, res) => {
 
         console.log(`\n📥 [VideoController] generate request received: Model: ${activeModel ?? "(default)"}, Prompt: "${prompt}"`);
 
-        const v2Input = mapVideoGenerationV1(req.body);
+        const projectId = project_id || req.body.projectId || null;
+        const sessionId = session_id || req.body.sessionId || null;
+
+        const v2Input = {
+            prompt: prompt.trim(),
+            model: activeModel || null,
+            aspect_ratio: req.body.aspect_ratio || req.body.ratio || "16:9",
+            duration: req.body.duration || "5s",
+            negative_prompt: req.body.negative_prompt || req.body.negativePrompt || "",
+            references,
+            project_id: projectId,
+            session_id: sessionId,
+        };
+
         const responseData = await executeV2VideoWorkflow({
             workflowId: "cinematic-video-v1",
             nodeType: "video-generation",
             v2Input,
             userId: req.user.id,
-            projectId: project_id,
-            sessionId: session_id,
+            projectId,
+            sessionId,
             req
         });
 
-        res.json({
-            ...responseData,
-            data: responseData, // keeping nested for backward compat
-        });
+        res.json(responseData);
 
     } catch (error) {
         console.error("❌ [VideoController] generateVideo error:", error);
@@ -140,21 +158,32 @@ export const extendVideo = async (req, res) => {
             return res.status(404).json({ ok: false, message: "Source media not found for workflow" });
         }
 
-        const v2Input = mapEditVideoV1(req.body, sourceMedia);
+        const projectId = project_id || req.body.projectId || null;
+        const sessionId = session_id || req.body.sessionId || null;
+
+        const v2Input = {
+            prompt: req.body.prompt || "",
+            model: activeModel || null,
+            source_asset: sourceMedia ? { url: sourceMedia.url, width: sourceMedia.width, height: sourceMedia.height } : null,
+            mode: "video_to_video",
+            duration: req.body.duration || "5s",
+            references,
+            camera_control: req.body.camera_control || null,
+            project_id: projectId,
+            session_id: sessionId,
+        };
+
         const responseData = await executeV2VideoWorkflow({
             workflowId: "edit-video-v1",
             nodeType: "media-transform",
             v2Input,
             userId: req.user.id,
-            projectId: project_id,
-            sessionId: session_id,
+            projectId,
+            sessionId,
             req
         });
 
-        res.json({
-            ...responseData,
-            data: responseData,
-        });
+        res.json(responseData);
 
     } catch (error) {
         console.error("❌ [VideoController] extendVideo error:", error);
@@ -192,21 +221,32 @@ export const editVideo = async (req, res) => {
             return res.status(404).json({ ok: false, message: "Source media not found for workflow" });
         }
 
-        const v2Input = mapEditVideoV1(req.body, sourceMedia);
+        const projectId = project_id || req.body.projectId || null;
+        const sessionId = session_id || req.body.sessionId || null;
+
+        const v2Input = {
+            prompt: req.body.prompt || "",
+            model: activeModel || null,
+            source_asset: sourceMedia ? { url: sourceMedia.url, width: sourceMedia.width, height: sourceMedia.height } : null,
+            mode: "video_to_video",
+            duration: req.body.duration || "5s",
+            references,
+            camera_control: req.body.camera_control || null,
+            project_id: projectId,
+            session_id: sessionId,
+        };
+
         const responseData = await executeV2VideoWorkflow({
             workflowId: "edit-video-v1",
             nodeType: "media-transform",
             v2Input,
             userId: req.user.id,
-            projectId: project_id,
-            sessionId: session_id,
+            projectId,
+            sessionId,
             req
         });
 
-        res.json({
-            ...responseData,
-            data: responseData,
-        });
+        res.json(responseData);
 
     } catch (error) {
         console.error("❌ [VideoController] editVideo error:", error);
@@ -264,21 +304,36 @@ export const motionControl = async (req, res) => {
             });
         }
 
-        const v2Input = mapMotionControlV1(req.body, image_url, video_url);
+        const combinedReferences = [...references];
+        if (video_url) {
+            combinedReferences.push({ type: "video", url: video_url, role: "motion_reference" });
+        }
+
+        const projectId = project_id || req.body.projectId || null;
+        const sessionId = session_id || req.body.sessionId || null;
+
+        const v2Input = {
+            prompt: req.body.prompt || "",
+            model: activeModel || null,
+            source_asset: image_url ? { url: image_url } : null,
+            mode: "image_to_video",
+            duration: req.body.duration || "5s",
+            references: combinedReferences,
+            project_id: projectId,
+            session_id: sessionId,
+        };
+
         const responseData = await executeV2VideoWorkflow({
             workflowId: "edit-video-v1",
             nodeType: "media-transform",
             v2Input,
             userId: req.user.id,
-            projectId: project_id,
-            sessionId: session_id,
+            projectId,
+            sessionId,
             req
         });
 
-        res.json({
-            ...responseData,
-            data: responseData,
-        });
+        res.json(responseData);
 
     } catch (error) {
         console.error("❌ [VideoController] motionControl error:", error);

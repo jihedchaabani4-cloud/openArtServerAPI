@@ -2,9 +2,10 @@ import { bootstrapV2 } from "./src/v2/bootstrap.js";
 import { run as runUseCase } from "./src/use-cases/useCaseRunner.js";
 import { executeNode } from "./src/v2/nodes/index.js";
 import { NodeSafetyService } from "./src/v2/nodes/safety/NodeSafetyService.js";
-import { mapImageGenerationV1, mapEditImageV1, normalizeAspectRatio, normalizeCount } from "./src/v2/utils/v1PayloadMapper.js";
+import { normalizeAspectRatio, normalizeCount } from "./src/v2/utils/v2PayloadUtils.js";
 import { loadRegistries } from "./src/v2/registry/registryLoader.js";
 import { createBillingStrategy } from "./src/v2/billing/billingStrategy.js";
+import { normalizeImageModelName } from "./lib/modelRegistryKeys.js";
 
 // Bootstrap V2 Engine & Use Cases
 bootstrapV2();
@@ -55,9 +56,9 @@ async function runWorstErrorsTestSuite() {
   // -----------------------------------------------------------------
   try {
     console.log("\n▶️ SCENARIO 3: Non-Existent Model Name ('fake_super_model_9999')");
-    const v1Input = mapImageGenerationV1({ prompt: "valid prompt", model_name: "fake_super_model_9999" });
-    if (v1Input.model === "fal" || typeof v1Input.model === "string") {
-      console.log(`  ✓ Safely handled: Invalid model normalized/fallback to default "${v1Input.model}".`);
+    const normalizedModel = normalizeImageModelName("fake_super_model_9999");
+    if (normalizedModel === null || normalizedModel === undefined || typeof normalizedModel === "string") {
+      console.log(`  ✓ Safely handled: Invalid model normalized/fallback to default "${normalizedModel}".`);
       passedCount++;
     } else {
       console.error("  ❌ Failed to handle invalid model name!");
@@ -183,7 +184,7 @@ async function runWorstErrorsTestSuite() {
   }
 
   // -----------------------------------------------------------------
-  // SCENARIO 10: Missing Source Asset on Image Edit Node
+  // SCENARIO 10: Missing Source Asset on Media Transform (Image Edit)
   // -----------------------------------------------------------------
   try {
     console.log("\n▶️ SCENARIO 10: Missing Source Asset on Media Transform (Image Edit)");

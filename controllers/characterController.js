@@ -5,7 +5,6 @@ import { workflowStorageGateway, characterService, mediaWorkflowLifecycleService
 import { loadRegistries } from "../src/v2/registry/registryLoader.js";
 import { compileWorkflow } from "../src/v2/compiler/compileWorkflow.js";
 import { startWorkflowRun } from "../src/v2/runner/workflowRunner.js";
-import { buildV1CompatibleResponse } from "../src/v2/utils/v1PayloadMapper.js";
 
 let cachedRegistries = null;
 function getRegistries() {
@@ -81,13 +80,22 @@ export async function createCharacter(req, res) {
             }).catch(err => console.warn(`⚠️ [characterController] Character metadata sync warning:`, err.message));
         }
 
-        res.json(buildV1CompatibleResponse({
-            runId: runResult.run_id,
-            v1WorkflowId: placeholder?.workflowId,
-            v1MediaId: placeholder?.mediaId,
-            projectId: project_id,
-            sessionId: null,
-        }));
+        const v1WfId = placeholder?.workflowId || null;
+        const v1MedId = placeholder?.mediaId || null;
+
+        res.json({
+            ok: true,
+            status: "processing",
+            taskId: runResult.run_id,
+            jobId: runResult.run_id,
+            batchId: null,
+            configId: null,
+            workflows: v1WfId ? [{ id: v1WfId, primary_media_id: v1MedId }] : [],
+            workflow: v1WfId ? { id: v1WfId, primary_media_id: v1MedId } : null,
+            v1WorkflowId: v1WfId,
+            project_id: project_id,
+            session_id: null,
+        });
 
     } catch (err) {
         console.error(`❌ [characterController] createCharacterSheet error:`, err);

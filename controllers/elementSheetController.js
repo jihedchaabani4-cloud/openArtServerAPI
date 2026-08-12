@@ -5,7 +5,6 @@ import { db, workflowStorageGateway } from "../src/container.js";
 import { loadRegistries } from "../src/v2/registry/registryLoader.js";
 import { compileWorkflow } from "../src/v2/compiler/compileWorkflow.js";
 import { startWorkflowRun } from "../src/v2/runner/workflowRunner.js";
-import { mapElementSheetV1, buildV1CompatibleResponse } from "../src/v2/utils/v1PayloadMapper.js";
 
 let cachedRegistries = null;
 function getRegistries() {
@@ -21,6 +20,11 @@ async function handleSheetRequest(req, res, sheetType) {
     try {
         const {
             project_id,
+            prompt,
+            model,
+            model_name,
+            features,
+            references = []
         } = req.body;
 
         console.log(`\n🚀 [elementSheetController] ${sheetType} request received`);
@@ -33,11 +37,17 @@ async function handleSheetRequest(req, res, sheetType) {
         }
 
         const userId = req.user.id;
-        const v2Payload = mapElementSheetV1(req.body, sheetType);
+        const v2WorkflowId = "character-sheet-v1";
+        const v2Input = {
+            prompt: prompt || "",
+            model: model || model_name || "nanobana",
+            characters: features ? [{ name: "CHARACTER", description: prompt, traits: features }] : [],
+            references,
+            project_id: project_id || null,
+            session_id: req.body.session_id || req.body.sessionId || null,
+        };
         
         const runId = randomUUID();
-        const v2WorkflowId = v2Payload.workflowId;
-        const v2Input = v2Payload.input;
 
         console.log(`\n================================================================`);
         console.log(`🎭 [character-sheet-v1] USE CASE EXECUTING: ${sheetType} SHEET GENERATION`);
@@ -72,13 +82,22 @@ async function handleSheetRequest(req, res, sheetType) {
         console.log(`🚀 [character-sheet-v1] Starting DAG Execution Plan (Run: ${runId})`);
         const runResult = await startWorkflowRun(plan, runtimeInput, runId);
 
-        res.json(buildV1CompatibleResponse({
-            runId: runResult.run_id,
-            v1WorkflowId: placeholder?.workflowId,
-            v1MediaId: placeholder?.mediaId,
-            projectId: project_id,
-            sessionId: null, // no session_id — sheet workflows belong to the project, not a session
-        }));
+        const v1WfId = placeholder?.workflowId || null;
+        const v1MedId = placeholder?.mediaId || null;
+
+        res.json({
+            ok: true,
+            status: "processing",
+            taskId: runResult.run_id,
+            jobId: runResult.run_id,
+            batchId: null,
+            configId: null,
+            workflows: v1WfId ? [{ id: v1WfId, primary_media_id: v1MedId }] : [],
+            workflow: v1WfId ? { id: v1WfId, primary_media_id: v1MedId } : null,
+            v1WorkflowId: v1WfId,
+            project_id: project_id,
+            session_id: null,
+        });
 
     } catch (err) {
         console.error(`❌ [elementSheetController] Error (${sheetType}):`, err);

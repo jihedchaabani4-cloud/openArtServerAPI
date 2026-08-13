@@ -172,7 +172,29 @@ export class MediaWorkflowLifecycleService {
 
       const sessionId = input.session_id || input.sessionId || null;
       const effectiveStepId = inferStepId(nodeType, input, stepId);
-      const effectiveWorkflowType = workflowType || (workflowId === "character-sheet-v1" ? "CHARACTER" : "GENERATION");
+
+      // If workflowId is provided, attach media directly to the existing parent workflow container
+      const targetWfId = input.workflow_id || input.workflowId || workflowId;
+      if (targetWfId && typeof targetWfId === "string" && targetWfId.trim() && targetWfId !== "character-sheet-v1") {
+        try {
+          const media = await this.bridge.appendV1Placeholder({
+            workflowId: targetWfId.trim(),
+            projectId,
+            stepId: effectiveStepId,
+            config: buildGenerationConfig(nodeType, input),
+          });
+          if (media) {
+            console.log(
+              `[MediaWorkflowLifecycle] Appended placeholder to existing parent workflow=${targetWfId} media=${media.id}`
+            );
+            return { workflowId: targetWfId.trim(), mediaId: media.id };
+          }
+        } catch (appendErr) {
+          console.warn(`[MediaWorkflowLifecycle] Notice appending to parent workflow ${targetWfId}:`, appendErr.message);
+        }
+      }
+
+      const effectiveWorkflowType = workflowType || "GENERATION";
 
       const { workflow, media } = await this.bridge.createV1Placeholder({
         userId,

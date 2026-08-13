@@ -16,6 +16,8 @@ input_schema:
     references: { type: array }
     style: { type: string }
     model: { type: string }
+    project_id: { type: string }
+    projectId: { type: string }
 
 default_model: z_image_base
 

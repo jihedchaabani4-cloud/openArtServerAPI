@@ -1,7 +1,7 @@
 id: character-sheet-v1
 name: Character Sheet
 version: 1.0.0
-description: Generate a professional 3-view character sheet with LLM prompt intelligence.
+description: Generate a professional 3-view character sheet with PromptBuilder first and LLM skill second.
 
 metadata:
   category: character
@@ -20,21 +20,10 @@ input_schema:
 default_model: nanobana
 
 nodes:
-  llm_enrich:
-    type: llm
-    user_inputs:
-      userPrompt: "${input.prompt}"
-    config:
-      skills: [llm/translation, llm/character-description, llm/json-output]
-      jsonMode: true
-      parameters:
-        style: "${input.style}"
-
   build_prompt:
     type: prompt-builder
-    depends_on: [llm_enrich]
-    user_inputs:
-      prompt: "${llm_enrich.output.json.description}"
+    inputs:
+      prompt: "${input.prompt}"
       characters: "${input.characters}"
       references: "${input.references}"
       style: "${input.style}"
@@ -44,11 +33,23 @@ nodes:
         views: [front, side, back]
         style: realistic
 
-  generate:
-    type: image-generation
+  llm_enrich:
+    type: llm
     depends_on: [build_prompt]
     inputs:
-      prompt: "${build_prompt.output.finalPrompt}"
+      userPrompt: "${build_prompt.output.finalPrompt}"
+      context: "${build_prompt.output.context}"
+    config:
+      skills: [llm/translation, llm/character-description, llm/json-output]
+      jsonMode: true
+      parameters:
+        style: "${input.style}"
+
+  generate:
+    type: image-generation
+    depends_on: [llm_enrich, build_prompt]
+    inputs:
+      prompt: "${llm_enrich.output.json.description}"
       references: "${build_prompt.output.context.references}"
       model: "${input.model}"
     config:

@@ -3,68 +3,11 @@ import { run as runUseCase } from "../src/use-cases/useCaseRunner.js";
 import { randomUUID } from "node:crypto";
 
 /**
- * Strips raw template tag wrappers like <Trait: X> or <Tag: Y> into clean natural words.
- */
-function stripRawTagSyntax(text = "") {
-    if (typeof text !== "string") return "";
-    return text
-        .replace(/<(?:Trait|Tag|Feature|Attribute):\s*([^>]+)>/gi, "$1")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-}
-
-/**
- * Converts prompt, traits object/array, and features into one clean unified description string.
- */
-function buildUnifiedDescription(promptText = "", traitsInput = null, featuresInput = null) {
-    const textParts = [];
-
-    const cleanPrompt = stripRawTagSyntax(promptText);
-    if (cleanPrompt) {
-        textParts.push(cleanPrompt);
-    }
-
-    const traitWords = [];
-    if (Array.isArray(traitsInput)) {
-        traitWords.push(...traitsInput.map(t => stripRawTagSyntax(String(t))));
-    } else if (traitsInput && typeof traitsInput === "object") {
-        for (const [key, val] of Object.entries(traitsInput)) {
-            if (!val) continue;
-            const cleanVal = stripRawTagSyntax(String(val));
-            const cleanKey = String(key).trim().toLowerCase();
-            if (cleanKey === "hair" || cleanKey === "eyes" || cleanKey === "skin") {
-                traitWords.push(`${cleanVal} ${cleanKey}`);
-            } else if (cleanKey === "outfit" || cleanKey === "clothing") {
-                traitWords.push(`wearing ${cleanVal}`);
-            } else {
-                traitWords.push(cleanVal);
-            }
-        }
-    }
-
-    if (Array.isArray(featuresInput)) {
-        traitWords.push(...featuresInput.map(f => stripRawTagSyntax(String(f))));
-    }
-
-    const uniqueTraits = Array.from(new Set(traitWords.filter(Boolean)));
-
-    for (const trait of uniqueTraits) {
-        if (!textParts.some(p => p.toLowerCase().includes(trait.toLowerCase()))) {
-            textParts.push(trait);
-        }
-    }
-
-    return textParts.join(", ").trim();
-}
-
-/**
  * POST /api/characters/create & POST /api/characters
  * 
- * 🌟 Unified Clean Character Creation Flow:
- * 1. Strips raw <Trait: > tag syntax and converts traits/features into a clean description.
- * 2. Creates character entity record in Supabase DB with clean description.
- * 3. Dispatches character-sheet-v1 UseCase to generate AI reference sheet.
+ * 🌟 Pure HTTP Controller (Zero logic mutation):
+ * 1. Forwards raw character payload directly to Supabase DB.
+ * 2. Dispatches character-sheet-v1 UseCase directly to V2 engine queue.
  */
 export async function createCharacter(req, res) {
     try {
@@ -89,24 +32,24 @@ export async function createCharacter(req, res) {
         }
 
         const userId = req.user.id;
-        const charName = stripRawTagSyntax(name || title || "Untitled Character");
-        const charDesc = buildUnifiedDescription(description || prompt || "", traits, features) || charName;
+        const charName = name || title || "Untitled Character";
+        const charPrompt = prompt || description || charName;
 
         // ── 1. Create Character & Single Workflow Container (CHARACTER_SHEET) ──────
         const createdResult = await characterService.createCharacter({
             projectId: targetProjectId,
             userId,
             name: charName,
-            description: charDesc,
+            description: charPrompt,
         });
 
         const characterId = createdResult.characterId || createdResult.character?.id || randomUUID();
 
-        // ── 2. Prepare UseCase Runtime Input ──────────────────────────────────
+        // ── 2. Prepare Direct UseCase Runtime Input ───────────────────────────
         const runtimeInput = {
-            prompt: charDesc,
+            prompt: charPrompt,
             model: model || model_name || "nanobana",
-            characters: [{ name: charName, description: charDesc }],
+            characters: [{ name: charName, description: charPrompt, traits, features }],
             references,
             project_id: targetProjectId,
             session_id: null,
@@ -126,7 +69,7 @@ export async function createCharacter(req, res) {
         res.json({
             ok: true,
             status: "processing",
-            character: createdResult.character || { id: characterId, name: charName, description: charDesc, project_id: targetProjectId },
+            character: createdResult.character || { id: characterId, name: charName, description: charPrompt, project_id: targetProjectId },
             characterId: characterId,
             taskId: runResult.executionId,
             jobId: runResult.executionId,

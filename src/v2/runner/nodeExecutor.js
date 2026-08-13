@@ -1,50 +1,58 @@
 import { parseBinding } from "../compiler/validateBindings.js";
-import { executeNode } from "../nodes/index.js";
 import { RunRepository } from "./runRepository.js";
-import { resolveRetryAttempt, getBackoffDelay } from "./retryExecutor.js";
-import { enqueueWorkflowRun, v2WorkflowQueue } from "../queue/v2WorkflowQueue.js";
-import { logV2Event } from "../logging/v2Logger.js";
+import { executeNode } from "../nodes/index.js";
 import {
-  getGateways,
   reserveNodeBilling,
   settleNodeBilling,
   rollbackNodeBilling,
   createNodeMediaPlaceholders,
   finalizeNodeMediaOutputs,
   isProviderBackedNodeType,
+  getGateways,
 } from "./workflowRunner.js";
+import { enqueueWorkflowRun } from "../queue/v2WorkflowQueue.js";
+import { logV2Event } from "../logging/v2Logger.js";
 
 const runRepo = new RunRepository();
 
 /**
- * Gets a nested value from an object using a dot-notation path.
+ * Safely extracts nested properties using dot notation paths.
  */
 export function getValueAtPath(obj, path) {
-  if (!path) return obj;
+  if (!obj || !path) return undefined;
   const parts = path.split(".");
-  let current = obj;
+  let curr = obj;
   for (const part of parts) {
-    if (current === null || current === undefined) return undefined;
-    current = current[part];
+    if (curr === undefined || curr === null) return undefined;
+    curr = curr[part];
   }
-  return current;
+  return curr;
 }
 
 /**
- * Resolves inputs for a node by merging static resolved_inputs and dynamic bindings.
+ * Resolves input expressions for a node based on workflow inputs and dependency outputs.
  */
-export async function resolveInputsForNode(run, node, nodeRuns) {
-  const resolved = { ...node.resolved_inputs };
+export async function resolveInputsForNode(run, nodeConfig, nodeRuns) {
+  const resolved = {};
+  const inputsToResolve = nodeConfig.inputs || nodeConfig.user_inputs || {};
 
-  for (const [key, bindingExpr] of Object.entries(node.bindings || {})) {
-    const parsed = parseBinding(bindingExpr);
-    if (!parsed) continue;
+  for (const [key, expr] of Object.entries(inputsToResolve)) {
+    if (typeof expr !== "string") {
+      resolved[key] = expr;
+      continue;
+    }
+
+    const parsed = parseBinding(expr);
+    if (!parsed) {
+      resolved[key] = expr;
+      continue;
+    }
 
     if (parsed.kind === "input") {
       resolved[key] = run.input[parsed.field];
     } else if (parsed.kind === "node_output") {
-      const upstreamRun = nodeRuns.find((n) => n.node_id === parsed.nodeId);
-      resolved[key] = getValueAtPath(upstreamRun?.output, parsed.path);
+      const depRun = nodeRuns.find((n) => n.node_id === parsed.nodeId);
+      resolved[key] = getValueAtPath(depRun?.output, parsed.path);
     }
   }
 
@@ -52,7 +60,7 @@ export async function resolveInputsForNode(run, node, nodeRuns) {
 }
 
 /**
- * Executes a single node and handles its lifecycle/retries.
+ * Executes a single node directly without retries. On failure, immediately marks as failed.
  * @param {string} runId
  * @param {string} nodeId
  */
@@ -83,7 +91,6 @@ export async function executeNodeJob(runId, nodeId) {
   // 2. Fetch other node runs to resolve dependencies
   const nodeRuns = await runRepo.listNodeRuns(runId);
 
-  // Declare placeholders in outer scope so catch block can access them for Phase 2 failure
   let placeholders = [];
 
   try {
@@ -116,7 +123,7 @@ export async function executeNodeJob(runId, nodeId) {
       operation: `node.execute:${nodeId}`,
       durationMs: 0,
       status: "success",
-      message: `Starting node ${nodeId} (attempt ${nodeRun.attempt})`
+      message: `Starting node ${nodeId}`
     });
 
     // 5. Invoke node execution
@@ -198,9 +205,10 @@ export async function executeNodeJob(runId, nodeId) {
     await enqueueWorkflowRun(runId);
 
   } catch (error) {
+    console.error(`❌ [nodeExecutor] Node "${nodeId}" failed: ${error.message}`);
+
     await rollbackNodeBilling({ runId, nodeId, nodeConfig, attempt: nodeRun.attempt }).catch(() => {});
 
-    // Phase 2 (failure) — Mark all created placeholders as failed.
     const { storageGateway } = getGateways();
     if (storageGateway?.failPlaceholders && placeholders.length > 0) {
       await storageGateway.failPlaceholders(placeholders, error).catch(() => {});
@@ -226,51 +234,17 @@ export async function executeNodeJob(runId, nodeId) {
       durationMs: Date.now() - startedAt,
       status: "error",
       errorCode: error.code || "NODE_EXECUTION_FAILED",
-      message: `Node ${nodeId} failed on attempt ${nodeRun.attempt}: ${error.message}`
+      message: `Node ${nodeId} failed: ${error.message}`
     });
 
-    // 7. On failure: apply retry policy
-    const retryPolicy = nodeConfig.retry_policy;
-    const retryResult = resolveRetryAttempt(nodeConfig, nodeRun.attempt);
+    // Direct failure: Mark node run as failed without retrying
+    await runRepo.updateNodeRun(runId, nodeId, {
+      status: "failed",
+      error: { code: error.code || "NODE_FAILED", message: error.message },
+      completed_at: new Date().toISOString()
+    });
 
-    if (retryResult.shouldRetry) {
-      const delayMs = getBackoffDelay(retryPolicy, nodeRun.attempt);
-      
-      // Update node run status to pending/running for next attempt
-      await runRepo.updateNodeRun(runId, nodeId, {
-        attempt: retryResult.nextAttempt,
-        status: "pending", // mark as pending until job picks it up
-        provider_override: retryResult.providerOverride || null,
-        error: { code: error.code || "NODE_ATTEMPT_FAILED", message: error.message }
-      });
-
-      // Enqueue job with delay
-      await v2WorkflowQueue.add(
-        "node-execute",
-        { runId, nodeId },
-        {
-          jobId: `node-${runId}-${nodeId}-${retryResult.nextAttempt}`,
-          delay: delayMs
-        }
-      );
-
-      logV2Event({
-        traceId: runId,
-        operation: `node.retry:${nodeId}`,
-        durationMs: 0,
-        status: "success",
-        message: `Scheduled attempt ${retryResult.nextAttempt} for node ${nodeId} in ${delayMs}ms`
-      });
-
-    } else {
-      // Retries exhausted: mark node run as failed and trigger orchestrator to fail run
-      await runRepo.updateNodeRun(runId, nodeId, {
-        status: "failed",
-        error: { code: error.code || "NODE_FAILED", message: error.message },
-        completed_at: new Date().toISOString()
-      });
-
-      await enqueueWorkflowRun(runId);
-    }
+    // Trigger orchestrator to mark workflow as failed immediately
+    await enqueueWorkflowRun(runId);
   }
 }

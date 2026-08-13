@@ -244,6 +244,10 @@ export class MediaWorkflowLifecycleService {
       ...(projectId ? { project_id: projectId, projectId } : {})
     };
 
+    const isCharacterWorkflow = run?.use_case_id === "character-sheet-v1" || run?.useCaseId === "character-sheet-v1" || resolvedInputs?.workflow_type === "CHARACTER_SHEET" || resolvedInputs?.workflow_type === "CHARACTER";
+
+    const workflowType = isCharacterWorkflow ? "CHARACTER_SHEET" : (resolvedInputs?.workflow_type || "GENERATION");
+
     return this.startPlaceholders({
       userId: run?.user_id || null,
       nodeType: nodeConfig.type,
@@ -251,6 +255,7 @@ export class MediaWorkflowLifecycleService {
       count,
       runId,
       workflowId: run?.workflow_id || null,
+      workflowType,
     });
   }
 

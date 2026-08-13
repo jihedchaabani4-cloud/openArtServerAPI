@@ -1,7 +1,7 @@
 id: character-sheet-v1
 name: Character Sheet
 version: 1.0.0
-description: Generate a professional 3-view character sheet with PromptBuilder first, LLM Vision analysis second, and ImageGen third.
+description: Pure prompt resolution in PromptBuilder, professional 3-view studio sheet engineering in LLM Vision, and 4-image generation.
 
 metadata:
   category: character
@@ -27,11 +27,6 @@ nodes:
       characters: "${input.characters}"
       references: "${input.references}"
       style: "${input.style}"
-    config:
-      skills: [character-sheet]
-      skill_parameters:
-        views: [front, side, back]
-        style: realistic
 
   llm_enrich:
     type: llm

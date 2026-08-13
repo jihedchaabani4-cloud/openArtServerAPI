@@ -6,7 +6,7 @@
  *   1. Safety & Bounds Check → NodeSafetyService.assertPromptBuilderInputs
  *   2. Token & Locator Parser → Extract @Tokens (@Sarah) and inline markers (<character:id>)
  *   3. Characteristic Tag Processor → Convert trait/feature tag objects into natural prose
- *   4. Entity & Reference Resolver → Fetch entity metadata & references
+ *   4. Entity & Reference Resolver → Fetch entity metadata & resolve workflow IDs to media URLs
  *   5. Relevance Filter → Strip DB metadata (createdAt, ownerId, billingFlags)
  *   6. Context Assembler → Produce Normalized Context Snapshot (`context`)
  *   7. Pure Clean Prompt Assembly → Pass prompt without hardcoded text pollution
@@ -15,6 +15,70 @@
  */
 
 import { NodeSafetyService } from "./safety/NodeSafetyService.js";
+import { MediaRepository } from "../../db/MediaRepository.js";
+
+const mediaRepo = new MediaRepository();
+
+/**
+ * Resolves a reference item (string workflow ID, HTTP URL, or object) into a full reference object with media URL.
+ */
+async function resolveReferenceToMedia(ref, idx = 1) {
+  if (!ref) return null;
+
+  // Case 1: If ref is an object with url or workflow_id
+  if (typeof ref === "object") {
+    let url = ref.url || ref.src || ref.file_url || null;
+    const refId = ref.workflow_id || ref.workflowId || ref.assetId || ref.id || ref.media_id;
+
+    if (!url && refId && typeof refId === "string" && !refId.startsWith("http")) {
+      try {
+        const media = await mediaRepo.findLatestByWorkflow(refId);
+        if (media?.url) url = media.url;
+      } catch (err) {
+        console.warn(`[promptBuilderNode] Failed to resolve media for workflow_id ${refId}: ${err.message}`);
+      }
+    }
+
+    if (url && url.trim()) {
+      return {
+        assetId: refId || `ref_${idx}`,
+        workflowId: ref.workflow_id || ref.workflowId || (refId && !refId.startsWith("http") ? refId : null),
+        url: url.trim(),
+        role: ref.role || "character_reference",
+      };
+    }
+    return null;
+  }
+
+  // Case 2: If ref is a string
+  if (typeof ref === "string") {
+    const trimmed = ref.trim();
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+      return {
+        assetId: `ref_${idx}`,
+        workflowId: null,
+        url: trimmed,
+        role: "character_reference",
+      };
+    }
+    // Assume string is a workflow_id / asset_id!
+    try {
+      const media = await mediaRepo.findLatestByWorkflow(trimmed);
+      if (media?.url) {
+        return {
+          assetId: trimmed,
+          workflowId: trimmed,
+          url: media.url,
+          role: "character_reference",
+        };
+      }
+    } catch (err) {
+      console.warn(`[promptBuilderNode] Failed to resolve media for workflow_id ${trimmed}: ${err.message}`);
+    }
+  }
+
+  return null;
+}
 
 /**
  * Strips raw template tag wrappers like <Trait: X> or <Tag: Y> into clean natural words.
@@ -140,7 +204,7 @@ function parseTokensAndPointers(promptText = "") {
 
 /**
  * Main Execution Function for Prompt Builder Node.
- * Pure, non-polluting prompt builder that respects input prompt and cleans raw <Trait: > tags.
+ * Resolves reference workflow IDs into actual media URLs via MediaRepository.
  *
  * @param {object} resolvedInputs
  * @param {object} ctx - { runId, nodeId, userId, traceId, gateways, deps }
@@ -171,20 +235,9 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
     .map(normalizeElement)
     .filter(Boolean);
 
-  const normalizedReferences = rawReferences.map((ref, idx) => {
-    if (typeof ref === "string") {
-      return {
-        assetId: `ref_${idx + 1}`,
-        url: ref,
-        role: "character_reference"
-      };
-    }
-    return {
-      assetId: ref.assetId ?? ref.id ?? ref.asset_id ?? `ref_${idx + 1}`,
-      url: ref.url ?? ref.src ?? "",
-      role: ref.role ?? "character_reference",
-    };
-  }).filter(r => Boolean(r.url && r.url.trim()));
+  // Resolve workflow IDs / URLs to full media objects with URLs asynchronously
+  const resolvedRefPromises = rawReferences.map((ref, idx) => resolveReferenceToMedia(ref, idx + 1));
+  const normalizedReferences = (await Promise.all(resolvedRefPromises)).filter(Boolean);
 
   for (const char of normalizedCharacters) {
     for (const ref of char.references) {

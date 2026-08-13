@@ -238,10 +238,17 @@ export class MediaWorkflowLifecycleService {
           )
         : 1;
 
+    const projectId = resolvedInputs?.project_id || resolvedInputs?.projectId || run?.project_id || run?.projectId || run?.input?.project_id || run?.input?.projectId;
+
+    const inputWithProject = {
+      ...resolvedInputs,
+      ...(projectId ? { project_id: projectId, projectId } : {})
+    };
+
     return this.startPlaceholders({
       userId: run?.user_id || null,
       nodeType: nodeConfig.type,
-      input: resolvedInputs,
+      input: inputWithProject,
       count,
       runId,
       workflowId: run?.workflow_id || null,

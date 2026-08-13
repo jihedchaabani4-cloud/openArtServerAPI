@@ -48,6 +48,7 @@ nodes:
       prompt: "${llm_enrich.output.json.description}"
       references: "${build_prompt.output.context.references}"
       model: "${input.model}"
+      project_id: "${input.project_id}"
     config:
       width: 1024
       height: 1024

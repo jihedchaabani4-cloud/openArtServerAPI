@@ -47,14 +47,25 @@ export function createV2ImageAdapter({
       // If a model is specified, route directly to the V1 model runner
       if (modelName) {
         try {
+          // Extract clean string URLs from references
+          const rawRefs = request.references ?? request.input_assets ?? [];
+          const referenceUrls = rawRefs
+            .map(r => (typeof r === "string" ? r : r.url || r.src || ""))
+            .filter(Boolean);
+
           // 1. Resolve the correct model runner class (e.g., NanobanaNormal)
           const runner = resolveProvider({
             model_name: modelName,
-            input_assets: request.references ?? request.input_assets ?? [],
+            input_assets: referenceUrls,
           });
 
-          // 2. Build provider payload using the runner's own adapt() / toPayload()
-          const payload = buildProviderPayload(runner, request);
+          // 2. Build provider payload using clean reference URLs
+          const payload = buildProviderPayload(runner, {
+            ...request,
+            references: referenceUrls,
+            input_assets: referenceUrls,
+            images: referenceUrls,
+          });
 
           // 3. Call the AI provider API directly (Zero DB, Zero Billing, Zero Queue)
           const result = await runner.generate(payload);

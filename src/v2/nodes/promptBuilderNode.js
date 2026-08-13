@@ -88,11 +88,11 @@ function normalizeCharacter(char) {
     name: char.name ?? "Character",
     visualTraits: characteristicWords,
     references: Array.isArray(char.references)
-      ? char.references.map(r => ({
-          assetId: r.assetId ?? r.id ?? "ref_unk",
-          url: r.url ?? "",
-          role: r.role ?? "character_reference"
-        }))
+      ? char.references.map((r, idx) => ({
+          assetId: typeof r === "string" ? `ref_${idx + 1}` : (r.assetId ?? r.id ?? `ref_${idx + 1}`),
+          url: typeof r === "string" ? r : (r.url ?? r.src ?? ""),
+          role: typeof r === "string" ? "character_reference" : (r.role ?? "character_reference")
+        })).filter(r => Boolean(r.url && r.url.trim()))
       : []
   };
 }
@@ -109,11 +109,11 @@ function normalizeElement(elem) {
       ? elem.visualTraits
       : (elem.description ? [elem.description] : []),
     references: Array.isArray(elem.references)
-      ? elem.references.map(r => ({
-          assetId: r.assetId ?? r.id ?? "ref_unk",
-          url: r.url ?? "",
-          role: r.role ?? "product_reference"
-        }))
+      ? elem.references.map((r, idx) => ({
+          assetId: typeof r === "string" ? `ref_${idx + 1}` : (r.assetId ?? r.id ?? `ref_${idx + 1}`),
+          url: typeof r === "string" ? r : (r.url ?? r.src ?? ""),
+          role: typeof r === "string" ? "product_reference" : (r.role ?? "product_reference")
+        })).filter(r => Boolean(r.url && r.url.trim()))
       : []
   };
 }
@@ -171,15 +171,24 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
     .map(normalizeElement)
     .filter(Boolean);
 
-  const normalizedReferences = rawReferences.map((ref, idx) => ({
-    assetId: ref.assetId ?? ref.id ?? `ref_${idx + 1}`,
-    url: ref.url ?? "",
-    role: ref.role ?? "character_reference",
-  }));
+  const normalizedReferences = rawReferences.map((ref, idx) => {
+    if (typeof ref === "string") {
+      return {
+        assetId: `ref_${idx + 1}`,
+        url: ref,
+        role: "character_reference"
+      };
+    }
+    return {
+      assetId: ref.assetId ?? ref.id ?? ref.asset_id ?? `ref_${idx + 1}`,
+      url: ref.url ?? ref.src ?? "",
+      role: ref.role ?? "character_reference",
+    };
+  }).filter(r => Boolean(r.url && r.url.trim()));
 
   for (const char of normalizedCharacters) {
     for (const ref of char.references) {
-      if (!normalizedReferences.some(r => r.url === ref.url)) {
+      if (ref.url && !normalizedReferences.some(r => r.url === ref.url)) {
         normalizedReferences.push(ref);
       }
     }

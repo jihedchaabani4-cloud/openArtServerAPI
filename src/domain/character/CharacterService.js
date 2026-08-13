@@ -90,7 +90,7 @@ export class CharacterService {
                     id: characterId,
                     project_id: projectId,
                     user_id: safeUserId,
-                    workflow_type: "ELEMENT_SHEET",
+                    workflow_type: "CHARACTER_SHEET",
                     display_name: charName,
                     status: "processing",
                 }).catch(async (wfErr) => {
@@ -98,6 +98,7 @@ export class CharacterService {
                     await this.db.workflows.updateFields(characterId, {
                         display_name: charName,
                         project_id: projectId,
+                        workflow_type: "CHARACTER_SHEET",
                     }).catch(() => null);
                 });
             }

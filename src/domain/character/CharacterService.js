@@ -122,9 +122,21 @@ export class CharacterService {
                 return null;
             });
 
-            // Sync display_name on the workflow container
-            if (characterId && charName) {
-                await this.db.workflows.updateFields(characterId, { display_name: charName }).catch(() => null);
+            // Sync / create workflow container row for the character in public.workflow table
+            if (characterId) {
+                await this.db.workflows.createWorkflow({
+                    id: characterId,
+                    project_id: projectId,
+                    user_id: safeUserId,
+                    workflow_type: "ELEMENT_SHEET",
+                    display_name: charName,
+                    status: "processing",
+                }).catch(async () => {
+                    await this.db.workflows.updateFields(characterId, {
+                        display_name: charName,
+                        project_id: projectId,
+                    }).catch(() => null);
+                });
             }
 
             crudOperationLog({

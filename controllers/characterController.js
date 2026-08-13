@@ -1,5 +1,6 @@
 import { characterService, walletService, pricingService, workflowStorageGateway } from "../src/container.js";
 import { run as runUseCase } from "../src/use-cases/useCaseRunner.js";
+import { autoCreateProjectAndSession } from "../lib/helpers.js";
 import { randomUUID } from "node:crypto";
 
 /**
@@ -23,20 +24,19 @@ export async function createCharacter(req, res) {
             model_name,
             features,
             traits = features,
-            references = []
-        } = req.body;
-
-        if (!projectId) {
-            return res.status(400).json({ ok: false, message: "project_id is required" });
-        }
-
         const userId = req.user.id;
+        const rawProjectId = req.body.project_id || req.body.projectId;
+        const rawSessionId = req.body.session_id || req.body.sessionId;
+
+        const { project_id: finalProjectId, session_id: finalSessionId } =
+            await autoCreateProjectAndSession(userId, rawProjectId, rawSessionId, false);
+
         const charName = name || title || "Untitled Character";
         const charDesc = description || prompt || "";
 
         // ── 1. Save Character Profile Entity in DB ────────────────────────────
         const createdResult = await characterService.createCharacter({
-            projectId,
+            projectId: finalProjectId,
             userId,
             name: charName,
             description: charDesc,
@@ -52,8 +52,8 @@ export async function createCharacter(req, res) {
             model: model || model_name || "nanobana",
             characters: [{ name: charName, description: charDesc, traits: traits || {} }],
             references,
-            project_id: projectId,
-            session_id: req.body.session_id || req.body.sessionId || null,
+            project_id: finalProjectId,
+            session_id: finalSessionId,
         };
 
         const placeholder = await workflowStorageGateway.createMediaPlaceholder({
@@ -88,7 +88,7 @@ export async function createCharacter(req, res) {
         res.json({
             ok: true,
             status: "processing",
-            character: createdResult.character || { id: characterId, name: charName },
+            character: createdResult.character || { id: characterId, name: charName, project_id: finalProjectId },
             characterId: characterId,
             taskId: runResult.executionId,
             jobId: runResult.executionId,
@@ -96,7 +96,8 @@ export async function createCharacter(req, res) {
             workflow: v1WfId ? { id: v1WfId, primary_media_id: v1MedId } : null,
             v1WorkflowId: v1WfId,
             v1MediaId: v1MedId,
-            project_id: projectId,
+            project_id: finalProjectId,
+            session_id: finalSessionId,
         });
 
     } catch (err) {

@@ -158,11 +158,25 @@ export class ProjectReadService {
             const { data: chars, error: charErr } = await supabaseAdmin
                 .from("characters")
                 .select("*")
-                .in("workflow_id", workflowIds);
+                .or(`project_id.eq.${projectId},workflow_id.in.(${workflowIds.join(",")})`);
 
             if (charErr) {
                 console.warn("⚠️ Characters query warning:", charErr.message);
             } else if (chars) {
+                charactersList = chars;
+                chars.forEach((c) => {
+                    if (c.workflow_id) characterMap[c.workflow_id] = c;
+                    if (c.id) characterMap[c.id] = c;
+                });
+            }
+        } else {
+            // Also fetch characters directly by project_id when no workflows exist yet
+            const { data: chars, error: charErr } = await supabaseAdmin
+                .from("characters")
+                .select("*")
+                .eq("project_id", projectId);
+
+            if (!charErr && chars) {
                 charactersList = chars;
                 chars.forEach((c) => {
                     if (c.workflow_id) characterMap[c.workflow_id] = c;

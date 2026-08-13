@@ -5,11 +5,11 @@
  * Internal Pipeline:
  *   1. Safety & Bounds Check → NodeSafetyService.assertPromptBuilderInputs
  *   2. Token & Locator Parser → Extract @Tokens (@Sarah) and inline markers (<character:id>)
- *   3. Entity & Reference Resolver → Fetch entity metadata via injected gateways/inputs
- *   4. Relevance Filter → Strip DB metadata (createdAt, ownerId, billingFlags)
- *   5. Context Normalizer → Map raw entity schemas into uniform context representation
+ *   3. Characteristic Tag Processor → Convert trait/feature tag objects into natural prose
+ *   4. Entity & Reference Resolver → Fetch entity metadata & references
+ *   5. Relevance Filter → Strip DB metadata (createdAt, ownerId, billingFlags)
  *   6. Context Assembler → Produce Normalized Context Snapshot (`context`)
- *   7. Fast Prompt Fallback → Assemble `finalPrompt` string for Fast Mode
+ *   7. Fast Prompt Construction → Assemble `finalPrompt` string
  *
  * Output: { finalPrompt: string, context: WorkflowContext }
  */
@@ -17,16 +17,67 @@
 import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 
 /**
+ * Process character characteristic tags (traits, features, archetype, gender, etc.)
+ * into clean, natural descriptive words.
+ * Converts { hair: "black", gender: "female", outfit: "leather jacket" }
+ * into ["black hair", "female", "wearing leather jacket"]
+ */
+function processCharacteristicTags(char) {
+  if (!char || typeof char !== "object") return [];
+
+  const traitsList = [];
+
+  // 1. Process traits object or array
+  if (char.traits) {
+    if (Array.isArray(char.traits)) {
+      traitsList.push(...char.traits.map(t => String(t).trim()));
+    } else if (typeof char.traits === "object") {
+      for (const [key, val] of Object.entries(char.traits)) {
+        if (!val) continue;
+        const cleanVal = String(val).trim();
+        const cleanKey = String(key).trim().toLowerCase();
+        
+        if (cleanKey === "hair" || cleanKey === "eyes" || cleanKey === "skin") {
+          traitsList.push(`${cleanVal} ${cleanKey}`);
+        } else if (cleanKey === "outfit" || cleanKey === "clothing") {
+          traitsList.push(`wearing ${cleanVal}`);
+        } else {
+          traitsList.push(`${cleanVal}`);
+        }
+      }
+    }
+  }
+
+  // 2. Process features array
+  if (Array.isArray(char.features)) {
+    traitsList.push(...char.features.map(f => String(f).trim()));
+  }
+
+  // 3. Process explicit archetype & gender
+  if (char.archetype) traitsList.push(String(char.archetype).trim());
+  if (char.gender) traitsList.push(String(char.gender).trim());
+
+  // 4. Fallback to description text if no tags provided
+  if (traitsList.length === 0 && char.description) {
+    traitsList.push(String(char.description).trim());
+  }
+
+  // Deduplicate and filter empty strings
+  return Array.from(new Set(traitsList.filter(Boolean)));
+}
+
+/**
  * Filter out heavy DB fields to keep context lean for downstream nodes.
  */
 function normalizeCharacter(char) {
   if (!char || typeof char !== "object") return null;
+
+  const characteristicWords = processCharacteristicTags(char);
+
   return {
     id: char.id ?? char.characterId ?? "char_unknown",
     name: char.name ?? "Character",
-    visualTraits: Array.isArray(char.visualTraits)
-      ? char.visualTraits
-      : (char.description ? [char.description] : []),
+    visualTraits: characteristicWords,
     references: Array.isArray(char.references)
       ? char.references.map(r => ({
           assetId: r.assetId ?? r.id ?? "ref_unk",
@@ -64,13 +115,11 @@ function normalizeElement(elem) {
 function parseTokensAndPointers(promptText = "") {
   const tokens = [];
 
-  // Match @Tokens like @Sarah, @RedBottle
   const atMatches = promptText.match(/@(\w+)/g) || [];
   for (const match of atMatches) {
     tokens.push({ type: "token", value: match.slice(1) });
   }
 
-  // Match inline tags like <character:c1>, <element:e1>
   const tagMatches = promptText.match(/<(\w+):([^>]+)>/g) || [];
   for (const match of tagMatches) {
     const parts = match.slice(1, -1).split(":");
@@ -97,7 +146,6 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
   const parsedTokens = parseTokensAndPointers(safe.prompt);
 
   // ── 3. Entity & Reference Resolution ────────────────────────────────────────
-  // Unpack and normalize characters and elements passed explicitly or parsed
   const rawCharacters = safe.characters ?? [];
   const rawElements = safe.elements ?? [];
   const rawReferences = safe.references ?? [];
@@ -113,8 +161,17 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
   const normalizedReferences = rawReferences.map((ref, idx) => ({
     assetId: ref.assetId ?? ref.id ?? `ref_${idx + 1}`,
     url: ref.url ?? "",
-    role: ref.role ?? "style_reference",
+    role: ref.role ?? "character_reference",
   }));
+
+  // Append character references if not explicitly in rawReferences
+  for (const char of normalizedCharacters) {
+    for (const ref of char.references) {
+      if (!normalizedReferences.some(r => r.url === ref.url)) {
+        normalizedReferences.push(ref);
+      }
+    }
+  }
 
   // ── 4. Context Assembler ────────────────────────────────────────────────────
   const finalContext = {
@@ -135,18 +192,20 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
     },
   };
 
-  // ── 5. Fast Prompt Fallback Construction ──────────────────────────────────
-  // Assemble a clean production-ready prompt string for Fast/Free Mode (0 LLM cost)
+  // ── 5. Prompt Construction ──────────────────────────────────────────────────
   const promptParts = [];
 
   if (safe.prompt) {
     promptParts.push(safe.prompt);
   }
 
-  // Prepend character trait summaries if available
+  // Append character characteristic words naturally
   for (const char of normalizedCharacters) {
-    if (char.visualTraits.length > 0 && !safe.prompt.includes(char.name)) {
-      promptParts.push(`${char.name} (${char.visualTraits.join(", ")})`);
+    if (char.visualTraits.length > 0) {
+      const traitText = char.visualTraits.join(", ");
+      if (!safe.prompt.includes(traitText)) {
+        promptParts.push(`${char.name} (${traitText})`);
+      }
     }
   }
 
@@ -155,10 +214,10 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
     promptParts.push(safe.style);
   }
 
-  const fastPromptFallback = promptParts.join(", ").trim();
+  const finalPromptText = promptParts.join(", ").trim();
 
   return {
-    finalPrompt: fastPromptFallback || "High quality creative image",
+    finalPrompt: finalPromptText || "High quality creative character sheet",
     context: finalContext,
   };
 }

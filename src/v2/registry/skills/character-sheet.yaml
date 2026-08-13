@@ -1,7 +1,7 @@
 id: character-sheet
-version: 1.1.0
+version: 1.2.0
 applies_to: [prompt-builder]
-description: Professional 3-panel studio character reference sheet (Front View, Back View, Face Close-up Portrait).
+description: Professional 3-panel studio character reference sheet without text/labels (Front View, Back View, Face Close-up Portrait).
 
 parameters_schema:
   views:
@@ -13,10 +13,14 @@ parameters_schema:
   background:
     type: string
     default: neutral studio gray background
+  negative_prompt:
+    type: string
+    default: "no text, no labels, no typography, no written words, no watermarks, no badges, no overlay titles, no panel numbers"
 
 pipeline:
   - resolveCharacters
   - resolveReferences
   - applyStudioSheetLayout
   - applyPhotographicDetails
+  - enforceCleanNoTextConstraint
   - enhancePrompt

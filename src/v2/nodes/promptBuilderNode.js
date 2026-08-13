@@ -9,7 +9,7 @@
  *   4. Entity & Reference Resolver → Fetch entity metadata & references
  *   5. Relevance Filter → Strip DB metadata (createdAt, ownerId, billingFlags)
  *   6. Context Assembler → Produce Normalized Context Snapshot (`context`)
- *   7. Professional Studio Turnaround Layout Assembly → 3-panel layout (Front, Back, Face Close-up)
+ *   7. Pure Clean Prompt Assembly → Pass prompt without hardcoded text pollution
  *
  * Output: { finalPrompt: string, context: WorkflowContext }
  */
@@ -128,6 +128,7 @@ function parseTokensAndPointers(promptText = "") {
 
 /**
  * Main Execution Function for Prompt Builder Node.
+ * Pure, non-polluting prompt builder that respects input prompt.
  *
  * @param {object} resolvedInputs
  * @param {object} ctx - { runId, nodeId, userId, traceId, gateways, deps }
@@ -189,22 +190,14 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
     },
   };
 
-  // ── 5. Professional Studio Turnaround Prompt Assembly ──────────────────────
-  const isCharacterSheetWorkflow = nodeId === "build_prompt" || (safe.prompt && safe.prompt.toLowerCase().includes("character"));
-
+  // ── 5. Pure Clean Prompt Assembly ──────────────────────────────────────────
   const promptParts = [];
-
-  if (isCharacterSheetWorkflow) {
-    promptParts.push(
-      "Professional studio character reference turnaround sheet, 3 side-by-side panels on neutral studio gray background: Panel 1 full-body front view in standing neutral pose, Panel 2 full-body back view in standing neutral pose, Panel 3 extreme face portrait close-up showing fine micro skin texture, iris details, and facial features"
-    );
-  }
 
   if (safe.prompt) {
     promptParts.push(safe.prompt);
   }
 
-  // Append character characteristic words naturally
+  // Append character characteristic words naturally if not already present
   for (const char of normalizedCharacters) {
     if (char.visualTraits.length > 0) {
       const traitText = char.visualTraits.join(", ");
@@ -214,17 +207,15 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
     }
   }
 
-  // Add studio photography style & camera spec
-  if (isCharacterSheetWorkflow) {
-    promptParts.push("softbox studio lighting, 85mm lens photography, f/8 aperture, neutral studio backdrop, 8k resolution, crisp photorealistic detail");
-  } else if (safe.style && !promptParts.some(p => p.toLowerCase().includes(safe.style.toLowerCase()))) {
+  // Add style if present and not already mentioned
+  if (safe.style && !promptParts.some(p => p.toLowerCase().includes(safe.style.toLowerCase()))) {
     promptParts.push(safe.style);
   }
 
   const finalPromptText = promptParts.join(", ").trim();
 
   return {
-    finalPrompt: finalPromptText || "High quality creative character sheet",
+    finalPrompt: finalPromptText || "High quality creative image",
     context: finalContext,
   };
 }

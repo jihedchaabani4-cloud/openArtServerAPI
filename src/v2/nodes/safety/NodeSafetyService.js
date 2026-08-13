@@ -50,19 +50,10 @@ const LLM_TEMPERATURE_MAX = 2.0;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/**
- * Clamp a number between min and max (inclusive).
- */
 function clamp(value, min, max) {
   return Math.min(Math.max(Number(value), min), max);
 }
 
-/**
- * Throw a NodeValidationError with a consistent format.
- * @param {string} nodeId
- * @param {string} field
- * @param {string} message
- */
 function fail(nodeId, field, message) {
   const err = new Error(`[Node:${nodeId}] "${field}": ${message}`);
   err.code = "NODE_VALIDATION_ERROR";
@@ -71,9 +62,6 @@ function fail(nodeId, field, message) {
   throw err;
 }
 
-/**
- * Assert a string is non-null, non-empty, and within a max length.
- */
 function assertString(nodeId, field, value, maxLength = Infinity) {
   if (value === null || value === undefined || typeof value !== "string") {
     fail(nodeId, field, "must be a non-empty string.");
@@ -86,9 +74,6 @@ function assertString(nodeId, field, value, maxLength = Infinity) {
   }
 }
 
-/**
- * Assert a value is a valid URL string.
- */
 function assertUrl(nodeId, field, value) {
   if (!value || typeof value !== "string" || !value.trim()) {
     fail(nodeId, field, "must be a non-empty URL string.");
@@ -259,13 +244,17 @@ export const NodeSafetyService = {
       temperature = clamp(temperature, LLM_TEMPERATURE_MIN, LLM_TEMPERATURE_MAX);
     }
 
+    const extractedImages = Array.isArray(inputs.images)
+      ? inputs.images.map(img => (typeof img === "string" ? img : (img?.url || img?.src || ""))).filter(Boolean)
+      : [];
+
     return {
       ...inputs,
       userPrompt: inputs.userPrompt.trim(),
       jsonMode,
       temperature,
       skills:               inputs.skills               ?? [],
-      images:               Array.isArray(inputs.images) ? inputs.images : [],
+      images:               extractedImages,
       parameters:           inputs.parameters           ?? {},
       systemPromptOverride: inputs.systemPromptOverride ?? null,
     };
@@ -281,7 +270,6 @@ export const NodeSafetyService = {
       promptText = (inputs.prompt.description || inputs.prompt.prompt || inputs.prompt.text || "").trim();
     }
 
-    // Fallback: If promptText is empty, extract from characters array if available
     if (!promptText && Array.isArray(inputs.characters) && inputs.characters.length > 0) {
       const firstChar = inputs.characters[0];
       promptText = (firstChar.description || firstChar.name || "").trim();

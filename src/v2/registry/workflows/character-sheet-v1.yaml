@@ -1,7 +1,7 @@
 id: character-sheet-v1
 name: Character Sheet
 version: 1.0.0
-description: Generate a professional 3-view character sheet with PromptBuilder first and LLM skill second.
+description: Generate a professional 3-view character sheet with PromptBuilder first, LLM Vision analysis second, and ImageGen third.
 
 metadata:
   category: character
@@ -39,6 +39,7 @@ nodes:
     inputs:
       userPrompt: "${build_prompt.output.finalPrompt}"
       context: "${build_prompt.output.context}"
+      images: "${build_prompt.output.context.references}"
     config:
       skills: [llm/translation, llm/character-description, llm/json-output]
       jsonMode: true

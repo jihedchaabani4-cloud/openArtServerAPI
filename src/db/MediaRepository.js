@@ -53,6 +53,29 @@ export class MediaRepository extends BaseRepository {
         return data;
     }
 
+    async findMediaByIdOrWorkflow(id) {
+        if (!id || typeof id !== "string") return null;
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select(`
+                *,
+                config:generation_config (
+                   dna_data:dna(name, type, description, traits)
+                )
+            `)
+            .or(`workflow_id.eq.${id},id.eq.${id}`)
+            .not("url", "is", null)
+            .order("create_time", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (error) {
+            console.warn(`[MediaRepository] Failed findMediaByIdOrWorkflow for ${id}:`, error.message);
+            return null;
+        }
+        return data;
+    }
+
     async findByProject(project_id, limit = 30, offset = 0) {
         const { data, error } = await this.client()
             .from(this.tableName)

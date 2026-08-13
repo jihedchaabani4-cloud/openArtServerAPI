@@ -6,7 +6,7 @@
  *   1. Safety & Bounds Check → NodeSafetyService.assertPromptBuilderInputs
  *   2. Token & Locator Parser → Extract @Tokens (@Sarah) and inline markers (<character:id>)
  *   3. Characteristic Tag Processor → Convert trait/feature tag objects into natural prose
- *   4. Entity & Reference Resolver → Fetch entity metadata & resolve workflow IDs to media URLs
+ *   4. Entity & Reference Resolver → Fetch entity metadata & resolve workflow IDs / URLs to media URLs
  *   5. Relevance Filter → Strip DB metadata (createdAt, ownerId, billingFlags)
  *   6. Context Assembler → Produce Normalized Context Snapshot (`context`)
  *   7. Pure Clean Prompt Assembly → Pass prompt without hardcoded text pollution
@@ -32,14 +32,14 @@ async function resolveReferenceToMedia(ref, idx = 1) {
 
     if (!url && refId && typeof refId === "string" && !refId.startsWith("http")) {
       try {
-        const media = await mediaRepo.findLatestByWorkflow(refId);
+        const media = await mediaRepo.findMediaByIdOrWorkflow(refId);
         if (media?.url) url = media.url;
       } catch (err) {
-        console.warn(`[promptBuilderNode] Failed to resolve media for workflow_id ${refId}: ${err.message}`);
+        console.warn(`[promptBuilderNode] Failed to resolve media for refId ${refId}: ${err.message}`);
       }
     }
 
-    if (url && url.trim()) {
+    if (url && typeof url === "string" && url.trim().startsWith("http")) {
       return {
         assetId: refId || `ref_${idx}`,
         workflowId: ref.workflow_id || ref.workflowId || (refId && !refId.startsWith("http") ? refId : null),
@@ -53,7 +53,7 @@ async function resolveReferenceToMedia(ref, idx = 1) {
   // Case 2: If ref is a string
   if (typeof ref === "string") {
     const trimmed = ref.trim();
-    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("data:")) {
       return {
         assetId: `ref_${idx}`,
         workflowId: null,
@@ -61,19 +61,20 @@ async function resolveReferenceToMedia(ref, idx = 1) {
         role: "character_reference",
       };
     }
-    // Assume string is a workflow_id / asset_id!
+
+    // Look up ID (media.id or workflow_id) in DB
     try {
-      const media = await mediaRepo.findLatestByWorkflow(trimmed);
-      if (media?.url) {
+      const media = await mediaRepo.findMediaByIdOrWorkflow(trimmed);
+      if (media?.url && media.url.startsWith("http")) {
         return {
           assetId: trimmed,
-          workflowId: trimmed,
+          workflowId: media.workflow_id || trimmed,
           url: media.url,
           role: "character_reference",
         };
       }
     } catch (err) {
-      console.warn(`[promptBuilderNode] Failed to resolve media for workflow_id ${trimmed}: ${err.message}`);
+      console.warn(`[promptBuilderNode] Failed to resolve media for ref string ${trimmed}: ${err.message}`);
     }
   }
 
@@ -204,7 +205,7 @@ function parseTokensAndPointers(promptText = "") {
 
 /**
  * Main Execution Function for Prompt Builder Node.
- * Resolves reference workflow IDs into actual media URLs via MediaRepository.
+ * Resolves reference workflow IDs and image URLs directly via MediaRepository.
  *
  * @param {object} resolvedInputs
  * @param {object} ctx - { runId, nodeId, userId, traceId, gateways, deps }

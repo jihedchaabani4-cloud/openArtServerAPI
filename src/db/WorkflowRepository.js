@@ -26,6 +26,7 @@ export class WorkflowRepository extends BaseRepository {
             primary_media_id: primary_media_id || null,
         };
 
+        if (data.id) newWorkflow.id = data.id;
         if (workflow_type) newWorkflow.workflow_type = workflow_type;
 
         const { select = "*" } = options;

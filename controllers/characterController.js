@@ -1,14 +1,14 @@
-import { characterService, walletService, pricingService, workflowStorageGateway } from "../src/container.js";
+import { characterService, walletService, pricingService } from "../src/container.js";
 import { run as runUseCase } from "../src/use-cases/useCaseRunner.js";
 import { randomUUID } from "node:crypto";
 
 /**
  * POST /api/characters/create & POST /api/characters
  * 
- * 🌟 Unified 2-in-1 Character Creation Flow:
+ * 🌟 Unified Clean Character Creation Flow:
  * 1. Creates character entity record in Supabase DB (project-level asset).
- * 2. Creates workflow container & media placeholders (status='processing').
- * 3. Automatically dispatches character-sheet-v1 UseCase to generate AI reference sheet.
+ * 2. Creates single workflow container with workflow_type='ELEMENT_SHEET'.
+ * 3. Dispatches character-sheet-v1 UseCase to generate AI reference sheet.
  */
 export async function createCharacter(req, res) {
     try {
@@ -36,7 +36,7 @@ export async function createCharacter(req, res) {
         const charName = name || title || "Untitled Character";
         const charDesc = description || prompt || "";
 
-        // ── 1. Save Character Profile Entity in DB (Project-level Asset) ──────
+        // ── 1. Create Character & Single Workflow Container (ELEMENT_SHEET) ──────
         const createdResult = await characterService.createCharacter({
             projectId: targetProjectId,
             userId,
@@ -45,35 +45,19 @@ export async function createCharacter(req, res) {
         });
 
         const characterId = createdResult.characterId || createdResult.character?.id || randomUUID();
-        const runId = randomUUID();
 
-        // ── 2. Create Workflow Container & Media Placeholder (status='processing')
-        const v2Input = {
+        // ── 2. Prepare UseCase Runtime Input ──────────────────────────────────
+        const runtimeInput = {
             prompt: charDesc || charName,
             model: model || model_name || "nanobana",
             characters: [{ name: charName, description: charDesc, traits: traits || {} }],
             references,
             project_id: targetProjectId,
-            session_id: null, // Characters belong to project, not a canvas session
+            session_id: null,
+            workflow_id: characterId,
         };
-
-        const placeholder = await workflowStorageGateway.createMediaPlaceholder({
-            runId,
-            nodeType: "image-generation",
-            userId,
-            workflowId: characterId,
-            input: v2Input,
-        }).catch((err) => {
-            console.warn("⚠️ [characterController] Placeholder creation notice:", err.message);
-            return null;
-        });
 
         // ── 3. Dispatch AI Character Sheet Generation via UseCase ──────────────
-        const runtimeInput = {
-            ...v2Input,
-            _v1PlaceholderIds: placeholder ? [placeholder] : [],
-        };
-
         const runResult = await runUseCase({
             useCaseId: "character-sheet-v1",
             input: runtimeInput,
@@ -82,10 +66,7 @@ export async function createCharacter(req, res) {
             pricingService,
         });
 
-        // ── 4. Return Full Unified Response ────────────────────────────────────
-        const v1WfId = placeholder?.workflowId || characterId;
-        const v1MedId = placeholder?.mediaId || null;
-
+        // ── 4. Return Clean Single-Workflow Response ───────────────────────────
         res.json({
             ok: true,
             status: "processing",
@@ -93,10 +74,9 @@ export async function createCharacter(req, res) {
             characterId: characterId,
             taskId: runResult.executionId,
             jobId: runResult.executionId,
-            workflows: v1WfId ? [{ id: v1WfId, primary_media_id: v1MedId }] : [],
-            workflow: v1WfId ? { id: v1WfId, primary_media_id: v1MedId } : null,
-            v1WorkflowId: v1WfId,
-            v1MediaId: v1MedId,
+            workflows: [{ id: characterId, workflow_type: "ELEMENT_SHEET" }],
+            workflow: { id: characterId, workflow_type: "ELEMENT_SHEET" },
+            v1WorkflowId: characterId,
             project_id: targetProjectId,
             session_id: null,
         });

@@ -14,24 +14,13 @@
  *   - LLM description generation delegates to LLMService.
  *
  * NO direct supabase / supabaseAdmin calls in this service.
- *
- * Methods:
- *   - createCharacter
- *   - updateCharacter
- *   - addMediaToCharacter
- *   - removeMediaFromCharacter
- *   - deleteCharacter
- *   - generateDescription
- *
- * Feature: 024-unify-domain-crud
- * Contract: specs/024-unify-domain-crud/contracts/domain-crud-contract.md
  */
 
 import { randomUUID } from "node:crypto";
 import { llmService } from "#platform/ai/LLMService.js";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
 
-// ── LLM prompt (moved from characterController) ───────────────────────────────
+// ── LLM prompt ─────────────────────────────────────────────────────────────
 
 const CHARACTER_GENERATOR_SYSTEM_PROMPT = `
 You are an elite haute-couture AI Art Director and Master Character Designer for high-budget cinematic films and editorial fashion houses.
@@ -95,6 +84,24 @@ export class CharacterService {
                 if (proj?.user_id) safeUserId = proj.user_id;
             }
 
+            // 1. Create workflow container row FIRST to satisfy Foreign Key constraint (characters.workflow_id -> workflow.id)
+            if (characterId) {
+                await this.db.workflows.createWorkflow({
+                    id: characterId,
+                    project_id: projectId,
+                    user_id: safeUserId,
+                    workflow_type: "ELEMENT_SHEET",
+                    display_name: charName,
+                    status: "processing",
+                }).catch(async (wfErr) => {
+                    console.warn(`⚠️ [CharacterService] createWorkflow container notice:`, wfErr.message);
+                    await this.db.workflows.updateFields(characterId, {
+                        display_name: charName,
+                        project_id: projectId,
+                    }).catch(() => null);
+                });
+            }
+
             const upsertPayload = {
                 id:             characterId,
                 workflow_id:    characterId,
@@ -107,9 +114,9 @@ export class CharacterService {
                 updated_at:     new Date().toISOString(),
             };
 
-            // Upsert character row via repository (bypasses RLS via admin client)
+            // 2. Upsert character row via repository (bypasses RLS via admin client)
             let char = await this.db.characters.upsert(upsertPayload).catch(async (err) => {
-                console.warn(`⚠️ [CharacterService] createCharacter upsert notice:`, err.message);
+                console.error(`❌ [CharacterService] createCharacter upsert error:`, err.message);
                 // Fallback: re-try with confirmed project owner's user_id
                 const proj = await this.db.projects.findById(projectId).catch(() => null);
                 if (proj?.user_id && proj.user_id !== safeUserId) {
@@ -121,23 +128,6 @@ export class CharacterService {
                 }
                 return null;
             });
-
-            // Sync / create workflow container row for the character in public.workflow table
-            if (characterId) {
-                await this.db.workflows.createWorkflow({
-                    id: characterId,
-                    project_id: projectId,
-                    user_id: safeUserId,
-                    workflow_type: "ELEMENT_SHEET",
-                    display_name: charName,
-                    status: "processing",
-                }).catch(async () => {
-                    await this.db.workflows.updateFields(characterId, {
-                        display_name: charName,
-                        project_id: projectId,
-                    }).catch(() => null);
-                });
-            }
 
             crudOperationLog({
                 traceId, operation: "createCharacter", status: "ok",
@@ -180,7 +170,6 @@ export class CharacterService {
                     charUpdates.title = cleanName;
                     wfUpdates.display_name = cleanName;
                 } else {
-                    // Preserve existing name if empty string provided
                     const existingChar = await this.db.characters.findByCharacterId(characterId).catch(() => null);
                     const fallbackName = existingChar?.name || existingChar?.title || "Untitled Character";
                     charUpdates.name  = fallbackName;
@@ -215,14 +204,12 @@ export class CharacterService {
             if (updates.is_favorited !== undefined) charUpdates.is_favorited = !!updates.is_favorited;
             if (updates.favorited    !== undefined) charUpdates.is_favorited = !!updates.favorited;
 
-            // Try update first; if no row found, upsert with workflow context
             let updatedChar = await this.db.characters.updateCharacterFields(characterId, charUpdates).catch((err) => {
                 console.warn(`⚠️ [CharacterService] updateCharacter notice:`, err.message);
                 return null;
             });
 
             if (!updatedChar) {
-                // Character row may not exist yet — resolve from workflow and upsert
                 const wfRow = await this.db.workflows.getWorkflow(characterId).catch(() => null);
 
                 const insertPayload = {
@@ -286,7 +273,6 @@ export class CharacterService {
                 });
             }
 
-            // Verify the character's workflow container exists
             const wf = await this.db.workflows.getWorkflow(characterId).catch(() => null);
             if (!wf) {
                 throw new CrudServiceError("Character workflow not found", {
@@ -299,7 +285,6 @@ export class CharacterService {
             let resolvedHeight = 1024;
 
             if (mediaId) {
-                // Resolve dimensions/URL from existing media record
                 const sourceMedia = await this.db.media.findById(mediaId).catch(() => null);
                 if (!sourceMedia) {
                     throw new CrudServiceError(`Media with ID ${mediaId} not found`, {
@@ -310,7 +295,6 @@ export class CharacterService {
                 resolvedWidth  = sourceMedia.width  || 1024;
                 resolvedHeight = sourceMedia.height || 1024;
             } else if (imageUrl && imageUrl.startsWith("data:")) {
-                // Upload base64 data URI to storage
                 const newMediaId = randomUUID();
                 const ext = imageUrl.startsWith("data:image/png")
                     ? "png"
@@ -321,7 +305,6 @@ export class CharacterService {
                 resolvedUrl = await this.storageService.upload(storagePath, imageUrl);
             }
 
-            // Create the media record via repository
             const mediaRow = await this.db.media.createMedia({
                 workflow_id: wf.id,
                 project_id:  wf.project_id || projectId,
@@ -356,7 +339,6 @@ export class CharacterService {
         crudOperationLog({ traceId, operation: "removeMediaFromCharacter", characterId, mediaId });
 
         try {
-            // Scoped delete — only removes media if it belongs to this character's workflow
             await this.db.media.deleteByIdAndWorkflow(mediaId, characterId);
 
             crudOperationLog({
@@ -376,10 +358,6 @@ export class CharacterService {
 
     // ── deleteCharacter ──────────────────────────────────────────────────────
 
-    /**
-     * Delete a character entity and delegate all underlying workflow/media
-     * resource cleanup to WorkflowService.
-     */
     async deleteCharacter({ characterId, userId, req = null }) {
         const traceId = randomUUID();
         const start   = Date.now();
@@ -393,12 +371,10 @@ export class CharacterService {
                 });
             }
 
-            // 1. Delete character domain record via repository
             await this.db.characters.deleteById(characterId).catch((charDeleteErr) => {
                 console.warn(`⚠️ [CharacterService] deleteCharacter characters row notice:`, charDeleteErr.message);
             });
 
-            // 2. Delegate workflow/media resources cleanup to WorkflowService
             const result = await this.workflowService.deleteWorkflow({ workflowId: characterId, userId, req });
 
             crudOperationLog({
@@ -418,16 +394,6 @@ export class CharacterService {
 
     // ── generateDescription ──────────────────────────────────────────────────
 
-    /**
-     * Generates an ultra-detailed, editorial character description from a brief concept.
-     * Uses LLMService (Gemini → Groq fallback) with a haute-couture art direction prompt.
-     *
-     * @param {Object} params
-     * @param {string} [params.concept]   - Free-form character concept
-     * @param {string} [params.archetype] - Character archetype
-     * @param {string} [params.style]     - Style influences
-     * @returns {{ title, description, keywords, model }}
-     */
     async generateDescription({ concept, archetype, style } = {}) {
         const traceId = randomUUID();
         const start   = Date.now();

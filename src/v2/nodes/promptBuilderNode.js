@@ -65,12 +65,13 @@ async function resolveReferenceToUrl(ref) {
 }
 
 /**
- * Strips raw template tag wrappers like <Trait: X> or <Tag: Y> into clean natural words.
+ * Strips raw template tag wrappers like <Trait: X>, <Tag: Y>, <reference: ID>, <ref: ID> into clean natural words.
  */
 function stripRawTagSyntax(text = "") {
   if (typeof text !== "string") return "";
   return text
     .replace(/<(?:Trait|Tag|Feature|Attribute):\s*([^>]+)>/gi, "$1")
+    .replace(/<(?:reference|ref|media):\s*([^>]+)>/gi, "reference asset ($1)")
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();

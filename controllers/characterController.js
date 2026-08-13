@@ -3,11 +3,54 @@ import { run as runUseCase } from "../src/use-cases/useCaseRunner.js";
 import { randomUUID } from "node:crypto";
 
 /**
+ * Converts prompt, traits object/array, and features into one clean unified description string.
+ */
+function buildUnifiedDescription(promptText = "", traitsInput = null, featuresInput = null) {
+    const textParts = [];
+
+    if (promptText && promptText.trim()) {
+        textParts.push(promptText.trim());
+    }
+
+    const traitWords = [];
+    if (Array.isArray(traitsInput)) {
+        traitWords.push(...traitsInput.map(t => String(t).trim()));
+    } else if (traitsInput && typeof traitsInput === "object") {
+        for (const [key, val] of Object.entries(traitsInput)) {
+            if (!val) continue;
+            const cleanVal = String(val).trim();
+            const cleanKey = String(key).trim().toLowerCase();
+            if (cleanKey === "hair" || cleanKey === "eyes" || cleanKey === "skin") {
+                traitWords.push(`${cleanVal} ${cleanKey}`);
+            } else if (cleanKey === "outfit" || cleanKey === "clothing") {
+                traitWords.push(`wearing ${cleanVal}`);
+            } else {
+                traitWords.push(cleanVal);
+            }
+        }
+    }
+
+    if (Array.isArray(featuresInput)) {
+        traitWords.push(...featuresInput.map(f => String(f).trim()));
+    }
+
+    const uniqueTraits = Array.from(new Set(traitWords.filter(Boolean)));
+
+    for (const trait of uniqueTraits) {
+        if (!textParts.some(p => p.toLowerCase().includes(trait.toLowerCase()))) {
+            textParts.push(trait);
+        }
+    }
+
+    return textParts.join(", ").trim();
+}
+
+/**
  * POST /api/characters/create & POST /api/characters
  * 
  * 🌟 Unified Clean Character Creation Flow:
- * 1. Creates character entity record in Supabase DB (project-level asset).
- * 2. Creates single workflow container with workflow_type='ELEMENT_SHEET'.
+ * 1. Converts traits and features directly into a unified character description.
+ * 2. Creates character entity record in Supabase DB with unified description.
  * 3. Dispatches character-sheet-v1 UseCase to generate AI reference sheet.
  */
 export async function createCharacter(req, res) {
@@ -34,9 +77,9 @@ export async function createCharacter(req, res) {
 
         const userId = req.user.id;
         const charName = name || title || "Untitled Character";
-        const charDesc = description || prompt || "";
+        const charDesc = buildUnifiedDescription(description || prompt || "", traits, features) || charName;
 
-        // ── 1. Create Character & Single Workflow Container (ELEMENT_SHEET) ──────
+        // ── 1. Create Character & Single Workflow Container (CHARACTER_SHEET) ──────
         const createdResult = await characterService.createCharacter({
             projectId: targetProjectId,
             userId,
@@ -48,9 +91,9 @@ export async function createCharacter(req, res) {
 
         // ── 2. Prepare UseCase Runtime Input ──────────────────────────────────
         const runtimeInput = {
-            prompt: charDesc || charName,
+            prompt: charDesc,
             model: model || model_name || "nanobana",
-            characters: [{ name: charName, description: charDesc, traits: traits || {} }],
+            characters: [{ name: charName, description: charDesc }],
             references,
             project_id: targetProjectId,
             session_id: null,
@@ -66,11 +109,11 @@ export async function createCharacter(req, res) {
             pricingService,
         });
 
-        // ── 4. Return Clean Single-Workflow Response ───────────────────────────
+        // ── 4. Return Clean Response ──────────────────────────────────────────
         res.json({
             ok: true,
             status: "processing",
-            character: createdResult.character || { id: characterId, name: charName, project_id: targetProjectId },
+            character: createdResult.character || { id: characterId, name: charName, description: charDesc, project_id: targetProjectId },
             characterId: characterId,
             taskId: runResult.executionId,
             jobId: runResult.executionId,

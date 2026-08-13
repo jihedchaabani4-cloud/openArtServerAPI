@@ -9,7 +9,7 @@
  *   4. Entity & Reference Resolver → Fetch entity metadata & references
  *   5. Relevance Filter → Strip DB metadata (createdAt, ownerId, billingFlags)
  *   6. Context Assembler → Produce Normalized Context Snapshot (`context`)
- *   7. Fast Prompt Construction → Assemble `finalPrompt` string
+ *   7. Professional Studio Turnaround Layout Assembly → 3-panel layout (Front, Back, Face Close-up)
  *
  * Output: { finalPrompt: string, context: WorkflowContext }
  */
@@ -19,8 +19,6 @@ import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 /**
  * Process character characteristic tags (traits, features, archetype, gender, etc.)
  * into clean, natural descriptive words.
- * Converts { hair: "black", gender: "female", outfit: "leather jacket" }
- * into ["black hair", "female", "wearing leather jacket"]
  */
 function processCharacteristicTags(char) {
   if (!char || typeof char !== "object") return [];
@@ -62,7 +60,6 @@ function processCharacteristicTags(char) {
     traitsList.push(String(char.description).trim());
   }
 
-  // Deduplicate and filter empty strings
   return Array.from(new Set(traitsList.filter(Boolean)));
 }
 
@@ -192,8 +189,16 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
     },
   };
 
-  // ── 5. Prompt Construction ──────────────────────────────────────────────────
+  // ── 5. Professional Studio Turnaround Prompt Assembly ──────────────────────
+  const isCharacterSheetWorkflow = nodeId === "build_prompt" || (safe.prompt && safe.prompt.toLowerCase().includes("character"));
+
   const promptParts = [];
+
+  if (isCharacterSheetWorkflow) {
+    promptParts.push(
+      "Professional studio character reference turnaround sheet, 3 side-by-side panels on neutral studio gray background: Panel 1 full-body front view in standing neutral pose, Panel 2 full-body back view in standing neutral pose, Panel 3 extreme face portrait close-up showing fine micro skin texture, iris details, and facial features"
+    );
+  }
 
   if (safe.prompt) {
     promptParts.push(safe.prompt);
@@ -209,8 +214,10 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
     }
   }
 
-  // Add style if present and not already mentioned
-  if (safe.style && !promptParts.some(p => p.toLowerCase().includes(safe.style.toLowerCase()))) {
+  // Add studio photography style & camera spec
+  if (isCharacterSheetWorkflow) {
+    promptParts.push("softbox studio lighting, 85mm lens photography, f/8 aperture, neutral studio backdrop, 8k resolution, crisp photorealistic detail");
+  } else if (safe.style && !promptParts.some(p => p.toLowerCase().includes(safe.style.toLowerCase()))) {
     promptParts.push(safe.style);
   }
 

@@ -1,20 +1,22 @@
 id: character-sheet
-version: 1.0.0
+version: 1.1.0
 applies_to: [prompt-builder]
-description: Multi-view character reference sheet.
+description: Professional 3-panel studio character reference sheet (Front View, Back View, Face Close-up Portrait).
 
 parameters_schema:
   views:
     type: array
-    default: [front, side, back]
+    default: [full-body front view, full-body back view, extreme face close-up portrait]
   style:
     type: string
-    default: realistic
+    default: studio-photography
+  background:
+    type: string
+    default: neutral studio gray background
 
 pipeline:
   - resolveCharacters
   - resolveReferences
-  - applyCharacterTemplate
-  - applyPoseTemplate
-  - applySheetLayout
+  - applyStudioSheetLayout
+  - applyPhotographicDetails
   - enhancePrompt

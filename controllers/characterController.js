@@ -48,7 +48,7 @@ export async function createCharacter(req, res) {
         // ── 2. Prepare Direct UseCase Runtime Input ───────────────────────────
         const runtimeInput = {
             prompt: charPrompt,
-            model: model || model_name || "nanobana",
+            model: model || model_name || "z_image_base",
             characters: [{ name: charName, description: charPrompt, traits, features }],
             references,
             project_id: targetProjectId,

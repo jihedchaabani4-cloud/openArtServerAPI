@@ -17,7 +17,7 @@ input_schema:
     style: { type: string }
     model: { type: string }
 
-default_model: nanobana
+default_model: z_image_base
 
 nodes:
   build_prompt:

@@ -1,12 +1,12 @@
 id: character-sheet
-version: 1.2.0
+version: 1.3.0
 applies_to: [prompt-builder]
-description: Professional 3-panel studio character reference sheet without text/labels (Front View, Back View, Face Close-up Portrait).
+description: Professional 3-panel studio character reference sheet with full uncropped head portrait (Front View, Back View, Head and Shoulders Portrait).
 
 parameters_schema:
   views:
     type: array
-    default: [full-body front view, full-body back view, extreme face close-up portrait]
+    default: [full-body front view, full-body back view, full uncropped head and shoulders portrait close-up]
   style:
     type: string
     default: studio-photography
@@ -15,12 +15,13 @@ parameters_schema:
     default: neutral studio gray background
   negative_prompt:
     type: string
-    default: "no text, no labels, no typography, no written words, no watermarks, no badges, no overlay titles, no panel numbers"
+    default: "cropped forehead, cut off head, truncated hair, no text, no labels, no typography, no written words, no watermarks, no badges, no overlay titles, no panel numbers"
 
 pipeline:
   - resolveCharacters
   - resolveReferences
   - applyStudioSheetLayout
+  - applyFullHeadFraming
   - applyPhotographicDetails
   - enforceCleanNoTextConstraint
   - enhancePrompt

@@ -3,22 +3,35 @@ import { run as runUseCase } from "../src/use-cases/useCaseRunner.js";
 import { randomUUID } from "node:crypto";
 
 /**
+ * Strips raw template tag wrappers like <Trait: X> or <Tag: Y> into clean natural words.
+ */
+function stripRawTagSyntax(text = "") {
+    if (typeof text !== "string") return "";
+    return text
+        .replace(/<(?:Trait|Tag|Feature|Attribute):\s*([^>]+)>/gi, "$1")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+/**
  * Converts prompt, traits object/array, and features into one clean unified description string.
  */
 function buildUnifiedDescription(promptText = "", traitsInput = null, featuresInput = null) {
     const textParts = [];
 
-    if (promptText && promptText.trim()) {
-        textParts.push(promptText.trim());
+    const cleanPrompt = stripRawTagSyntax(promptText);
+    if (cleanPrompt) {
+        textParts.push(cleanPrompt);
     }
 
     const traitWords = [];
     if (Array.isArray(traitsInput)) {
-        traitWords.push(...traitsInput.map(t => String(t).trim()));
+        traitWords.push(...traitsInput.map(t => stripRawTagSyntax(String(t))));
     } else if (traitsInput && typeof traitsInput === "object") {
         for (const [key, val] of Object.entries(traitsInput)) {
             if (!val) continue;
-            const cleanVal = String(val).trim();
+            const cleanVal = stripRawTagSyntax(String(val));
             const cleanKey = String(key).trim().toLowerCase();
             if (cleanKey === "hair" || cleanKey === "eyes" || cleanKey === "skin") {
                 traitWords.push(`${cleanVal} ${cleanKey}`);
@@ -31,7 +44,7 @@ function buildUnifiedDescription(promptText = "", traitsInput = null, featuresIn
     }
 
     if (Array.isArray(featuresInput)) {
-        traitWords.push(...featuresInput.map(f => String(f).trim()));
+        traitWords.push(...featuresInput.map(f => stripRawTagSyntax(String(f))));
     }
 
     const uniqueTraits = Array.from(new Set(traitWords.filter(Boolean)));
@@ -49,8 +62,8 @@ function buildUnifiedDescription(promptText = "", traitsInput = null, featuresIn
  * POST /api/characters/create & POST /api/characters
  * 
  * 🌟 Unified Clean Character Creation Flow:
- * 1. Converts traits and features directly into a unified character description.
- * 2. Creates character entity record in Supabase DB with unified description.
+ * 1. Strips raw <Trait: > tag syntax and converts traits/features into a clean description.
+ * 2. Creates character entity record in Supabase DB with clean description.
  * 3. Dispatches character-sheet-v1 UseCase to generate AI reference sheet.
  */
 export async function createCharacter(req, res) {
@@ -76,7 +89,7 @@ export async function createCharacter(req, res) {
         }
 
         const userId = req.user.id;
-        const charName = name || title || "Untitled Character";
+        const charName = stripRawTagSyntax(name || title || "Untitled Character");
         const charDesc = buildUnifiedDescription(description || prompt || "", traits, features) || charName;
 
         // ── 1. Create Character & Single Workflow Container (CHARACTER_SHEET) ──────

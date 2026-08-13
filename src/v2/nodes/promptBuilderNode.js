@@ -17,6 +17,18 @@
 import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 
 /**
+ * Strips raw template tag wrappers like <Trait: X> or <Tag: Y> into clean natural words.
+ */
+function stripRawTagSyntax(text = "") {
+  if (typeof text !== "string") return "";
+  return text
+    .replace(/<(?:Trait|Tag|Feature|Attribute):\s*([^>]+)>/gi, "$1")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * Process character characteristic tags (traits, features, archetype, gender, etc.)
  * into clean, natural descriptive words.
  */
@@ -28,11 +40,11 @@ function processCharacteristicTags(char) {
   // 1. Process traits object or array
   if (char.traits) {
     if (Array.isArray(char.traits)) {
-      traitsList.push(...char.traits.map(t => String(t).trim()));
+      traitsList.push(...char.traits.map(t => stripRawTagSyntax(String(t))));
     } else if (typeof char.traits === "object") {
       for (const [key, val] of Object.entries(char.traits)) {
         if (!val) continue;
-        const cleanVal = String(val).trim();
+        const cleanVal = stripRawTagSyntax(String(val));
         const cleanKey = String(key).trim().toLowerCase();
         
         if (cleanKey === "hair" || cleanKey === "eyes" || cleanKey === "skin") {
@@ -48,16 +60,16 @@ function processCharacteristicTags(char) {
 
   // 2. Process features array
   if (Array.isArray(char.features)) {
-    traitsList.push(...char.features.map(f => String(f).trim()));
+    traitsList.push(...char.features.map(f => stripRawTagSyntax(String(f))));
   }
 
   // 3. Process explicit archetype & gender
-  if (char.archetype) traitsList.push(String(char.archetype).trim());
-  if (char.gender) traitsList.push(String(char.gender).trim());
+  if (char.archetype) traitsList.push(stripRawTagSyntax(String(char.archetype)));
+  if (char.gender) traitsList.push(stripRawTagSyntax(String(char.gender)));
 
   // 4. Fallback to description text if no tags provided
   if (traitsList.length === 0 && char.description) {
-    traitsList.push(String(char.description).trim());
+    traitsList.push(stripRawTagSyntax(String(char.description)));
   }
 
   return Array.from(new Set(traitsList.filter(Boolean)));
@@ -128,7 +140,7 @@ function parseTokensAndPointers(promptText = "") {
 
 /**
  * Main Execution Function for Prompt Builder Node.
- * Pure, non-polluting prompt builder that respects input prompt.
+ * Pure, non-polluting prompt builder that respects input prompt and cleans raw <Trait: > tags.
  *
  * @param {object} resolvedInputs
  * @param {object} ctx - { runId, nodeId, userId, traceId, gateways, deps }
@@ -140,8 +152,11 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
   // ── 1. Safety & Boundary Check ─────────────────────────────────────────────
   const safe = NodeSafetyService.assertPromptBuilderInputs(resolvedInputs, nodeId);
 
+  // Clean raw <Trait: X> tags from safe.prompt
+  const cleanedPrompt = stripRawTagSyntax(safe.prompt);
+
   // ── 2. Token & Locator Parsing ──────────────────────────────────────────────
-  const parsedTokens = parseTokensAndPointers(safe.prompt);
+  const parsedTokens = parseTokensAndPointers(cleanedPrompt);
 
   // ── 3. Entity & Reference Resolution ────────────────────────────────────────
   const rawCharacters = safe.characters ?? [];
@@ -162,7 +177,6 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
     role: ref.role ?? "character_reference",
   }));
 
-  // Append character references if not explicitly in rawReferences
   for (const char of normalizedCharacters) {
     for (const ref of char.references) {
       if (!normalizedReferences.some(r => r.url === ref.url)) {
@@ -173,7 +187,7 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
 
   // ── 4. Context Assembler ────────────────────────────────────────────────────
   const finalContext = {
-    userPrompt: safe.prompt,
+    userPrompt: cleanedPrompt,
     entities: {
       characters: normalizedCharacters,
       elements: normalizedElements,
@@ -193,21 +207,19 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
   // ── 5. Pure Clean Prompt Assembly ──────────────────────────────────────────
   const promptParts = [];
 
-  if (safe.prompt) {
-    promptParts.push(safe.prompt);
+  if (cleanedPrompt) {
+    promptParts.push(cleanedPrompt);
   }
 
-  // Append character characteristic words naturally if not already present
   for (const char of normalizedCharacters) {
     if (char.visualTraits.length > 0) {
       const traitText = char.visualTraits.join(", ");
-      if (!safe.prompt.includes(traitText)) {
+      if (!cleanedPrompt.includes(traitText)) {
         promptParts.push(`${char.name} (${traitText})`);
       }
     }
   }
 
-  // Add style if present and not already mentioned
   if (safe.style && !promptParts.some(p => p.toLowerCase().includes(safe.style.toLowerCase()))) {
     promptParts.push(safe.style);
   }

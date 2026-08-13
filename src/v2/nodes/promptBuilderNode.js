@@ -6,7 +6,7 @@
  *   1. Safety & Bounds Check → NodeSafetyService.assertPromptBuilderInputs
  *   2. Token & Locator Parser → Extract @Tokens (@Sarah) and inline markers (<character:id>)
  *   3. Characteristic Tag Processor → Convert trait/feature tag objects into natural prose
- *   4. Entity & Reference Resolver → Fetch entity metadata & resolve workflow IDs / URLs to media URLs
+ *   4. Entity & Reference Resolver → Resolve reference workflow IDs directly to media HTTP URLs
  *   5. Relevance Filter → Strip DB metadata (createdAt, ownerId, billingFlags)
  *   6. Context Assembler → Produce Normalized Context Snapshot (`context`)
  *   7. Pure Clean Prompt Assembly → Pass prompt without hardcoded text pollution
@@ -20,12 +20,29 @@ import { MediaRepository } from "../../db/MediaRepository.js";
 const mediaRepo = new MediaRepository();
 
 /**
- * Resolves a reference item (string workflow ID, HTTP URL, or object) into a full reference object with media URL.
+ * Resolves a reference (workflow_id, media_id, or HTTP URL) into a direct image URL string.
  */
-async function resolveReferenceToMedia(ref, idx = 1) {
+async function resolveReferenceToUrl(ref) {
   if (!ref) return null;
 
-  // Case 1: If ref is an object with url or workflow_id
+  // Case 1: If ref is a string
+  if (typeof ref === "string") {
+    const trimmed = ref.trim();
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("data:")) {
+      return trimmed;
+    }
+    try {
+      const media = await mediaRepo.findMediaByIdOrWorkflow(trimmed);
+      if (media?.url && media.url.startsWith("http")) {
+        return media.url.trim();
+      }
+    } catch (err) {
+      console.warn(`[promptBuilderNode] Failed to resolve media for ${trimmed}: ${err.message}`);
+    }
+    return null;
+  }
+
+  // Case 2: If ref is an object
   if (typeof ref === "object") {
     let url = ref.url || ref.src || ref.file_url || null;
     const refId = ref.workflow_id || ref.workflowId || ref.assetId || ref.id || ref.media_id;
@@ -35,46 +52,12 @@ async function resolveReferenceToMedia(ref, idx = 1) {
         const media = await mediaRepo.findMediaByIdOrWorkflow(refId);
         if (media?.url) url = media.url;
       } catch (err) {
-        console.warn(`[promptBuilderNode] Failed to resolve media for refId ${refId}: ${err.message}`);
+        console.warn(`[promptBuilderNode] Failed to resolve media for ${refId}: ${err.message}`);
       }
     }
 
     if (url && typeof url === "string" && url.trim().startsWith("http")) {
-      return {
-        assetId: refId || `ref_${idx}`,
-        workflowId: ref.workflow_id || ref.workflowId || (refId && !refId.startsWith("http") ? refId : null),
-        url: url.trim(),
-        role: ref.role || "character_reference",
-      };
-    }
-    return null;
-  }
-
-  // Case 2: If ref is a string
-  if (typeof ref === "string") {
-    const trimmed = ref.trim();
-    if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("data:")) {
-      return {
-        assetId: `ref_${idx}`,
-        workflowId: null,
-        url: trimmed,
-        role: "character_reference",
-      };
-    }
-
-    // Look up ID (media.id or workflow_id) in DB
-    try {
-      const media = await mediaRepo.findMediaByIdOrWorkflow(trimmed);
-      if (media?.url && media.url.startsWith("http")) {
-        return {
-          assetId: trimmed,
-          workflowId: media.workflow_id || trimmed,
-          url: media.url,
-          role: "character_reference",
-        };
-      }
-    } catch (err) {
-      console.warn(`[promptBuilderNode] Failed to resolve media for ref string ${trimmed}: ${err.message}`);
+      return url.trim();
     }
   }
 
@@ -153,11 +136,7 @@ function normalizeCharacter(char) {
     name: char.name ?? "Character",
     visualTraits: characteristicWords,
     references: Array.isArray(char.references)
-      ? char.references.map((r, idx) => ({
-          assetId: typeof r === "string" ? `ref_${idx + 1}` : (r.assetId ?? r.id ?? `ref_${idx + 1}`),
-          url: typeof r === "string" ? r : (r.url ?? r.src ?? ""),
-          role: typeof r === "string" ? "character_reference" : (r.role ?? "character_reference")
-        })).filter(r => Boolean(r.url && r.url.trim()))
+      ? char.references.map(r => (typeof r === "string" ? r : r?.url || r?.src || "")).filter(Boolean)
       : []
   };
 }
@@ -174,11 +153,7 @@ function normalizeElement(elem) {
       ? elem.visualTraits
       : (elem.description ? [elem.description] : []),
     references: Array.isArray(elem.references)
-      ? elem.references.map((r, idx) => ({
-          assetId: typeof r === "string" ? `ref_${idx + 1}` : (r.assetId ?? r.id ?? `ref_${idx + 1}`),
-          url: typeof r === "string" ? r : (r.url ?? r.src ?? ""),
-          role: typeof r === "string" ? "product_reference" : (r.role ?? "product_reference")
-        })).filter(r => Boolean(r.url && r.url.trim()))
+      ? elem.references.map(r => (typeof r === "string" ? r : r?.url || r?.src || "")).filter(Boolean)
       : []
   };
 }
@@ -205,7 +180,7 @@ function parseTokensAndPointers(promptText = "") {
 
 /**
  * Main Execution Function for Prompt Builder Node.
- * Resolves reference workflow IDs and image URLs directly via MediaRepository.
+ * Resolves reference workflow IDs and image URLs directly into clean HTTP URL strings.
  *
  * @param {object} resolvedInputs
  * @param {object} ctx - { runId, nodeId, userId, traceId, gateways, deps }
@@ -236,14 +211,14 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
     .map(normalizeElement)
     .filter(Boolean);
 
-  // Resolve workflow IDs / URLs to full media objects with URLs asynchronously
-  const resolvedRefPromises = rawReferences.map((ref, idx) => resolveReferenceToMedia(ref, idx + 1));
+  // Resolve reference workflow IDs directly to simple HTTP URL strings
+  const resolvedRefPromises = rawReferences.map(ref => resolveReferenceToUrl(ref));
   const normalizedReferences = (await Promise.all(resolvedRefPromises)).filter(Boolean);
 
   for (const char of normalizedCharacters) {
-    for (const ref of char.references) {
-      if (ref.url && !normalizedReferences.some(r => r.url === ref.url)) {
-        normalizedReferences.push(ref);
+    for (const refUrl of char.references) {
+      if (refUrl && !normalizedReferences.includes(refUrl)) {
+        normalizedReferences.push(refUrl);
       }
     }
   }

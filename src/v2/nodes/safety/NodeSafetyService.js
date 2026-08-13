@@ -106,25 +106,15 @@ export const NodeSafetyService = {
 
   // ── 1. Image Generation ─────────────────────────────────────────────────
 
-  /**
-   * Validates and sanitises inputs for imageGenerationNode.
-   * @param {object} inputs
-   * @param {string} nodeId
-   * @returns {object} sanitised inputs ready for the provider
-   */
   assertImageInputs(inputs = {}, nodeId = "image-generation") {
-    // Required
     assertString(nodeId, "prompt", inputs.prompt, IMAGE_PROMPT_MAX);
 
-    // Sanitise dimensions (clamp into safe range)
     const width  = clamp(inputs.width  ?? 1024, IMAGE_WIDTH_MIN,  IMAGE_WIDTH_MAX);
     const height = clamp(inputs.height ?? 1024, IMAGE_HEIGHT_MIN, IMAGE_HEIGHT_MAX);
 
-    // Sanitise count (min 1, max 8)
     const rawCount = Number(inputs.count ?? 1);
     const count = isNaN(rawCount) ? 1 : clamp(rawCount, 1, IMAGE_COUNT_MAX);
 
-    // Sanitise seed (must be a positive integer or null)
     let seed = inputs.seed ?? null;
     if (seed !== null) {
       seed = Math.abs(Math.floor(Number(seed))) || null;
@@ -146,28 +136,18 @@ export const NodeSafetyService = {
 
   // ── 2. Video Generation ─────────────────────────────────────────────────
 
-  /**
-   * Validates and sanitises inputs for videoGenerationNode.
-   * @param {object} inputs
-   * @param {string} nodeId
-   * @returns {object} sanitised inputs ready for the provider
-   */
   assertVideoInputs(inputs = {}, nodeId = "video-generation") {
-    // Required: prompt
     assertString(nodeId, "prompt", inputs.prompt, VIDEO_PROMPT_MAX);
 
-    // mode enum
     const mode = inputs.mode ?? "t2v";
     if (!VIDEO_ALLOWED_MODES.includes(mode)) {
       fail(nodeId, "mode", `must be one of: ${VIDEO_ALLOWED_MODES.join(", ")} (got "${mode}").`);
     }
 
-    // Image-to-video: startFrame is required
     if (mode === "i2v") {
       assertUrl(nodeId, "startFrame", inputs.startFrame);
     }
 
-    // aspect_ratio enum
     const aspect_ratio = inputs.aspect_ratio ?? "16:9";
     if (!VIDEO_ALLOWED_RATIOS.includes(aspect_ratio)) {
       fail(
@@ -177,13 +157,9 @@ export const NodeSafetyService = {
       );
     }
 
-    // Sanitise duration (clamp 3–60 s)
     const duration = clamp(inputs.duration ?? 5, VIDEO_DURATION_MIN, VIDEO_DURATION_MAX);
-
-    // Sanitise fps (clamp 8–60)
     const fps = clamp(inputs.fps ?? 24, VIDEO_FPS_MIN, VIDEO_FPS_MAX);
 
-    // motion_strength (optional, clamp 0–1 if provided)
     let motion_strength = inputs.motion_strength ?? null;
     if (motion_strength !== null) {
       motion_strength = clamp(motion_strength, 0, 1);
@@ -205,27 +181,18 @@ export const NodeSafetyService = {
 
   // ── 3. Upscale ──────────────────────────────────────────────────────────
 
-  /**
-   * Validates and sanitises inputs for upscaleNode.
-   * @param {object} inputs
-   * @param {string} nodeId
-   * @returns {object} sanitised inputs ready for the provider
-   */
   assertUpscaleInputs(inputs = {}, nodeId = "upscale") {
-    // asset.url required
     const asset = inputs.asset;
     if (!asset || typeof asset !== "object") {
       fail(nodeId, "asset", "must be a valid asset object.");
     }
     assertUrl(nodeId, "asset.url", asset.url);
 
-    // factor must be 1, 2, or 4
     const rawFactor = Number(inputs.factor ?? 2);
     let factor = 2;
     if (UPSCALE_ALLOWED_FACTORS.includes(rawFactor)) {
       factor = rawFactor;
     } else {
-      // Snap up to the next allowed factor (safer: never produce less than requested)
       factor = UPSCALE_ALLOWED_FACTORS.find((f) => f >= rawFactor) ?? UPSCALE_ALLOWED_FACTORS.at(-1);
     }
 
@@ -239,21 +206,13 @@ export const NodeSafetyService = {
 
   // ── 4. Media Transform ──────────────────────────────────────────────────
 
-  /**
-   * Validates and sanitises inputs for mediaTransformNode.
-   * @param {object} inputs
-   * @param {string} nodeId
-   * @returns {object} sanitised inputs ready for the provider
-   */
   assertTransformInputs(inputs = {}, nodeId = "media-transform") {
-    // source_asset.url required
     const sourceAsset = inputs.source_asset;
     if (!sourceAsset || typeof sourceAsset !== "object") {
       fail(nodeId, "source_asset", "must be a valid asset object.");
     }
     assertUrl(nodeId, "source_asset.url", sourceAsset.url);
 
-    // mode enum
     const mode = inputs.mode ?? "image_edit";
     if (!TRANSFORM_ALLOWED_MODES.includes(mode)) {
       fail(
@@ -263,13 +222,9 @@ export const NodeSafetyService = {
       );
     }
 
-    // prompt required for all edit / transform modes
     assertString(nodeId, "prompt", inputs.prompt, 2000);
 
-    // strength (clamp 0–1)
     const strength = clamp(inputs.strength ?? 0.75, TRANSFORM_STRENGTH_MIN, TRANSFORM_STRENGTH_MAX);
-
-    // dimensions
     const width  = clamp(inputs.width  ?? sourceAsset.width  ?? 1024, IMAGE_WIDTH_MIN,  IMAGE_WIDTH_MAX);
     const height = clamp(inputs.height ?? sourceAsset.height ?? 1024, IMAGE_HEIGHT_MIN, IMAGE_HEIGHT_MAX);
 
@@ -288,27 +243,17 @@ export const NodeSafetyService = {
 
   // ── 5. LLM ──────────────────────────────────────────────────────────────
 
-  /**
-   * Validates and sanitises inputs for llmNode.
-   * @param {object} inputs
-   * @param {string} nodeId
-   * @returns {object} sanitised inputs ready for llmService
-   */
   assertLLMInputs(inputs = {}, nodeId = "llm") {
-    // userPrompt required
     assertString(nodeId, "userPrompt", inputs.userPrompt, LLM_PROMPT_MAX);
 
-    // Must have skills OR systemPromptOverride
     const hasSkills   = Array.isArray(inputs.skills) && inputs.skills.length > 0;
     const hasOverride = typeof inputs.systemPromptOverride === "string" && inputs.systemPromptOverride.trim();
     if (!hasSkills && !hasOverride) {
       fail(nodeId, "skills", "must be a non-empty array, or systemPromptOverride must be provided.");
     }
 
-    // jsonMode: coerce to boolean
     const jsonMode = inputs.jsonMode === true || inputs.jsonMode === "true";
 
-    // temperature: clamp 0–2
     let temperature = inputs.temperature ?? null;
     if (temperature !== null) {
       temperature = clamp(temperature, LLM_TEMPERATURE_MIN, LLM_TEMPERATURE_MAX);
@@ -328,18 +273,24 @@ export const NodeSafetyService = {
 
   // ── 6. Prompt Builder ───────────────────────────────────────────────────
 
-  /**
-   * Validates and sanitises inputs for promptBuilderNode.
-   * @param {object} inputs
-   * @param {string} nodeId
-   * @returns {object} sanitised inputs
-   */
   assertPromptBuilderInputs(inputs = {}, nodeId = "prompt-builder") {
-    const hasPrompt      = typeof inputs.prompt === "string" && inputs.prompt.trim();
+    let promptText = "";
+    if (typeof inputs.prompt === "string") {
+      promptText = inputs.prompt.trim();
+    } else if (inputs.prompt && typeof inputs.prompt === "object") {
+      promptText = (inputs.prompt.description || inputs.prompt.prompt || inputs.prompt.text || "").trim();
+    }
+
+    // Fallback: If promptText is empty, extract from characters array if available
+    if (!promptText && Array.isArray(inputs.characters) && inputs.characters.length > 0) {
+      const firstChar = inputs.characters[0];
+      promptText = (firstChar.description || firstChar.name || "").trim();
+    }
+
+    const hasPrompt      = Boolean(promptText);
     const hasSourceAsset = inputs.source_asset && inputs.source_asset.url;
     const hasSkill       = inputs.skill && inputs.skill.id;
 
-    // At least a prompt or a source_asset is needed to build anything
     if (!hasPrompt && !hasSourceAsset) {
       fail(
         nodeId,
@@ -348,7 +299,6 @@ export const NodeSafetyService = {
       );
     }
 
-    // Skill is optional, but if provided must have an id
     if (inputs.skill !== null && inputs.skill !== undefined) {
       if (!hasSkill) {
         fail(nodeId, "skill.id", "skill object must contain a non-empty id string.");
@@ -357,10 +307,10 @@ export const NodeSafetyService = {
 
     return {
       ...inputs,
-      prompt:      (inputs.prompt ?? "").trim(),
-      references:  inputs.references  ?? [],
-      characters:  inputs.characters  ?? [],
-      style:       inputs.style       ?? null,
+      prompt:       promptText,
+      references:   inputs.references  ?? [],
+      characters:   inputs.characters  ?? [],
+      style:        inputs.style       ?? null,
       source_asset: inputs.source_asset ?? null,
       skill:        inputs.skill        ?? null,
       parameters:   inputs.parameters   ?? {},

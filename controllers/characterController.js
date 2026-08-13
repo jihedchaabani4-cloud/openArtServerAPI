@@ -1,13 +1,12 @@
 import { characterService, walletService, pricingService, workflowStorageGateway } from "../src/container.js";
 import { run as runUseCase } from "../src/use-cases/useCaseRunner.js";
-import { autoCreateProjectAndSession } from "../lib/helpers.js";
 import { randomUUID } from "node:crypto";
 
 /**
  * POST /api/characters/create & POST /api/characters
  * 
  * 🌟 Unified 2-in-1 Character Creation Flow:
- * 1. Creates character entity record in Supabase DB (name, description, traits).
+ * 1. Creates character entity record in Supabase DB (project-level asset).
  * 2. Creates workflow container & media placeholders (status='processing').
  * 3. Automatically dispatches character-sheet-v1 UseCase to generate AI reference sheet.
  */
@@ -24,19 +23,22 @@ export async function createCharacter(req, res) {
             model_name,
             features,
             traits = features,
+            references = []
+        } = req.body;
+
+        const targetProjectId = projectId || req.body.project_id || req.body.projectId;
+
+        if (!targetProjectId) {
+            return res.status(400).json({ ok: false, message: "project_id is required" });
+        }
+
         const userId = req.user.id;
-        const rawProjectId = req.body.project_id || req.body.projectId;
-        const rawSessionId = req.body.session_id || req.body.sessionId;
-
-        const { project_id: finalProjectId, session_id: finalSessionId } =
-            await autoCreateProjectAndSession(userId, rawProjectId, rawSessionId, false);
-
         const charName = name || title || "Untitled Character";
         const charDesc = description || prompt || "";
 
-        // ── 1. Save Character Profile Entity in DB ────────────────────────────
+        // ── 1. Save Character Profile Entity in DB (Project-level Asset) ──────
         const createdResult = await characterService.createCharacter({
-            projectId: finalProjectId,
+            projectId: targetProjectId,
             userId,
             name: charName,
             description: charDesc,
@@ -44,7 +46,6 @@ export async function createCharacter(req, res) {
 
         const characterId = createdResult.characterId || createdResult.character?.id || randomUUID();
         const runId = randomUUID();
-        const v2WorkflowId = "character-sheet-v1";
 
         // ── 2. Create Workflow Container & Media Placeholder (status='processing')
         const v2Input = {
@@ -52,8 +53,8 @@ export async function createCharacter(req, res) {
             model: model || model_name || "nanobana",
             characters: [{ name: charName, description: charDesc, traits: traits || {} }],
             references,
-            project_id: finalProjectId,
-            session_id: finalSessionId,
+            project_id: targetProjectId,
+            session_id: null, // Characters belong to project, not a canvas session
         };
 
         const placeholder = await workflowStorageGateway.createMediaPlaceholder({
@@ -88,7 +89,7 @@ export async function createCharacter(req, res) {
         res.json({
             ok: true,
             status: "processing",
-            character: createdResult.character || { id: characterId, name: charName, project_id: finalProjectId },
+            character: createdResult.character || { id: characterId, name: charName, project_id: targetProjectId },
             characterId: characterId,
             taskId: runResult.executionId,
             jobId: runResult.executionId,
@@ -96,8 +97,8 @@ export async function createCharacter(req, res) {
             workflow: v1WfId ? { id: v1WfId, primary_media_id: v1MedId } : null,
             v1WorkflowId: v1WfId,
             v1MediaId: v1MedId,
-            project_id: finalProjectId,
-            session_id: finalSessionId,
+            project_id: targetProjectId,
+            session_id: null,
         });
 
     } catch (err) {

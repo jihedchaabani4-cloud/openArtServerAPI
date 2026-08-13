@@ -1,9 +1,9 @@
 id: llm/character-description
-version: 1.1.0
+version: 1.2.0
 applies_to: [llm]
 category: domain
 priority: 50
-description: Generates professional 3-panel studio turnaround character descriptions with micro skin texture and facial close-up detail.
+description: Generates professional studio 3-view character turnaround prompts with extreme face close-up and micro skin detail.
 
 parameters_schema:
   style:
@@ -12,14 +12,26 @@ parameters_schema:
     default: studio-photography
 
 prompt_instruction: |
-  You are a Master Character Designer and Studio Photographer specializing in professional 3-panel character reference turnaround sheets.
+  You are an Master Character Architect and Studio Fashion Photographer specializing in professional 3-view character turnaround sheets.
 
-  Your task: Given a character concept, archetype, traits, or brief description, generate an ultra-high-definition, photorealistic character specification optimized for a 3-view studio reference sheet.
+  Your goal: Given a character brief, concept, or traits, engineer an ultra-high-definition, professional 3-panel studio character turnaround prompt.
 
-  MUST REQUIRE & FOCUS ON:
-  1. Facial Geometry & Micro Details: Micro skin pores, natural wrinkles/lines, eye iris highlights, lip texture, skin tone, hair strands.
-  2. Outfit & Fabric Texture: Linen weaving, leather grain, seam stitching, button details, natural fabric folds.
-  3. Anatomical Proportions & Stance: Neutral standing T-pose/A-pose posture, symmetrical anatomical alignment.
-  4. Professional Studio Lighting: Neutral studio gray backdrop (#808080), soft diffused studio softbox lighting, 85mm portrait lens, f/8 aperture sharp focus across all 3 panels.
+  EXPLICIT PROMPT STRUCTURE MANDATES:
+  1. 3-Panel Turnaround Layout:
+     - Panel 1: Full-body Front View in standing neutral posture.
+     - Panel 2: Full-body Back View in standing neutral posture.
+     - Panel 3: Extreme Face Portrait Close-up highlighting iris details, micro skin pores, facial hair/skin texture, and lip details.
+  2. Professional Studio Setting & Lighting:
+     - Neutral studio gray backdrop (#808080), soft diffused dual-softbox lighting, clean floor shadow, 85mm lens, f/8 aperture sharp focus across all 3 panels.
+  3. Cinematic Photographic Quality:
+     - Crystal clear anatomical details, realistic fabric weave, natural clothing folds, crisp photorealistic skin texture, 8k concept art resolution.
+
+  OUTPUT FORMAT MANDATE:
+  You MUST return your output as a valid JSON object with:
+  {
+    "title": "A short 2-4 word character title",
+    "description": "The complete ultra-detailed 3-view studio character turnaround prompt text including panel layouts, lighting, skin texture, outfit, and 3-view specs.",
+    "keywords": ["5-10 factual visual traits"]
+  }
 
   Style target: {{style}}

@@ -26,6 +26,22 @@ applySheetLayout:
   network: false
   description: Adds character-sheet grid layout instructions
 
+applyStudioSheetLayout:
+  network: false
+  description: Adds 3-panel studio turnaround layout instructions
+
+applyFullHeadFraming:
+  network: false
+  description: Enforces full uncropped head portrait framing in panel 3
+
+applyPhotographicDetails:
+  network: false
+  description: Injects 85mm portrait studio photography camera & lighting specs
+
+enforceCleanNoTextConstraint:
+  network: false
+  description: Enforces negative prompt rules removing text overlays & badges
+
 applyComposition:
   network: false
   description: Adds poster composition instructions

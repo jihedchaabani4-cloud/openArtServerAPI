@@ -101,8 +101,7 @@ export class MediaWorkflowLifecycleService {
     if (input.project_id || input.projectId) {
       return input.project_id || input.projectId;
     }
-    if (!this.bridge || !userId) return null;
-    return this.bridge.getOrCreateDefaultProject(userId);
+    return null;
   }
 
   /**

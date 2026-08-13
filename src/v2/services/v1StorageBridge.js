@@ -45,6 +45,11 @@ export class V1StorageBridge {
       config = null,
     } = params;
 
+    if (!projectId) {
+      console.warn("[V1StorageBridge] Placeholder creation aborted: projectId is missing.");
+      return { workflow: null, media: null };
+    }
+
     const validWfType = workflowType;
 
     const workflowData = {

@@ -31,10 +31,15 @@ export function getValueAtPath(obj, path) {
 
 /**
  * Resolves input expressions for a node based on workflow inputs and dependency outputs.
+ * Combines compiled static resolved_inputs and dynamic bindings expressions.
  */
 export async function resolveInputsForNode(run, nodeConfig, nodeRuns) {
-  const resolved = {};
-  const inputsToResolve = nodeConfig.inputs || nodeConfig.user_inputs || {};
+  const resolved = { ...(nodeConfig.resolved_inputs || {}) };
+  const inputsToResolve = {
+    ...(nodeConfig.user_inputs || {}),
+    ...(nodeConfig.inputs || {}),
+    ...(nodeConfig.bindings || {}),
+  };
 
   for (const [key, expr] of Object.entries(inputsToResolve)) {
     if (typeof expr !== "string") {
@@ -49,7 +54,7 @@ export async function resolveInputsForNode(run, nodeConfig, nodeRuns) {
     }
 
     if (parsed.kind === "input") {
-      resolved[key] = run.input[parsed.field];
+      resolved[key] = run.input?.[parsed.field];
     } else if (parsed.kind === "node_output") {
       const depRun = nodeRuns.find((n) => n.node_id === parsed.nodeId);
       resolved[key] = getValueAtPath(depRun?.output, parsed.path);

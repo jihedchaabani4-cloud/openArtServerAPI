@@ -1,13 +1,11 @@
-/**
- * BudgetEstimator
- * Establishes pre-check costing for a compiled execution graph.
- */
+import { calculateCost, resolveOperation } from "../../models/index.js";
 
 const PROVIDER_BACKED_NODE_TYPES = new Set([
   "image-generation",
   "video-generation",
   "upscale",
   "media-transform",
+  "llm",
 ]);
 
 /**
@@ -36,52 +34,51 @@ function resolveEstimationField(node, field, inputs = {}) {
 }
 
 /**
- * Estimates the credit cost of a single node.
+ * Estimates the credit cost of a single node strictly via Models Management System.
  */
 export async function estimateNodeCost(node, inputs = {}, pricingService = null) {
   if (!PROVIDER_BACKED_NODE_TYPES.has(node.type)) {
     return 0;
   }
 
-  const model = resolveEstimationField(node, "model", inputs) || "default";
-  const quality = resolveEstimationField(node, "quality", inputs) || "standard";
+  let model = resolveEstimationField(node, "model", inputs) || node.config?.model;
+  let domain = "image";
+  let defaultOp = "text_to_image";
 
-  // Determine quantity multiplier
-  let quantity = 1;
   if (node.type === "image-generation") {
-    quantity = Math.max(1, Number(resolveEstimationField(node, "count", inputs) ?? 1));
+    model = model || "nanobana";
+    domain = "image";
+    defaultOp = "text_to_image";
   } else if (node.type === "video-generation") {
-    quantity = Math.max(1, Number(resolveEstimationField(node, "duration", inputs) ?? 5));
+    model = model || "kling-v3";
+    domain = "video";
+    defaultOp = "text_to_video";
   } else if (node.type === "upscale") {
-    quantity = Math.max(1, Number(resolveEstimationField(node, "factor", inputs) ?? 2));
-  }
-
-  // Fetch price from pricingService
-  if (pricingService) {
-    try {
-      const priceInfo = await pricingService.getPrice(model, node.type, quality);
-      return Number(priceInfo.creditCost) * quantity;
-    } catch (err) {
-      if (err.code === "PRICING_NOT_FOUND") {
-        throw err;
-      }
-      console.warn(`[BudgetEstimator] Failed to fetch price for ${model}/${node.type}/${quality}, falling back to defaults:`, err.message);
-    }
-  }
-
-  // Fallback defaults if pricingService is missing or fails
-  let fallbackCost = 1;
-  if (node.type === "image-generation") {
-    fallbackCost = model.includes("pro") ? 12 : 5;
-  } else if (node.type === "video-generation") {
-    fallbackCost = 10; // 10 credits per second
-  } else if (node.type === "upscale") {
-    fallbackCost = 3;
+    model = model || "nanobana";
+    domain = "image";
+    defaultOp = "image_upscale";
   } else if (node.type === "media-transform") {
-    fallbackCost = 10;
+    const isVideo = Boolean(
+      inputs.video_url || inputs.video || inputs.duration || inputs.mode === "video_to_video"
+    );
+    domain = isVideo ? "video" : "image";
+    model = model || (isVideo ? "kling-v3" : "nanobana");
+    defaultOp = isVideo ? "video_to_video" : "edit";
+  } else if (node.type === "llm") {
+    model = model || "llama-3-3-70b";
+    domain = "text";
+    defaultOp = "chat_completion";
   }
 
-  return fallbackCost * quantity;
+  const op = resolveOperation(inputs, domain) || defaultOp;
+  const costResult = calculateCost(model, op, inputs);
+  const costNumber = parseFloat(costResult.amount);
+
+  if (isNaN(costNumber) || costNumber < 0) {
+    throw new Error(`[BudgetEstimator] Invalid calculated cost "${costResult.amount}" for model "${model}" (${op})`);
+  }
+
+  return costNumber;
 }
 
 /**

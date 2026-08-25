@@ -4,6 +4,7 @@ import { RunRepository } from "./runRepository.js";
 import { jobQueueService } from "../../services/jobQueueService.js";
 import { getValueAtPath, executeNodeJob } from "./nodeExecutor.js";
 import { logV2Event } from "../logging/v2Logger.js";
+import { calculateCost, resolveOperation } from "../../models/index.js";
 
 const runRepo = new RunRepository();
 const PROVIDER_BACKED_NODE_TYPES = new Set([
@@ -40,21 +41,50 @@ export function getNodeBillingReference(runId, nodeId, attempt = 1) {
   return `v2:${runId}:${nodeId}:${attempt}`;
 }
 
-function estimateNodeBillingAmount(nodeConfig, resolvedInputs = {}) {
-  switch (nodeConfig?.type) {
-    case "image-generation":
-      return Math.max(1, Number(resolvedInputs.count ?? nodeConfig?.resolved_inputs?.count ?? 1));
-    case "video-generation":
-      return Math.max(1, Number(resolvedInputs.duration ?? nodeConfig?.resolved_inputs?.duration ?? 5));
-    case "upscale":
-      return Math.max(1, Number(resolvedInputs.factor ?? nodeConfig?.resolved_inputs?.factor ?? 2));
-    case "media-transform":
-      return 1; // 1 credit per transform operation
-    case "llm":
-      return 1; // 1 credit per LLM execution
-    default:
-      return 0;
+export function estimateNodeBillingAmount(nodeConfig, resolvedInputs = {}) {
+  const nodeType = nodeConfig?.type;
+  if (!isProviderBackedNodeType(nodeType)) {
+    return 0;
   }
+
+  let model = resolvedInputs.model || nodeConfig?.config?.model || nodeConfig?.resolved_inputs?.model;
+  let domain = "image";
+  let defaultOp = "text_to_image";
+
+  if (nodeType === "image-generation") {
+    model = model || "nanobana";
+    domain = "image";
+    defaultOp = "text_to_image";
+  } else if (nodeType === "video-generation") {
+    model = model || "kling-v3";
+    domain = "video";
+    defaultOp = "text_to_video";
+  } else if (nodeType === "upscale") {
+    model = model || "nanobana";
+    domain = "image";
+    defaultOp = "image_upscale";
+  } else if (nodeType === "media-transform") {
+    const isVideo = Boolean(
+      resolvedInputs.video_url || resolvedInputs.video || resolvedInputs.duration || resolvedInputs.mode === "video_to_video"
+    );
+    domain = isVideo ? "video" : "image";
+    model = model || (isVideo ? "kling-v3" : "nanobana");
+    defaultOp = isVideo ? "video_to_video" : "edit";
+  } else if (nodeType === "llm") {
+    model = model || "llama-3-3-70b";
+    domain = "text";
+    defaultOp = "chat_completion";
+  }
+
+  const op = resolveOperation(resolvedInputs, domain) || defaultOp;
+  const costResult = calculateCost(model, op, resolvedInputs);
+  const costNumber = parseFloat(costResult.amount);
+
+  if (isNaN(costNumber) || costNumber < 0) {
+    throw new Error(`[Billing] Invalid calculated cost "${costResult.amount}" for model "${model}" (${op})`);
+  }
+
+  return costNumber;
 }
 
 

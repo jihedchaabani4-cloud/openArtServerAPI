@@ -18,10 +18,6 @@ import { GenerationConfigRepository } from "#db/GenerationConfigRepository.js";
 import { DnaRepository }              from "#db/DnaRepository.js";
 import { CharacterRepository }        from "#db/CharacterRepository.js";
 
-// VideoTreatment and GenerateImageTreatment removed — V2 adapters now route directly to model runners.
-import { MODELS as IMAGE_MODELS } from "#image/core/registry.js";
-export { IMAGE_MODELS };
-
 // ─── DNA Domain ───────────────────────────────────────────────────────────────
 import { DnaTreatment } from "./dna/DnaTreatment.js";
 import { WorkflowEventRecorder } from "./infrastructure/events/workflowEventRecorder.js";

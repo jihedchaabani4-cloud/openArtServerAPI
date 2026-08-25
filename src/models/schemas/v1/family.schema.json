@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["id", "domain", "displayName"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9-_]+$" },
+    "domain": { "enum": ["image", "video", "text"] },
+    "displayName": { "type": "string" },
+    "description": { "type": "string" },
+    "iconUrl": { "type": "string" },
+    "badge": { "type": "string" }
+  },
+  "additionalProperties": false
+}

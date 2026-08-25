@@ -1,0 +1,14 @@
+{
+  "id": "fal",
+  "baseUrl": "https://fal.run",
+  "auth": {
+    "type": "apiKey",
+    "credentialType": "fal_key"
+  },
+  "execution": {
+    "style": "sync",
+    "supportsPolling": false,
+    "supportsWebhook": false,
+    "supportsStreaming": false
+  }
+}

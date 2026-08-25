@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0",
+  "id": "llama-3-3-70b.groq",
+  "modelFamily": "llama-3-3-70b",
+  "provider": "groq",
+  "status": "active",
+  "providerModelId": "llama-3.3-70b-versatile",
+  "providerModelVersion": "v1.0.0",
+  "versionPolicy": "pinned",
+  "operations": {
+    "chat_completion": {
+      "endpoint": "/chat/completions",
+      "inputs": {
+        "messages": { "type": "message[]", "required": true },
+        "temperature": { "type": "float", "min": 0, "max": 2, "default": 0.7 }
+      },
+      "outputs": {
+        "type": "text",
+        "fields": {
+          "content": { "type": "string", "required": true }
+        }
+      },
+      "pricing": {
+        "mode": "fixed",
+        "amount": "0.000000"
+      }
+    }
+  }
+}

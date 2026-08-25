@@ -1,0 +1,63 @@
+id: image-generation-v1
+name: Image Generation
+version: 1.0.0
+description: Professional image generation pipeline with dynamic user model, quality tier, aspect ratio, prompt reference resolving, LLM content safety verification, silent translation, strict tag preservation, and high-fidelity image rendering.
+
+metadata:
+  category: image
+  tags: [image, generation, text-to-image]
+  author: system
+
+input_schema:
+  required: [prompt]
+  properties:
+    prompt:      { type: string }
+    references:  { type: array }
+    workflow_id: { type: string }
+    project_id:  { type: string }
+    width:       { type: number }
+    height:      { type: number }
+    ratio:       { type: string }
+    model:       { type: string }
+    quality:     { type: string }
+    count:       { type: number }
+
+nodes:
+  llm_translate:
+    type: llm
+    inputs:
+      userPrompt: "${input.prompt}"
+    config:
+      skills: [llm/system-safety, llm/translate, llm/json-output]
+      jsonMode: true
+
+  build_prompt:
+    type: prompt-builder
+    depends_on: [llm_translate]
+    inputs:
+      prompt:     "${llm_translate.output.text}"
+      references: "${input.references}"
+
+  generate:
+    type: image-generation
+    depends_on: [build_prompt]
+    inputs:
+      prompt:     "${build_prompt.output.finalPrompt}"
+      references: "${build_prompt.output.context.imageUrls}"
+      width:      "${input.width}"
+      height:     "${input.height}"
+      ratio:      "${input.ratio}"
+      model:      "${input.model}"
+      quality:    "${input.quality}"
+      count:      "${input.count}"
+    persist:
+      target: media
+      step_id: image_generation
+      status: completed
+      value: "$outputs.assets[0].url"
+
+outputs:
+  translated_prompt: "${llm_translate.output.text}"
+  final_prompt:      "${build_prompt.output.finalPrompt}"
+  main_asset:        "${generate.output.assets}"
+  model_used:        "${generate.output.metadata.model}"

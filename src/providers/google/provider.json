@@ -1,0 +1,14 @@
+{
+  "id": "google",
+  "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+  "auth": {
+    "type": "apiKey",
+    "credentialType": "google_ai_api_key"
+  },
+  "execution": {
+    "style": "sync",
+    "supportsPolling": false,
+    "supportsWebhook": false,
+    "supportsStreaming": false
+  }
+}

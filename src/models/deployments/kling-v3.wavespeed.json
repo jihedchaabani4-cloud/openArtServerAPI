@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "1.0",
+  "id": "kling-v3.wavespeed",
+  "modelFamily": "kling-v3",
+  "provider": "wavespeed",
+  "status": "active",
+  "providerModelId": "kling_v3",
+  "providerModelVersion": "v3.0.0",
+  "versionPolicy": "pinned",
+  "operations": {
+    "text_to_video": {
+      "endpoint": "/kling/v3/generate",
+      "inputs": {
+        "prompt": { "type": "string", "required": true },
+        "durationSeconds": { "type": "enum", "values": ["5", "10"], "default": "5" },
+        "resolution": { "type": "enum", "values": ["720p", "1080p"], "default": "720p" }
+      },
+      "outputs": {
+        "type": "video",
+        "fields": {
+          "url": { "type": "string", "required": true }
+        }
+      },
+      "pricing": {
+        "mode": "duration_resolution_table",
+        "table": {
+          "720p": { "5": "20.000000", "10": "40.000000" },
+          "1080p": { "5": "35.000000", "10": "70.000000" }
+        }
+      }
+    }
+  }
+}

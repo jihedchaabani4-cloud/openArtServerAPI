@@ -1,0 +1,8 @@
+{
+  "id": "minimax",
+  "domain": "image",
+  "displayName": "Minimax Image-01",
+  "description": "High quality text-to-image and editing by Minimax",
+  "iconUrl": "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/minimax-color.svg",
+  "badge": "PRO"
+}

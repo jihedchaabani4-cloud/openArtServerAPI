@@ -1,12 +1,12 @@
 id: llm/translation
-version: 1.0.0
+version: 2.0.0
 applies_to: [llm]
-category: system
+category: language
 priority: 20
-description: Translates non-English user input to English before processing.
+description: Professional multi-lingual & Tunisian Derja translation for AI image generation with strict tag preservation.
 
 prompt_instruction: |
-  LANGUAGE RULE:
-  If the user's input is not in English, silently translate it to English
-  before processing. Preserve all creative intent, nuance, and meaning.
-  Never mention that you translated the input.
+  PROFESSIONAL IMAGE PROMPT TRANSLATION & PRESERVATION DIRECTIVE:
+  - If input text is in Tunisian Derja, Arabic, French, or any non-English language, translate the true visual meaning into fluent, professional English for AI image generators.
+  - STRICTLY PRESERVE all reference tags (<character:...>, <element:...>, @image1, @Name, __TAG_0__) without any modification or removal.
+  - Output ONLY the clean translated English prompt text.

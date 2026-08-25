@@ -92,7 +92,6 @@ export class CharacterService {
                     user_id: safeUserId,
                     workflow_type: "CHARACTER_SHEET",
                     display_name: charName,
-                    status: "processing",
                 }).catch(async (wfErr) => {
                     console.warn(`⚠️ [CharacterService] createWorkflow container notice:`, wfErr.message);
                     await this.db.workflows.updateFields(characterId, {
@@ -130,12 +129,26 @@ export class CharacterService {
                 return null;
             });
 
+            // 3. Create initial processing media placeholder (so UI shows spinner immediately)
+            let media = await this.db.media.createMedia({
+                workflow_id: characterId,
+                project_id:  projectId,
+                step_id:     "character_sheet",
+                status:      "processing",
+                url:         null,
+                width:       1344,
+                height:      768,
+            }).catch((mediaErr) => {
+                console.warn(`⚠️ [CharacterService] createMedia placeholder notice:`, mediaErr.message);
+                return null;
+            });
+
             crudOperationLog({
                 traceId, operation: "createCharacter", status: "ok",
                 durationMs: Date.now() - start, characterId,
             });
 
-            return { characterId, workflowId: characterId, character: char };
+            return { characterId, workflowId: characterId, mediaId: media?.id, character: char, media };
         } catch (err) {
             crudOperationLog({
                 traceId, operation: "createCharacter", status: "error",

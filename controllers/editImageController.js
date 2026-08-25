@@ -29,7 +29,7 @@ export const generateEdit = async (req, res) => {
         }
 
         const userId = req.user.id;
-        const normalizedModelName = normalizeImageModelName(model || model_name) || "fal";
+        const normalizedModelName = normalizeImageModelName(model || model_name) || "nanobana";
 
         const { project_id: finalProjectId, session_id: finalSessionId } =
             await autoCreateProjectAndSession(userId, project_id, session_id, false);
@@ -41,13 +41,14 @@ export const generateEdit = async (req, res) => {
             quality: "standard",
             strength: strength,
             source_asset: source_asset,
+            source_url: source_asset?.url || source_asset || null,
             mode: "image_edit",
             project_id: finalProjectId,
             session_id: finalSessionId,
         };
 
         const runResult = await runUseCase({
-            useCaseId: "edit-image-v1",
+            useCaseId: "image-edit-v1",
             input: runtimeInput,
             userId,
             walletService,

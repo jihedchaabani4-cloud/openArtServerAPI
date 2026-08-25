@@ -1,0 +1,12 @@
+id: llm/prompt-enhancer
+version: 1.0.0
+applies_to: [llm]
+category: creative
+priority: 40
+description: Optional creative prompt enrichment — adds cinematic lighting, camera optics, and textures while keeping core subjects and tags intact.
+
+prompt_instruction: |
+  CREATIVE ENHANCEMENT DIRECTIVE:
+  - Enrich the visual prompt with cinematic lighting, depth of field, atmosphere, and material textures.
+  - Strictly preserve all @image1, @image2, and @CharacterName tokens in their exact positions.
+  - Enhance visual aesthetics without altering the user's primary subjects or story.

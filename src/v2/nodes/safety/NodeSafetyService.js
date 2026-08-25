@@ -296,7 +296,9 @@ export const NodeSafetyService = {
     return {
       ...inputs,
       prompt:       promptText,
-      references:   inputs.references  ?? [],
+      references:   Array.isArray(inputs.references)
+        ? inputs.references.filter(r => r !== null && r !== undefined && r !== "")
+        : [],
       characters:   inputs.characters  ?? [],
       style:        inputs.style       ?? null,
       source_asset: inputs.source_asset ?? null,

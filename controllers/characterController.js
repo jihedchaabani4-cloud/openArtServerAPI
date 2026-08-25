@@ -1,39 +1,33 @@
-import { characterService, walletService, pricingService } from "../src/container.js";
-import { run as runUseCase } from "../src/use-cases/useCaseRunner.js";
+import { characterService, useCaseService } from "../src/container.js";
 import { randomUUID } from "node:crypto";
 
 /**
  * POST /api/characters/create & POST /api/characters
  * 
- * 🌟 Pure HTTP Controller (Zero logic mutation):
- * 1. Forwards raw character payload directly to Supabase DB.
- * 2. Dispatches character-sheet-v1 UseCase directly to V2 engine queue.
+ * 🌟 Pure HTTP Controller:
+ * 1. Saves Character container safely in DB (never loses user work).
+ * 2. Prechecks credits for AI Sheet Generation:
+ *    - If sufficient: enqueues background UseCase job in Redis.
+ *    - If insufficient: returns saved character with needsCredits flag.
  */
 export async function createCharacter(req, res) {
     try {
         const {
             project_id,
-            projectId = project_id,
+            projectId,
             name,
-            title = name,
             prompt = "",
-            description = prompt,
-            model,
-            model_name,
-            features,
-            traits = features,
             references = []
         } = req.body;
 
-        const targetProjectId = projectId || req.body.project_id || req.body.projectId;
-
+        const targetProjectId = project_id || projectId;
         if (!targetProjectId) {
             return res.status(400).json({ ok: false, message: "project_id is required" });
         }
 
         const userId = req.user.id;
-        const charName = name || title || "Untitled Character";
-        const charPrompt = prompt || description || charName;
+        const charName = name?.trim() || prompt?.slice(0, 40) || "Untitled Character";
+        const charPrompt = prompt?.trim() || charName;
 
         // ── 1. Create Character & Single Workflow Container (CHARACTER_SHEET) ──────
         const createdResult = await characterService.createCharacter({
@@ -47,37 +41,49 @@ export async function createCharacter(req, res) {
 
         // ── 2. Prepare Direct UseCase Runtime Input ───────────────────────────
         const runtimeInput = {
-            prompt: charPrompt,
-            model: model || model_name || "z_image_base",
-            characters: [{ name: charName, description: charPrompt, traits, features }],
-            references,
             project_id: targetProjectId,
-            session_id: null,
             workflow_id: characterId,
+            prompt: charPrompt,
+            references: Array.isArray(references) ? references : [],
+            characters: [{ name: charName, description: charPrompt }],
         };
 
-        // ── 3. Dispatch AI Character Sheet Generation via UseCase ──────────────
-        const runResult = await runUseCase({
-            useCaseId: "character-sheet-v1",
-            input: runtimeInput,
-            userId,
-            walletService,
-            pricingService,
-        });
+        // ── 3. Prepare, Reserve Credits & Redis Job Dispatch ─────────────────
+        let taskId = null;
+        let hasSufficientCredits = true;
+        let creditErrorMsg = null;
+
+        try {
+            console.log(`💳 [characterController] Preparing character "${characterId}" (UseCase: character-sheet-v1)...`);
+            const prepared = await useCaseService.prepareAndEnqueue({
+                useCaseId: "character-sheet-v1",
+                input: runtimeInput,
+                userId,
+                executionId: characterId,
+                traceId: characterId,
+            });
+            taskId = prepared.executionId || prepared.workflowRunId || characterId;
+            console.log(`📤 [characterController] Prepared and enqueued UseCase job "${prepared.jobId}" for character "${characterId}".`);
+        } catch (creditErr) {
+            console.warn(`⚠️ [characterController] Prepare/enqueue notice for character ${characterId}:`, creditErr.message);
+            hasSufficientCredits = false;
+            creditErrorMsg = creditErr.message;
+        }
 
         // ── 4. Return Clean Response ──────────────────────────────────────────
-        res.json({
+        return res.json({
             ok: true,
-            status: "processing",
-            character: createdResult.character || { id: characterId, name: charName, description: charPrompt, project_id: targetProjectId },
-            characterId: characterId,
-            taskId: runResult.executionId,
-            jobId: runResult.executionId,
-            workflows: [{ id: characterId, workflow_type: "CHARACTER_SHEET" }],
-            workflow: { id: characterId, workflow_type: "CHARACTER_SHEET" },
-            v1WorkflowId: characterId,
+            characterId,
+            workflowId: characterId,
+            taskId,
+            status: hasSufficientCredits ? "processing" : "saved",
+            needsCredits: !hasSufficientCredits,
+            message: hasSufficientCredits
+                ? "Character created and sheet generation started."
+                : (creditErrorMsg || "Character saved! Add credits to generate the visual sheet."),
             project_id: targetProjectId,
-            session_id: null,
+            character: createdResult.character || { id: characterId, name: charName, description: charPrompt, project_id: targetProjectId },
+            workflow: { id: characterId, workflow_type: "CHARACTER_SHEET" },
         });
 
     } catch (err) {
@@ -87,9 +93,83 @@ export async function createCharacter(req, res) {
 }
 
 /**
- * Legacy character sheet alias -> redirects to unified createCharacter
+ * POST /api/characters/:characterId/generate-sheet
+ * 
+ * Dedicated endpoint to generate (or re-generate) a character sheet
+ * directly via Redis UseCase worker without re-creating character container.
  */
-export const createCharacterSheet = createCharacter;
+export async function generateCharacterSheet(req, res) {
+    try {
+        const { characterId } = req.params;
+        const { prompt, references, project_id, projectId } = req.body;
+        const userId = req.user.id;
+
+        if (!characterId) {
+            return res.status(400).json({ ok: false, message: "characterId is required" });
+        }
+
+        // 1. Fetch existing character info from DB
+        const wf = await characterService.db.workflows.getWorkflow(characterId).catch(() => null);
+        const existingChar = await characterService.db.characters.findByCharacterId(characterId).catch(() => null);
+
+        const targetProjectId = project_id || projectId || wf?.project_id || existingChar?.project_id;
+        const charName = existingChar?.name || wf?.display_name || "Untitled Character";
+        const effectivePrompt = (prompt && prompt.trim()) || existingChar?.description || existingChar?.character_info || charName;
+        const effectiveRefs = Array.isArray(references) ? references : [];
+
+        // 2. If prompt updated, update character row
+        if (prompt && prompt.trim() && prompt.trim() !== existingChar?.description) {
+            await characterService.updateCharacter({
+                characterId,
+                updates: { description: prompt.trim(), character_info: prompt.trim() },
+                userId,
+            }).catch(() => null);
+        }
+
+        const runtimeInput = {
+            project_id: targetProjectId,
+            workflow_id: characterId,
+            prompt: effectivePrompt,
+            references: effectiveRefs,
+            characters: [{ name: charName, description: effectivePrompt }],
+        };
+
+        await characterService.db.media.createMedia({
+            workflow_id: characterId,
+            project_id: targetProjectId,
+            step_id: "character_sheet",
+            status: "processing",
+            url: null,
+            width: 1344,
+            height: 768,
+        }).catch((mediaErr) => {
+            console.warn(`⚠️ [characterController] regenerate placeholder notice:`, mediaErr.message);
+            return null;
+        });
+
+        // 3. Prepare, reserve credits, and enqueue on-demand generation.
+        const prepared = await useCaseService.prepareAndEnqueue({
+            useCaseId: "character-sheet-v1",
+            input: runtimeInput,
+            userId,
+            executionId: characterId,
+            traceId: characterId,
+        });
+
+        return res.json({
+            ok: true,
+            status: "processing",
+            characterId,
+            workflowId: characterId,
+            taskId: prepared.executionId || prepared.workflowRunId || characterId,
+            project_id: targetProjectId,
+        });
+    } catch (err) {
+        console.error(`❌ [characterController] generateCharacterSheet error:`, err);
+        const statusCode = err.statusCode || (err.code === "INSUFFICIENT_CREDITS" ? 402 : 500);
+        return res.status(statusCode).json({ ok: false, message: err.message });
+    }
+}
 
 /**
  * POST /api/characters/generate-description

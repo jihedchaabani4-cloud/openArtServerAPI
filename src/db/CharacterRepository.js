@@ -79,6 +79,10 @@ export class CharacterRepository extends DnaRepository {
         return data;
     }
 
+    async updateCharacter(id, fields) {
+        return this.updateCharacterFields(id, fields);
+    }
+
     /**
      * Deletes a character by id OR workflow_id.
      * @param {string} id - Character id or workflow_id

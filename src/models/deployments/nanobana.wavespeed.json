@@ -1,0 +1,108 @@
+{
+  "schemaVersion": "1.0",
+  "id": "nanobana.wavespeed",
+  "modelFamily": "nanobana",
+  "provider": "wavespeed",
+  "status": "active",
+  "providerModelId": "google/nano-banana",
+  "providerModelVersion": "v1.0.0",
+  "versionPolicy": "pinned",
+  "operations": {
+    "text_to_image": {
+      "endpoint": "/nanobana/generate",
+      "inputs": {
+        "prompt": {
+          "type": "string",
+          "required": true
+        },
+        "aspect_ratio": {
+          "type": "enum",
+          "values": [
+            "1:1",
+            "16:9",
+            "9:16",
+            "4:3",
+            "3:4",
+            "3:2",
+            "2:3",
+            "21:9"
+          ],
+          "default": "1:1"
+        },
+        "quality": {
+          "type": "enum",
+          "values": [
+            "standard",
+            "hd",
+            "2k",
+            "4k"
+          ],
+          "default": "standard"
+        }
+      },
+      "outputs": {
+        "type": "image",
+        "fields": {
+          "url": {
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "pricing": {
+        "mode": "quality_table",
+        "table": {
+          "standard": "8.000000",
+          "hd": "11.000000",
+          "2k": "16.000000",
+          "4k": "26.000000"
+        }
+      }
+    },
+    "edit": {
+      "endpoint": "/nanobana/edit",
+      "inputs": {
+        "prompt": {
+          "type": "string",
+          "required": true
+        },
+        "image_url": {
+          "type": "image_url",
+          "required": true,
+          "allowedDomains": [
+            "cdn.openart.ai",
+            "storage.googleapis.com"
+          ]
+        },
+        "quality": {
+          "type": "enum",
+          "values": [
+            "standard",
+            "hd",
+            "2k",
+            "4k"
+          ],
+          "default": "standard"
+        }
+      },
+      "outputs": {
+        "type": "image",
+        "fields": {
+          "url": {
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "pricing": {
+        "mode": "quality_table",
+        "table": {
+          "standard": "9.000000",
+          "hd": "12.000000",
+          "2k": "18.000000",
+          "4k": "30.000000"
+        }
+      }
+    }
+  }
+}

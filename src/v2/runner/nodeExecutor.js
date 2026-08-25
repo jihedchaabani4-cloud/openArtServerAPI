@@ -5,15 +5,71 @@ import {
   reserveNodeBilling,
   settleNodeBilling,
   rollbackNodeBilling,
-  createNodeMediaPlaceholders,
-  finalizeNodeMediaOutputs,
   isProviderBackedNodeType,
   getGateways,
 } from "./workflowRunner.js";
-import { enqueueWorkflowRun } from "../queue/v2WorkflowQueue.js";
+import { jobQueueService } from "../../services/jobQueueService.js";
+import { db } from "../../container.js";
 import { logV2Event } from "../logging/v2Logger.js";
+import { nodeFailure, nodeSuccess } from "../runtime/nodeEnvelope.js";
 
 const runRepo = new RunRepository();
+
+/**
+ * Executes declarative node-level persistence from YAML (target: "character" | "media")
+ */
+export async function executeNodePersistence({ nodeConfig, output, run, resolvedInputs = {} }) {
+  if (!nodeConfig?.persist) return;
+
+  const { target, step_id, field, value, status = "completed" } = nodeConfig.persist;
+  const workflowId = run.input?.workflow_id || run.input?.characterId;
+  const projectId = run.input?.project_id || run.input?.projectId;
+
+  const resolvedValue = typeof value === "string" && value.startsWith("$output")
+    ? getValueAtPath(output, value.replace(/^\$outputs?\./, ""))
+    : value;
+
+  try {
+    if (target === "character" && workflowId && field) {
+      console.log(`💾 [Persistence] Updating character ${workflowId} field "${field}"`);
+      await db.characters.updateCharacter(workflowId, { [field]: resolvedValue }).catch(() => null);
+    } else if (target === "media" && workflowId) {
+      const mediaUrl = typeof resolvedValue === "string" ? resolvedValue : (resolvedValue?.url || output?.assets?.[0]?.url || output?.media?.url);
+      if (mediaUrl) {
+        const targetStepId = step_id || "character_sheet";
+        console.log(`💾 [Persistence] Updating media for workflow ${workflowId} (step_id: ${targetStepId}) to completed`);
+
+        // Find existing processing media placeholder created by createCharacter
+        const existingList = await db.media.findByWorkflow(workflowId).catch(() => []);
+        const placeholder = existingList?.find((m) => m.step_id === targetStepId || m.status === "processing" || m.status === "pending");
+
+        const width = output?.assets?.[0]?.width || resolvedInputs?.width || nodeConfig?.config?.width || 1344;
+        const height = output?.assets?.[0]?.height || resolvedInputs?.height || nodeConfig?.config?.height || 768;
+
+        if (placeholder?.id) {
+          await db.media.updateMedia(placeholder.id, {
+            url: mediaUrl,
+            status: status || "completed",
+            width,
+            height,
+          }).catch((err) => console.warn(`[Persistence] Failed to update media placeholder:`, err.message));
+        } else {
+          await db.media.createMedia({
+            workflow_id: workflowId,
+            project_id: projectId,
+            step_id: targetStepId,
+            url: mediaUrl,
+            status: status || "completed",
+            width,
+            height,
+          }).catch((err) => console.warn(`[Persistence] Failed to create media fallback:`, err.message));
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`⚠️ [Persistence] Notice for node ${nodeConfig.id}:`, err.message);
+  }
+}
 
 /**
  * Safely extracts nested properties using dot notation paths.
@@ -54,7 +110,10 @@ export async function resolveInputsForNode(run, nodeConfig, nodeRuns) {
     }
 
     if (parsed.kind === "input") {
-      resolved[key] = run.input?.[parsed.field];
+      const inputVal = run.input?.[parsed.field];
+      if (inputVal !== undefined && inputVal !== null) {
+        resolved[key] = inputVal;
+      }
     } else if (parsed.kind === "node_output") {
       const depRun = nodeRuns.find((n) => n.node_id === parsed.nodeId);
       resolved[key] = getValueAtPath(depRun?.output, parsed.path);
@@ -149,42 +208,34 @@ export async function executeNodeJob(runId, nodeId) {
       attempt: nodeRun.attempt,
     });
 
-    const preCreatedPlaceholders = run.input?._v1PlaceholderIds;
-    if (preCreatedPlaceholders && preCreatedPlaceholders.length > 0 && isProviderBackedNodeType(nodeConfig?.type)) {
-      placeholders = preCreatedPlaceholders;
-    } else {
-      placeholders = await createNodeMediaPlaceholders({
-        runId,
-        nodeConfig,
-        resolvedInputs,
-        run,
-      });
-    }
-
-    console.log(`🎨 ▶ Stage 3: Executing Processor "${nodeConfig.type}" for Node "${nodeId}"...`);
+    console.log(`🎨 ▶ Stage 2: Executing Processor "${nodeConfig.type}" for Node "${nodeId}"...`);
     const output = await executeNode(nodeConfig.type, resolvedInputs, ctx);
     console.log(`   Processor Output Preview:`, JSON.stringify(output, null, 2).slice(0, 300) + '...');
 
-    console.log(`💾 ▶ Stage 4: Finalizing & persisting outputs for Node "${nodeId}"...`);
-    await finalizeNodeMediaOutputs({
-      runId,
-      nodeId,
-      nodeConfig,
-      output,
-      run,
-      input: run.input,
-      placeholders,
-    });
+    console.log(`💾 ▶ Stage 3: Persisting outputs for Node "${nodeId}"...`);
+    await executeNodePersistence({ nodeConfig, output, run, resolvedInputs });
+
     await settleNodeBilling({ runId, nodeId, nodeConfig, attempt: nodeRun.attempt });
 
     const durationMs = Date.now() - startedAt;
-    console.log(`✅ ▶ Stage 5: Node "${nodeId}" COMPLETED successfully in ${durationMs}ms`);
+    const envelope = nodeSuccess(output, {
+      workflowRunId: runId,
+      nodeRunId: nodeRun.id,
+      nodeId,
+      nodeType: nodeConfig.type,
+      durationMs,
+      modelKey: resolvedInputs.model,
+      traceId: runId,
+    });
+    console.log(`✅ ▶ Stage 4: Node "${nodeId}" COMPLETED successfully in ${durationMs}ms`);
     console.log(`----------------------------------------------------------------\n`);
 
     // 6. On success: update node status, complete it, and trigger orchestrator
     await runRepo.updateNodeRun(runId, nodeId, {
       status: "completed",
-      output,
+      output: output && typeof output === "object"
+        ? { ...output, __nodeEnvelope: envelope }
+        : { value: output, __nodeEnvelope: envelope },
       completed_at: new Date().toISOString()
     });
 
@@ -206,17 +257,39 @@ export async function executeNodeJob(runId, nodeId) {
       message: `Node ${nodeId} completed successfully`
     });
 
-    // Enqueue orchestrator run to process next tier
-    await enqueueWorkflowRun(runId);
-
   } catch (error) {
     console.error(`❌ [nodeExecutor] Node "${nodeId}" failed: ${error.message}`);
 
     await rollbackNodeBilling({ runId, nodeId, nodeConfig, attempt: nodeRun.attempt }).catch(() => {});
 
+    const maxAttempts = nodeConfig?.retry_policy?.max_attempts || 1;
+    const currentAttempt = nodeRun?.attempt || 1;
+
+    if (currentAttempt < maxAttempts) {
+      const nextAttempt = currentAttempt + 1;
+      const fallbackProvider = nodeConfig?.retry_policy?.fallback_provider || nodeRun.provider_override || null;
+      console.log(`🔄 [nodeExecutor] Retrying Node "${nodeId}" (Attempt ${nextAttempt}/${maxAttempts}) with fallback: ${fallbackProvider}`);
+
+      await runRepo.updateNodeRun(runId, nodeId, {
+        attempt: nextAttempt,
+        status: "pending",
+        provider_override: fallbackProvider,
+      });
+
+      return executeNodeJob(runId, nodeId);
+    }
+
     const { storageGateway } = getGateways();
     if (storageGateway?.failPlaceholders && placeholders.length > 0) {
       await storageGateway.failPlaceholders(placeholders, error).catch(() => {});
+    }
+
+    const workflowId = run?.input?.workflow_id || run?.input?.characterId;
+    if (workflowId) {
+      await db.media.findByWorkflow(workflowId).then((list) => {
+        const p = list?.find((m) => m.status === "processing" || m.status === "pending");
+        if (p?.id) return db.media.updateMedia(p.id, { status: "failed", error_message: error.message }).catch(() => {});
+      }).catch(() => {});
     }
 
     const { eventRecorder } = getGateways();
@@ -242,14 +315,18 @@ export async function executeNodeJob(runId, nodeId) {
       message: `Node ${nodeId} failed: ${error.message}`
     });
 
-    // Direct failure: Mark node run as failed without retrying
+    const envelope = nodeFailure(error, {
+      workflowRunId: runId,
+      nodeRunId: nodeRun.id,
+      nodeId,
+      nodeType: nodeConfig?.type,
+      durationMs: Date.now() - startedAt,
+      traceId: runId,
+    });
     await runRepo.updateNodeRun(runId, nodeId, {
       status: "failed",
-      error: { code: error.code || "NODE_FAILED", message: error.message },
+      error: { code: error.code || "NODE_FAILED", message: error.message, envelope },
       completed_at: new Date().toISOString()
     });
-
-    // Trigger orchestrator to mark workflow as failed immediately
-    await enqueueWorkflowRun(runId);
   }
 }

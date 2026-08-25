@@ -2,14 +2,15 @@ import { validateUseCaseDefinition } from "../useCaseSchema.js";
 
 export const upscaleUseCase = {
   useCaseId: "upscale-v1",
-  label: "Image & Media Upscaling",
-  description: "Enhances image quality and resolution with super-resolution AI models.",
+  label: "Image Upscale",
+  description: "AI-powered image upscaling — enhance resolution up to 4x with super-resolution.",
   workflowRef: "upscale-v1",
-  billing: {
-    strategy: "per-node"
-  },
+  billing: { strategy: "per-node" },
   inputSchema: {
-    factor: { type: "number", required: false, default: 2 }
+    source_url:  { type: "string",  required: true },
+    workflow_id: { type: "string",  required: false },
+    project_id:  { type: "string",  required: false },
+    factor:      { type: "number",  required: false },
   }
 };
 

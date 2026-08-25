@@ -1,0 +1,101 @@
+{
+  "schemaVersion": "1.0",
+  "id": "z_image_base.wavespeed",
+  "modelFamily": "z_image_base",
+  "provider": "wavespeed",
+  "status": "active",
+  "providerModelId": "z-image/base",
+  "providerModelVersion": "v1.0.0",
+  "versionPolicy": "pinned",
+  "operations": {
+    "text_to_image": {
+      "endpoint": "/z_image_base/generate",
+      "inputs": {
+        "prompt": {
+          "type": "string",
+          "required": true
+        },
+        "aspect_ratio": {
+          "type": "enum",
+          "values": [
+            "1:1",
+            "16:9",
+            "9:16",
+            "3:2",
+            "3:4"
+          ],
+          "default": "1:1"
+        },
+        "quality": {
+          "type": "enum",
+          "values": [
+            "standard",
+            "hd",
+            "2k",
+            "4k"
+          ],
+          "default": "standard"
+        }
+      },
+      "outputs": {
+        "type": "image",
+        "fields": {
+          "url": {
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "pricing": {
+        "mode": "quality_table",
+        "table": {
+          "standard": "7.000000",
+          "hd": "9.000000",
+          "2k": "14.000000",
+          "4k": "22.000000"
+        }
+      }
+    },
+    "edit": {
+      "endpoint": "/z_image_base/edit",
+      "inputs": {
+        "prompt": {
+          "type": "string",
+          "required": true
+        },
+        "image_url": {
+          "type": "image_url",
+          "required": true
+        },
+        "quality": {
+          "type": "enum",
+          "values": [
+            "standard",
+            "hd",
+            "2k",
+            "4k"
+          ],
+          "default": "standard"
+        }
+      },
+      "outputs": {
+        "type": "image",
+        "fields": {
+          "url": {
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "pricing": {
+        "mode": "quality_table",
+        "table": {
+          "standard": "8.000000",
+          "hd": "10.000000",
+          "2k": "16.000000",
+          "4k": "26.000000"
+        }
+      }
+    }
+  }
+}

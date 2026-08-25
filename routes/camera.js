@@ -5,7 +5,6 @@ import { autoCreateProjectAndSession } from "../lib/helpers.js";
 import { normalizeImageModelName } from "../lib/modelRegistryKeys.js";
 import { promptService } from "../src/container.js";
 import { requireAuth } from "../src/middleware/auth.js";
-import { CameraTask } from "../src/video/tasks/CameraTask.js";
 import { buildCameraPrompt } from "../src/v2/utils/legacyPromptBuilders.js";
 
 // V2 & UseCase Imports
@@ -47,7 +46,7 @@ async function handleImageCamera(req, res) {
         }
 
         const userId = req.user.id;
-        const normalizedModelName = normalizeImageModelName(model || model_name) || "fal";
+        const normalizedModelName = normalizeImageModelName(model || model_name) || "nanobana";
 
         const { project_id: finalProjectId, session_id: finalSessionId } =
             await autoCreateProjectAndSession(userId, project_id, session_id, false);
@@ -59,20 +58,24 @@ async function handleImageCamera(req, res) {
 
         const resolvedReferences = await resolveReferences(db, {
             baseWorkflowId: workflow_id,
-            referenceMediaIds: reference_workflow_ids,
+            explicitReferences: reference_workflow_ids || [],
+            sourceMedia,
         });
 
-        const finalPrompt = buildCameraPrompt(rotation || 0, tilt || 0, zoom || 3);
-        
+        const finalPrompt = buildCameraPrompt({
+            rotation: rotation || 0,
+            tilt: tilt || 0,
+            zoom: zoom || 1,
+        });
+
         const runtimeInput = {
             prompt: finalPrompt,
             model: normalizedModelName,
             aspect_ratio: aspect_ratio || ratio || "1:1",
             quality: quality || "standard",
-            strength: 0.75,
-            source_asset: sourceMedia ? { url: sourceMedia.url, width: sourceMedia.width, height: sourceMedia.height } : null,
+            source_asset: { url: sourceMedia.url, width: sourceMedia.width, height: sourceMedia.height },
+            source_url: sourceMedia.url,
             references: resolvedReferences,
-            mode: "image_edit",
             project_id: finalProjectId,
             session_id: finalSessionId,
         };
@@ -85,10 +88,9 @@ async function handleImageCamera(req, res) {
             pricingService,
         });
 
-        return res.json({
+        res.json({
             ok: true,
             status: "processing",
-            media_type: "image",
             taskId: runResult.executionId,
             jobId: runResult.executionId,
             batchId: null,
@@ -98,35 +100,34 @@ async function handleImageCamera(req, res) {
         });
 
     } catch (error) {
-        console.error("❌ [Camera/Image] error:", error);
-        return res.status(500).json({ ok: false, message: error.message });
+        console.error("❌ [cameraRoute] handleImageCamera error:", error);
+        res.status(500).json({ ok: false, message: error.message });
     }
 }
 
 async function handleVideoCamera(req, res) {
     try {
-        const {
-            model,
-            model_name,
+        let {
+            prompt = "",
             camera_text,
-            prompt        = "",
-            ratio         = "16:9",
-            aspect_ratio,
-            duration      = "5s",
-            references    = [],
+            cameraText,
             project_id,
             session_id,
-            is_new_project,
             workflow_id,
             video_workflow_id,
+            duration = "5s",
+            model_name,
+            model,
+            is_new_project = false,
+            references = [],
         } = req.body;
 
         const finalWfId = video_workflow_id || workflow_id;
         if (!finalWfId) {
-            return res.status(400).json({ ok: false, message: "video_workflow_id is required for video camera edit." });
+            return res.status(400).json({ ok: false, message: "video_workflow_id is required." });
         }
 
-        const rawCameraText = (camera_text || "").trim();
+        const rawCameraText = (camera_text || cameraText || "").trim();
         if (!rawCameraText) {
             return res.status(400).json({ ok: false, message: "camera_text is required. Describe the camera move (e.g. 'slow zoom in')." });
         }
@@ -141,18 +142,15 @@ async function handleVideoCamera(req, res) {
             return res.status(404).json({ ok: false, message: "Source media not found." });
         }
 
-        const cameraTask = new CameraTask({ promptService });
-        const { cameraPrompt, cameraControl } = await cameraTask.execute({ cameraText: rawCameraText });
-        const finalPrompt = CameraTask.mergeIntoPrompt(prompt, cameraPrompt);
+        const finalPrompt = prompt ? `${prompt}, ${rawCameraText}` : rawCameraText;
         
         const runtimeInput = {
             prompt: finalPrompt,
-            model: (model || model_name || "").trim() || null,
+            model: (model || model_name || "").trim() || "kling-v3",
             source_asset: sourceMedia ? { url: sourceMedia.url, width: sourceMedia.width, height: sourceMedia.height } : null,
             mode: "video_to_video",
             duration: duration,
             references: references,
-            camera_control: cameraControl,
             project_id: finalProjectId,
             session_id: finalSessionId,
         };

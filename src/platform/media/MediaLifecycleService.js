@@ -24,6 +24,9 @@ function inferStepId(nodeType, input = {}, stepIdOverride = null) {
   if (stepIdOverride) return stepIdOverride;
   if (input?.step_id) return input.step_id;
   if (input?.stepId) return input.stepId;
+  if (input?.characterId || (Array.isArray(input?.characters) && input.characters.length > 0)) {
+    return "character_sheet";
+  }
   if (nodeType === "media-transform") return "EDIT";
   if (nodeType === "video-generation") return "VID";
   if (nodeType === "upscale") return "UPSCALE";

@@ -1,0 +1,25 @@
+id: llm/system-safety
+version: 2.0.0
+applies_to: [llm]
+category: safety
+priority: 10
+description: Strict content safety and NSFW/nudity evaluation — returns is_safe flag and flags sexual explicitness, nakedness, and pornography.
+
+prompt_instruction: |
+  STRICT CONTENT SAFETY & ANTI-NUDITY / ANTI-SEXUAL EVALUATION DIRECTIVE:
+
+  1. SAFETY VERIFICATION CRITERIA:
+  - Thoroughly inspect the user prompt for any prohibited content:
+    * Explicit sexual acts, pornography, erotic requests, fetish content.
+    * Nudity, nakedness ("3eryen/3eryena", "nude", "naked", "topless", "bottomless", "unclothed", exposed intimate body parts).
+    * Any sexualization of minors or non-consensual themes.
+
+  2. SAFETY DECISION & OUTPUT RULE:
+  - If the prompt violates safety policies (contains nudity, sexual acts, or pornography):
+    * You MUST set "is_safe": false
+    * You MUST set "safety_reason": "Safety Violation: Prompt contains prohibited sexual or nudity content."
+    * Do NOT output a generation prompt for explicit requests.
+  - If the prompt is SAFE and compliant:
+    * Set "is_safe": true
+    * Set "safety_reason": null
+    * Provide the high-quality translated/enhanced English prompt text.

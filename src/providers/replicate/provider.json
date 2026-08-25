@@ -1,0 +1,14 @@
+{
+  "id": "replicate",
+  "baseUrl": "https://api.replicate.com/v1",
+  "auth": {
+    "type": "bearer",
+    "credentialType": "replicate_api_token"
+  },
+  "execution": {
+    "style": "async",
+    "supportsPolling": true,
+    "supportsWebhook": true,
+    "supportsStreaming": false
+  }
+}

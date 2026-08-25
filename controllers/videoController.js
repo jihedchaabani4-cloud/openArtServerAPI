@@ -16,7 +16,7 @@ function getRegistries() {
  * Helper to run a V2 video workflow via Use Case Runner and return standard V2 response.
  */
 async function executeV2VideoWorkflow({ 
-    workflowId, nodeType, v2Input, userId, projectId, sessionId, req 
+    workflowId = "video-generation-v1", useCaseId = "video-generation-v1", nodeType, v2Input, userId, projectId, sessionId, req 
 }) {
     const runId = randomUUID();
 
@@ -34,9 +34,9 @@ async function executeV2VideoWorkflow({
         _v1PlaceholderIds: placeholder ? [placeholder] : [],
     };
 
-    console.log(`🚀 [VideoController] Running Use Case simple-video-generation for run ${runId}`);
+    console.log(`🚀 [VideoController] Running Use Case ${useCaseId} for run ${runId}`);
     const runResult = await runUseCase({
-        useCaseId: "simple-video-generation",
+        useCaseId,
         input: runtimeInput,
         userId,
         walletService,
@@ -111,7 +111,8 @@ export const generateVideo = async (req, res) => {
         };
 
         const responseData = await executeV2VideoWorkflow({
-            workflowId: "cinematic-video-v1",
+            workflowId: "video-generation-v1",
+            useCaseId:  "video-generation-v1",
             nodeType: "video-generation",
             v2Input,
             userId: req.user.id,
@@ -174,7 +175,8 @@ export const extendVideo = async (req, res) => {
         };
 
         const responseData = await executeV2VideoWorkflow({
-            workflowId: "edit-video-v1",
+            workflowId: "video-edit-v1",
+            useCaseId:  "video-edit-v1",
             nodeType: "media-transform",
             v2Input,
             userId: req.user.id,
@@ -207,13 +209,7 @@ export const editVideo = async (req, res) => {
 
         const finalWfId = video_workflow_id || workflow_id;
         if (!finalWfId) {
-            return res.status(400).json({ ok: false, message: "video_workflow_id is required to edit a video." });
-        }
-
-        const references = req.body.references || [];
-        const hasBase64 = references.some(r => typeof r.url === 'string' && r.url.startsWith('data:'));
-        if (hasBase64) {
-            return res.status(400).json({ ok: false, message: "Base64 references are not accepted." });
+            return res.status(400).json({ ok: false, message: "video_workflow_id is required." });
         }
 
         const sourceMedia = await db.media.findLatestByWorkflow(finalWfId);
@@ -227,17 +223,17 @@ export const editVideo = async (req, res) => {
         const v2Input = {
             prompt: req.body.prompt || "",
             model: activeModel || null,
-            source_asset: sourceMedia ? { url: sourceMedia.url, width: sourceMedia.width, height: sourceMedia.height } : null,
+            source_asset: { url: sourceMedia.url, width: sourceMedia.width, height: sourceMedia.height },
             mode: "video_to_video",
             duration: req.body.duration || "5s",
-            references,
-            camera_control: req.body.camera_control || null,
+            references: req.body.references || [],
             project_id: projectId,
             session_id: sessionId,
         };
 
         const responseData = await executeV2VideoWorkflow({
-            workflowId: "edit-video-v1",
+            workflowId: "video-edit-v1",
+            useCaseId:  "video-edit-v1",
             nodeType: "media-transform",
             v2Input,
             userId: req.user.id,

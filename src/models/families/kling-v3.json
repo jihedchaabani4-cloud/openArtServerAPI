@@ -1,0 +1,8 @@
+{
+  "id": "kling-v3",
+  "domain": "video",
+  "displayName": "Kling V3",
+  "description": "Next-generation video generation model",
+  "iconUrl": "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/kling.svg",
+  "badge": "PRO"
+}

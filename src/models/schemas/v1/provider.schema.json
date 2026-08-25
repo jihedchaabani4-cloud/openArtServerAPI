@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["id", "baseUrl", "auth", "execution"],
+  "properties": {
+    "id": { "type": "string" },
+    "baseUrl": { "type": "string", "format": "uri" },
+    "auth": {
+      "type": "object",
+      "required": ["type", "credentialType"],
+      "properties": {
+        "type": { "enum": ["bearer", "apiKey", "oauth2"] },
+        "credentialType": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "execution": {
+      "type": "object",
+      "required": ["style"],
+      "properties": {
+        "style": { "enum": ["sync", "async"] },
+        "supportsPolling": { "type": "boolean" },
+        "supportsWebhook": { "type": "boolean" },
+        "supportsStreaming": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,8 @@
+{
+  "id": "nanobana_pro",
+  "domain": "image",
+  "displayName": "NanoBanana Pro",
+  "description": "Maximum quality — 4K, advanced reasoning, typography",
+  "iconUrl": "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/minimax.svg",
+  "badge": "PREMIUM"
+}

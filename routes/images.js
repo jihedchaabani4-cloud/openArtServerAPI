@@ -6,7 +6,7 @@ import { requireAuth } from "../src/middleware/auth.js";
 const router = express.Router();
 
 /** POST /api/images/generated — image generation via V2 UseCaseRunner */
-router.post("/generated", requireAuth, imageController.generateV2);
+router.post("/generated", requireAuth, imageController.generateImage);
 
 /** POST /api/images/generated/edit/existing — image editing */
 router.post("/generated/edit/existing", requireAuth, editImageController.generateEdit);

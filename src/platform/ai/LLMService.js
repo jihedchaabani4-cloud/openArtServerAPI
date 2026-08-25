@@ -2,11 +2,10 @@
  * LLMService.js
  * Unified, general-purpose LLM Provider & Client Service for Express Backend.
  * Handles text prompts, multimodal image inputs (Base64/URLs), system instructions,
- * JSON schema formatting, with built-in Gemini 3.1 Flash Lite + Groq Vision Fallback.
+ * and JSON schema formatting via Gemini 3.1 Flash Lite with retry mechanism.
  */
 
 const geminiApiKey = process.env.GEMINI_API_KEY || "";
-const groqApiKey = process.env.GROQ_API_KEY || "";
 
 export class LLMService {
   /**
@@ -65,19 +64,22 @@ export class LLMService {
     let rawOutput = null;
     let usedModel = "unknown";
     let lastGeminiError = "";
-    let lastGroqError = "";
+    const MAX_ATTEMPTS = 2;
 
-    // ── Attempt 1: Gemini 3.1 Flash Lite ───────────────────────────────────────
-    if (geminiApiKey) {
+    if (!geminiApiKey) {
+      throw new Error("LLMService: GEMINI_API_KEY is not configured in environment variables.");
+    }
+
+    const parts = [{ text: fullPromptText }];
+    imagePayloads.forEach((img) => {
+      parts.push({
+        inline_data: { mime_type: img.mimeType, data: img.data },
+      });
+    });
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
-        const parts = [{ text: fullPromptText }];
-        imagePayloads.forEach((img) => {
-          parts.push({
-            inline_data: { mime_type: img.mimeType, data: img.data },
-          });
-        });
-
-        console.log(`[LLMService] Calling Gemini API (gemini-3.1-flash-lite)...`);
+        console.log(`[LLMService] Calling Gemini API (gemini-3.1-flash-lite) — Attempt ${attempt}/${MAX_ATTEMPTS}...`);
         const response = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${geminiApiKey}`,
           {
@@ -93,7 +95,8 @@ export class LLMService {
           if (text?.trim()) {
             rawOutput = text.trim();
             usedModel = "gemini-3.1-flash-lite";
-            console.log("[LLMService] ✅ Gemini response received successfully.");
+            console.log(`[LLMService] ✅ Gemini response received successfully on attempt ${attempt}.`);
+            break;
           } else {
             lastGeminiError = "Gemini returned empty text";
           }
@@ -104,57 +107,15 @@ export class LLMService {
       } catch (err) {
         lastGeminiError = err.message;
       }
-    }
 
-    // ── Attempt 2: Groq Vision / LLM Fallback ───────────────────────────────────
-    if (!rawOutput && groqApiKey) {
-      console.warn(`[LLMService] Gemini failed (${lastGeminiError}). Falling back to Groq...`);
-      try {
-        const isVision = imagePayloads.length > 0;
-        const groqModel = isVision ? "llama-3.2-11b-vision-preview" : "llama-3.3-70b-versatile";
-
-        const contentParts = [{ type: "text", text: fullPromptText }];
-        imagePayloads.forEach((img) => {
-          contentParts.push({
-            type: "image_url",
-            image_url: { url: `data:${img.mimeType};base64,${img.data}` },
-          });
-        });
-
-        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${groqApiKey}`,
-          },
-          body: JSON.stringify({
-            model: groqModel,
-            messages: [{ role: "user", content: contentParts }],
-            temperature: 0.2,
-          }),
-        });
-
-        if (response.ok) {
-          const resData = await response.json();
-          const text = resData?.choices?.[0]?.message?.content;
-          if (text?.trim()) {
-            rawOutput = text.trim();
-            usedModel = groqModel;
-            console.log(`[LLMService] ✅ Groq (${groqModel}) fallback succeeded!`);
-          } else {
-            lastGroqError = "Groq returned empty text";
-          }
-        } else {
-          const errText = await response.text();
-          lastGroqError = `HTTP ${response.status}: ${errText.slice(0, 200)}`;
-        }
-      } catch (err) {
-        lastGroqError = err.message;
+      if (attempt < MAX_ATTEMPTS) {
+        console.warn(`[LLMService] Attempt ${attempt} failed (${lastGeminiError}). Retrying in 1s...`);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
 
     if (!rawOutput) {
-      throw new Error(`LLMService: All AI providers failed. Gemini: "${lastGeminiError}", Groq: "${lastGroqError}".`);
+      throw new Error(`LLMService: Gemini API failed after ${MAX_ATTEMPTS} attempts. Error: "${lastGeminiError}".`);
     }
 
     // Parse JSON if requested

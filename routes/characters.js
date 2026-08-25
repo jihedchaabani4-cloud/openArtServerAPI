@@ -27,6 +27,12 @@ router.patch("/:characterId", characterController.updateCharacter);
 router.delete("/:characterId", characterController.deleteCharacter);
 
 /**
+ * @route POST /api/characters/:characterId/generate-sheet
+ * @desc Generate or re-generate turnaround sheet for an existing character
+ */
+router.post("/:characterId/generate-sheet", characterController.generateCharacterSheet);
+
+/**
  * @route POST   /api/characters/:characterId/media  — attach a detail image
  * @route DELETE /api/characters/:characterId/media/:mediaId — remove a detail image
  */

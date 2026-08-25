@@ -14,97 +14,76 @@
  * Do NOT call reserveNodeBilling / settleNodeBilling / rollbackNodeBilling here.
  */
 
-import { selectProvider } from "../providers/router.js";
-import { MEDIA_CAPABILITIES } from "../constants/workflowConstants.js";
+import { run, resolveOperation } from "../../models/index.js";
+import { logV2Event } from "../logging/v2Logger.js";
 import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 
 export async function executeMediaTransform(inputs, ctx) {
+  const { runId, nodeId = "media-transform", traceId, userId } = ctx;
+
   // ── Safety: validate & sanitise all inputs before any provider work ────────
-  const safe = NodeSafetyService.assertTransformInputs(inputs, ctx.nodeId ?? "media-transform");
-
+  const safe = NodeSafetyService.assertTransformInputs(inputs, nodeId);
   const sourceAsset = safe.source_asset;
-  const mode        = safe.mode;
-  const model       = safe.model;
+  const started = Date.now();
 
-  // Map mode to capability
-  const capabilityMap = {
-    image_edit: MEDIA_CAPABILITIES.IMAGE_GENERATION,      // Same provider, different payload
-    image_to_image: MEDIA_CAPABILITIES.IMAGE_GENERATION,
-    image_variation: MEDIA_CAPABILITIES.IMAGE_GENERATION,
-    video_to_video: MEDIA_CAPABILITIES.VIDEO_GENERATION,
-  };
+  logV2Event({
+    traceId,
+    operation: `node.mediaTransform:${nodeId}`,
+    durationMs: 0,
+    status: "success",
+    message: `Starting media transform for node ${nodeId}`,
+  });
 
-  const capabilityId = capabilityMap[mode];
-  if (!capabilityId) {
-    throw new Error(`media-transform: unsupported mode "${mode}"`);
-  }
-
-  // Select provider using the correct V2 router signature:
-  // selectProvider(request, policy, forceProvider) → { adapter, decision }
-  const { adapter, decision } = await selectProvider(
-    { capabilityId, executionId: ctx.runId },
-    {},                          // default policy
-    ctx.forceProvider || null    // honour retry-based provider overrides
+  const modelFamily = safe.model || "nanobana";
+  const operation = resolveOperation(
+    { ...safe, image_url: sourceAsset?.url || safe.image_url },
+    safe.mode?.includes("video") ? "video" : "image"
   );
 
-  if (!adapter) {
-    throw new Error(
-      `media-transform: no provider available for mode "${mode}" (capabilityId=${capabilityId})`
-    );
-  }
+  // ── Direct execution via Models Management System ─────────────────────────
+  const runResult = await run(
+    modelFamily,
+    operation,
+    {
+      ...safe,
+      image_url: sourceAsset?.url || safe.image_url,
+      prompt: safe.prompt || "",
+    },
+    {
+      idempotencyKey: `node:${runId}:${nodeId}`,
+      userId,
+      domain: safe.mode?.includes("video") ? "video" : "image",
+    }
+  );
 
-  // Build transform payload (use sanitised safe inputs)
-  const transformPayload = {
-    capabilityId,
-    prompt:    safe.prompt,
-    image:     sourceAsset.url,
-    image_url: sourceAsset.url,
-    width:     safe.width,
-    height:    safe.height,
-    strength:  safe.strength,
-    references: safe.references,
-    mode,
-    model,
-  };
-
-  // Execute
-  const providerResult = await adapter.execute(transformPayload);
-
-  // Extract output
-  const outputItem = providerResult.outputs?.[0];
-  if (!outputItem?.url) {
-    throw new Error("media-transform: provider returned no output URL");
-  }
-
-  const providerId = decision?.selectedProvider || "unknown";
-
-  // Build asset
   const asset = {
-    id: outputItem.id || `${providerId}-${mode}-${Date.now()}`,
-    url: outputItem.url,
-    type: outputItem.type || (mode.includes("video") ? "video" : "image"),
-    width: outputItem.width || inputs.width || 1024,
-    height: outputItem.height || inputs.height || 1024,
+    id: `transformed-${Date.now()}`,
+    url: runResult.url ?? "",
+    type: runResult.type || (safe.mode?.includes("video") ? "video" : "image"),
+    width: safe.width || 1024,
+    height: safe.height || 1024,
     metadata: {
-      ...(outputItem.metadata || {}),
-      provider: providerId,
-      mode,
-      model: model || providerResult.model || null,
-      source_asset_id: sourceAsset.id || null,
-      prompt: inputs.prompt,
+      provider: runResult.metadata?.deploymentUsed ?? modelFamily,
+      mode: safe.mode,
+      model: modelFamily,
+      source_asset_id: sourceAsset?.id || null,
+      prompt: safe.prompt,
+      ...(runResult.metadata ?? {}),
     },
   };
+
+  const durationMs = Date.now() - started;
+  logV2Event({
+    traceId,
+    operation: `node.mediaTransform:${nodeId}`,
+    durationMs,
+    status: "success",
+    message: `Media transform completed via ${modelFamily}`,
+  });
 
   return {
     asset,
-    metadata: {
-      provider: providerId,
-      mode,
-      model: model || providerResult.model || null,
-      sourceAsset: {
-        id: sourceAsset.id,
-        url: sourceAsset.url,
-      },
-    },
+    assets: [asset],
+    metadata: { model: modelFamily, mode: safe.mode, latencyMs: durationMs, metadata: runResult.metadata },
   };
 }

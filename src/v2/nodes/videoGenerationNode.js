@@ -1,29 +1,17 @@
-/**
- * Video Generation Node (T074)
- * skill_aware: false | provider-backed: true
- *
- * Accepts a prompt and motion parameters, routes to the selected video
- * provider via the V2 provider router, and returns a video asset.
- *
- * Billing and storage are handled by the V2 runner gateways, not in-node.
- */
-
-import { selectProvider } from "../providers/router.js";
-import { MEDIA_CAPABILITIES } from "../constants/workflowConstants.js";
+import { run, resolveOperation } from "../../models/index.js";
 import { logV2Event } from "../logging/v2Logger.js";
 import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 
 /**
- * @param {object} inputs - { prompt, duration, aspect_ratio, motion_strength }
+ * @param {object} inputs - { prompt, duration, aspect_ratio, motion_strength, model }
  * @param {object} ctx    - { runId, nodeId, userId, traceId, forceProvider, gateways }
  * @returns {Promise<{ asset: object, metadata: object }>}
  */
 export async function executeVideoGeneration(inputs, ctx) {
-  const { runId, nodeId, traceId, forceProvider = null } = ctx;
+  const { runId, nodeId, traceId, userId } = ctx;
 
   // ── Safety: validate & sanitise all inputs before any provider work ────────
   const safe = NodeSafetyService.assertVideoInputs(inputs, nodeId);
-
   const started = Date.now();
 
   logV2Event({
@@ -34,37 +22,27 @@ export async function executeVideoGeneration(inputs, ctx) {
     message: `Starting video generation for node ${nodeId}`,
   });
 
-  // ── Provider selection ───────────────────────────────────────────────────
-  const { adapter, decision } = await selectProvider(
-    { capabilityId: MEDIA_CAPABILITIES.VIDEO_GENERATION, executionId: runId },
-    { quality: inputs.quality ?? "standard" },
-    forceProvider
-  );
-  const providerId = decision.selectedProvider;
+  const modelFamily = safe.model || "kling-v3";
+  const operation = resolveOperation(safe, "video");
 
-  // ── Execute generation (use sanitised safe inputs) ────────────────────────
-  const providerResult = await adapter.execute({
-    capabilityId: MEDIA_CAPABILITIES.VIDEO_GENERATION,
-    model:           safe.model,
-    mode:            safe.mode,
-    prompt:          safe.prompt,
-    duration:        safe.duration,
-    fps:             safe.fps,
-    aspect_ratio:    safe.aspect_ratio,
-    motion_strength: safe.motion_strength,
-    startFrame:      safe.startFrame,
-    references:      safe.references,
+  // ── Direct execution via Models Management System ─────────────────────────
+  const runResult = await run(modelFamily, operation, safe, {
+    idempotencyKey: `node:${runId}:${nodeId}`,
+    userId,
+    domain: "video",
   });
 
   // ── Normalize output ─────────────────────────────────────────────────────
-  const rawOutputs = providerResult?.outputs ?? [];
-  const firstOutput = rawOutputs[0] ?? {};
   const asset = {
-    id: firstOutput.id ?? `vid-${Date.now()}`,
+    id: `vid-${Date.now()}`,
     type: "video",
-    url: firstOutput.url ?? "",
-    duration: firstOutput.duration ?? safe.duration,
-    metadata: { ...(firstOutput.metadata ?? {}), provider: providerId },
+    url: runResult.url ?? "",
+    duration: safe.duration ?? 5,
+    metadata: {
+      provider: runResult.metadata?.deploymentUsed ?? modelFamily,
+      model: modelFamily,
+      ...(runResult.metadata ?? {}),
+    },
   };
 
   const durationMs = Date.now() - started;
@@ -73,12 +51,12 @@ export async function executeVideoGeneration(inputs, ctx) {
     operation: `node.videoGeneration:${nodeId}`,
     durationMs,
     status: "success",
-    message: `Video generation completed via ${providerId}`,
+    message: `Video generation completed via ${modelFamily}`,
   });
 
   return {
     asset,
-    metadata: { provider: providerId, decision, latencyMs: durationMs },
-    providerDecision: decision,
+    assets: [asset],
+    metadata: { model: modelFamily, latencyMs: durationMs, metadata: runResult.metadata },
   };
 }

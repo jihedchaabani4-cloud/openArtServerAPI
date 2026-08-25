@@ -1,37 +1,28 @@
 import { registerUseCase, clearUseCaseRegistry } from "./useCaseRegistry.js";
-import { brandMascotUseCase } from "./definitions/brandMascot.js";
-import { productAdVideosUseCase } from "./definitions/productAdVideos.js";
-import { vfxStudioUseCase } from "./definitions/vfxStudio.js";
-import { simpleImageGenerationUseCase } from "./definitions/simpleImageGeneration.js";
-import { simpleVideoGenerationUseCase } from "./definitions/simpleVideoGeneration.js";
-import { simpleImageGenerationFastUseCase } from "./definitions/simpleImageGenerationFast.js";
-import { simpleImageGenerationProUseCase } from "./definitions/simpleImageGenerationPro.js";
+import { characterSheetUseCase } from "./definitions/characterSheet.js";
+import { imageGenerationUseCase } from "./definitions/imageGeneration.js";
+import { videoGenerationUseCase } from "./definitions/videoGeneration.js";
+import { imageEditUseCase } from "./definitions/imageEdit.js";
+import { videoEditUseCase } from "./definitions/videoEdit.js";
 import { cameraControlUseCase } from "./definitions/cameraControl.js";
 import { lightingControlUseCase } from "./definitions/lightingControl.js";
-import { editImageUseCase } from "./definitions/editImage.js";
 import { upscaleUseCase } from "./definitions/upscale.js";
-import { characterSheetUseCase } from "./definitions/characterSheet.js";
 
 /**
- * Registers all pre-defined Use Cases into the global registry.
+ * Registers all active Use Cases into the global registry.
  */
 export function registerAllUseCases() {
-  // Clear any existing registrations to allow clean bootstrap reload
   clearUseCaseRegistry();
 
   const useCases = [
-    simpleImageGenerationUseCase,
-    simpleVideoGenerationUseCase,
-    simpleImageGenerationFastUseCase,
-    simpleImageGenerationProUseCase,
-    brandMascotUseCase,
-    productAdVideosUseCase,
-    vfxStudioUseCase,
+    characterSheetUseCase,
+    imageGenerationUseCase,
+    videoGenerationUseCase,
+    imageEditUseCase,
+    videoEditUseCase,
     cameraControlUseCase,
     lightingControlUseCase,
-    editImageUseCase,
     upscaleUseCase,
-    characterSheetUseCase,
   ];
 
   for (const uc of useCases) {

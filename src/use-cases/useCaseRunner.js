@@ -5,7 +5,13 @@ import { startWorkflowRun } from "../v2/runner/workflowRunner.js";
 import { loadRegistries } from "../v2/registry/registryLoader.js";
 
 let cachedRegistries = null;
-function getRegistries() {
+export function clearRegistryCache() {
+  cachedRegistries = null;
+}
+export function getRegistries() {
+  if (process.env.NODE_ENV !== "production") {
+    return loadRegistries();
+  }
   if (!cachedRegistries) {
     cachedRegistries = loadRegistries();
   }
@@ -43,8 +49,38 @@ export function validateInputs(input = {}, schema = {}) {
       }
     }
   }
+}
 
-  return true;
+/**
+ * Validates inputs, compiles workflow plan, estimates cost, and prechecks user balance.
+ */
+export async function precheckUseCaseCredits({
+  useCaseId,
+  input = {},
+  userId,
+  walletService = null,
+  pricingService = null,
+  registries = null,
+}) {
+  const useCase = getUseCase(useCaseId);
+  if (!useCase) {
+    const err = new Error(`Use Case "${useCaseId}" not found`);
+    err.statusCode = 404;
+    err.code = "USE_CASE_NOT_FOUND";
+    throw err;
+  }
+
+  validateInputs(input, useCase.inputSchema);
+
+  const finalRegistries = registries || getRegistries();
+  const plan = compileWorkflowById(useCase.workflowRef, finalRegistries);
+
+  const strategyName = useCase.billing?.strategy || "free";
+  const billingStrategy = createBillingStrategy(strategyName);
+  const totalCost = await billingStrategy.estimateTotal(plan, input, pricingService);
+
+  await billingStrategy.preCheck(userId, totalCost, walletService);
+  return { totalCost, plan };
 }
 
 /**
@@ -93,16 +129,6 @@ export async function run({
       url: input.source_url,
       type: "image",
     };
-  }
-
-  // Assemble prompt for Brand Mascot Use Case
-  if (useCaseId === "brand-mascot-ad-series" && input.brand_name) {
-    input.prompt = `Professional mascot character for ${input.brand_name} brand`;
-  }
-
-  // Assemble prompt for Product Ad Videos Use Case
-  if (useCaseId === "product-ad-videos" && input.product_name && input.description) {
-    input.prompt = `Cinematic product advertisement video of ${input.product_name}, ${input.description}. High quality, slow motion, studio lighting.`;
   }
 
   // 3. Automatically resolve registries if omitted

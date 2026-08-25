@@ -1,0 +1,8 @@
+{
+  "id": "llama-3-3-70b",
+  "domain": "text",
+  "displayName": "Llama 3.3 70B",
+  "description": "State of the art open source large language model",
+  "iconUrl": "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/meta.svg",
+  "badge": "FREE"
+}

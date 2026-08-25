@@ -138,7 +138,7 @@ export const authorizationService = new AuthorizationService();
 export const tenantAccessService = new TenantAccessService({ db });
 export const auditService = new AuditService();
 
-// ─── Provider Registry (V2 adapters registered in bootstrap.js) ─────────────
-// Image and Video providers are registered by bootstrapV2() in v2/bootstrap.js.
-// They route directly to model runners (WavespeedImageRunner, etc.).
-// No V1 treatment runners are registered here.
+// ─── UseCase & Job Queue Services (feature 028) ─────────────────────────────
+import { UseCaseService } from "./services/useCaseService.js";
+export { jobQueueService } from "./services/jobQueueService.js";
+export const useCaseService = new UseCaseService({ walletService, pricingService });

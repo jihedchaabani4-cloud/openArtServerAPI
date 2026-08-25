@@ -131,6 +131,10 @@ export class MediaRepository extends BaseRepository {
         return data;
     }
 
+    async updateMedia(id, fields) {
+        return this.updateFields(id, fields);
+    }
+
     async findByUrl(url) {
         const { data, error } = await this.client()
             .from(this.tableName)

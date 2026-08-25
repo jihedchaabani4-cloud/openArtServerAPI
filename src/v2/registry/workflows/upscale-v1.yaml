@@ -1,26 +1,35 @@
 id: upscale-v1
-version: "1.0.0"
-description: "Upscales an existing image or video asset using AI enhancement."
+name: Image Upscale
+version: 1.0.0
+description: Upscale and enhance image resolution with AI super-resolution.
 
-inputs:
-  source_asset:
-    type: object
-    required: true
-    description: "The asset to upscale (must contain a url field)."
-  factor:
-    type: number
-    required: false
-    default: 2
-    description: "Upscale factor (e.g. 2 = 2x, 4 = 4x)."
+metadata:
+  category: image
+  tags: [image, upscale, enhance, resolution]
+  author: system
+
+input_schema:
+  required: [source_url]
+  properties:
+    source_url: { type: string }
+    workflow_id: { type: string }
+    project_id: { type: string }
+    factor: { type: number }
 
 nodes:
-  - id: upscale_node
+  upscale:
     type: upscale
-    resolved_inputs:
-      factor: 2
-    bindings:
-      source_asset: "input.source_asset"
-      factor: "input.factor"
+    inputs:
+      image: "${input.source_url}"
+      workflow_id: "${input.workflow_id}"
+      project_id: "${input.project_id}"
+      factor: "${input.factor}"
+    persist:
+      target: media
+      step_id: upscale
+      status: completed
+      value: "$outputs.assets[0].url"
 
 outputs:
-  main_asset: "upscale_node.output.enhancedAsset"
+  main_asset: "${upscale.output.assets}"
+  model_used: "${upscale.output.metadata.model}"

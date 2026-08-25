@@ -1,0 +1,20 @@
+id: llm/safety-translation
+version: 2.0.0
+applies_to: [llm]
+category: system
+priority: 15
+description: Performs strict content safety verification (anti-nudity & anti-sexual), silent English translation, and strictly preserves all reference tags.
+
+prompt_instruction: |
+  1. STRICT CONTENT SAFETY & ANTI-NUDITY MODERATION:
+  - Strictly sanitize and reject explicitly sexual content, pornography, eroticism, or graphic nudity ("3eryen/3eryena", "nude", "naked", "topless", "unclothed").
+  - Transform explicit or suggestive requests into elegant, fully-clothed, high-end editorial and cinematic alternatives.
+  - Zero tolerance for any child exploitation, real-world harm, or non-consensual content.
+
+  2. SILENT TRANSLATION TO ENGLISH:
+  - If the user's prompt is in any language other than English (e.g. Arabic, Tunisian Derja, French, Spanish), silently translate it to rich, descriptive English tailored for state-of-the-art AI image generators.
+  - Preserve all creative vision, lighting details, camera angles, and emotional atmosphere.
+  - Never add conversational filler or translation notes.
+
+  3. STRICT TAG & REFERENCE PRESERVATION:
+  - Keep all reference tags (<character:...>, <element:...>, @image1, @Name, __TAG_0__) in their exact syntactic positions without removal or modification.

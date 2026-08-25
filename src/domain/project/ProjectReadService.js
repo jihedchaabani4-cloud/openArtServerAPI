@@ -1,7 +1,5 @@
 import { supabase, supabaseAdmin } from "../../../lib/supabase.js";
-import { MODEL_ROUTES } from "#video/core/modelRouter.js";
-import { IMAGE_ROUTES } from "#image/core/modelRouter.js";
-import { getModelMetadata } from "../../utils/modelUtils.js";
+import { getCatalog } from "../../models/index.js";
 import { APP_PRICING } from "../../config/pricing.js";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
 
@@ -10,54 +8,38 @@ const APP_CONFIG = {
     pricing: APP_PRICING,
 };
 
-function videoModelInfoToPayload(key, route) {
-    const info = route.info || {};
-    return {
-        key,
-        displayName: info.displayName || key,
-        description: info.description || "",
-        category: info.category || "video",
-        tier: info.tier,
-        pricing: route.pricing,
-        tags: info.tags || [],
-        supportedModes: info.supportedModes || [],
-        support: info.support || {},
-        supportsEdit: route.supportsEdit,
-        supportsCamera: route.supportsCamera,
-        icon: info.icon || getModelMetadata(key).iconUrl,
-    };
-}
-
 function getModelConfig() {
-    const videoModels = Object.entries(MODEL_ROUTES)
-        .filter(([_, route]) => route.type === "generated" && route.open !== false && !route.hidden)
-        .map(([key, route]) => videoModelInfoToPayload(key, route));
+    const catalog = getCatalog();
 
-    const imageModels = Object.entries(IMAGE_ROUTES)
-        .filter(([_, route]) => route.open !== false && !route.hidden)
-        .map(([key, route]) => {
-            const group = route.group;
-            return {
-                key,
-                displayName: group.displayName,
-                description: group.description || "",
-                category: group.category,
-                tier: group.tier,
-                pricing: route.pricing,
-                tags: group.tags || [],
-                support: group.support || {},
-                supportsEdit: route.supportsEdit,
-                supportsCamera: route.supportsCamera,
-                variants: {
-                    t2i: !!route.t2i,
-                    i2i: !!route.i2i,
-                    i2iMulti: !!route.i2iMulti,
-                },
-                icon: group.icon || getModelMetadata(key).iconUrl,
-            };
-        });
+    const models = catalog.map((m) => {
+        const isVideo = m.domain === "video";
+        const opDetails = m.operationDetails || {};
+        const mainOp = isVideo ? "text_to_video" : (opDetails.text_to_image ? "text_to_image" : Object.keys(opDetails)[0]);
+        const opDef = opDetails[mainOp] || {};
 
-    return { models: [...videoModels, ...imageModels] };
+        return {
+            key:            m.modelFamily,
+            displayName:    m.displayName,
+            description:    m.description || "",
+            category:       m.domain,
+            tier:           m.badge || "standard",
+            pricing:        opDef.pricing || {},
+            tags:           m.badge ? [m.badge.toLowerCase()] : [],
+            supportedModes: m.operations || [],
+            support:        {},
+            supportsEdit:   m.operations.includes("edit"),
+            supportsCamera: isVideo,
+            variants: {
+                t2i:      m.operations.includes("text_to_image"),
+                i2i:      m.operations.includes("edit"),
+                i2iMulti: m.operations.includes("edit"),
+            },
+            icon:           m.iconUrl || "",
+            badge:          m.badge || null,
+        };
+    });
+
+    return { models };
 }
 
 function normalizeMediaStatus(status, url) {

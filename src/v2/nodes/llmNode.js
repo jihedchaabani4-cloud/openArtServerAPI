@@ -56,6 +56,8 @@ function parseJSONResponse(rawText) {
 function normalizeStructuredJSON(parsed, userPrompt = "") {
   if (!parsed || typeof parsed !== "object") {
     return {
+      is_safe: true,
+      safety_reason: null,
       prompt: userPrompt || "High quality creative generation",
       description: userPrompt || "High quality creative generation",
       title: "Generated Concept",
@@ -65,6 +67,9 @@ function normalizeStructuredJSON(parsed, userPrompt = "") {
     };
   }
 
+  const isSafe = parsed.is_safe !== false && parsed.safe !== false && parsed.safety !== false;
+  const safetyReason = parsed.safety_reason || parsed.reason || (isSafe ? null : "Safety Violation: Prompt contains prohibited sexual or nudity content.");
+
   const promptText = typeof parsed.description === "string" && parsed.description.trim()
     ? parsed.description.trim()
     : (typeof parsed.prompt === "string" && parsed.prompt.trim()
@@ -73,6 +78,8 @@ function normalizeStructuredJSON(parsed, userPrompt = "") {
 
   return {
     ...parsed,
+    is_safe: isSafe,
+    safety_reason: safetyReason,
     prompt: promptText,
     description: promptText,
     title: parsed.title ?? "Generated Concept",
@@ -89,7 +96,7 @@ function normalizeStructuredJSON(parsed, userPrompt = "") {
  *
  * @param {object} resolvedInputs
  * @param {object} ctx - { runId, nodeId, userId, traceId, gateways, deps }
- * @returns {Promise<{ text: string, json: object, modelUsed: string }>}
+ * @returns {Promise<{ text: string, json: object, is_safe: boolean, safety_reason: string|null, modelUsed: string }>}
  */
 export async function executeLLMNode(resolvedInputs, ctx = {}) {
   const { nodeId = "llm", runId = "run-1" } = ctx;
@@ -126,7 +133,7 @@ export async function executeLLMNode(resolvedInputs, ctx = {}) {
 
   // Enforce Structured Output JSON format rule if jsonMode is active
   if (jsonMode) {
-    systemPrompt += `\n\nOUTPUT CONTRACT: You MUST return ONLY a strictly valid JSON object matching this schema:\n{\n  "title": "Short title",\n  "description": "Enhanced cinematic prompt text",\n  "keywords": ["tag1", "tag2"],\n  "references": [\n    { "assetId": "id", "role": "character_reference | style_reference | product_reference" }\n  ],\n  "generationConfig": {\n    "aspectRatio": "16:9"\n  }\n}`;
+    systemPrompt += `\n\nOUTPUT CONTRACT: You MUST return ONLY a strictly valid JSON object matching this schema:\n{\n  "is_safe": true,\n  "safety_reason": null,\n  "title": "Short title",\n  "description": "Enhanced cinematic prompt text",\n  "keywords": ["tag1", "tag2"],\n  "references": [\n    { "assetId": "id", "role": "character_reference | style_reference | product_reference" }\n  ],\n  "generationConfig": {\n    "aspectRatio": "16:9"\n  }\n}`;
   }
 
   // ── 3. LLM Call & 1-Retry Fallback ─────────────────────────────────────────
@@ -165,9 +172,22 @@ export async function executeLLMNode(resolvedInputs, ctx = {}) {
     }
   }
 
+  // ── 4. Content Safety Enforcement ──────────────────────────────────────────
+  // If the LLM detected sexual or nudity violation, halt execution and flag media immediately
+  if (jsonOutput && jsonOutput.is_safe === false) {
+    const errorMsg = jsonOutput.safety_reason || "Safety Violation: Prompt contains prohibited nudity or sexual content.";
+    console.warn(`🛑 [LLMNode] Content safety violation: ${errorMsg}`);
+    const safetyErr = new Error(errorMsg);
+    safetyErr.code = "CONTENT_SAFETY_VIOLATION";
+    safetyErr.is_safe = false;
+    throw safetyErr;
+  }
+
   return {
-    text: jsonOutput?.description ?? result.raw,
+    text: jsonOutput?.description ?? jsonOutput?.prompt ?? result.raw,
     json: jsonOutput,
+    is_safe: jsonOutput?.is_safe ?? true,
+    safety_reason: jsonOutput?.safety_reason ?? null,
     modelUsed: result.model,
   };
 }

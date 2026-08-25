@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { parseBinding } from "../compiler/validateBindings.js";
 import { RunRepository } from "./runRepository.js";
-import { enqueueWorkflowRun, enqueueNodeExecute } from "../queue/v2WorkflowQueue.js";
-import { getValueAtPath } from "./nodeExecutor.js";
+import { jobQueueService } from "../../services/jobQueueService.js";
+import { getValueAtPath, executeNodeJob } from "./nodeExecutor.js";
 import { logV2Event } from "../logging/v2Logger.js";
-import { normalizeNodeMediaOutputs } from "#platform/media/MediaLifecycleService.js";
 
 const runRepo = new RunRepository();
 const PROVIDER_BACKED_NODE_TYPES = new Set([
@@ -95,70 +94,6 @@ export async function rollbackNodeBilling({ runId, nodeId, nodeConfig, attempt =
 }
 
 /**
- * Phase 1 — Create V1 media placeholders BEFORE the node executes.
- * Returns an array of { workflowId, mediaId } for each expected output asset.
- * For image-generation, creates `count` placeholders.
- * For other node types, creates exactly 1 placeholder.
- */
-export async function createNodeMediaPlaceholders({ runId, nodeConfig, resolvedInputs, run }) {
-  if (!storageGateway?.startPlaceholdersForNode) {
-    return [];
-  }
-
-  return storageGateway.startPlaceholdersForNode({
-    runId,
-    nodeConfig,
-    resolvedInputs,
-    run,
-  });
-}
-
-/**
- * Phase 2 — Finalize V1 media records AFTER the node executes successfully.
- * Updates each placeholder with the actual URL and status='success'.
- */
-export async function finalizeNodeMediaOutputs({ runId, nodeId, nodeConfig, output, run, input, placeholders = [] }) {
-  if (!storageGateway || !isProviderBackedNodeType(nodeConfig?.type)) {
-    return [];
-  }
-
-  if (placeholders.length > 0) {
-    return storageGateway.finalizeOutputsForNode({
-      placeholders,
-      nodeConfig,
-      output,
-      runId,
-      nodeId,
-    });
-  }
-
-  const mediaOutputs = normalizeNodeMediaOutputs(nodeConfig, output, { runId, nodeId });
-  const persisted = [];
-  for (const mediaResult of mediaOutputs) {
-    const resultWithContext = {
-      ...mediaResult,
-      _v2Context: {
-        runId,
-        workflowId: run?.workflow_id || "unknown",
-        userId: run?.user_id || null,
-        output,
-        nodeType: nodeConfig.type,
-        input: input || {},
-      },
-    };
-    persisted.push(await storageGateway.persistMediaResult(resultWithContext));
-  }
-  return persisted;
-}
-
-/**
- * @deprecated Use finalizeNodeMediaOutputs instead.
- */
-export async function persistNodeMediaOutputs({ runId, nodeId, nodeConfig, output, run, input }) {
-  return finalizeNodeMediaOutputs({ runId, nodeId, nodeConfig, output, run, input, placeholders: [] });
-}
-
-/**
  * Starts a new workflow run.
  * @param {import('../contracts/executionGraph.js').ExecutionGraph} plan
  * @param {Object} runtimeInput
@@ -209,12 +144,11 @@ export async function startWorkflowRun(plan, runtimeInput, runId = null) {
     message: `Initialized workflow run ${finalRunId} for ${plan.workflow_id}`
   });
 
-  // Enqueue the run job to begin execution orchestration (with inline fallback)
+  // Execute workflow orchestration across nodes
   try {
-    await enqueueWorkflowRun(finalRunId);
+    await executeOrchestration(finalRunId);
   } catch (err) {
-    console.warn(`[workflowRunner] Queue enqueue notice: ${err.message}. Triggering inline orchestration fallback...`);
-    executeOrchestration(finalRunId).catch((e) => console.error("Inline orchestration error:", e));
+    console.error(`[workflowRunner] Execution error for run ${finalRunId}:`, err);
   }
 
   return { run_id: finalRunId, status: "pending" };
@@ -352,21 +286,12 @@ export async function executeOrchestration(runId) {
       });
       
       try {
-        await enqueueNodeExecute(runId, node.id);
+        await executeNodeJob(runId, node.id);
+        return await executeOrchestration(runId);
       } catch (err) {
-        console.warn(`[workflowRunner] Queue node enqueue notice (${node.id}): ${err.message}. Triggering inline node execution...`);
-        executeNodeJob(runId, node.id).then(() => executeOrchestration(runId)).catch((e) => console.error("Inline node execution error:", e));
+        console.error(`[workflowRunner] Node execution error (${node.id}):`, err.message);
+        return;
       }
-      
-      enqueuedAny = true;
-
-      logV2Event({
-        traceId: runId,
-        operation: "workflow.orchestrate",
-        durationMs: 0,
-        status: "success",
-        message: `Enqueued node ${node.id} for execution`
-      });
     }
   }
 

@@ -216,6 +216,7 @@ export function compileWorkflow(workflow, registries) {
       bindings,
       retry_policy: resolveRetryPolicy(nodeType.retry, nodeType.skill_aware, resolvedProcessors),
       ...(skills.length > 0 ? { skills, resolved_processors: resolvedProcessors } : {}),
+      ...(nodeConfig.persist ? { persist: nodeConfig.persist } : {}),
     };
   });
 

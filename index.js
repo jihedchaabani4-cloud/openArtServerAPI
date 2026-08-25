@@ -6,7 +6,6 @@ import morgan from "morgan";
 
 import apiRouter from "./src/api/routes.js";
 import { walletService } from "./src/container.js";
-import "./src/workers/worker.js";
 import { bootstrapV2 } from "./src/v2/bootstrap.js";
 
 bootstrapV2();

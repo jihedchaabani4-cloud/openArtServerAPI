@@ -1,0 +1,8 @@
+{
+  "id": "pruna_ai",
+  "domain": "image",
+  "displayName": "Pruna AI Image",
+  "description": "High-quality text-to-image and editing powered by Pruna AI",
+  "iconUrl": "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/lobe.svg",
+  "badge": "FAST"
+}

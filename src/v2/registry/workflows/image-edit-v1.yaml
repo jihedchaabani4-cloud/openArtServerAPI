@@ -1,0 +1,50 @@
+id: image-edit-v1
+name: Image Edit
+version: 1.0.0
+description: Edit an existing image using a text prompt and optional reference images.
+
+metadata:
+  category: image
+  tags: [image, edit, inpaint]
+  author: system
+
+input_schema:
+  required: [prompt, source_url]
+  properties:
+    prompt: { type: string }
+    source_url: { type: string }
+    references: { type: array }
+    workflow_id: { type: string }
+    project_id: { type: string }
+    ratio: { type: string }
+
+nodes:
+  build_prompt:
+    type: prompt-builder
+    inputs:
+      prompt: "${input.prompt}"
+      references: "${input.references}"
+      source_url: "${input.source_url}"
+
+  generate:
+    type: image-generation
+    depends_on: [build_prompt]
+    inputs:
+      prompt: "${build_prompt.output.finalPrompt}"
+      image: "${input.source_url}"
+      references: "${build_prompt.output.context.references}"
+      workflow_id: "${input.workflow_id}"
+      project_id: "${input.project_id}"
+      ratio: "${input.ratio}"
+    config:
+      mode: edit
+      count: 1
+    persist:
+      target: media
+      step_id: image_edit
+      status: completed
+      value: "$outputs.assets[0].url"
+
+outputs:
+  main_asset: "${generate.output.assets}"
+  model_used: "${generate.output.metadata.model}"

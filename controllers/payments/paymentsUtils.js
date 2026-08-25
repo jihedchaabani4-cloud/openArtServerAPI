@@ -1,16 +1,6 @@
 import crypto from "crypto";
 import { supabase } from "../../lib/supabase.js";
-import { getModelMetadata } from "../../src/utils/modelUtils.js";
-import {
-    IMAGE_ROUTES,
-    IMAGE_MODEL_TYPES,
-    calculateImageCredits,
-} from "../../src/image/core/modelRouter.js";
-import {
-    MODEL_ROUTES,
-    VIDEO_MODEL_TYPES,
-    calculateVideoCredits,
-} from "../../src/video/core/modelRouter.js";
+import { getCatalog, calculateCost } from "../../src/models/index.js";
 
 const SENSITIVE_PACKAGE_FIELDS = new Set(["variant_id", "checkout_url"]);
 
@@ -75,21 +65,22 @@ function floorMediaCount(packageCredits, modelCredits) {
 }
 
 function buildImageComparison(packages) {
-    return Object.entries(IMAGE_ROUTES)
-        .filter(([_, route]) => route.type === IMAGE_MODEL_TYPES.GENERATED && route.open !== false && !route.hidden)
-        .map(([key, route]) => {
-            const group = route.group || {};
-            const price = calculateImageCredits({
-                modelKey: key,
-                quality: "standard",
-                operation: "generated",
-            });
-            const creditsPerGeneration = price.credits;
+    const catalog = getCatalog({ domain: "image" });
+
+    return catalog
+        .map((entry) => {
+            let creditsPerGeneration = 10;
+            try {
+                const cost = calculateCost(entry.modelFamily, "text_to_image", { quality: "standard" });
+                creditsPerGeneration = parseFloat(cost.amount);
+            } catch {
+                creditsPerGeneration = 10;
+            }
 
             return {
-                key,
-                displayName: group.displayName || key,
-                icon: group.icon || getModelMetadata(key).iconUrl,
+                key: entry.modelFamily,
+                displayName: entry.displayName || entry.modelFamily,
+                icon: entry.iconUrl || "",
                 category: "image",
                 creditsPerGeneration,
                 unitLabel: "image",
@@ -108,21 +99,22 @@ function buildImageComparison(packages) {
 }
 
 function buildVideoComparison(packages) {
-    return Object.entries(MODEL_ROUTES)
-        .filter(([_, route]) => route.type === VIDEO_MODEL_TYPES.GENERATED && route.open !== false && !route.hidden)
-        .map(([key, route]) => {
-            const info = route.info || {};
-            const price = calculateVideoCredits({
-                modelKey: key,
-                durationSeconds: 5,
-                resolution: "720p",
-            });
-            const creditsPerGeneration = price.credits;
+    const catalog = getCatalog({ domain: "video" });
+
+    return catalog
+        .map((entry) => {
+            let creditsPerGeneration = 20;
+            try {
+                const cost = calculateCost(entry.modelFamily, "text_to_video", { durationSeconds: 5, resolution: "720p" });
+                creditsPerGeneration = parseFloat(cost.amount);
+            } catch {
+                creditsPerGeneration = 20;
+            }
 
             return {
-                key,
-                displayName: info.displayName || key,
-                icon: info.icon || getModelMetadata(key).iconUrl,
+                key: entry.modelFamily,
+                displayName: entry.displayName || entry.modelFamily,
+                icon: entry.iconUrl || "",
                 category: "video",
                 creditsPerGeneration,
                 unitLabel: "video",

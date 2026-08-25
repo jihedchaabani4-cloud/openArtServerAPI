@@ -1,7 +1,7 @@
 id: character-sheet-v1
 name: Character Sheet
 version: 1.0.0
-description: Pure prompt resolution in PromptBuilder, professional 3-view studio sheet engineering in LLM Vision, and 4-image generation.
+description: Pure prompt resolution in PromptBuilder, professional 3-view studio sheet engineering in LLM Vision, and fixed 16:9 character sheet generation.
 
 metadata:
   category: character
@@ -14,12 +14,9 @@ input_schema:
     prompt: { type: string }
     characters: { type: array }
     references: { type: array }
-    style: { type: string }
-    model: { type: string }
+    workflow_id: { type: string }
     project_id: { type: string }
     projectId: { type: string }
-
-default_model: z_image_base
 
 nodes:
   build_prompt:
@@ -28,7 +25,6 @@ nodes:
       prompt: "${input.prompt}"
       characters: "${input.characters}"
       references: "${input.references}"
-      style: "${input.style}"
 
   llm_enrich:
     type: llm
@@ -40,8 +36,10 @@ nodes:
     config:
       skills: [llm/translation, llm/character-description, llm/json-output]
       jsonMode: true
-      parameters:
-        style: "${input.style}"
+    persist:
+      target: character
+      field: description
+      value: "$outputs.json.description"
 
   generate:
     type: image-generation
@@ -49,13 +47,20 @@ nodes:
     inputs:
       prompt: "${llm_enrich.output.json.description}"
       references: "${build_prompt.output.context.references}"
-      model: "${input.model}"
+      workflow_id: "${input.workflow_id}"
       project_id: "${input.project_id}"
-      count: "${input.count}"
     config:
-      width: 1024
-      height: 1024
+      model: gpt-image-2
+      ratio: "16:9"
+      aspect_ratio: "16:9"
+      width: 1344
+      height: 768
       count: 1
+    persist:
+      target: media
+      step_id: character_sheet
+      status: completed
+      value: "$outputs.assets[0].url"
 
 outputs:
   character_title: "${llm_enrich.output.json.title}"

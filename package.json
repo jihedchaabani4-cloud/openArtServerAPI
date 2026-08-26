@@ -6,8 +6,6 @@
     "type": "module",
     "imports": {
         "#lib/*.js": "./lib/*.js",
-        "#core/*.js": "./src/core/*.js",
-        "#core/*": "./src/core/*",
         "#utils/*.js": "./src/utils/*.js",
         "#db/*.js": "./src/db/*.js",
         "#platform/storage/*.js": "./src/platform/storage/*.js",
@@ -21,9 +19,6 @@
         "#domain/generation/*.js": "./src/domain/generation/*.js",
         "#domain/project/*.js": "./src/domain/project/*.js",
         "#queue/*.js": "./src/queue/*.js",
-        "#video/*.js": "./src/video/*.js",
-        "#video/*": "./src/video/*",
-        "#image/*.js": "./src/image/*.js",
         "#container.js": "./src/container.js"
     },
     "scripts": {

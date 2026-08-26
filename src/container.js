@@ -1,7 +1,6 @@
 import "dotenv/config";
 import { PromptService } from "#platform/ai/PromptService.js";
 import { StorageService } from "#platform/storage/StorageService.js";
-import { VisionService } from "#platform/ai/VisionService.js";
 import { WalletService } from "#platform/billing/WalletService.js";
 import { PricingService } from "#platform/billing/PricingService.js";
 import { FailedOpsService } from "#platform/billing/FailedOpsService.js";
@@ -33,18 +32,9 @@ import { AuditService } from "#platform/security/AuditService.js";
 import { WorkflowStorageGateway } from "./infrastructure/storage/workflowStorageGateway.js";
 import { WorkflowQueueGateway } from "./infrastructure/queue/workflowQueueGateway.js";
 
-// ─── Providers ───────────────────────────────────────────────────────────────
-import { OpenAITextProvider } from "./core/providers/OpenAITextProvider.js";
-import { GroqProvider }       from "./core/providers/GroqProvider.js";
-
-// ─── Init Providers ──────────────────────────────────────────────────────────
-const openai = process.env.OPENAI_API_KEY ? new OpenAITextProvider(process.env.OPENAI_API_KEY) : null;
-const groq   = new GroqProvider(process.env.GROQ_API_KEY);
-
 // ─── Services ────────────────────────────────────────────────────────────────
-export const promptService  = new PromptService(groq);
+export const promptService  = new PromptService();
 export const storageService = new StorageService();
-export const visionService  = new VisionService(groq);
 const walletServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || null;
 export const walletService  = process.env.SUPABASE_URL && walletServiceKey
     ? new WalletService(process.env.SUPABASE_URL, walletServiceKey)
@@ -107,7 +97,7 @@ export const workflowQueueGateway = new WorkflowQueueGateway();
 // ─── DNA Treatment ────────────────────────────────────────────────────────────
 
 export const dnaTreatment = new DnaTreatment({
-    textProvider: promptService.textProvider,
+    textProvider: promptService,
     db
 });
 

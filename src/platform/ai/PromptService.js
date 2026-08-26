@@ -1,9 +1,40 @@
+import { run } from "../../models/index.js";
+
+async function executeTextCompletion({ systemPrompt, userPrompt, temperature = 0.7 }) {
+    const messages = [];
+    if (systemPrompt) messages.push({ role: "system", content: systemPrompt });
+    if (userPrompt) messages.push({ role: "user", content: userPrompt });
+
+    const result = await run("llama-3-3-70b", "chat_completion", {
+        messages,
+        temperature,
+    });
+
+    return result.content || "";
+}
+
+async function executeJsonCompletion(params) {
+    const text = await executeTextCompletion(params);
+    let cleaned = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+    const firstBrace = cleaned.indexOf("{");
+    const lastBrace = cleaned.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+        cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+    }
+    return JSON.parse(cleaned);
+}
+
 export class PromptService {
-    /**
-     * @param {import('../core/providers/BaseTextProvider').BaseTextProvider} textProvider
-     */
-    constructor(textProvider) {
-        this.textProvider = textProvider;
+    constructor() {
+        this.modelFamily = "llama-3-3-70b";
+    }
+
+    async complete({ systemPrompt, userPrompt, temperature = 0.7 }) {
+        return executeTextCompletion({ systemPrompt, userPrompt, temperature });
+    }
+
+    async completeJSON({ systemPrompt, userPrompt, temperature = 0.7 }) {
+        return executeJsonCompletion({ systemPrompt, userPrompt, temperature });
     }
 
     async checkPrompt(prompt) {
@@ -29,7 +60,7 @@ export class PromptService {
         const userPrompt = `Analyze and translate this prompt: "${prompt}"`;
 
         try {
-            const result = await this.textProvider.completeJSON({ systemPrompt, userPrompt });
+            const result = await this.completeJSON({ systemPrompt, userPrompt });
             return {
                 safe: result.is_safe,
                 reason: result.rejection_reason,
@@ -51,10 +82,6 @@ export class PromptService {
      *  3. Fixes incomplete / broken words (typos, half-written words)
      *  4. Enriches the prompt with cinematic/visual details for AI generation
      *  5. Returns the improved prompt + metadata
-     *
-     * @param {string} prompt - raw user input
-     * @param {{ mode?: "image"|"video", style?: string }} [opts]
-     * @returns {{ optimized: string, originalLanguage: string, wasTranslated: boolean, wasEnhanced: boolean }}
      */
     async optimizePrompt(prompt, { mode = "image", style = "cinematic" } = {}) {
         if (!prompt?.trim()) return {
@@ -117,10 +144,9 @@ RULES:
 Translate the semantic meaning and enhance it as a professional AI generation prompt.`;
 
         try {
-            const result = await this.textProvider.completeJSON({ systemPrompt, userPrompt, temperature: 0.4 });
+            const result = await this.completeJSON({ systemPrompt, userPrompt, temperature: 0.4 });
             const optimized = result.optimized_prompt || prompt;
 
-            // ── Print final prompt for visibility ────────────────────────
             console.log(`\n🌍 [PromptOptimizer] Language detected: ${result.original_language || 'unknown'}`);
             if (result.was_translated) {
                 console.log(`🔄 [PromptOptimizer] Translated from: "${prompt.substring(0, 60)}..."`);
@@ -150,19 +176,13 @@ Translate the semantic meaning and enhance it as a professional AI generation pr
         }
     }
 
-    /** @deprecated — use optimizePrompt instead */
-    async upscalePrompt(prompt, { style = "cinematic", quality = "ultra" } = {}) {
-        return this.optimizePrompt(prompt, { style });
-    }
-
-
     async generateDnaFromPrompt(userPrompt) {
         const systemPrompt = `You are a Master Character Architect and Cinematographer. Your EXCLUSIVE goal is photorealistic human/character generation.
         Prioritize extreme macro-details, dermatological accuracy, and character soul.
         Return JSON object following ULTIMATE DNA v4.0 Schema including "professional_prompt" field.`;
 
         try {
-            return await this.textProvider.completeJSON({ systemPrompt, userPrompt, temperature: 0.5 });
+            return await this.completeJSON({ systemPrompt, userPrompt, temperature: 0.5 });
         } catch (e) {
             console.error("DNA generation failed:", e);
             return null;
@@ -178,7 +198,7 @@ Translate the semantic meaning and enhance it as a professional AI generation pr
         const userPrompt = `Minimal Selector: ${JSON.stringify(minimalDna)}`;
 
         try {
-            return await this.textProvider.completeJSON({ systemPrompt, userPrompt, temperature: 0.4 });
+            return await this.completeJSON({ systemPrompt, userPrompt, temperature: 0.4 });
         } catch (e) {
             console.error("DNA expansion failed:", e);
             return null;
@@ -194,7 +214,7 @@ Translate the semantic meaning and enhance it as a professional AI generation pr
         const userPrompt = `Current DNA: ${JSON.stringify(dna)}`;
 
         try {
-            return await this.textProvider.completeJSON({ systemPrompt, userPrompt });
+            return await this.completeJSON({ systemPrompt, userPrompt });
         } catch (e) {
             console.error("Edit intent processing failed:", e);
             return { dna_changes: {}, change_prompt: "" };
@@ -209,7 +229,7 @@ Translate the semantic meaning and enhance it as a professional AI generation pr
         const userPrompt = `CHARACTER DNA: ${JSON.stringify(dna)} ${userCommand ? `Context: "${userCommand}"` : ""}`;
 
         try {
-            return await this.textProvider.complete({ systemPrompt, userPrompt, temperature: 0.7 });
+            return await this.complete({ systemPrompt, userPrompt, temperature: 0.7 });
         } catch (e) {
             console.error("Professional prompt generation failed:", e);
             return "";
@@ -226,7 +246,7 @@ Translate the semantic meaning and enhance it as a professional AI generation pr
         `;
         const userPrompt = `Positive prompt: "${prompt}"`;
         try {
-            const result = await this.textProvider.completeJSON({ systemPrompt, userPrompt, temperature: 0.2 });
+            const result = await this.completeJSON({ systemPrompt, userPrompt, temperature: 0.2 });
             return result.negative || "";
         } catch (e) {
             console.error("Negative prompt generation failed:", e);
@@ -250,44 +270,11 @@ Translate the semantic meaning and enhance it as a professional AI generation pr
         const userPrompt = `Base Prompt: "${basePrompt}"\nGenerate ${count} variations.`;
 
         try {
-            const result = await this.textProvider.completeJSON({ systemPrompt, userPrompt });
+            const result = await this.completeJSON({ systemPrompt, userPrompt });
             return result.variations || Array(count).fill(basePrompt);
         } catch (e) {
             console.error("Scene variations generation failed:", e);
             return Array(count).fill(basePrompt);
-        }
-    }
-
-    async generateCameraPrompt(cameraText) {
-        const systemPrompt = `
-            You are a professional cinematographer and AI video prompt engineer specializing in camera motion and composition.
-
-            Your task: Convert a user's natural-language camera instruction into two things:
-            1. A "camera_prompt" — a short cinematic description (max 20 words) that can be appended to a video generation prompt to describe the camera motion or position. Use cinematic language: "slow dolly in", "aerial pull-back", "tracking shot left", "subtle handheld shake", "bird's-eye view", "low angle tilt up", etc.
-            2. A "camera_control" object (optional) — structured control parameters if applicable.
-
-            camera_control schema (use ONLY known values, leave null if unsure):
-            {
-                "type": "zoom_in" | "zoom_out" | "pan_left" | "pan_right" | "tilt_up" | "tilt_down" | "rotate_cw" | "rotate_ccw" | "static" | null,
-                "speed": "slow" | "normal" | "fast" | null
-            }
-
-            Return ONLY valid JSON:
-            {
-                "camera_prompt": string,
-                "camera_control": { "type": string | null, "speed": string | null }
-            }
-        `;
-        const userPrompt = `Camera instruction: "${cameraText}"`;
-        try {
-            const result = await this.textProvider.completeJSON({ systemPrompt, userPrompt, temperature: 0.4 });
-            return {
-                cameraPrompt:   result.camera_prompt   || "",
-                cameraControl:  result.camera_control  || null,
-            };
-        } catch (e) {
-            console.error("Camera prompt generation failed:", e);
-            return { cameraPrompt: cameraText, cameraControl: null };
         }
     }
 }

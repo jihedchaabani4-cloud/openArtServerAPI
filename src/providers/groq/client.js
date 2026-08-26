@@ -5,8 +5,8 @@ import {
   ProviderMalformedResponseError,
 } from "../../models/errors/index.js";
 
-export class WaveSpeedClient {
-  constructor({ baseUrl = "https://api.wavespeed.ai/api/v3", apiKey } = {}) {
+export class GroqClient {
+  constructor({ baseUrl = "https://api.groq.com/openai/v1", apiKey } = {}) {
     this.baseUrl = baseUrl;
     this.apiKey = apiKey;
   }
@@ -22,14 +22,10 @@ export class WaveSpeedClient {
       providerModelId = arg1.providerModelId;
     }
 
-    // For test environments or mock transports
-    if (process.env.NODE_ENV === "test" && !this.apiKey?.startsWith("real_")) {
+    if (process.env.NODE_ENV === "test" && !this.apiKey?.startsWith("real_") && !this.apiKey?.startsWith("gsk_")) {
       return {
-        id: "mock-task-12345",
-        status: "completed",
-        output: {
-          url: `https://cdn.openart.ai/generated/${Date.now()}.png`,
-        },
+        choices: [{ message: { content: "Mock Groq completion response" } }],
+        usage: { prompt_tokens: 10, completion_tokens: 15 },
       };
     }
 
@@ -42,26 +38,30 @@ export class WaveSpeedClient {
           "Content-Type": "application/json",
           Authorization: `Bearer ${this.apiKey}`,
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          model: providerModelId || "llama-3.3-70b-versatile",
+          ...payload,
+        }),
       });
     } catch (err) {
-      throw new ProviderRequestError(`Network error calling WaveSpeed: ${err.message}`);
+      throw new ProviderRequestError(`Network error calling Groq: ${err.message}`);
     }
 
     if (res.status === 429 || res.status === 503) {
-      throw new ProviderTransientError(`WaveSpeed temporary error (${res.status})`);
+      throw new ProviderTransientError(`Groq temporary rate limit (${res.status})`);
     }
     if (res.status === 422) {
-      throw new ProviderContentPolicyError(`WaveSpeed rejected content policy`);
+      throw new ProviderContentPolicyError("Groq rejected request content");
     }
     if (!res.ok) {
-      throw new ProviderRequestError(`WaveSpeed error status ${res.status}`);
+      const errText = await res.text().catch(() => "");
+      throw new ProviderRequestError(`Groq error status ${res.status}: ${errText.slice(0, 200)}`);
     }
 
     try {
       return await res.json();
     } catch {
-      throw new ProviderMalformedResponseError("WaveSpeed returned invalid JSON");
+      throw new ProviderMalformedResponseError("Groq returned invalid JSON");
     }
   }
 }

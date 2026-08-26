@@ -5,8 +5,8 @@ import {
   ProviderMalformedResponseError,
 } from "../../models/errors/index.js";
 
-export class WaveSpeedClient {
-  constructor({ baseUrl = "https://api.wavespeed.ai/api/v3", apiKey } = {}) {
+export class FalClient {
+  constructor({ baseUrl = "https://queue.fal.run", apiKey } = {}) {
     this.baseUrl = baseUrl;
     this.apiKey = apiKey;
   }
@@ -22,14 +22,9 @@ export class WaveSpeedClient {
       providerModelId = arg1.providerModelId;
     }
 
-    // For test environments or mock transports
     if (process.env.NODE_ENV === "test" && !this.apiKey?.startsWith("real_")) {
       return {
-        id: "mock-task-12345",
-        status: "completed",
-        output: {
-          url: `https://cdn.openart.ai/generated/${Date.now()}.png`,
-        },
+        images: [{ url: `https://cdn.openart.ai/fal/${Date.now()}.png` }],
       };
     }
 
@@ -40,28 +35,29 @@ export class WaveSpeedClient {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
+          Authorization: `Key ${this.apiKey}`,
         },
         body: JSON.stringify(payload),
       });
     } catch (err) {
-      throw new ProviderRequestError(`Network error calling WaveSpeed: ${err.message}`);
+      throw new ProviderRequestError(`Network error calling Fal.ai: ${err.message}`);
     }
 
     if (res.status === 429 || res.status === 503) {
-      throw new ProviderTransientError(`WaveSpeed temporary error (${res.status})`);
+      throw new ProviderTransientError(`Fal.ai temporary queue/capacity error (${res.status})`);
     }
     if (res.status === 422) {
-      throw new ProviderContentPolicyError(`WaveSpeed rejected content policy`);
+      throw new ProviderContentPolicyError("Fal.ai content moderation rejected the request");
     }
     if (!res.ok) {
-      throw new ProviderRequestError(`WaveSpeed error status ${res.status}`);
+      const errText = await res.text().catch(() => "");
+      throw new ProviderRequestError(`Fal.ai error status ${res.status}: ${errText.slice(0, 200)}`);
     }
 
     try {
       return await res.json();
     } catch {
-      throw new ProviderMalformedResponseError("WaveSpeed returned invalid JSON");
+      throw new ProviderMalformedResponseError("Fal.ai returned invalid JSON");
     }
   }
 }

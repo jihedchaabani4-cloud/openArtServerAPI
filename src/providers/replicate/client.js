@@ -5,8 +5,8 @@ import {
   ProviderMalformedResponseError,
 } from "../../models/errors/index.js";
 
-export class WaveSpeedClient {
-  constructor({ baseUrl = "https://api.wavespeed.ai/api/v3", apiKey } = {}) {
+export class ReplicateClient {
+  constructor({ baseUrl = "https://api.replicate.com/v1", apiKey } = {}) {
     this.baseUrl = baseUrl;
     this.apiKey = apiKey;
   }
@@ -22,14 +22,10 @@ export class WaveSpeedClient {
       providerModelId = arg1.providerModelId;
     }
 
-    // For test environments or mock transports
-    if (process.env.NODE_ENV === "test" && !this.apiKey?.startsWith("real_")) {
+    if (process.env.NODE_ENV === "test" && !this.apiKey?.startsWith("real_") && !this.apiKey?.startsWith("r8_")) {
       return {
-        id: "mock-task-12345",
-        status: "completed",
-        output: {
-          url: `https://cdn.openart.ai/generated/${Date.now()}.png`,
-        },
+        output: [`https://cdn.openart.ai/replicate/${Date.now()}.png`],
+        status: "succeeded",
       };
     }
 
@@ -42,26 +38,30 @@ export class WaveSpeedClient {
           "Content-Type": "application/json",
           Authorization: `Bearer ${this.apiKey}`,
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          version: providerModelId,
+          input: payload,
+        }),
       });
     } catch (err) {
-      throw new ProviderRequestError(`Network error calling WaveSpeed: ${err.message}`);
+      throw new ProviderRequestError(`Network error calling Replicate: ${err.message}`);
     }
 
     if (res.status === 429 || res.status === 503) {
-      throw new ProviderTransientError(`WaveSpeed temporary error (${res.status})`);
+      throw new ProviderTransientError(`Replicate temporary rate limit (${res.status})`);
     }
     if (res.status === 422) {
-      throw new ProviderContentPolicyError(`WaveSpeed rejected content policy`);
+      throw new ProviderContentPolicyError("Replicate content policy validation failed");
     }
     if (!res.ok) {
-      throw new ProviderRequestError(`WaveSpeed error status ${res.status}`);
+      const errText = await res.text().catch(() => "");
+      throw new ProviderRequestError(`Replicate error status ${res.status}: ${errText.slice(0, 200)}`);
     }
 
     try {
       return await res.json();
     } catch {
-      throw new ProviderMalformedResponseError("WaveSpeed returned invalid JSON");
+      throw new ProviderMalformedResponseError("Replicate returned invalid JSON");
     }
   }
 }

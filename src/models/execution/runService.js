@@ -3,20 +3,23 @@ import { resolveServableDeployment } from "../deployment/deploymentResolver.js";
 import { resolveCredential } from "../credentials/credentialResolver.js";
 import { validateInput } from "../validation/validationService.js";
 import { getRegistry } from "../registry/loader.js";
+
+// Providers Dedicated Clients
 import { WaveSpeedClient } from "../../providers/wavespeed/client.js";
+import { GoogleClient } from "../../providers/google/client.js";
+import { GroqClient } from "../../providers/groq/client.js";
+import { FalClient } from "../../providers/fal/client.js";
+import { ReplicateClient } from "../../providers/replicate/client.js";
+
+// Providers Adapters
 import { wavespeedAdapter } from "../../adapters/wavespeedAdapter.js";
 import { googleAdapter } from "../../adapters/googleAdapter.js";
 import { groqAdapter } from "../../adapters/groqAdapter.js";
 import { falAdapter } from "../../adapters/falAdapter.js";
 import { replicateAdapter } from "../../adapters/replicateAdapter.js";
+
 import telemetry, { MODEL_EVENTS } from "../observability/events.js";
-import {
-  OutputContractViolationError,
-  ProviderRequestError,
-  ProviderTransientError,
-  ProviderContentPolicyError,
-  ProviderMalformedResponseError,
-} from "../errors/index.js";
+import { OutputContractViolationError } from "../errors/index.js";
 
 const ADAPTERS = {
   wavespeed: wavespeedAdapter,
@@ -26,76 +29,17 @@ const ADAPTERS = {
   replicate: replicateAdapter,
 };
 
-class GenericHttpClient {
-  constructor({ providerId, baseUrl, apiKey }) {
-    this.providerId = providerId;
-    this.baseUrl = baseUrl;
-    this.apiKey = apiKey;
-  }
-
-  async execute(endpoint, payload) {
-    if (process.env.NODE_ENV === "test" && !this.apiKey.startsWith("real_") && !this.apiKey.startsWith("AIza")) {
-      if (this.providerId === "google" || this.providerId === "groq") {
-        return {
-          choices: [{ message: { content: "Mock text completion response" } }],
-          candidates: [{ content: { parts: [{ text: "Mock text completion response" }] } }],
-          usage: { prompt_tokens: 10, completion_tokens: 15 },
-        };
-      }
-      return {
-        id: "mock-task-12345",
-        status: "completed",
-        output: { url: `https://cdn.openart.ai/generated/${Date.now()}.png` },
-      };
-    }
-
-    let url = `${this.baseUrl}${endpoint}`;
-    const headers = { "Content-Type": "application/json" };
-
-    if (this.providerId === "google") {
-      url = `${url}?key=${this.apiKey}`;
-    } else if (this.providerId === "fal") {
-      headers.Authorization = `Key ${this.apiKey}`;
-    } else {
-      headers.Authorization = `Bearer ${this.apiKey}`;
-    }
-
-    let res;
-    try {
-      res = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(payload),
-      });
-    } catch (err) {
-      throw new ProviderRequestError(`Network error calling ${this.providerId}: ${err.message}`);
-    }
-
-    if (res.status === 429 || res.status === 503) {
-      throw new ProviderTransientError(`${this.providerId} temporary error (${res.status})`);
-    }
-    if (res.status === 422) {
-      throw new ProviderContentPolicyError(`${this.providerId} rejected content policy`);
-    }
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => "");
-      throw new ProviderRequestError(`${this.providerId} error status ${res.status}: ${errBody.slice(0, 200)}`);
-    }
-
-    try {
-      return await res.json();
-    } catch {
-      throw new ProviderMalformedResponseError(`${this.providerId} returned invalid JSON`);
-    }
-  }
-}
+const CLIENT_FACTORIES = {
+  wavespeed: (cfg) => new WaveSpeedClient(cfg),
+  google:    (cfg) => new GoogleClient(cfg),
+  groq:      (cfg) => new GroqClient(cfg),
+  fal:       (cfg) => new FalClient(cfg),
+  replicate: (cfg) => new ReplicateClient(cfg),
+};
 
 function getClientForProvider(provider, credential) {
-  if (provider.id === "wavespeed") {
-    return new WaveSpeedClient({ baseUrl: provider.baseUrl, apiKey: credential.apiKey });
-  }
-  return new GenericHttpClient({
-    providerId: provider.id,
+  const factory = CLIENT_FACTORIES[provider.id] || ((cfg) => new WaveSpeedClient(cfg));
+  return factory({
     baseUrl: provider.baseUrl,
     apiKey: credential.apiKey,
   });
@@ -157,7 +101,12 @@ export async function run(modelFamily, operation, rawInput = {}, options = {}) {
 
   let rawResponse;
   try {
-    rawResponse = await client.execute(opConfig.endpoint, providerPayload);
+    rawResponse = await client.execute({
+      providerModelId: deployment.providerModelId,
+      payload: providerPayload,
+      endpoint: opConfig.endpoint,
+      operation,
+    });
   } catch (err) {
     telemetry.emit(MODEL_EVENTS.EXECUTION_FAILED, {
       modelFamily,

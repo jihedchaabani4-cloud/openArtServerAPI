@@ -1,11 +1,25 @@
 import { supabase, supabaseAdmin } from "../../../lib/supabase.js";
 import { getCatalog } from "../../models/index.js";
-import { APP_PRICING } from "../../config/pricing.js";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
+
+function getCatalogPricing() {
+    const catalog = getCatalog();
+    const pricing = {};
+    for (const m of catalog) {
+        for (const [op, details] of Object.entries(m.operationDetails || {})) {
+            if (details.pricing) {
+                pricing[`${m.modelFamily}.${op}`] = details.pricing;
+            }
+        }
+    }
+    return pricing;
+}
 
 const APP_CONFIG = {
     changeLogId: "2026-03-19-v1-3f4e036c-6a67-467f-a0e6-25cff0a0a8ab",
-    pricing: APP_PRICING,
+    get pricing() {
+        return getCatalogPricing();
+    },
 };
 
 function getModelConfig() {

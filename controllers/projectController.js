@@ -1,5 +1,4 @@
 import { projectReadService } from "../src/container.js";
-import { APP_PRICING } from "../src/config/pricing.js";
 import { calculateCost, getCatalog } from "../src/models/index.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -69,7 +68,6 @@ export const getProjectData = async (req, res) => {
                     modelConfig,
                     appConfig: {
                         changeLogId: "2026-03-19-v1-3f4e036c-6a67-467f-a0e6-25cff0a0a8ab",
-                        pricing: APP_PRICING,
                     },
                 }}},
             });
@@ -86,10 +84,7 @@ export const getProjectData = async (req, res) => {
                     json: {
                         projectName:  data.projectName,
                         projectId:    project_id,
-                        appConfig: {
-                            changeLogId: "2026-03-19-v1-3f4e036c-6a67-467f-a0e6-25cff0a0a8ab",
-                            pricing: APP_PRICING,
-                        },
+                        appConfig:    data.appConfig,
                         modelConfig,
                         projectContents: {
                             sessions:   data.sessions,

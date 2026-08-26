@@ -54,27 +54,6 @@ export class UseCaseService {
   }
 
   /**
-   * Pre-check user credit balance before dispatching a UseCase job.
-   * @param {Object} params
-   * @param {string} params.useCaseId
-   * @param {Object} params.input
-   * @param {string} params.userId
-   * @param {Object} [params.walletService]
-   * @param {Object} [params.pricingService]
-   * @returns {Promise<{ totalCost: number, plan: Object }>}
-   */
-  async precheckCredits({ useCaseId, input, userId, walletService = null, pricingService = null }) {
-    const { precheckUseCaseCredits } = await import("../use-cases/useCaseRunner.js");
-    return precheckUseCaseCredits({
-      useCaseId,
-      input,
-      userId,
-      walletService: walletService || this.walletService,
-      pricingService: pricingService || this.pricingService,
-    });
-  }
-
-  /**
    * Validate, compile, calculate upfront cost, reserve credits, then enqueue.
    * This is the canonical paid UseCase entrypoint for HTTP controllers.
    */

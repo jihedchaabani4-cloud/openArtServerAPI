@@ -1,19 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { isVideoModelRegistered } from "../lib/modelRegistryKeys.js";
-import { db, workflowStorageGateway, walletService, pricingService } from "../src/container.js";
-
-// V2 & UseCase Imports
-import { loadRegistries } from "../src/v2/registry/registryLoader.js";
-import { run as runUseCase } from "../src/use-cases/useCaseRunner.js";
-
-let cachedRegistries = null;
-function getRegistries() {
-    if (!cachedRegistries) cachedRegistries = loadRegistries();
-    return cachedRegistries;
-}
+import { db, workflowStorageGateway, useCaseService } from "../src/container.js";
 
 /**
- * Helper to run a V2 video workflow via Use Case Runner and return standard V2 response.
+ * Helper to enqueue a V2 video workflow via UseCase Service with upfront credit hold.
  */
 async function executeV2VideoWorkflow({ 
     workflowId = "video-generation-v1", useCaseId = "video-generation-v1", nodeType, v2Input, userId, projectId, sessionId, req 
@@ -34,24 +24,25 @@ async function executeV2VideoWorkflow({
         _v1PlaceholderIds: placeholder ? [placeholder] : [],
     };
 
-    console.log(`🚀 [VideoController] Running Use Case ${useCaseId} for run ${runId}`);
-    const runResult = await runUseCase({
+    console.log(`🚀 [VideoController] Preparing & Enqueueing Use Case "${useCaseId}" for user #${userId}`);
+    const prepared = await useCaseService.prepareAndEnqueue({
         useCaseId,
         input: runtimeInput,
         userId,
-        walletService,
-        pricingService,
-        registries: getRegistries(),
+        executionId: runId,
+        traceId: runId,
     });
 
     const v1WfId = placeholder?.workflowId || null;
     const v1MedId = placeholder?.mediaId || null;
+    const taskId = prepared.jobId || prepared.executionId || runId;
 
     const baseResponse = {
         ok: true,
         status: "processing",
-        taskId: runResult.executionId,
-        jobId: runResult.executionId,
+        taskId,
+        jobId: taskId,
+        cost: prepared.cost?.totalCredits,
         batchId: null,
         configId: null,
         workflows: v1WfId ? [{ id: v1WfId, primary_media_id: v1MedId }] : [],

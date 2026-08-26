@@ -1,10 +1,11 @@
-import { calculateCost as defaultCalculateCost } from "../models/index.js";
+import { calculateCost as defaultCalculateCost, resolveOperation } from "../models/index.js";
 
 const BILLABLE_NODE_TYPES = new Set([
   "image-generation",
   "video-generation",
   "upscale",
   "media-transform",
+  "llm",
 ]);
 
 function resolveField(node, field, inputs = {}) {
@@ -18,32 +19,49 @@ function resolveField(node, field, inputs = {}) {
   return inputs[field];
 }
 
-function operationForNode(node, inputs = {}) {
-  const model = resolveField(node, "model", inputs);
-  if (node.type === "video-generation") return "text_to_video";
-  if (node.type === "image-generation") return "text_to_image";
-  if (node.type === "media-transform") return "edit";
-  if (node.type === "upscale") {
-    return String(model || "").toLowerCase().includes("video")
-      ? "video_upscale"
-      : "image_upscale";
+function determineDomain(node, inputs = {}) {
+  if (node.type === "video-generation") return "video";
+  if (node.type === "llm") return "text";
+  if (node.type === "media-transform") {
+    const isVideo = Boolean(
+      inputs.video_url || inputs.video || inputs.duration || inputs.mode === "video_to_video"
+    );
+    return isVideo ? "video" : "image";
   }
-  return String(node.type || "").replaceAll("-", "_");
+  return "image";
+}
+
+function operationForNode(node, inputs = {}) {
+  const domain = determineDomain(node, inputs);
+  return resolveOperation(inputs, domain);
 }
 
 function inputForNode(node, inputs = {}) {
   const operation = operationForNode(node, inputs);
   return {
+    ...inputs,
     model: resolveField(node, "model", inputs) || inputs.model,
     modelKey: resolveField(node, "model", inputs) || inputs.model,
     providerId: resolveField(node, "provider", inputs) || inputs.provider,
     quality: resolveField(node, "quality", inputs) || inputs.quality || "standard",
     count: Number(resolveField(node, "count", inputs) || inputs.count || 1),
-    durationSeconds: Number(resolveField(node, "durationSeconds", inputs) || resolveField(node, "duration", inputs) || inputs.durationSeconds || inputs.duration || 5),
+    durationSeconds: Number(
+      resolveField(node, "durationSeconds", inputs) ||
+      resolveField(node, "duration", inputs) ||
+      inputs.durationSeconds ||
+      inputs.duration ||
+      5
+    ),
     resolution: resolveField(node, "resolution", inputs) || inputs.resolution || "720p",
-    scale: String(resolveField(node, "upscaleScale", inputs) || resolveField(node, "factor", inputs) || inputs.upscaleScale || inputs.factor || "2"),
-    prompt: resolveField(node, "prompt", inputs) || inputs.prompt || "default prompt",
-    image_url: resolveField(node, "image_url", inputs) || inputs.image_url || inputs.source_url || "https://cdn.openart.ai/placeholder.jpg",
+    scale: String(
+      resolveField(node, "upscaleScale", inputs) ||
+      resolveField(node, "factor", inputs) ||
+      inputs.upscaleScale ||
+      inputs.factor ||
+      "2"
+    ),
+    prompt: resolveField(node, "prompt", inputs) || inputs.prompt || "",
+    image_url: resolveField(node, "image_url", inputs) || inputs.image_url || inputs.source_url || null,
     operation,
   };
 }
@@ -60,29 +78,30 @@ export function getBillableNodes(plan, inputs = {}) {
     }));
 }
 
-export async function calculateWorkflowBillingPlan({ plan, inputs = {}, calculateCostFn = defaultCalculateCost } = {}) {
+export async function calculateWorkflowBillingPlan({
+  plan,
+  inputs = {},
+  calculateCostFn = defaultCalculateCost,
+} = {}) {
   const billableNodes = getBillableNodes(plan, inputs);
   const breakdowns = [];
   let totalCredits = 0;
 
   for (const billable of billableNodes) {
     const modelKey = billable.input.modelKey || billable.input.model;
-    if (!modelKey) continue;
+    if (!modelKey) {
+      throw new Error(`[Billing] Missing required model for billable node "${billable.nodeId}" (${billable.nodeType})`);
+    }
 
     let costResult;
-    try {
-      if (typeof calculateCostFn === "function") {
-        costResult = calculateCostFn(modelKey, billable.operation, billable.input);
-      } else if (calculateCostFn && typeof calculateCostFn.calculateCost === "function") {
-        costResult = calculateCostFn.calculateCost({
-          modelKey,
-          operation: billable.operation,
-          input: billable.input,
-        });
-      }
-    } catch {
-      // Fallback cost estimate if model / operation not in registry
-      costResult = { amount: "10.000000", totalCredits: 10 };
+    if (typeof calculateCostFn === "function") {
+      costResult = calculateCostFn(modelKey, billable.operation, billable.input);
+    } else if (calculateCostFn && typeof calculateCostFn.calculateCost === "function") {
+      costResult = calculateCostFn.calculateCost({
+        modelKey,
+        operation: billable.operation,
+        input: billable.input,
+      });
     }
 
     const credits = Math.max(0, Math.ceil(Number(costResult?.amount ?? costResult?.totalCredits ?? 0)));
@@ -104,4 +123,3 @@ export async function calculateWorkflowBillingPlan({ plan, inputs = {}, calculat
     billableNodes: breakdowns,
   };
 }
-

@@ -89,32 +89,28 @@ export async function generateImage(req, res) {
             workflow_id: workflowId,
         };
 
-        // ── 4. Credit precheck & Redis job dispatch ───────────────────────────
+        // ── 4. Credit reservation & Redis job dispatch (Upfront Hold) ───────
         let taskId = null;
         let hasSufficientCredits = true;
         let creditErrorMsg = null;
+        let calculatedCost = null;
 
         try {
-            console.log(`💳 [imageController] Prechecking credits (UseCase: image-generation-v1)...`);
-            await useCaseService.precheckCredits({
-                useCaseId: "image-generation-v1",
-                input:     runtimeInput,
-                userId,
-            });
-            console.log(`✅ [imageController] Credit precheck PASSED.`);
-
-            const executionId = randomUUID();
-            await jobQueueService.addUseCaseJob({
+            console.log(`💳 [imageController] Preparing & reserving credits (UseCase: image-generation-v1)...`);
+            const prepared = await useCaseService.prepareAndEnqueue({
                 useCaseId:   "image-generation-v1",
                 input:       runtimeInput,
                 userId,
-                executionId,
+                executionId: workflowId,
+                traceId:     workflowId,
             });
-            taskId = executionId;
-            console.log(`📤 [imageController] Enqueued job "${executionId}" to Redis (image-generation-v1).`);
+
+            taskId = prepared.jobId || prepared.executionId || workflowId;
+            calculatedCost = prepared.cost?.totalCredits ?? null;
+            console.log(`✅ [imageController] Reserved ${calculatedCost} credits & enqueued job "${taskId}".`);
 
         } catch (creditErr) {
-            console.warn(`⚠️ [imageController] Credit precheck failed:`, creditErr.message);
+            console.warn(`⚠️ [imageController] Prepare/enqueue failed:`, creditErr.message);
             hasSufficientCredits = false;
             creditErrorMsg = creditErr.message;
         }
@@ -127,6 +123,7 @@ export async function generateImage(req, res) {
             message:      hasSufficientCredits
                 ? "Image generation started."
                 : (creditErrorMsg || "Add credits to generate your image."),
+            cost:         calculatedCost,
             workflowId,
             mediaId,
             taskId,

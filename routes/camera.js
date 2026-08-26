@@ -1,14 +1,10 @@
 import express from "express";
 import { randomUUID } from "node:crypto";
-import { db, walletService, pricingService } from "../src/container.js";
+import { db, useCaseService } from "../src/container.js";
 import { autoCreateProjectAndSession } from "../lib/helpers.js";
 import { normalizeImageModelName } from "../lib/modelRegistryKeys.js";
-import { promptService } from "../src/container.js";
 import { requireAuth } from "../src/middleware/auth.js";
 import { buildCameraPrompt } from "../src/v2/utils/legacyPromptBuilders.js";
-
-// V2 & UseCase Imports
-import { run as runUseCase } from "../src/use-cases/useCaseRunner.js";
 import { resolveReferences } from "../src/image/utils/resolveReferences.js";
 
 const router = express.Router();
@@ -80,19 +76,18 @@ async function handleImageCamera(req, res) {
             session_id: finalSessionId,
         };
 
-        const runResult = await runUseCase({
+        const prepared = await useCaseService.prepareAndEnqueue({
             useCaseId: "camera-control-v1",
             input: runtimeInput,
             userId,
-            walletService,
-            pricingService,
         });
 
         res.json({
             ok: true,
             status: "processing",
-            taskId: runResult.executionId,
-            jobId: runResult.executionId,
+            taskId: prepared.jobId || prepared.executionId,
+            jobId: prepared.jobId || prepared.executionId,
+            cost: prepared.cost?.totalCredits,
             batchId: null,
             configId: null,
             project_id: finalProjectId,
@@ -153,33 +148,25 @@ async function handleVideoCamera(req, res) {
             references: references,
             project_id: finalProjectId,
             session_id: finalSessionId,
+            workflow_id: finalWfId,
         };
 
-        const runResult = await runUseCase({
+        const prepared = await useCaseService.prepareAndEnqueue({
             useCaseId: "camera-control-v1",
             input: runtimeInput,
             userId,
-            walletService,
-            pricingService,
         });
 
-        const result = {
+        return res.json({
             ok: true,
             status: "processing",
-            taskId: runResult.executionId,
-            jobId: runResult.executionId,
+            taskId: prepared.jobId || prepared.executionId,
+            jobId: prepared.jobId || prepared.executionId,
+            cost: prepared.cost?.totalCredits,
             batchId: null,
             configId: null,
             project_id: finalProjectId,
             session_id: finalSessionId,
-        };
-
-        return res.json({
-            ...result,
-            media_type: "video",
-            data: result,
-            camera_prompt: cameraPrompt,
-            camera_control: cameraControl,
         });
 
     } catch (error) {

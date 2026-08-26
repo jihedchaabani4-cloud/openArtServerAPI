@@ -1,13 +1,10 @@
 import { autoCreateProjectAndSession } from "../lib/helpers.js";
 import { normalizeImageModelName } from "../lib/modelRegistryKeys.js";
-
-// V2 & UseCase Imports
-import { run as runUseCase } from "../src/use-cases/useCaseRunner.js";
-import { walletService, pricingService } from "../src/container.js";
+import { useCaseService } from "../src/container.js";
 
 /**
  * POST /api/images/edit
- * Dispatches image edit via edit-image-v1 UseCase.
+ * Dispatches image edit via image-edit-v1 UseCase.
  */
 export const generateEdit = async (req, res) => {
     try {
@@ -45,21 +42,21 @@ export const generateEdit = async (req, res) => {
             mode: "image_edit",
             project_id: finalProjectId,
             session_id: finalSessionId,
+            workflow_id: workflow_id || null,
         };
 
-        const runResult = await runUseCase({
+        const prepared = await useCaseService.prepareAndEnqueue({
             useCaseId: "image-edit-v1",
             input: runtimeInput,
             userId,
-            walletService,
-            pricingService,
         });
 
         res.json({
             ok: true,
             status: "processing",
-            taskId: runResult.executionId,
-            jobId: runResult.executionId,
+            taskId: prepared.jobId || prepared.executionId,
+            jobId: prepared.jobId || prepared.executionId,
+            cost: prepared.cost?.totalCredits,
             batchId: null,
             configId: null,
             project_id: finalProjectId,

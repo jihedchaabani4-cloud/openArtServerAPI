@@ -1,12 +1,27 @@
-import { estimateWorkflowCost } from "./BudgetEstimator.js";
+import { estimateNodeBillingAmount } from "../runner/workflowRunner.js";
 
 /**
  * Workflow Budget Strategy
  * Performs an upfront estimation and credit check on the entire workflow.
  */
 export class WorkflowBudgetStrategy {
-  async estimateTotal(plan, inputs, pricingService) {
-    return estimateWorkflowCost(plan, inputs, pricingService);
+  async estimateTotal(plan, inputs = {}) {
+    if (!plan || !Array.isArray(plan.nodes)) {
+      return 0;
+    }
+
+    let total = 0;
+    for (const node of plan.nodes) {
+      const nodeInputs = {
+        ...inputs,
+        ...(node.resolved_inputs || {}),
+        ...(node.config || {}),
+      };
+      const cost = estimateNodeBillingAmount(node, nodeInputs);
+      total += cost;
+    }
+
+    return total;
   }
 
   async preCheck(userId, total, walletService) {

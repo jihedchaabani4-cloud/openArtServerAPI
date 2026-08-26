@@ -47,36 +47,32 @@ export function estimateNodeBillingAmount(nodeConfig, resolvedInputs = {}) {
     return 0;
   }
 
-  let model = resolvedInputs.model || nodeConfig?.config?.model || nodeConfig?.resolved_inputs?.model;
-  let domain = "image";
-  let defaultOp = "text_to_image";
+  const model =
+    resolvedInputs.model ||
+    nodeConfig?.inputs?.model ||
+    nodeConfig?.config?.model ||
+    nodeConfig?.resolved_inputs?.model;
 
-  if (nodeType === "image-generation") {
-    model = model || "nanobana";
-    domain = "image";
-    defaultOp = "text_to_image";
-  } else if (nodeType === "video-generation") {
-    model = model || "kling-v3";
-    domain = "video";
-    defaultOp = "text_to_video";
-  } else if (nodeType === "upscale") {
-    model = model || "nanobana";
-    domain = "image";
-    defaultOp = "image_upscale";
-  } else if (nodeType === "media-transform") {
-    const isVideo = Boolean(
-      resolvedInputs.video_url || resolvedInputs.video || resolvedInputs.duration || resolvedInputs.mode === "video_to_video"
-    );
-    domain = isVideo ? "video" : "image";
-    model = model || (isVideo ? "kling-v3" : "nanobana");
-    defaultOp = isVideo ? "video_to_video" : "edit";
-  } else if (nodeType === "llm") {
-    model = model || "llama-3-3-70b";
-    domain = "text";
-    defaultOp = "chat_completion";
+  if (!model) {
+    throw new Error(`[Billing] Missing required model for node "${nodeConfig?.id || nodeType}"`);
   }
 
-  const op = resolveOperation(resolvedInputs, domain) || defaultOp;
+  let domain = "image";
+  if (nodeType === "video-generation") {
+    domain = "video";
+  } else if (nodeType === "llm") {
+    domain = "text";
+  } else if (nodeType === "media-transform") {
+    const isVideo = Boolean(
+      resolvedInputs.video_url ||
+      resolvedInputs.video ||
+      resolvedInputs.duration ||
+      resolvedInputs.mode === "video_to_video"
+    );
+    domain = isVideo ? "video" : "image";
+  }
+
+  const op = resolveOperation(resolvedInputs, domain);
   const costResult = calculateCost(model, op, resolvedInputs);
   const costNumber = parseFloat(costResult.amount);
 

@@ -11,6 +11,7 @@ export const videoGenerationUseCase = {
     references:  { type: "array",   required: false },
     workflow_id: { type: "string",  required: false },
     project_id:  { type: "string",  required: false },
+    model:       { type: "string",  required: true },
     ratio:       { type: "string",  required: false },
     duration:    { type: "number",  required: false },
   }

@@ -14,7 +14,7 @@ export const imageGenerationUseCase = {
     ratio:       { type: "string",  required: false },
     width:       { type: "number",  required: false },
     height:      { type: "number",  required: false },
-    model:       { type: "string",  required: false },
+    model:       { type: "string",  required: true },
     quality:     { type: "string",  required: false },
     count:       { type: "number",  required: false },
   }

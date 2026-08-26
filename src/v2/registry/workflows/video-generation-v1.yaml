@@ -33,6 +33,7 @@ nodes:
       references: "${build_prompt.output.context.references}"
       workflow_id: "${input.workflow_id}"
       project_id: "${input.project_id}"
+      model: "${input.model}"
       ratio: "${input.ratio}"
       duration: "${input.duration}"
     persist:

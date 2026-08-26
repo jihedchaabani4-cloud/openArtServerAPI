@@ -32,6 +32,7 @@ nodes:
     inputs:
       prompt: "${build_prompt.output.finalPrompt}"
       image: "${input.source_url}"
+      model: "${input.model}"
       references: "${build_prompt.output.context.references}"
       workflow_id: "${input.workflow_id}"
       project_id: "${input.project_id}"

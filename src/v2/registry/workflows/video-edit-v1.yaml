@@ -29,6 +29,7 @@ nodes:
     inputs:
       prompt: "${build_prompt.output.finalPrompt}"
       video: "${input.source_url}"
+      model: "${input.model}"
       workflow_id: "${input.workflow_id}"
       project_id: "${input.project_id}"
     config:

@@ -36,7 +36,6 @@ import { WorkflowQueueGateway } from "./infrastructure/queue/workflowQueueGatewa
 // ─── Providers ───────────────────────────────────────────────────────────────
 import { OpenAITextProvider } from "./core/providers/OpenAITextProvider.js";
 import { GroqProvider }       from "./core/providers/GroqProvider.js";
-import { registerProviders } from "./providers/providerRegistry.js";
 
 // ─── Init Providers ──────────────────────────────────────────────────────────
 const openai = process.env.OPENAI_API_KEY ? new OpenAITextProvider(process.env.OPENAI_API_KEY) : null;

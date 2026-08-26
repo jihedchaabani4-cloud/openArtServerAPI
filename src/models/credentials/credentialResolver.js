@@ -24,7 +24,10 @@ export async function resolveCredential(deployment, provider, credentialProvider
   // Platform secret lookup from env
   const envKey = `${provider.id.toUpperCase()}_API_KEY`;
   const fallbackEnvKey = `${provider.id.toUpperCase()}_KEY`;
-  const platformKey = process.env[envKey] || process.env[fallbackEnvKey];
+  const platformKey =
+    process.env[envKey] ||
+    process.env[fallbackEnvKey] ||
+    (provider.id === "google" ? (process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY) : null);
 
   if (!platformKey) {
     throw new CredentialError(`No platform credential configured for provider "${provider.id}" (expected env ${envKey})`);

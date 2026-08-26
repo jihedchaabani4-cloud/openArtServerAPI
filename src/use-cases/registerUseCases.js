@@ -4,8 +4,6 @@ import { imageGenerationUseCase } from "./definitions/imageGeneration.js";
 import { videoGenerationUseCase } from "./definitions/videoGeneration.js";
 import { imageEditUseCase } from "./definitions/imageEdit.js";
 import { videoEditUseCase } from "./definitions/videoEdit.js";
-import { cameraControlUseCase } from "./definitions/cameraControl.js";
-import { lightingControlUseCase } from "./definitions/lightingControl.js";
 import { upscaleUseCase } from "./definitions/upscale.js";
 
 /**
@@ -20,8 +18,6 @@ export function registerAllUseCases() {
     videoGenerationUseCase,
     imageEditUseCase,
     videoEditUseCase,
-    cameraControlUseCase,
-    lightingControlUseCase,
     upscaleUseCase,
   ];
 

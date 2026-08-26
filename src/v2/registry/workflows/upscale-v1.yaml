@@ -20,6 +20,7 @@ nodes:
   upscale:
     type: upscale
     inputs:
+      model: "${input.model}"
       image: "${input.source_url}"
       workflow_id: "${input.workflow_id}"
       project_id: "${input.project_id}"

@@ -21,24 +21,38 @@ export const generateEdit = async (req, res) => {
             source_asset = null
         } = req.body;
 
-        if (!prompt) {
+        if (!prompt?.trim()) {
             return res.status(400).json({ ok: false, message: "Prompt is required for edit." });
         }
 
+        const rawModel = (model || model_name || "").trim();
+        if (!rawModel) {
+            return res.status(400).json({ ok: false, message: "model is required for edit." });
+        }
+
+        const normalizedModelName = normalizeImageModelName(rawModel);
+        if (!normalizedModelName) {
+            return res.status(400).json({ ok: false, message: `Model "${rawModel}" not found.` });
+        }
+
+        const sourceUrl = source_asset?.url || (typeof source_asset === "string" ? source_asset : null);
+        if (!sourceUrl) {
+            return res.status(400).json({ ok: false, message: "source_asset (or source_url) is required for edit." });
+        }
+
         const userId = req.user.id;
-        const normalizedModelName = normalizeImageModelName(model || model_name) || "nanobana";
 
         const { project_id: finalProjectId, session_id: finalSessionId } =
             await autoCreateProjectAndSession(userId, project_id, session_id, false);
 
         const runtimeInput = {
-            prompt: prompt || "",
+            prompt: prompt.trim(),
             model: normalizedModelName,
             aspect_ratio: aspect_ratio || ratio || "1:1",
             quality: "standard",
             strength: strength,
             source_asset: source_asset,
-            source_url: source_asset?.url || source_asset || null,
+            source_url: sourceUrl,
             mode: "image_edit",
             project_id: finalProjectId,
             session_id: finalSessionId,

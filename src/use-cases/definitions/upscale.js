@@ -7,6 +7,7 @@ export const upscaleUseCase = {
   workflowRef: "upscale-v1",
   billing: { strategy: "per-node" },
   inputSchema: {
+    model:       { type: "string",  required: true },
     source_url:  { type: "string",  required: true },
     workflow_id: { type: "string",  required: false },
     project_id:  { type: "string",  required: false },

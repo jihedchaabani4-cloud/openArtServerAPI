@@ -22,7 +22,10 @@ export async function executeVideoGeneration(inputs, ctx) {
     message: `Starting video generation for node ${nodeId}`,
   });
 
-  const modelFamily = safe.model || "kling-v3";
+  const modelFamily = safe.model;
+  if (!modelFamily) {
+    throw new Error(`[Node:${nodeId}] Missing required "model" input`);
+  }
   const operation = resolveOperation(safe, "video");
 
   // ── Direct execution via Models Management System ─────────────────────────

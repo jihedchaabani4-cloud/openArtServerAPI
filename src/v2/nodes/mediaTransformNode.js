@@ -34,7 +34,10 @@ export async function executeMediaTransform(inputs, ctx) {
     message: `Starting media transform for node ${nodeId}`,
   });
 
-  const modelFamily = safe.model || "nanobana";
+  const modelFamily = safe.model;
+  if (!modelFamily) {
+    throw new Error(`[Node:${nodeId}] Missing required "model" input`);
+  }
   const operation = resolveOperation(
     { ...safe, image_url: sourceAsset?.url || safe.image_url },
     safe.mode?.includes("video") ? "video" : "image"
@@ -78,12 +81,17 @@ export async function executeMediaTransform(inputs, ctx) {
     operation: `node.mediaTransform:${nodeId}`,
     durationMs,
     status: "success",
-    message: `Media transform completed via ${modelFamily}`,
+    message: `Media transform completed via ${modelFamily} (${safe.mode})`,
   });
 
   return {
     asset,
     assets: [asset],
-    metadata: { model: modelFamily, mode: safe.mode, latencyMs: durationMs, metadata: runResult.metadata },
+    metadata: {
+      model: modelFamily,
+      mode: safe.mode,
+      latencyMs: durationMs,
+      metadata: runResult.metadata,
+    },
   };
 }

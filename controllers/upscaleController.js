@@ -1,4 +1,5 @@
 import { autoCreateProjectAndSession } from "../lib/helpers.js";
+import { normalizeImageModelName } from "../lib/modelRegistryKeys.js";
 import { useCaseService } from "../src/container.js";
 
 /**
@@ -10,10 +11,28 @@ export const upscale = async (req, res) => {
         const {
             workflow_id,
             source_asset = null,
+            source_url = null,
+            model,
+            model_name,
             factor = 2,
             project_id,
             session_id,
         } = req.body;
+
+        const rawModel = (model || model_name || "").trim();
+        if (!rawModel) {
+            return res.status(400).json({ ok: false, message: "model is required for upscale." });
+        }
+
+        const normalizedModelName = normalizeImageModelName(rawModel);
+        if (!normalizedModelName) {
+            return res.status(400).json({ ok: false, message: `Model "${rawModel}" not found.` });
+        }
+
+        const resolvedSourceUrl = source_url || source_asset?.url || (typeof source_asset === "string" ? source_asset : null);
+        if (!resolvedSourceUrl) {
+            return res.status(400).json({ ok: false, message: "source_asset (or source_url) is required for upscale." });
+        }
 
         const userId = req.user.id;
 
@@ -21,8 +40,10 @@ export const upscale = async (req, res) => {
             await autoCreateProjectAndSession(userId, project_id, session_id, false);
 
         const runtimeInput = {
+            model: normalizedModelName,
+            source_url: resolvedSourceUrl,
             source_asset: source_asset,
-            factor: factor,
+            factor: Number(factor || 2),
             project_id: finalProjectId,
             session_id: finalSessionId,
             workflow_id: workflow_id || null,

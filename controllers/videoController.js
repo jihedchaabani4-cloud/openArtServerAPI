@@ -67,10 +67,12 @@ export const generateVideo = async (req, res) => {
     try {
         const { model, model_name, prompt, references = [], project_id, session_id } = req.body;
         const rawModel = (model ?? model_name ?? "").trim();
-        const activeModel = rawModel || undefined;
+        if (!rawModel) {
+            return res.status(400).json({ ok: false, message: "model is required" });
+        }
 
-        if (activeModel != null && activeModel !== "" && !isVideoModelRegistered(activeModel)) {
-            return res.status(400).json({ ok: false, message: "Model not found" });
+        if (!isVideoModelRegistered(rawModel)) {
+            return res.status(400).json({ ok: false, message: `Video model "${rawModel}" not found` });
         }
 
         if (!prompt?.trim()) {

@@ -38,10 +38,14 @@ export async function generateImage(req, res) {
             return res.status(400).json({ ok: false, message: "project_id is required" });
         }
 
+        const chosenModel  = (model || model_name || "").trim();
+        if (!chosenModel) {
+            return res.status(400).json({ ok: false, message: "model is required" });
+        }
+
         const userId       = req.user.id;
         const workflowId   = randomUUID();
         const mediaId      = randomUUID();
-        const chosenModel  = model || model_name || null;
         const chosenQual   = quality || resolution || "standard";
         const chosenRatio  = ratio || "1:1";
         const imageCount   = Number(count || num_images || 1);

@@ -24,7 +24,10 @@ export async function executeUpscale(inputs, ctx) {
     message: `Starting upscale for node ${nodeId}`,
   });
 
-  const modelFamily = safe.model || "nanobana";
+  const modelFamily = safe.model;
+  if (!modelFamily) {
+    throw new Error(`[Node:${nodeId}] Missing required "model" input`);
+  }
   const operation = resolveOperation(safe, "image");
 
   // ── Direct execution via Models Management System ─────────────────────────

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0",
+  "id": "gemini-2-0-flash.google",
+  "modelFamily": "gemini-2-0-flash",
+  "provider": "google",
+  "status": "active",
+  "providerModelId": "gemini-2.0-flash",
+  "providerModelVersion": "v1.0.0",
+  "versionPolicy": "pinned",
+  "operations": {
+    "chat_completion": {
+      "endpoint": "/models/gemini-2.0-flash:generateContent",
+      "inputs": {
+        "messages": { "type": "message[]", "required": true },
+        "temperature": { "type": "float", "min": 0, "max": 2, "default": 0.7 }
+      },
+      "outputs": {
+        "type": "text",
+        "fields": {
+          "content": { "type": "string", "required": true }
+        }
+      },
+      "pricing": {
+        "mode": "fixed",
+        "amount": "0.000000"
+      }
+    }
+  }
+}

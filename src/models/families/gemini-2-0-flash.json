@@ -1,0 +1,8 @@
+{
+  "id": "gemini-2-0-flash",
+  "domain": "text",
+  "displayName": "Google Gemini 2.0 Flash",
+  "description": "Next-gen multimodal AI model with ultra-fast vision inspection, reasoning, and prompt analysis",
+  "iconUrl": "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/google.svg",
+  "badge": "FREE"
+}

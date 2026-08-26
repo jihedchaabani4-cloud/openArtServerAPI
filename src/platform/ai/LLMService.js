@@ -2,7 +2,7 @@
  * LLMService.js
  * Unified, general-purpose LLM Provider & Client Service for Express Backend.
  * Handles text prompts, multimodal image inputs (Base64/URLs), system instructions,
- * and JSON schema formatting via Gemini 3.1 Flash Lite with retry mechanism.
+ * and JSON schema formatting via Google Gemini 2.0 Flash (with 1.5 Flash fallback).
  */
 
 const geminiApiKey = process.env.GEMINI_API_KEY || "";
@@ -52,6 +52,10 @@ export class LLMService {
    * @returns {Promise<{ raw: string, json?: object, model: string }>}
    */
   async generate({ prompt, systemInstruction = "", images = [], jsonMode = false }) {
+    if (!geminiApiKey) {
+      throw new Error("LLMService: GEMINI_API_KEY is not configured in environment variables.");
+    }
+
     // 1. Prepare image payloads
     const imagePayloads = (
       await Promise.all(images.map((img) => this.prepareImagePayload(img)))
@@ -64,11 +68,8 @@ export class LLMService {
     let rawOutput = null;
     let usedModel = "unknown";
     let lastGeminiError = "";
-    const MAX_ATTEMPTS = 2;
 
-    if (!geminiApiKey) {
-      throw new Error("LLMService: GEMINI_API_KEY is not configured in environment variables.");
-    }
+    const candidateModels = ["gemini-2.0-flash", "gemini-1.5-flash"];
 
     const parts = [{ text: fullPromptText }];
     imagePayloads.forEach((img) => {
@@ -77,11 +78,11 @@ export class LLMService {
       });
     });
 
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    for (const modelName of candidateModels) {
       try {
-        console.log(`[LLMService] Calling Gemini API (gemini-3.1-flash-lite) — Attempt ${attempt}/${MAX_ATTEMPTS}...`);
+        console.log(`[LLMService] Calling Gemini Vision API (${modelName})...`);
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${geminiApiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiApiKey}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -94,8 +95,8 @@ export class LLMService {
           const text = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
           if (text?.trim()) {
             rawOutput = text.trim();
-            usedModel = "gemini-3.1-flash-lite";
-            console.log(`[LLMService] ✅ Gemini response received successfully on attempt ${attempt}.`);
+            usedModel = modelName;
+            console.log(`[LLMService] ✅ Gemini response received successfully via ${modelName}.`);
             break;
           } else {
             lastGeminiError = "Gemini returned empty text";
@@ -108,14 +109,11 @@ export class LLMService {
         lastGeminiError = err.message;
       }
 
-      if (attempt < MAX_ATTEMPTS) {
-        console.warn(`[LLMService] Attempt ${attempt} failed (${lastGeminiError}). Retrying in 1s...`);
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
+      console.warn(`[LLMService] ${modelName} call failed (${lastGeminiError}). Trying fallback...`);
     }
 
     if (!rawOutput) {
-      throw new Error(`LLMService: Gemini API failed after ${MAX_ATTEMPTS} attempts. Error: "${lastGeminiError}".`);
+      throw new Error(`LLMService: Gemini API failed for all models. Error: "${lastGeminiError}".`);
     }
 
     // Parse JSON if requested
@@ -143,4 +141,3 @@ export class LLMService {
 }
 
 export const llmService = new LLMService();
-export default llmService;

@@ -3,47 +3,9 @@ import { resolveServableDeployment } from "../deployment/deploymentResolver.js";
 import { resolveCredential } from "../credentials/credentialResolver.js";
 import { validateInput } from "../validation/validationService.js";
 import { getRegistry } from "../registry/loader.js";
-
-// Providers Dedicated Clients
-import { WaveSpeedClient } from "../../providers/wavespeed/client.js";
-import { GoogleClient } from "../../providers/google/client.js";
-import { GroqClient } from "../../providers/groq/client.js";
-import { FalClient } from "../../providers/fal/client.js";
-import { ReplicateClient } from "../../providers/replicate/client.js";
-
-// Providers Adapters
-import { wavespeedAdapter } from "../../adapters/wavespeedAdapter.js";
-import { googleAdapter } from "../../adapters/googleAdapter.js";
-import { groqAdapter } from "../../adapters/groqAdapter.js";
-import { falAdapter } from "../../adapters/falAdapter.js";
-import { replicateAdapter } from "../../adapters/replicateAdapter.js";
-
+import { getProviderClient, getProviderAdapter } from "../registry/providerRuntimeRegistry.js";
 import telemetry, { MODEL_EVENTS } from "../observability/events.js";
 import { OutputContractViolationError } from "../errors/index.js";
-
-const ADAPTERS = {
-  wavespeed: wavespeedAdapter,
-  google: googleAdapter,
-  groq: groqAdapter,
-  fal: falAdapter,
-  replicate: replicateAdapter,
-};
-
-const CLIENT_FACTORIES = {
-  wavespeed: (cfg) => new WaveSpeedClient(cfg),
-  google:    (cfg) => new GoogleClient(cfg),
-  groq:      (cfg) => new GroqClient(cfg),
-  fal:       (cfg) => new FalClient(cfg),
-  replicate: (cfg) => new ReplicateClient(cfg),
-};
-
-function getClientForProvider(provider, credential) {
-  const factory = CLIENT_FACTORIES[provider.id] || ((cfg) => new WaveSpeedClient(cfg));
-  return factory({
-    baseUrl: provider.baseUrl,
-    apiKey: credential.apiKey,
-  });
-}
 
 export async function run(modelFamily, operation, rawInput = {}, options = {}) {
   const startTime = Date.now();
@@ -94,18 +56,25 @@ export async function run(modelFamily, operation, rawInput = {}, options = {}) {
   });
 
   const opConfig = deployment.operations[operation];
-  const adapter = ADAPTERS[provider.id] || wavespeedAdapter;
+  const adapter = getProviderAdapter(provider.id);
   const providerPayload = adapter.toProviderPayload(cleanInput, opConfig.fieldMapping || {});
 
-  const client = getClientForProvider(provider, credential);
+  const client = getProviderClient(provider.id, {
+    baseUrl: provider.baseUrl,
+    credential,
+    timeoutMs: deployment.timeoutMs || 60000,
+  });
 
   let rawResponse;
   try {
     rawResponse = await client.execute({
       providerModelId: deployment.providerModelId,
       payload: providerPayload,
-      endpoint: opConfig.endpoint,
       operation,
+      executionConfig: {
+        endpoint: opConfig.endpoint,
+        ...(opConfig.executionConfig || {}),
+      },
     });
   } catch (err) {
     telemetry.emit(MODEL_EVENTS.EXECUTION_FAILED, {

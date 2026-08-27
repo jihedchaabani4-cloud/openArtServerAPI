@@ -12,6 +12,7 @@
       "endpoint": "/models/gemini-2.0-flash:generateContent",
       "inputs": {
         "messages": { "type": "message[]", "required": true },
+        "images": { "type": "image_url[]", "required": false },
         "temperature": { "type": "float", "min": 0, "max": 2, "default": 0.7 }
       },
       "outputs": {

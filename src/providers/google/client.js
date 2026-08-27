@@ -1,3 +1,4 @@
+import { GoogleGenAI } from "@google/genai";
 import {
   ProviderRequestError,
   ProviderTransientError,
@@ -6,76 +7,72 @@ import {
 } from "../../models/errors/index.js";
 
 export class GoogleClient {
-  constructor({ baseUrl = "https://generativelanguage.googleapis.com/v1beta", apiKey, credential, timeoutMs = 60000 } = {}) {
-    this.baseUrl = baseUrl;
+  constructor({ baseUrl, apiKey, credential, timeoutMs = 60000 } = {}) {
     this.apiKey = credential?.apiKey || apiKey || "";
     this.timeoutMs = timeoutMs;
+    this.ai = new GoogleGenAI({ apiKey: this.apiKey });
   }
 
   async execute(options, legacyPayload) {
-    let endpoint, payload, providerModelId, operation, executionConfig;
+    let payload, providerModelId, operation, executionConfig;
 
     if (typeof options === "string") {
-      endpoint = options;
       payload = legacyPayload;
-      executionConfig = { endpoint };
+      executionConfig = { endpoint: options };
     } else {
       payload = options.payload;
       providerModelId = options.providerModelId;
       operation = options.operation;
       executionConfig = options.executionConfig || {};
-      endpoint = executionConfig.endpoint || (typeof options.endpoint === "string" ? options.endpoint : `/models/${providerModelId || "gemini-2.0-flash"}:generateContent`);
     }
 
     if (process.env.NODE_ENV === "test" && !this.apiKey?.startsWith("real_") && !this.apiKey?.startsWith("AIza")) {
       return {
+        text: "Mock Google Gemini response",
         candidates: [{ content: { parts: [{ text: "Mock Google Gemini response" }] } }],
         usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 15 },
       };
     }
 
-    const url = `${this.baseUrl}${endpoint}?key=${this.apiKey}`;
-    let res;
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+    const modelName = providerModelId || "gemini-2.0-flash";
 
-      res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": this.apiKey,
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
+    try {
+      // Execute via official Google Gen AI SDK
+      const response = await this.ai.models.generateContent({
+        model: modelName,
+        contents: payload.contents || payload.prompt || payload,
+        config: payload.config || payload.generationConfig,
       });
-      clearTimeout(timeoutId);
+
+      return {
+        text: response.text || "",
+        candidates: response.candidates,
+        usageMetadata: response.usageMetadata,
+      };
     } catch (err) {
-      if (err.name === "AbortError") {
-        throw new ProviderTransientError(`Google AI request timed out after ${this.timeoutMs}ms`);
+      const msg = err.message || String(err);
+      if (err.name === "AbortError" || msg.includes("timeout") || msg.includes("DEADLINE_EXCEEDED")) {
+        throw new ProviderTransientError(`Google AI request timed out: ${msg}`);
       }
-      throw new ProviderRequestError(`Network error calling Google AI: ${err.message}`);
-    }
-
-    if (res.status === 429 || res.status === 503) {
-      throw new ProviderTransientError(`Google AI temporary rate limit or error (${res.status})`);
-    }
-    if (res.status === 400 || res.status === 422) {
-      const errText = await res.text().catch(() => "");
-      if (errText.includes("SAFETY") || errText.includes("BLOCKED") || errText.includes("HARM_CATEGORY")) {
-        throw new ProviderContentPolicyError("Google AI content moderation blocked the prompt");
+      if (
+        msg.includes("429") ||
+        msg.includes("RESOURCE_EXHAUSTED") ||
+        msg.includes("503") ||
+        msg.includes("UNAVAILABLE")
+      ) {
+        throw new ProviderTransientError(`Google AI temporary rate limit or error: ${msg}`);
       }
-      throw new ProviderRequestError(`Google AI request error (${res.status}): ${errText.slice(0, 200)}`);
-    }
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      throw new ProviderRequestError(`Google AI error status ${res.status}: ${errText.slice(0, 200)}`);
-    }
-
-    try {
-      return await res.json();
-    } catch {
-      throw new ProviderMalformedResponseError("Google AI returned invalid JSON");
+      if (
+        msg.includes("SAFETY") ||
+        msg.includes("BLOCKED") ||
+        msg.includes("HARM_CATEGORY")
+      ) {
+        throw new ProviderContentPolicyError(`Google AI content moderation blocked the prompt: ${msg}`);
+      }
+      if (msg.includes("400") || msg.includes("INVALID_ARGUMENT")) {
+        throw new ProviderRequestError(`Google AI request error: ${msg}`);
+      }
+      throw new ProviderRequestError(`Google AI error: ${msg}`);
     }
   }
 }

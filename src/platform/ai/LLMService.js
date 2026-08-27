@@ -27,6 +27,7 @@ export class LLMService {
 
     const runResult = await run("gemini-2-0-flash", "chat_completion", {
       messages,
+      images,
       temperature: 0.4,
     });
 

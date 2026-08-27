@@ -16,7 +16,11 @@ export class WaveSpeedAdapter {
     }
 
     const outputType = outputDef.type || "image";
-    const url = rawResponse.output?.url || rawResponse.url || rawResponse.image_url;
+    const url =
+      (Array.isArray(rawResponse.outputs) && rawResponse.outputs[0]) ||
+      rawResponse.output?.url ||
+      rawResponse.url ||
+      rawResponse.image_url;
 
     if (outputDef.fields?.url?.required && !url) {
       throw new OutputContractViolationError("WaveSpeed response missing required output field: 'url'");

@@ -5,7 +5,7 @@ async function executeTextCompletion({ systemPrompt, userPrompt, temperature = 0
     if (systemPrompt) messages.push({ role: "system", content: systemPrompt });
     if (userPrompt) messages.push({ role: "user", content: userPrompt });
 
-    const result = await run("llama-3-3-70b", "chat_completion", {
+    const result = await run("gemini-2-0-flash", "chat_completion", {
         messages,
         temperature,
     });
@@ -26,7 +26,7 @@ async function executeJsonCompletion(params) {
 
 export class PromptService {
     constructor() {
-        this.modelFamily = "llama-3-3-70b";
+        this.modelFamily = "gemini-2-0-flash";
     }
 
     async complete({ systemPrompt, userPrompt, temperature = 0.7 }) {

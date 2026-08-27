@@ -3,16 +3,10 @@ import { ConfigIntegrityError } from "../errors/index.js";
 // Providers Dedicated Clients
 import { WaveSpeedClient } from "../../providers/wavespeed/client.js";
 import { GoogleClient } from "../../providers/google/client.js";
-import { GroqClient } from "../../providers/groq/client.js";
-import { FalClient } from "../../providers/fal/client.js";
-import { ReplicateClient } from "../../providers/replicate/client.js";
 
 // Providers Adapters
 import { wavespeedAdapter } from "../../adapters/wavespeedAdapter.js";
 import { googleAdapter } from "../../adapters/googleAdapter.js";
-import { groqAdapter } from "../../adapters/groqAdapter.js";
-import { falAdapter } from "../../adapters/falAdapter.js";
-import { replicateAdapter } from "../../adapters/replicateAdapter.js";
 
 const clientRegistry = new Map();
 const adapterRegistry = new Map();
@@ -75,6 +69,3 @@ export function listRegisteredRuntimes() {
 // ── Auto-register Built-in Providers ─────────────────────────────────────────
 registerProviderRuntime("wavespeed", { ClientClass: WaveSpeedClient, adapter: wavespeedAdapter });
 registerProviderRuntime("google",    { ClientClass: GoogleClient,    adapter: googleAdapter });
-registerProviderRuntime("groq",      { ClientClass: GroqClient,      adapter: groqAdapter });
-registerProviderRuntime("fal",       { ClientClass: FalClient,       adapter: falAdapter });
-registerProviderRuntime("replicate", { ClientClass: ReplicateClient, adapter: replicateAdapter });

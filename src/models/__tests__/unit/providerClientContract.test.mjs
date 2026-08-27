@@ -16,7 +16,7 @@ console.log("Running Provider Client Contract Unit Tests...");
 
 // 1. Verify Provider Runtime Registry & Zero Silent Fallbacks
 const registered = listRegisteredRuntimes();
-const expectedProviders = ["wavespeed", "google", "groq", "fal", "replicate"];
+const expectedProviders = ["wavespeed", "google"];
 for (const p of expectedProviders) {
   assert.ok(registered.includes(p), `Provider "${p}" should be registered in runtime registry`);
 }

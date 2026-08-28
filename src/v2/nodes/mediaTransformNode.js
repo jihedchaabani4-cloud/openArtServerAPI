@@ -63,8 +63,8 @@ export async function executeMediaTransform(inputs, ctx) {
     id: `transformed-${Date.now()}`,
     url: runResult.url ?? "",
     type: runResult.type || (safe.mode?.includes("video") ? "video" : "image"),
-    width: safe.width || 1024,
-    height: safe.height || 1024,
+    width: safe.width || null,
+    height: safe.height || null,
     metadata: {
       provider: runResult.metadata?.deploymentUsed ?? modelFamily,
       mode: safe.mode,

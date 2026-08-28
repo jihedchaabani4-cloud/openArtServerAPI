@@ -13,7 +13,7 @@ export async function executeUpscale(inputs, ctx) {
   const safe = NodeSafetyService.assertUpscaleInputs(inputs, nodeId);
 
   const inputAsset = safe.asset;
-  const factor     = safe.factor || 2;
+  const factor     = safe.factor || null;
   const started    = Date.now();
 
   logV2Event({
@@ -37,7 +37,7 @@ export async function executeUpscale(inputs, ctx) {
     {
       ...safe,
       image_url: inputAsset.url,
-      factor,
+      ...(factor ? { factor } : {}),
     },
     {
       idempotencyKey: `node:${runId}:${nodeId}`,
@@ -50,8 +50,8 @@ export async function executeUpscale(inputs, ctx) {
     id: `enhanced-${inputAsset.id || "asset"}-${Date.now()}`,
     type: "image",
     url: runResult.url || inputAsset.url,
-    width: ((inputAsset.width ?? 1024) * factor),
-    height: ((inputAsset.height ?? 1024) * factor),
+    width: inputAsset.width ? inputAsset.width * (factor || 1) : null,
+    height: inputAsset.height ? inputAsset.height * (factor || 1) : null,
     duration: inputAsset.duration ?? null,
     metadata: {
       ...(inputAsset.metadata || {}),

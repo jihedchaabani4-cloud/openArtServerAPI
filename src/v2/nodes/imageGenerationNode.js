@@ -41,8 +41,8 @@ export async function executeImageGeneration(inputs, ctx) {
       id: `img-${Date.now()}`,
       type: "image",
       url: runResult.url ?? "",
-      width: safe.width ?? 1024,
-      height: safe.height ?? 1024,
+      width: safe.width ?? null,
+      height: safe.height ?? null,
       metadata: {
         provider: runResult.metadata?.deploymentUsed ?? modelFamily,
         model: modelFamily,

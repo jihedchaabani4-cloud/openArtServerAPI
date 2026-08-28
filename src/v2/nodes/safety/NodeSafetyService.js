@@ -5,15 +5,11 @@
  * nodes.  Every node calls its dedicated assertXxx() at the very start of
  * execution, before any provider or billing work begins.
  *
- * Design principles
+ * Design principles:
  *   1. Fail-fast  — throw on the first bad input, with a crystal-clear message.
- *   2. Sanitise   — clamp / coerce / default so the provider always gets safe values.
+ *   2. Strict     — do NOT inject silent hardcoded defaults; preserve caller values.
  *   3. Stateless  — pure functions, no DB / network calls.
  *   4. Internal   — used only by nodes in src/v2/nodes/.
- *
- * All methods return the sanitised input object so nodes can destructure it
- * immediately:
- *   const safe = NodeSafetyService.assertImageInputs(inputs, nodeId);
  */
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -94,29 +90,29 @@ export const NodeSafetyService = {
   assertImageInputs(inputs = {}, nodeId = "image-generation") {
     assertString(nodeId, "prompt", inputs.prompt, IMAGE_PROMPT_MAX);
 
-    const width  = clamp(inputs.width  ?? 1024, IMAGE_WIDTH_MIN,  IMAGE_WIDTH_MAX);
-    const height = clamp(inputs.height ?? 1024, IMAGE_HEIGHT_MIN, IMAGE_HEIGHT_MAX);
-
-    const rawCount = Number(inputs.count ?? 1);
-    const count = isNaN(rawCount) ? 1 : clamp(rawCount, 1, IMAGE_COUNT_MAX);
-
-    let seed = inputs.seed ?? null;
-    if (seed !== null) {
-      seed = Math.abs(Math.floor(Number(seed))) || null;
-    }
-
-    return {
+    const safe = {
       ...inputs,
       prompt: inputs.prompt.trim(),
-      width,
-      height,
-      count,
-      seed,
-      quality:    inputs.quality    ?? "standard",
-      style:      inputs.style      ?? null,
-      references: inputs.references ?? [],
-      model:      inputs.model      ?? null,
     };
+
+    if (inputs.width !== undefined && inputs.width !== null) {
+      safe.width = clamp(inputs.width, IMAGE_WIDTH_MIN, IMAGE_WIDTH_MAX);
+    }
+    if (inputs.height !== undefined && inputs.height !== null) {
+      safe.height = clamp(inputs.height, IMAGE_HEIGHT_MIN, IMAGE_HEIGHT_MAX);
+    }
+    if (inputs.count !== undefined && inputs.count !== null) {
+      const rawCount = Number(inputs.count);
+      safe.count = isNaN(rawCount) ? 1 : clamp(rawCount, 1, IMAGE_COUNT_MAX);
+    }
+    if (inputs.seed !== undefined && inputs.seed !== null) {
+      safe.seed = Math.abs(Math.floor(Number(inputs.seed))) || null;
+    }
+    if (inputs.references !== undefined && inputs.references !== null) {
+      safe.references = Array.isArray(inputs.references) ? inputs.references : [];
+    }
+
+    return safe;
   },
 
   // ── 2. Video Generation ─────────────────────────────────────────────────
@@ -124,44 +120,46 @@ export const NodeSafetyService = {
   assertVideoInputs(inputs = {}, nodeId = "video-generation") {
     assertString(nodeId, "prompt", inputs.prompt, VIDEO_PROMPT_MAX);
 
-    const mode = inputs.mode ?? "t2v";
-    if (!VIDEO_ALLOWED_MODES.includes(mode)) {
-      fail(nodeId, "mode", `must be one of: ${VIDEO_ALLOWED_MODES.join(", ")} (got "${mode}").`);
-    }
-
-    if (mode === "i2v") {
-      assertUrl(nodeId, "startFrame", inputs.startFrame);
-    }
-
-    const aspect_ratio = inputs.aspect_ratio ?? "16:9";
-    if (!VIDEO_ALLOWED_RATIOS.includes(aspect_ratio)) {
-      fail(
-        nodeId,
-        "aspect_ratio",
-        `must be one of: ${VIDEO_ALLOWED_RATIOS.join(", ")} (got "${aspect_ratio}").`,
-      );
-    }
-
-    const duration = clamp(inputs.duration ?? 5, VIDEO_DURATION_MIN, VIDEO_DURATION_MAX);
-    const fps = clamp(inputs.fps ?? 24, VIDEO_FPS_MIN, VIDEO_FPS_MAX);
-
-    let motion_strength = inputs.motion_strength ?? null;
-    if (motion_strength !== null) {
-      motion_strength = clamp(motion_strength, 0, 1);
-    }
-
-    return {
+    const safe = {
       ...inputs,
       prompt: inputs.prompt.trim(),
-      mode,
-      aspect_ratio,
-      duration,
-      fps,
-      motion_strength,
-      startFrame:  inputs.startFrame  ?? null,
-      references:  inputs.references  ?? [],
-      model:       inputs.model       ?? null,
     };
+
+    if (inputs.mode !== undefined && inputs.mode !== null) {
+      if (!VIDEO_ALLOWED_MODES.includes(inputs.mode)) {
+        fail(nodeId, "mode", `must be one of: ${VIDEO_ALLOWED_MODES.join(", ")} (got "${inputs.mode}").`);
+      }
+      safe.mode = inputs.mode;
+      if (inputs.mode === "i2v") {
+        assertUrl(nodeId, "startFrame", inputs.startFrame);
+      }
+    }
+
+    if (inputs.aspect_ratio !== undefined && inputs.aspect_ratio !== null) {
+      if (!VIDEO_ALLOWED_RATIOS.includes(inputs.aspect_ratio)) {
+        fail(
+          nodeId,
+          "aspect_ratio",
+          `must be one of: ${VIDEO_ALLOWED_RATIOS.join(", ")} (got "${inputs.aspect_ratio}").`,
+        );
+      }
+      safe.aspect_ratio = inputs.aspect_ratio;
+    }
+
+    if (inputs.duration !== undefined && inputs.duration !== null) {
+      safe.duration = clamp(inputs.duration, VIDEO_DURATION_MIN, VIDEO_DURATION_MAX);
+    }
+    if (inputs.fps !== undefined && inputs.fps !== null) {
+      safe.fps = clamp(inputs.fps, VIDEO_FPS_MIN, VIDEO_FPS_MAX);
+    }
+    if (inputs.motion_strength !== undefined && inputs.motion_strength !== null) {
+      safe.motion_strength = clamp(inputs.motion_strength, 0, 1);
+    }
+    if (inputs.references !== undefined && inputs.references !== null) {
+      safe.references = Array.isArray(inputs.references) ? inputs.references : [];
+    }
+
+    return safe;
   },
 
   // ── 3. Upscale ──────────────────────────────────────────────────────────
@@ -173,20 +171,21 @@ export const NodeSafetyService = {
     }
     assertUrl(nodeId, "asset.url", asset.url);
 
-    const rawFactor = Number(inputs.factor ?? 2);
-    let factor = 2;
-    if (UPSCALE_ALLOWED_FACTORS.includes(rawFactor)) {
-      factor = rawFactor;
-    } else {
-      factor = UPSCALE_ALLOWED_FACTORS.find((f) => f >= rawFactor) ?? UPSCALE_ALLOWED_FACTORS.at(-1);
-    }
-
-    return {
+    const safe = {
       ...inputs,
       asset,
-      factor,
-      quality: inputs.quality ?? "standard",
     };
+
+    if (inputs.factor !== undefined && inputs.factor !== null) {
+      const rawFactor = Number(inputs.factor);
+      if (UPSCALE_ALLOWED_FACTORS.includes(rawFactor)) {
+        safe.factor = rawFactor;
+      } else {
+        safe.factor = UPSCALE_ALLOWED_FACTORS.find((f) => f >= rawFactor) ?? UPSCALE_ALLOWED_FACTORS.at(-1);
+      }
+    }
+
+    return safe;
   },
 
   // ── 4. Media Transform ──────────────────────────────────────────────────
@@ -198,32 +197,39 @@ export const NodeSafetyService = {
     }
     assertUrl(nodeId, "source_asset.url", sourceAsset.url);
 
-    const mode = inputs.mode ?? "image_edit";
-    if (!TRANSFORM_ALLOWED_MODES.includes(mode)) {
-      fail(
-        nodeId,
-        "mode",
-        `must be one of: ${TRANSFORM_ALLOWED_MODES.join(", ")} (got "${mode}").`,
-      );
-    }
-
     assertString(nodeId, "prompt", inputs.prompt, 2000);
 
-    const strength = clamp(inputs.strength ?? 0.75, TRANSFORM_STRENGTH_MIN, TRANSFORM_STRENGTH_MAX);
-    const width  = clamp(inputs.width  ?? sourceAsset.width  ?? 1024, IMAGE_WIDTH_MIN,  IMAGE_WIDTH_MAX);
-    const height = clamp(inputs.height ?? sourceAsset.height ?? 1024, IMAGE_HEIGHT_MIN, IMAGE_HEIGHT_MAX);
-
-    return {
+    const safe = {
       ...inputs,
       source_asset: sourceAsset,
-      mode,
       prompt: inputs.prompt.trim(),
-      strength,
-      width,
-      height,
-      references: inputs.references ?? [],
-      model:      inputs.model      ?? null,
     };
+
+    if (inputs.mode !== undefined && inputs.mode !== null) {
+      if (!TRANSFORM_ALLOWED_MODES.includes(inputs.mode)) {
+        fail(
+          nodeId,
+          "mode",
+          `must be one of: ${TRANSFORM_ALLOWED_MODES.join(", ")} (got "${inputs.mode}").`,
+        );
+      }
+      safe.mode = inputs.mode;
+    }
+
+    if (inputs.strength !== undefined && inputs.strength !== null) {
+      safe.strength = clamp(inputs.strength, TRANSFORM_STRENGTH_MIN, TRANSFORM_STRENGTH_MAX);
+    }
+    if (inputs.width !== undefined && inputs.width !== null) {
+      safe.width = clamp(inputs.width, IMAGE_WIDTH_MIN, IMAGE_WIDTH_MAX);
+    }
+    if (inputs.height !== undefined && inputs.height !== null) {
+      safe.height = clamp(inputs.height, IMAGE_HEIGHT_MIN, IMAGE_HEIGHT_MAX);
+    }
+    if (inputs.references !== undefined && inputs.references !== null) {
+      safe.references = Array.isArray(inputs.references) ? inputs.references : [];
+    }
+
+    return safe;
   },
 
   // ── 5. LLM ──────────────────────────────────────────────────────────────

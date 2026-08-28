@@ -42,15 +42,9 @@ export const generateEdit = async (req, res) => {
 
         const userId = req.user.id;
 
-        const { project_id: finalProjectId, session_id: finalSessionId } =
-            await autoCreateProjectAndSession(userId, project_id, session_id, false);
-
         const runtimeInput = {
             prompt: prompt.trim(),
             model: normalizedModelName,
-            aspect_ratio: aspect_ratio || ratio || "1:1",
-            quality: "standard",
-            strength: strength,
             source_asset: source_asset,
             source_url: sourceUrl,
             mode: "image_edit",
@@ -58,6 +52,10 @@ export const generateEdit = async (req, res) => {
             session_id: finalSessionId,
             workflow_id: workflow_id || null,
         };
+
+        if (aspect_ratio || ratio) runtimeInput.aspect_ratio = aspect_ratio || ratio;
+        if (req.body.quality) runtimeInput.quality = req.body.quality;
+        if (req.body.strength !== undefined) runtimeInput.strength = Number(req.body.strength);
 
         const prepared = await useCaseService.prepareAndEnqueue({
             useCaseId: "image-edit-v1",

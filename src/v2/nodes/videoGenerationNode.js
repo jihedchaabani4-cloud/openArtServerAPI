@@ -40,7 +40,7 @@ export async function executeVideoGeneration(inputs, ctx) {
     id: `vid-${Date.now()}`,
     type: "video",
     url: runResult.url ?? "",
-    duration: safe.duration ?? 5,
+    duration: safe.duration ?? null,
     metadata: {
       provider: runResult.metadata?.deploymentUsed ?? modelFamily,
       model: modelFamily,

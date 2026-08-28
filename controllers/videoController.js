@@ -87,21 +87,19 @@ export const generateVideo = async (req, res) => {
             });
         }
 
-        console.log(`\n📥 [VideoController] generate request received: Model: ${activeModel ?? "(default)"}, Prompt: "${prompt}"`);
-
-        const projectId = project_id || req.body.projectId || null;
-        const sessionId = session_id || req.body.sessionId || null;
-
         const v2Input = {
             prompt: prompt.trim(),
-            model: activeModel || null,
-            aspect_ratio: req.body.aspect_ratio || req.body.ratio || "16:9",
-            duration: req.body.duration || "5s",
-            negative_prompt: req.body.negative_prompt || req.body.negativePrompt || "",
+            model: rawModel,
             references,
             project_id: projectId,
             session_id: sessionId,
         };
+
+        if (req.body.aspect_ratio || req.body.ratio) v2Input.aspect_ratio = req.body.aspect_ratio || req.body.ratio;
+        if (req.body.duration !== undefined) v2Input.duration = req.body.duration;
+        if (req.body.durationSeconds !== undefined) v2Input.durationSeconds = req.body.durationSeconds;
+        if (req.body.resolution !== undefined) v2Input.resolution = req.body.resolution;
+        if (req.body.negative_prompt || req.body.negativePrompt) v2Input.negative_prompt = req.body.negative_prompt || req.body.negativePrompt;
 
         const responseData = await executeV2VideoWorkflow({
             workflowId: "video-generation-v1",

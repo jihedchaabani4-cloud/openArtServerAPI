@@ -14,7 +14,7 @@ export const upscale = async (req, res) => {
             source_url = null,
             model,
             model_name,
-            factor = 2,
+            factor,
             project_id,
             session_id,
         } = req.body;
@@ -43,11 +43,12 @@ export const upscale = async (req, res) => {
             model: normalizedModelName,
             source_url: resolvedSourceUrl,
             source_asset: source_asset,
-            factor: Number(factor || 2),
             project_id: finalProjectId,
             session_id: finalSessionId,
             workflow_id: workflow_id || null,
         };
+
+        if (factor !== undefined && factor !== null) runtimeInput.factor = Number(factor);
 
         const prepared = await useCaseService.prepareAndEnqueue({
             useCaseId: "upscale-v1",

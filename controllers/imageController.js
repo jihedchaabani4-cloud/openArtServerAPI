@@ -46,9 +46,6 @@ export async function generateImage(req, res) {
         const userId       = req.user.id;
         const workflowId   = randomUUID();
         const mediaId      = randomUUID();
-        const chosenQual   = quality || resolution || "standard";
-        const chosenRatio  = ratio || "1:1";
-        const imageCount   = Number(count || num_images || 1);
 
         // ── 1. Create Workflow container ──────────────────────────────────────
         const workflow = await db.workflows.createWorkflow({
@@ -62,36 +59,33 @@ export async function generateImage(req, res) {
         console.log(`✅ [imageController] Workflow created: ${workflowId}`);
 
         // ── 2. Create Media placeholder (status: processing) ─────────────────
-        const dims = ratioDimensions(chosenRatio);
-        const mediaWidth  = width  || dims.width;
-        const mediaHeight = height || dims.height;
-
         const media = await db.media.createMedia({
             id:          mediaId,
             workflow_id: workflowId,
             project_id:  projectId,
             step_id:     "image_generation",
             url:         null,
-            width:       mediaWidth,
-            height:      mediaHeight,
+            width:       width ? Number(width) : null,
+            height:      height ? Number(height) : null,
             status:      "processing",
         });
 
-        console.log(`✅ [imageController] Media placeholder created: ${mediaId} (${mediaWidth}x${mediaHeight})`);
+        console.log(`✅ [imageController] Media placeholder created: ${mediaId}`);
 
         // ── 3. Prepare UseCase runtime input (dynamic parameters) ────────────
         const runtimeInput = {
             prompt:      prompt.trim(),
             references:  Array.isArray(references) ? references : [],
-            ratio:       chosenRatio,
-            width:       mediaWidth,
-            height:      mediaHeight,
             model:       chosenModel,
-            quality:     chosenQual,
-            count:       isNaN(imageCount) ? 1 : Math.max(1, imageCount),
             project_id:  projectId,
             workflow_id: workflowId,
         };
+
+        if (ratio !== undefined && ratio !== null) runtimeInput.ratio = ratio;
+        if (width !== undefined && width !== null) runtimeInput.width = Number(width);
+        if (height !== undefined && height !== null) runtimeInput.height = Number(height);
+        if (quality !== undefined || resolution !== undefined) runtimeInput.quality = quality || resolution;
+        if (count !== undefined || num_images !== undefined) runtimeInput.count = Number(count || num_images);
 
         // ── 4. Credit reservation & Redis job dispatch (Upfront Hold) ───────
         let taskId = null;

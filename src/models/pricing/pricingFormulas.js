@@ -18,7 +18,7 @@ export function evaluateFixed(input = {}, pricingDef = {}) {
 }
 
 export function evaluateQualityTable(input = {}, pricingDef = {}) {
-  const quality = String(input.quality || pricingDef.defaultQuality || "standard");
+  const quality = String(input.quality || "");
   const table = pricingDef.table || {};
   const price = table[quality];
   if (price === undefined) {
@@ -29,7 +29,7 @@ export function evaluateQualityTable(input = {}, pricingDef = {}) {
 }
 
 export function evaluateResolutionTable(input = {}, pricingDef = {}) {
-  const resolution = String(input.resolution || pricingDef.defaultResolution || "1080p");
+  const resolution = String(input.resolution || "");
   const table = pricingDef.table || {};
   const price = table[resolution];
   if (price === undefined) {
@@ -73,8 +73,8 @@ export function evaluateCountMultiplier(input = {}, pricingDef = {}) {
 }
 
 export function evaluateDurationResolutionTable(input = {}, pricingDef = {}) {
-  const duration = String(input.durationSeconds || input.duration || 5);
-  const resolution = String(input.resolution || "720p");
+  const duration = String(input.durationSeconds || input.duration || "");
+  const resolution = String(input.resolution || "");
   const table = pricingDef.table || {};
 
   let price = table[resolution]?.[duration];
@@ -82,14 +82,14 @@ export function evaluateDurationResolutionTable(input = {}, pricingDef = {}) {
     price = table[`${duration}:${resolution}`];
   }
   if (price === undefined) {
-    throw new PricingConfigError(`No price found for duration "${duration}" and resolution "${resolution}"`);
+    throw new PricingConfigError(`No price found for duration "${duration}" and resolution "${resolution}" in duration_resolution_table`);
   }
   const count = toDec(input.count || 1);
   return toDec(price).times(count);
 }
 
 export function evaluatePerSecond(input = {}, pricingDef = {}) {
-  const duration = toDec(input.durationSeconds || input.duration || 5);
+  const duration = toDec(input.durationSeconds || input.duration || 0);
   const ratePerSecond = toDec(pricingDef.ratePerSecond || 0);
   const baseCredits = toDec(pricingDef.baseCredits || 0);
   const count = toDec(input.count || 1);
@@ -97,7 +97,7 @@ export function evaluatePerSecond(input = {}, pricingDef = {}) {
 }
 
 export function evaluatePerSecondWithAudio(input = {}, pricingDef = {}) {
-  const duration = toDec(input.durationSeconds || input.duration || 5);
+  const duration = toDec(input.durationSeconds || input.duration || 0);
   const ratePerSecond = toDec(pricingDef.ratePerSecond || 0);
   const audioSurcharge = input.audio || input.hasAudio ? toDec(pricingDef.audioSurchargePerSecond || 0) : new Decimal(0);
   const count = toDec(input.count || 1);
@@ -105,7 +105,7 @@ export function evaluatePerSecondWithAudio(input = {}, pricingDef = {}) {
 }
 
 export function evaluateScaleTable(input = {}, pricingDef = {}) {
-  const scale = String(input.scale || input.upscaleScale || input.factor || "2x");
+  const scale = String(input.scale || input.upscaleScale || input.factor || "");
   const table = pricingDef.table || {};
   const price = table[scale];
   if (price === undefined) {

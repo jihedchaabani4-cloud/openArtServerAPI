@@ -41,37 +41,37 @@ function inputForNode(node, inputs = {}) {
   const isLLMNode = node.type === "llm";
   const nodeModel = resolveField(node, "model", inputs);
   const resolvedModel = isLLMNode ? (nodeModel || "gemini-2-0-flash") : (nodeModel || inputs.model);
+
+  const rawPrompt = inputs.prompt ?? resolveField(node, "prompt", inputs) ?? resolveField(node, "userPrompt", inputs);
   const messages = isLLMNode
-    ? (inputs.messages || [{ role: "user", content: resolveField(node, "userPrompt", inputs) || inputs.prompt || "hello" }])
+    ? (inputs.messages || (rawPrompt ? [{ role: "user", content: rawPrompt }] : undefined))
     : inputs.messages;
 
-  return {
+  const rawDuration = inputs.durationSeconds ?? inputs.duration ?? resolveField(node, "durationSeconds", inputs) ?? resolveField(node, "duration", inputs);
+  const rawQuality = inputs.quality ?? resolveField(node, "quality", inputs);
+  const rawResolution = inputs.resolution ?? resolveField(node, "resolution", inputs);
+  const rawScale = inputs.upscaleScale ?? inputs.factor ?? resolveField(node, "upscaleScale", inputs) ?? resolveField(node, "factor", inputs);
+  const rawCount = inputs.count ?? resolveField(node, "count", inputs);
+  const rawImageUrl = inputs.image_url ?? inputs.source_url ?? inputs.image ?? resolveField(node, "image_url", inputs) ?? resolveField(node, "image", inputs);
+
+  const nodeInput = {
     ...inputs,
-    messages,
+    operation,
     model: resolvedModel,
     modelKey: resolvedModel,
-    providerId: resolveField(node, "provider", inputs) || inputs.provider,
-    quality: inputs.quality || resolveField(node, "quality", inputs) || "standard",
-    count: Number(inputs.count || resolveField(node, "count", inputs) || 1),
-    durationSeconds: String(
-      inputs.durationSeconds ||
-      inputs.duration ||
-      resolveField(node, "durationSeconds", inputs) ||
-      resolveField(node, "duration", inputs) ||
-      "5"
-    ),
-    resolution: inputs.resolution || resolveField(node, "resolution", inputs) || "720p",
-    scale: String(
-      inputs.upscaleScale ||
-      inputs.factor ||
-      resolveField(node, "upscaleScale", inputs) ||
-      resolveField(node, "factor", inputs) ||
-      "2"
-    ),
-    prompt: inputs.prompt || resolveField(node, "prompt", inputs) || "",
-    image_url: inputs.image_url || inputs.source_url || resolveField(node, "image_url", inputs) || null,
-    operation,
+    providerId: resolveField(node, "provider", inputs) ?? inputs.provider,
   };
+
+  if (messages !== undefined) nodeInput.messages = messages;
+  if (rawPrompt !== undefined) nodeInput.prompt = rawPrompt;
+  if (rawDuration !== undefined) nodeInput.durationSeconds = String(rawDuration);
+  if (rawQuality !== undefined) nodeInput.quality = rawQuality;
+  if (rawResolution !== undefined) nodeInput.resolution = rawResolution;
+  if (rawScale !== undefined) nodeInput.scale = String(rawScale);
+  if (rawCount !== undefined) nodeInput.count = Number(rawCount);
+  if (rawImageUrl !== undefined) nodeInput.image_url = rawImageUrl;
+
+  return nodeInput;
 }
 
 export function getBillableNodes(plan, inputs = {}) {

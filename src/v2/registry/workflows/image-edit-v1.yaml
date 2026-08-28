@@ -17,6 +17,8 @@ input_schema:
     workflow_id: { type: string }
     project_id: { type: string }
     ratio: { type: string }
+    model: { type: string }
+    quality: { type: string }
 
 nodes:
   build_prompt:

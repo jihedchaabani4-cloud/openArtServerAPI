@@ -16,7 +16,7 @@ function resolveField(node, field, inputs = {}) {
   }
   if (node.resolved_inputs?.[field] !== undefined) return node.resolved_inputs[field];
   if (node.config?.[field] !== undefined) return node.config[field];
-  return inputs[field];
+  return undefined;
 }
 
 function determineDomain(node, inputs = {}) {
@@ -38,30 +38,38 @@ function operationForNode(node, inputs = {}) {
 
 function inputForNode(node, inputs = {}) {
   const operation = operationForNode(node, inputs);
+  const isLLMNode = node.type === "llm";
+  const nodeModel = resolveField(node, "model", inputs);
+  const resolvedModel = isLLMNode ? (nodeModel || "gemini-2-0-flash") : (nodeModel || inputs.model);
+  const messages = isLLMNode
+    ? (inputs.messages || [{ role: "user", content: resolveField(node, "userPrompt", inputs) || inputs.prompt || "hello" }])
+    : inputs.messages;
+
   return {
     ...inputs,
-    model: resolveField(node, "model", inputs) || inputs.model,
-    modelKey: resolveField(node, "model", inputs) || inputs.model,
+    messages,
+    model: resolvedModel,
+    modelKey: resolvedModel,
     providerId: resolveField(node, "provider", inputs) || inputs.provider,
-    quality: resolveField(node, "quality", inputs) || inputs.quality || "standard",
-    count: Number(resolveField(node, "count", inputs) || inputs.count || 1),
-    durationSeconds: Number(
-      resolveField(node, "durationSeconds", inputs) ||
-      resolveField(node, "duration", inputs) ||
+    quality: inputs.quality || resolveField(node, "quality", inputs) || "standard",
+    count: Number(inputs.count || resolveField(node, "count", inputs) || 1),
+    durationSeconds: String(
       inputs.durationSeconds ||
       inputs.duration ||
-      5
+      resolveField(node, "durationSeconds", inputs) ||
+      resolveField(node, "duration", inputs) ||
+      "5"
     ),
-    resolution: resolveField(node, "resolution", inputs) || inputs.resolution || "720p",
+    resolution: inputs.resolution || resolveField(node, "resolution", inputs) || "720p",
     scale: String(
-      resolveField(node, "upscaleScale", inputs) ||
-      resolveField(node, "factor", inputs) ||
       inputs.upscaleScale ||
       inputs.factor ||
+      resolveField(node, "upscaleScale", inputs) ||
+      resolveField(node, "factor", inputs) ||
       "2"
     ),
-    prompt: resolveField(node, "prompt", inputs) || inputs.prompt || "",
-    image_url: resolveField(node, "image_url", inputs) || inputs.image_url || inputs.source_url || null,
+    prompt: inputs.prompt || resolveField(node, "prompt", inputs) || "",
+    image_url: inputs.image_url || inputs.source_url || resolveField(node, "image_url", inputs) || null,
     operation,
   };
 }

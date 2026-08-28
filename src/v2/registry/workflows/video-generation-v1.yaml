@@ -17,6 +17,9 @@ input_schema:
     project_id: { type: string }
     ratio: { type: string }
     duration: { type: number }
+    durationSeconds: { type: string }
+    resolution: { type: string }
+    model: { type: string }
 
 nodes:
   build_prompt:

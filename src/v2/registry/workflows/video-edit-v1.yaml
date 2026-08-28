@@ -15,6 +15,7 @@ input_schema:
     source_url: { type: string }
     workflow_id: { type: string }
     project_id: { type: string }
+    model: { type: string }
 
 nodes:
   build_prompt:

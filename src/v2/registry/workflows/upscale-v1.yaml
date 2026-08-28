@@ -15,6 +15,7 @@ input_schema:
     workflow_id: { type: string }
     project_id: { type: string }
     factor: { type: number }
+    model: { type: string }
 
 nodes:
   upscale:

@@ -4,6 +4,7 @@
   "displayName": "Google Gemini 2.0 Flash-Lite",
   "description": "Ultra-lightweight, high-speed Gemini 2 model engineered for cost-efficiency and high throughput, completely free in Google AI Studio",
   "status": "active",
+  "systemOnly": true,
   "operations": {
     "chat_completion": {
       "canonicalInputs": {

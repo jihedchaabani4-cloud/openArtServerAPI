@@ -35,6 +35,12 @@ export function getCatalog(filters = {}) {
   const entries = [];
 
   for (const [modelId, model] of models.entries()) {
+    const isSystemOnly = Boolean(model.systemOnly || model.visibility === "internal");
+
+    // Filter out system-only models by default unless explicitly requested
+    if (!filters.includeSystem && !filters.systemOnly && isSystemOnly) continue;
+    if (filters.systemOnly && !isSystemOnly) continue;
+
     const operations = Object.keys(model.operations || {});
     const operationDetails = {};
     const activeProviders = new Set();
@@ -62,6 +68,8 @@ export function getCatalog(filters = {}) {
       description: model.description || "",
       iconUrl: model.iconUrl || "",
       domain: model.domain,
+      systemOnly: isSystemOnly,
+      visibility: model.visibility || (isSystemOnly ? "internal" : "public"),
       operations,
       operationDetails,
       lifecycleStatus: model.status || "active",

@@ -76,4 +76,24 @@ describe("Public Facade Contract (T031)", () => {
     assert.equal(resolveOperation({ image_url: "https://example.com/img.png" }, "image"), "edit");
     assert.equal(resolveOperation({}, "text"), "chat_completion");
   });
+
+  it("should exclude system-only models from default getCatalog", () => {
+    const publicCatalog = getCatalog();
+    assert.ok(publicCatalog.every((m) => !m.systemOnly));
+    assert.equal(publicCatalog.some((m) => m.modelFamily === "gemini_2_0_flash"), false);
+    assert.ok(publicCatalog.some((m) => m.modelFamily === "nanobana_pro"));
+  });
+
+  it("should include system-only models when includeSystem is true", () => {
+    const fullCatalog = getCatalog({ includeSystem: true });
+    assert.ok(fullCatalog.some((m) => m.modelFamily === "gemini_2_0_flash"));
+    assert.ok(fullCatalog.some((m) => m.modelFamily === "nanobana_pro"));
+  });
+
+  it("should filter only system models when systemOnly is true", () => {
+    const systemCatalog = getCatalog({ systemOnly: true });
+    assert.ok(systemCatalog.every((m) => m.systemOnly));
+    assert.ok(systemCatalog.some((m) => m.modelFamily === "gemini_2_0_flash"));
+    assert.equal(systemCatalog.some((m) => m.modelFamily === "nanobana_pro"), false);
+  });
 });

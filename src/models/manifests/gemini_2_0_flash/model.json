@@ -4,6 +4,7 @@
   "displayName": "Google Gemini 2.0 Flash",
   "description": "Next-generation multimodal reasoning and language model from Google DeepMind with ultra-fast speed, 1M context window, and generous free tier in Google AI Studio",
   "status": "active",
+  "systemOnly": true,
   "operations": {
     "chat_completion": {
       "canonicalInputs": {

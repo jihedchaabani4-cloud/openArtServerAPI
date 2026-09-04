@@ -14,7 +14,7 @@ import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";
 const logger = createLogger("llm");
 
 export class LLMService {
-  constructor({ defaultModel = "gemini-2-0-flash" } = {}) {
+  constructor({ defaultModel = "gemini-3-flash" } = {}) {
     this.defaultModel = defaultModel;
   }
 

@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import { llmService } from "../../../platform/ai/LLMService.js";
 
 describe("LLMService Integration with Models Management System", () => {
-  it("should generate raw text output through Gemini 2.0 Flash", async () => {
+  it("should generate raw text output through default Gemini 3 Flash", async () => {
     const mockSdkClient = {
       models: {
         generateContent: async ({ model, contents }) => {
           assert.equal(model, "gemini-3.6-flash");
           return {
-            text: "This is a prompt enhancement from Gemini 2.0 Flash.",
+            text: "This is a prompt enhancement from Gemini 3 Flash.",
           };
         },
       },
@@ -24,8 +24,33 @@ describe("LLMService Integration with Models Management System", () => {
     });
 
     assert.ok(response);
-    assert.equal(response.raw, "This is a prompt enhancement from Gemini 2.0 Flash.");
+    assert.equal(response.raw, "This is a prompt enhancement from Gemini 3 Flash.");
     assert.equal(response.model, "gemini-3.6-flash");
+  });
+
+  it("should generate raw text output through explicit Gemini 2.0 Flash", async () => {
+    const mockSdkClient = {
+      models: {
+        generateContent: async ({ model, contents }) => {
+          assert.equal(model, "gemini-2.0-flash");
+          return {
+            text: "This is a prompt enhancement from Gemini 2.0 Flash.",
+          };
+        },
+      },
+    };
+
+    const response = await llmService.generate({
+      prompt: "A neon cyborg warrior",
+      model: "gemini-2-0-flash",
+      options: {
+        sdkClient: mockSdkClient,
+      },
+    });
+
+    assert.ok(response);
+    assert.equal(response.raw, "This is a prompt enhancement from Gemini 2.0 Flash.");
+    assert.equal(response.model, "gemini-2.0-flash");
   });
 
   it("should parse JSON output in jsonMode", async () => {

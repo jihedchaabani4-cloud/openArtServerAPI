@@ -5,7 +5,7 @@ const aiLogger = createLogger("ai");
 
 export class PromptService {
     constructor() {
-        this.modelFamily = "gemini-2-0-flash";
+        this.modelFamily = "gemini-3-flash";
     }
 
     async complete({ systemPrompt, userPrompt, temperature = 0.7, options = {} }) {

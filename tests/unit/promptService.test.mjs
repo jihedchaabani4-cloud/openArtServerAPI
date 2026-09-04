@@ -37,10 +37,10 @@ describe("PromptService Unit Tests", () => {
       assert.equal(capturedArgs.prompt, "Hello world");
       assert.equal(capturedArgs.systemInstruction, "You are an assistant.");
       assert.equal(capturedArgs.temperature, 0.8);
-      assert.equal(capturedArgs.model, "gemini-2-0-flash");
+      assert.equal(capturedArgs.model, "gemini-3-flash");
     });
 
-    it("should delegate completeJSON() to llmService.generateJSON with default gemini-2-0-flash", async () => {
+    it("should delegate completeJSON() to llmService.generateJSON with default gemini-3-flash", async () => {
       let capturedArgs = null;
       llmService.generateJSON = async (args) => {
         capturedArgs = args;
@@ -57,7 +57,7 @@ describe("PromptService Unit Tests", () => {
       assert.equal(capturedArgs.prompt, "Give me data");
       assert.equal(capturedArgs.systemInstruction, "Return json");
       assert.equal(capturedArgs.temperature, 0.3);
-      assert.equal(capturedArgs.model, "gemini-2-0-flash");
+      assert.equal(capturedArgs.model, "gemini-3-flash");
     });
   });
 

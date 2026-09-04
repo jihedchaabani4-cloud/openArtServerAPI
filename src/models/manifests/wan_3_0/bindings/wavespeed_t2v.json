@@ -1,0 +1,21 @@
+{
+  "modelId": "wan_3_0",
+  "operation": "text_to_video",
+  "providerId": "wavespeed",
+  "providerModelId": "alibaba/wan-3.0/text-to-video",
+  "endpoint": "/api/v3/alibaba/wan-3.0/text-to-video",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "prompt": { "providerField": "prompt" },
+    "duration": { "providerField": "duration" },
+    "aspect_ratio": { "providerField": "aspect_ratio" },
+    "resolution": { "providerField": "resolution" }
+  },
+  "pricing": {
+    "base_cost_usd": 0.20,
+    "modifiers": {
+      "duration": { "5": 1.0, "10": 1.8 }
+    }
+  }
+}

@@ -1,8 +1,0 @@
-{
-  "id": "seedream-pro",
-  "domain": "image",
-  "displayName": "SeaDream 5.0 Edit",
-  "description": "Premium 4K with advanced typography and prompt adherence",
-  "iconUrl": "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/baichuan.svg",
-  "badge": "PREMIUM"
-}

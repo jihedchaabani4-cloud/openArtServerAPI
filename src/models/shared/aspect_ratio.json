@@ -1,7 +1,0 @@
-{
-  "$schema": "../schemas/v1/parameter.schema.json",
-  "id": "aspect_ratio",
-  "type": "enum",
-  "description": "Width-to-height aspect ratio of output media",
-  "uiHint": "segmented_control"
-}

@@ -1,64 +1,72 @@
 /**
- * Models Management System — Public Interface (V2)
+ * Models Management System — Public Facade Interface
  *
- * SEALED SUBSYSTEM: Only 5 functions are exported.
- * All callers must use this module; direct imports from sub-modules are forbidden.
+ * SEALED SUBSYSTEM: All callers interact through these exported functions.
+ * Backed by the Dynamic Multi-Provider Architecture (032).
  */
 
-import { getRegistry } from "./registry/loader.js";
-import { validateInput as validateInputInternal } from "./validation/validationService.js";
-import { calculateCost as calculateCostInternal } from "./pricing/modelPricingService.js";
-import { evaluatePricing } from "./pricing/pricingEngine.js";
-import { resolveServableDeployment as resolveDeployment } from "./deployment/deploymentResolver.js";
-import { resolveModelSchema } from "./registry/resolver.js";
-import { run as runInternal } from "./execution/runService.js";
+import {
+  initRegistry,
+  getRegistry,
+  getModel,
+  getBindings,
+} from "./registry/modelRegistry.js";
+import { validateCanonicalInput } from "./registry/schemaValidator.js";
+import { calculateRetailCredits } from "./execution/pricingCalculator.js";
+import { run as runInternal } from "./execution/modelRunner.js";
 import { createLogger, LogEvents } from "../infrastructure/logging/index.js";
 
 const modelsLogger = createLogger("models");
 
+// Eagerly initialize the registry on module load
+try {
+  initRegistry();
+} catch (err) {
+  modelsLogger.error({ error: err.message }, `Registry boot initialization error: ${err.message}`);
+}
+
 // --- getCatalog ---------------------------------------------------------------
 
+/**
+ * Returns catalog of available models matching optional filters.
+ */
 export function getCatalog(filters = {}) {
-  const { families, deployments } = getRegistry();
+  const { models, bindingIndex } = getRegistry();
   const entries = [];
 
-  for (const [familyId, family] of families) {
-    const familyDeployments = [...deployments.values()].filter(
-      (d) => d.modelFamily === familyId
-    );
-    if (familyDeployments.length === 0) continue;
-
-    const operations = [
-      ...new Set(familyDeployments.flatMap((d) => Object.keys(d.operations || {}))),
-    ];
-
-    const rep =
-      familyDeployments.find((d) => d.status === "active") ||
-      familyDeployments.find((d) => d.status === "deprecated") ||
-      familyDeployments[0];
-
+  for (const [modelId, model] of models.entries()) {
+    const operations = Object.keys(model.operations || {});
     const operationDetails = {};
+    const activeProviders = new Set();
+
     for (const opKey of operations) {
-      const opDef = rep.operations?.[opKey];
-      if (opDef) {
-        operationDetails[opKey] = {
-          inputs: opDef.inputs || {},
-          pricing: opDef.pricing || null,
-        };
+      const opDef = model.operations[opKey];
+      const bindings = bindingIndex.get(`${modelId}:${opKey}`) || [];
+
+      for (const b of bindings) {
+        if (b.status === "active") {
+          activeProviders.add(b.providerId);
+        }
       }
+
+      operationDetails[opKey] = {
+        inputs: opDef.canonicalInputs || {},
+        retailPricing: opDef.retailPricing || null,
+      };
     }
 
     const entry = {
-      modelFamily: familyId,
-      displayName: family.displayName,
-      description: family.description || "",
-      iconUrl: family.iconUrl || "",
-      badge: family.badge || null,
-      domain: family.domain,
+      modelFamily: model.id,
+      modelId: model.id,
+      displayName: model.displayName,
+      description: model.description || "",
+      iconUrl: model.iconUrl || "",
+      domain: model.domain,
       operations,
       operationDetails,
-      provider: rep.provider,
-      lifecycleStatus: rep.status,
+      lifecycleStatus: model.status || "active",
+      status: model.status || "active",
+      activeProviders: Array.from(activeProviders),
     };
 
     if (filters.domain && entry.domain !== filters.domain) continue;
@@ -72,21 +80,51 @@ export function getCatalog(filters = {}) {
 }
 
 // --- getSchema ----------------------------------------------------------------
- 
+
+/**
+ * Returns input schema and pricing details for a given model and operation.
+ */
 export function getSchema(modelFamily, operation) {
-  return resolveModelSchema(modelFamily, operation);
+  const model = getModel(modelFamily);
+  const opDef = model.operations?.[operation];
+  if (!opDef) {
+    throw new Error(`Operation "${operation}" not supported for model "${modelFamily}"`);
+  }
+
+  return {
+    modelFamily: model.id,
+    modelId: model.id,
+    operation,
+    domain: model.domain,
+    inputs: opDef.canonicalInputs || {},
+    retailPricing: opDef.retailPricing || null,
+  };
 }
 
 // --- validateInput ------------------------------------------------------------
 
-export function validateInput(modelFamily, operation, rawInput) {
-  return validateInputInternal(modelFamily, operation, rawInput);
+/**
+ * Validates and sanitizes raw input against canonical schema.
+ */
+export function validateInput(modelFamily, operation, rawInput = {}) {
+  const model = getModel(modelFamily);
+  const opDef = model.operations?.[operation];
+  if (!opDef) {
+    throw new Error(`Operation "${operation}" not supported for model "${modelFamily}"`);
+  }
+
+  return validateCanonicalInput(opDef.canonicalInputs || {}, rawInput);
 }
 
 // --- calculateCost ------------------------------------------------------------
 
-export function calculateCost(modelFamily, operation, cleanInput) {
-  const cost = calculateCostInternal(modelFamily, operation, cleanInput);
+/**
+ * Computes fixed retail credit cost for a model operation.
+ */
+export function calculateCost(modelFamily, operation, cleanInput = {}) {
+  const model = getModel(modelFamily);
+  const cost = calculateRetailCredits(model, operation, cleanInput);
+
   modelsLogger.info(
     {
       modelFamily,
@@ -96,30 +134,43 @@ export function calculateCost(modelFamily, operation, cleanInput) {
     },
     `Cost calculated: ${cost} credits for ${modelFamily} (${operation})`
   );
+
   return cost;
 }
 
 // --- estimatePrice ------------------------------------------------------------
 
+/**
+ * Estimates retail credit cost from raw input.
+ */
 export function estimatePrice(modelFamily, operation, rawInput = {}) {
-  const cleanInput = validateInputInternal(modelFamily, operation, rawInput);
-  return evaluatePricing(modelFamily, operation, cleanInput);
+  const cleanInput = validateInput(modelFamily, operation, rawInput);
+  const amount = calculateCost(modelFamily, operation, cleanInput);
+  return {
+    amount,
+    currency: "credits",
+    pricingVersion: "fixed_retail",
+  };
 }
 
 // --- run ----------------------------------------------------------------------
 
-export async function run(modelFamily, operation, cleanInput, context = {}) {
-  // If operation was omitted or auto, resolve it dynamically
-  const resolvedOp = operation || resolveOperation(cleanInput, context.domain || "image");
+/**
+ * Executes a model operation via the unified multi-provider runner.
+ */
+export async function run(modelFamily, operation, cleanInput, options = {}) {
+  const resolvedOp = operation || resolveOperation(cleanInput, options.domain || "image");
+
   modelsLogger.debug(
     {
       modelFamily,
       operation: resolvedOp,
-      event: LogEvents.MODELS_EXECUTION_STARTED,
+      event: "models.execution.started",
     },
     `Executing model ${modelFamily} (${resolvedOp})`
   );
-  return runInternal(modelFamily, resolvedOp, cleanInput, context);
+
+  return runInternal(modelFamily, resolvedOp, cleanInput, options);
 }
 
 // --- resolveOperation ---------------------------------------------------------
@@ -127,7 +178,9 @@ export async function run(modelFamily, operation, cleanInput, context = {}) {
 export function resolveOperation(inputs = {}, targetOutput = "image") {
   if (inputs.operation) return inputs.operation;
 
-  const hasImage = Boolean(inputs.image_url || inputs.image || inputs.images?.length || inputs.input_assets?.length);
+  const hasImage = Boolean(
+    inputs.image_url || inputs.image || inputs.images?.length || inputs.input_assets?.length
+  );
 
   if (targetOutput === "image") {
     if (hasImage) return "edit";
@@ -140,4 +193,3 @@ export function resolveOperation(inputs = {}, targetOutput = "image") {
 
   return "text_to_image";
 }
-

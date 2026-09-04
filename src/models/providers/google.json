@@ -1,0 +1,9 @@
+{
+  "id": "google",
+  "displayName": "Google AI (Imagen / Gemini)",
+  "baseUrl": "https://generativelanguage.googleapis.com",
+  "authType": "apiKey",
+  "authQueryParam": "key",
+  "clientType": "generic-rest",
+  "defaultTimeoutMs": 45000
+}

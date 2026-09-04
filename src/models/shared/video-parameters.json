@@ -1,0 +1,50 @@
+{
+  "domain": "video",
+  "parameters": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Textual prompt describing the video scene"
+    },
+    "image_url": {
+      "type": "string",
+      "required": false,
+      "description": "Source image URL for image-to-video generation"
+    },
+    "duration": {
+      "type": "number",
+      "required": false,
+      "values": ["5", "10"],
+      "default": "5",
+      "description": "Video duration in seconds"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "required": false,
+      "values": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
+      "default": "16:9",
+      "description": "Video aspect ratio"
+    },
+    "fps": {
+      "type": "number",
+      "required": false,
+      "values": ["24", "30"],
+      "default": "24",
+      "description": "Frames per second"
+    },
+    "camera_motion": {
+      "type": "string",
+      "required": false,
+      "values": ["static", "pan_left", "pan_right", "zoom_in", "zoom_out"],
+      "default": "static",
+      "description": "Camera motion effect"
+    },
+    "resolution": {
+      "type": "string",
+      "required": false,
+      "values": ["480p", "720p", "1080p", "4k"],
+      "default": "720p",
+      "description": "Video resolution tier"
+    }
+  }
+}

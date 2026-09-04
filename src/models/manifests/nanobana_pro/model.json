@@ -1,0 +1,30 @@
+{
+  "id": "nanobana_pro",
+  "domain": "image",
+  "displayName": "NanoBanana Pro",
+  "description": "State-of-the-art high-fidelity photorealistic image generation model",
+  "status": "active",
+  "operations": {
+    "text_to_image": {
+      "canonicalInputs": {
+        "prompt": { "type": "string", "required": true },
+        "negative_prompt": { "type": "string", "required": false },
+        "resolution": { "type": "string", "values": ["1k", "2k", "4k"], "default": "1k" },
+        "aspect_ratio": { "type": "string", "values": ["1:1", "16:9", "9:16", "4:3", "3:4"], "default": "1:1" },
+        "quality": { "type": "string", "values": ["standard", "hd"], "default": "standard" },
+        "seed": { "type": "number", "required": false }
+      },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "1k:standard": 10,
+          "1k:hd": 13,
+          "2k:standard": 16,
+          "2k:hd": 21,
+          "4k:standard": 25,
+          "4k:hd": 33
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "modelId": "seedance_2_5",
+  "operation": "image_to_video",
+  "providerId": "wavespeed",
+  "providerModelId": "bytedance/seedance-2.5/image-to-video",
+  "endpoint": "/api/v3/bytedance/seedance-2.5/image-to-video",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "prompt": { "providerField": "prompt" },
+    "image_url": { "providerField": "image_url" },
+    "duration": { "providerField": "duration" },
+    "aspect_ratio": { "providerField": "aspect_ratio" },
+    "resolution": { "providerField": "resolution" }
+  },
+  "pricing": {
+    "base_cost_usd": 0.28,
+    "modifiers": {
+      "duration": { "5": 1.0, "10": 1.8 }
+    }
+  }
+}

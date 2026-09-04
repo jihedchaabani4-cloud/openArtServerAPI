@@ -1,0 +1,9 @@
+{
+  "id": "wavespeed",
+  "displayName": "WaveSpeed AI",
+  "baseUrl": "https://api.wavespeed.ai",
+  "authType": "bearer",
+  "authHeader": "Authorization",
+  "clientType": "generic-rest",
+  "defaultTimeoutMs": 30000
+}

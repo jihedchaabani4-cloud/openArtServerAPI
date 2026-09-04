@@ -1,8 +1,0 @@
-{
-  "id": "nanobana",
-  "domain": "image",
-  "displayName": "NanoBanana",
-  "description": "Fast affordable image generation and editing",
-  "iconUrl": "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/minimax.svg",
-  "badge": "FAST"
-}

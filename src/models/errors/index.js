@@ -190,12 +190,81 @@ export class ProviderMalformedResponseError extends ModelsSystemError {
 }
 
 export class OutputContractViolationError extends ModelsSystemError {
-  constructor(message) {
+  constructor(message = "Provider response violated output contract") {
     super(message, {
       retryable: false,
-      safeMessage: "Internal error",
-      statusCode: 500,
+      safeMessage: "Output generation failed to meet contract",
+      statusCode: 502,
       code: "OUTPUT_CONTRACT_VIOLATION"
     });
+  }
+}
+
+// --- Dynamic Multi-Provider Error Classes (032) ---
+
+export class UnknownProviderReferenceError extends ConfigIntegrityError {
+  constructor(providerId, context = "") {
+    super(`Unknown provider reference "${providerId}"${context ? ` in ${context}` : ""}`);
+    this.name = "UnknownProviderReferenceError";
+    this.code = "UNKNOWN_PROVIDER_REFERENCE";
+    this.providerId = providerId;
+  }
+}
+
+export class UnknownOperationReferenceError extends ConfigIntegrityError {
+  constructor(modelId, operation) {
+    super(`Binding references unknown operation "${operation}" for model "${modelId}"`);
+    this.name = "UnknownOperationReferenceError";
+    this.code = "UNKNOWN_OPERATION_REFERENCE";
+    this.modelId = modelId;
+    this.operation = operation;
+  }
+}
+
+export class UnknownCanonicalParameterError extends ConfigIntegrityError {
+  constructor(modelId, operation, paramKey) {
+    super(`Binding for model "${modelId}" (${operation}) maps unknown canonical parameter "${paramKey}"`);
+    this.name = "UnknownCanonicalParameterError";
+    this.code = "UNKNOWN_CANONICAL_PARAMETER";
+    this.modelId = modelId;
+    this.operation = operation;
+    this.paramKey = paramKey;
+  }
+}
+
+export class DuplicateBindingError extends ConfigIntegrityError {
+  constructor(modelId, operation, providerId) {
+    super(`Duplicate binding detected for composite key (${modelId}, ${operation}, ${providerId})`);
+    this.name = "DuplicateBindingError";
+    this.code = "DUPLICATE_BINDING";
+    this.modelId = modelId;
+    this.operation = operation;
+    this.providerId = providerId;
+  }
+}
+
+export class UnsupportedCapabilityError extends ModelsSystemError {
+  constructor(message = "No active provider binding supports the requested parameter values") {
+    super(message, {
+      retryable: false,
+      safeMessage: "The requested parameter combination is not supported by any active provider",
+      statusCode: 422,
+      code: "UNSUPPORTED_CAPABILITY"
+    });
+    this.name = "UnsupportedCapabilityError";
+  }
+}
+
+export class AllProvidersUnavailableError extends ModelsSystemError {
+  constructor(modelId, operation) {
+    super(`All provider bindings for model "${modelId}" (${operation}) are currently unavailable (circuit breakers open)`, {
+      retryable: true,
+      safeMessage: "All providers for this model are temporarily unavailable. Please try again shortly.",
+      statusCode: 503,
+      code: "ALL_PROVIDERS_UNAVAILABLE"
+    });
+    this.name = "AllProvidersUnavailableError";
+    this.modelId = modelId;
+    this.operation = operation;
   }
 }

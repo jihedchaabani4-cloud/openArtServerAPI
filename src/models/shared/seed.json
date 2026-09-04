@@ -1,7 +1,0 @@
-{
-  "$schema": "../schemas/v1/parameter.schema.json",
-  "id": "seed",
-  "type": "integer",
-  "description": "Random seed for reproducible generation",
-  "uiHint": "number_input"
-}

@@ -1,8 +1,0 @@
-{
-  "id": "runway_gen4_image_turbo",
-  "domain": "image",
-  "displayName": "RunwayML Gen-4 Image Turbo",
-  "description": "2.5x faster than Gen-4 Image with high fidelity",
-  "iconUrl": "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/runway.svg",
-  "badge": "FAST"
-}

@@ -1,8 +1,0 @@
-{
-  "id": "gpt-image-2",
-  "domain": "image",
-  "displayName": "GPT Image 2",
-  "description": "High-quality text-to-image and editing powered by GPT Image 2",
-  "iconUrl": "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/openai.svg",
-  "badge": "PRO"
-}

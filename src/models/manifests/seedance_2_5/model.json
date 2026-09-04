@@ -1,0 +1,45 @@
+{
+  "id": "seedance_2_5",
+  "domain": "video",
+  "displayName": "ByteDance Seedance 2.5",
+  "description": "Hollywood-grade cinematic video generation model from ByteDance with director-level motion control",
+  "status": "active",
+  "operations": {
+    "text_to_video": {
+      "canonicalInputs": {
+        "prompt": { "type": "string", "required": true },
+        "duration": { "type": "number", "values": ["5", "10"], "default": "5" },
+        "aspect_ratio": { "type": "string", "values": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"], "default": "16:9" },
+        "resolution": { "type": "string", "values": ["480p", "720p", "1080p"], "default": "720p" },
+        "fps": { "type": "number", "values": ["24", "30"], "default": "24" },
+        "camera_motion": { "type": "string", "values": ["static", "pan_left", "pan_right", "zoom_in", "zoom_out"], "default": "static" }
+      },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "default": 40,
+          "5": 40,
+          "10": 75
+        }
+      }
+    },
+    "image_to_video": {
+      "canonicalInputs": {
+        "prompt": { "type": "string", "required": true },
+        "image_url": { "type": "string", "required": true },
+        "duration": { "type": "number", "values": ["5", "10"], "default": "5" },
+        "aspect_ratio": { "type": "string", "values": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"], "default": "16:9" },
+        "resolution": { "type": "string", "values": ["480p", "720p", "1080p"], "default": "720p" },
+        "fps": { "type": "number", "values": ["24", "30"], "default": "24" }
+      },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "default": 45,
+          "5": 45,
+          "10": 80
+        }
+      }
+    }
+  }
+}

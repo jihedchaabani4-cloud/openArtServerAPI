@@ -1,0 +1,30 @@
+{
+  "modelId": "seedream_v5",
+  "operation": "text_to_image",
+  "providerId": "wavespeed",
+  "providerModelId": "bytedance/seedream-v5.0-pro",
+  "endpoint": "/api/v3/bytedance/seedream-v5.0-pro",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "prompt": { "providerField": "prompt" },
+    "negative_prompt": { "providerField": "negative_prompt" },
+    "resolution": { "providerField": "resolution" },
+    "aspect_ratio": { "providerField": "aspect_ratio" },
+    "quality": {
+      "providerField": "prompt_optimization_mode",
+      "valueMap": {
+        "standard": "fast",
+        "hd": "standard"
+      }
+    },
+    "seed": { "providerField": "seed" }
+  },
+  "pricing": {
+    "base_cost_usd": 0.03,
+    "modifiers": {
+      "resolution": { "1k": 1.0, "2k": 1.6 },
+      "quality": { "standard": 1.0, "hd": 1.3 }
+    }
+  }
+}

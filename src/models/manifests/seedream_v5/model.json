@@ -1,0 +1,28 @@
+{
+  "id": "seedream_v5",
+  "domain": "image",
+  "displayName": "ByteDance Seedream V5.0 Pro",
+  "description": "Next-generation ultra-high-resolution image generation model by ByteDance",
+  "status": "active",
+  "operations": {
+    "text_to_image": {
+      "canonicalInputs": {
+        "prompt": { "type": "string", "required": true },
+        "negative_prompt": { "type": "string", "required": false },
+        "resolution": { "type": "string", "values": ["1k", "2k"], "default": "1k" },
+        "aspect_ratio": { "type": "string", "values": ["1:1", "16:9", "9:16", "4:3", "3:4", "21:9", "3:2", "2:3"], "default": "1:1" },
+        "quality": { "type": "string", "values": ["standard", "hd"], "default": "standard" },
+        "seed": { "type": "number", "required": false }
+      },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "1k:standard": 9,
+          "1k:hd": 12,
+          "2k:standard": 15,
+          "2k:hd": 20
+        }
+      }
+    }
+  }
+}

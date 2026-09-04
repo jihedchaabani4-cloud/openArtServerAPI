@@ -1,0 +1,44 @@
+{
+  "id": "wan_3_0",
+  "domain": "video",
+  "displayName": "Alibaba Wan 3.0",
+  "description": "State-of-the-art cinematic video generation model by Alibaba capable of up to 30s coherent video",
+  "status": "active",
+  "operations": {
+    "text_to_video": {
+      "canonicalInputs": {
+        "prompt": { "type": "string", "required": true },
+        "duration": { "type": "number", "values": ["5", "10"], "default": "5" },
+        "aspect_ratio": { "type": "string", "values": ["16:9", "9:16", "1:1"], "default": "16:9" },
+        "resolution": { "type": "string", "values": ["480p", "720p", "1080p"], "default": "720p" },
+        "fps": { "type": "number", "values": ["24", "30"], "default": "24" }
+      },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "default": 35,
+          "5": 35,
+          "10": 65
+        }
+      }
+    },
+    "image_to_video": {
+      "canonicalInputs": {
+        "prompt": { "type": "string", "required": true },
+        "image_url": { "type": "string", "required": true },
+        "duration": { "type": "number", "values": ["5", "10"], "default": "5" },
+        "aspect_ratio": { "type": "string", "values": ["16:9", "9:16", "1:1"], "default": "16:9" },
+        "resolution": { "type": "string", "values": ["480p", "720p", "1080p"], "default": "720p" },
+        "fps": { "type": "number", "values": ["24", "30"], "default": "24" }
+      },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "default": 38,
+          "5": 38,
+          "10": 70
+        }
+      }
+    }
+  }
+}

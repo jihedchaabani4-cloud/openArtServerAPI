@@ -1,35 +1,70 @@
+import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { resolveCredential } from "../../credentials/credentialResolver.js";
-import { CredentialError } from "../../errors/index.js";
+import {
+  resolveCredential,
+  clearCredentialCache
+} from "../../credentials/credentialResolver.js";
 
-console.log("Running Credential Resolver Unit Tests...");
+describe("Credential Resolver (US5)", () => {
+  beforeEach(() => {
+    clearCredentialCache();
+  });
 
-const mockProvider = {
-  id: "testprov",
-  auth: { type: "apiKey", credentialType: "test_key" }
-};
+  it("should resolve credential from environment variable fallback", async () => {
+    process.env.TESTPROV_API_KEY = "sk-test-12345";
 
-// 1. Platform credential lookup
-process.env.TESTPROV_API_KEY = "platform_secret_123";
-const cred1 = await resolveCredential({ credentialPolicy: { userBYOK: "forbidden" } }, mockProvider);
-assert.equal(cred1.apiKey, "platform_secret_123");
-assert.equal(cred1.credentialSource, "platform");
+    const result = await resolveCredential(
+      { providerId: "testprov" },
+      { id: "testprov", authType: "bearer" }
+    );
 
-// 2. User BYOK required - supplied
-const mockCp = {
-  async getCredential(type) {
-    if (type === "test_key") return "user_key_456";
-    return null;
-  }
-};
-const cred2 = await resolveCredential({ credentialPolicy: { userBYOK: "required" } }, mockProvider, mockCp);
-assert.equal(cred2.apiKey, "user_key_456");
-assert.equal(cred2.credentialSource, "user");
+    assert.equal(result.apiKey, "sk-test-12345");
+    assert.equal(result.credentialSource, "platform_env");
+    delete process.env.TESTPROV_API_KEY;
+  });
 
-// 3. User BYOK required - missing throws CredentialError
-const emptyCp = { async getCredential() { return null; } };
-await assert.rejects(async () => {
-  await resolveCredential({ credentialPolicy: { userBYOK: "required" } }, mockProvider, emptyCp);
-}, CredentialError);
+  it("should serve subsequent resolution requests from in-memory cache", async () => {
+    process.env.TESTPROV_API_KEY = "sk-test-cache";
 
-console.log("✓ Credential resolver tests passed!");
+    const first = await resolveCredential(
+      { providerId: "testprov" },
+      { id: "testprov", authType: "bearer" }
+    );
+    assert.equal(first.credentialSource, "platform_env");
+
+    // Remove from env to prove it is served from cache
+    delete process.env.TESTPROV_API_KEY;
+
+    const second = await resolveCredential(
+      { providerId: "testprov" },
+      { id: "testprov", authType: "bearer" }
+    );
+    assert.equal(second.apiKey, "sk-test-cache");
+    assert.equal(second.credentialSource, "cache");
+  });
+
+  it("should resolve credential from mock database client", async () => {
+    const mockDb = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            single: async () => ({
+              data: { encrypted_key: "db-secret-key-99" },
+              error: null
+            })
+          })
+        })
+      })
+    };
+
+    const result = await resolveCredential(
+      { providerId: "supabase_prov" },
+      { id: "supabase_prov", authType: "bearer" },
+      null,
+      mockDb
+    );
+
+    assert.equal(result.apiKey, "db-secret-key-99");
+    assert.equal(result.credentialSource, "database");
+  });
+});

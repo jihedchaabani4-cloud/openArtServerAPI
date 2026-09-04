@@ -1,0 +1,36 @@
+{
+  "modelId": "nanobana_2",
+  "operation": "text_to_image",
+  "providerId": "wavespeed",
+  "providerModelId": "google/nano-banana-2/text-to-image",
+  "endpoint": "/api/v3/google/nano-banana-2/text-to-image",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "prompt": { "providerField": "prompt" },
+    "negative_prompt": { "providerField": "negative_prompt" },
+    "resolution": {
+      "providerField": "size",
+      "valueMap": {
+        "1k": "1024x1024",
+        "2k": "2048x2048"
+      }
+    },
+    "aspect_ratio": { "providerField": "aspect_ratio" },
+    "quality": {
+      "providerField": "quality_tier",
+      "valueMap": {
+        "standard": "std",
+        "hd": "high"
+      }
+    },
+    "seed": { "providerField": "seed" }
+  },
+  "pricing": {
+    "base_cost_usd": 0.02,
+    "modifiers": {
+      "resolution": { "1k": 1.0, "2k": 1.5 },
+      "quality": { "standard": 1.0, "hd": 1.3 }
+    }
+  }
+}

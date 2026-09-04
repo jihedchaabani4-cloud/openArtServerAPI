@@ -1,8 +1,0 @@
-{
-  "id": "z_image_base",
-  "domain": "image",
-  "displayName": "Z-Image Base",
-  "description": "Balanced speed and quality",
-  "iconUrl": "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/zhipu.svg",
-  "badge": "FAST"
-}

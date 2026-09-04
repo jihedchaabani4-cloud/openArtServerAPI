@@ -1,8 +1,0 @@
-{
-  "id": "runway_gen4_image",
-  "domain": "image",
-  "displayName": "RunwayML Gen-4 Image",
-  "description": "Precise images using up to 3 reference images",
-  "iconUrl": "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/runway.svg",
-  "badge": "PREMIUM"
-}

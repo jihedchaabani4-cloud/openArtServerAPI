@@ -16,6 +16,7 @@ const logger = createLogger("llm");
 export class LLMService {
   constructor({ defaultModel = "gemini-3-flash" } = {}) {
     this.defaultModel = defaultModel;
+    logger.debug({ defaultModel: this.defaultModel }, `[LLMService] Initialized with default model "${this.defaultModel}"`);
   }
 
   /**
@@ -49,37 +50,65 @@ export class LLMService {
     const messages = [{ role: "user", content: fullPrompt }];
 
     logger.debug(
-      { model, event: LogEvents.PROVIDER_REQUEST_STARTED },
-      `[LLMService] Request started for model "${model}"`
+      {
+        model,
+        promptLength: prompt?.length || 0,
+        hasSystemInstruction: Boolean(systemInstruction),
+        imagesCount: images.length,
+        jsonMode,
+        temperature,
+        event: LogEvents.PROVIDER_REQUEST_STARTED,
+      },
+      `[LLMService] Request started for model "${model}" (images: ${images.length}, jsonMode: ${jsonMode})`
     );
 
-    const result = await run(
-      model,
-      "chat_completion",
-      {
-        messages,
-        images,
-        temperature,
-      },
-      options
-    );
+    let result;
+    try {
+      result = await run(
+        model,
+        "chat_completion",
+        {
+          messages,
+          images,
+          temperature,
+        },
+        options
+      );
+    } catch (err) {
+      const durationMs = Math.round(performance.now() - startTime);
+      logger.error(
+        {
+          model,
+          durationMs,
+          error: err.message,
+          code: err.code || "LLM_GENERATION_FAILED",
+          statusCode: err.statusCode || 500,
+          event: LogEvents.PROVIDER_REQUEST_FAILED,
+        },
+        `[LLMService] Request failed after ${durationMs}ms for model "${model}": ${err.message}`
+      );
+      throw err;
+    }
 
     const durationMs = Math.round(performance.now() - startTime);
     const rawOutput = result.content || result.text || "";
-
-    logger.info(
-      {
-        model,
-        durationMs,
-        event: LogEvents.PROVIDER_REQUEST_COMPLETED,
-      },
-      `[LLMService] Completed in ${durationMs}ms via ${result.metadata?.providerUsed || "google"}`
-    );
 
     let jsonResult = null;
     if (jsonMode) {
       jsonResult = this.parseJSON(rawOutput);
     }
+
+    logger.info(
+      {
+        model: result.metadata?.providerModelId || result.metadata?.modelId || model,
+        providerUsed: result.metadata?.providerUsed || "google",
+        durationMs,
+        outputLength: rawOutput.length,
+        jsonParsed: Boolean(jsonResult),
+        event: LogEvents.PROVIDER_REQUEST_COMPLETED,
+      },
+      `[LLMService] Completed in ${durationMs}ms via ${result.metadata?.providerUsed || "google"}`
+    );
 
     return {
       raw: rawOutput,
@@ -94,6 +123,7 @@ export class LLMService {
    * Helper: Text generation
    */
   async generateText({ prompt, systemInstruction = "", temperature = 0.7, model = this.defaultModel, options = {} }) {
+    logger.debug({ model, promptSnippet: prompt?.slice(0, 80) }, `[LLMService] generateText called`);
     const res = await this.generate({
       prompt,
       systemInstruction,
@@ -108,6 +138,7 @@ export class LLMService {
    * Helper: Structured JSON generation
    */
   async generateJSON({ prompt, systemInstruction = "", temperature = 0.4, model = this.defaultModel, options = {} }) {
+    logger.debug({ model, promptSnippet: prompt?.slice(0, 80) }, `[LLMService] generateJSON called`);
     const res = await this.generate({
       prompt,
       systemInstruction,
@@ -123,6 +154,10 @@ export class LLMService {
    * Helper: Multimodal Vision analysis
    */
   async analyzeVision({ images = [], prompt, systemInstruction = "", jsonMode = true, model = this.defaultModel, options = {} }) {
+    logger.info(
+      { model, imagesCount: images.length, promptSnippet: prompt?.slice(0, 80) },
+      `[LLMService] analyzeVision called for ${images.length} image(s)`
+    );
     return this.generate({
       prompt,
       systemInstruction,
@@ -137,7 +172,10 @@ export class LLMService {
    * Robust JSON extraction from LLM text responses, stripping markdown blocks.
    */
   parseJSON(rawText = "") {
-    if (!rawText) return null;
+    if (!rawText) {
+      logger.warn("[LLMService] Empty raw text passed to parseJSON");
+      return null;
+    }
     try {
       let cleaned = rawText
         .replace(/^```json\s*/i, "")
@@ -152,7 +190,7 @@ export class LLMService {
       }
       return JSON.parse(cleaned);
     } catch (err) {
-      logger.warn({ err: err.message }, `[LLMService] Failed to parse JSON: ${err.message}`);
+      logger.warn({ err: err.message, snippet: rawText.slice(0, 100) }, `[LLMService] Failed to parse JSON: ${err.message}`);
       return null;
     }
   }

@@ -12,7 +12,10 @@ export async function runGoogleSdk({
   credential,
   options = {},
 }) {
-  const providerModelId = binding.providerModelId;
+  const providerModelId =
+    options.sdkClient
+      ? binding.providerModelId
+      : (process.env.GEMINI_MODEL || (binding.providerModelId === "gemini-2.0-flash" ? "gemini-3.6-flash" : binding.providerModelId));
   const apiKey = credential || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || null;
 
   const ai =
@@ -61,13 +64,29 @@ export async function runGoogleSdk({
     return { text: fullText, content: fullText, outputs: [fullText] };
   }
 
-  // 3. Direct SDK Call
+  // 3. Direct SDK Call with self-healing model deprecation fallback
   const sdkFn = ai.models[method];
   if (typeof sdkFn !== "function") {
     throw new Error(`Google GenAI SDK method "${method}" is not supported`);
   }
 
-  const response = await sdkFn.call(ai.models, sdkPayload);
+  let response;
+  try {
+    response = await sdkFn.call(ai.models, sdkPayload);
+  } catch (err) {
+    const isDeprecated =
+      err?.message &&
+      (err.message.includes("no longer available") ||
+       err.message.includes("gemini-3.6-flash") ||
+       (err.status === 404 && typeof err.message === "string" && err.message.includes("models/")));
+
+    if (isDeprecated && sdkPayload.model !== "gemini-3.6-flash") {
+      sdkPayload.model = "gemini-3.6-flash";
+      response = await sdkFn.call(ai.models, sdkPayload);
+    } else {
+      throw err;
+    }
+  }
 
   // 4. Return formatted response (standardized for downstream pipeline)
   if (response?.generatedImages) {

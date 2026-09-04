@@ -18,10 +18,10 @@ export class LLMService {
    * @param {string} options.prompt - Main user/task prompt
    * @param {string} [options.systemInstruction] - System prompt / role instructions
    * @param {string[]} [options.images] - Array of Base64 or image URLs
-   * @param {boolean} [options.jsonMode=false] - Whether output should be parsed as JSON
+   * @param {Object} [options.options] - Optional execution options (e.g. sdkClient mock)
    * @returns {Promise<{ raw: string, json?: object, model: string }>}
    */
-  async generate({ prompt, systemInstruction = "", images = [], jsonMode = false }) {
+  async generate({ prompt, systemInstruction = "", images = [], jsonMode = false, options = {} }) {
     const startTime = performance.now();
     const fullPromptText = systemInstruction
       ? `${systemInstruction}\n\n${prompt}`
@@ -34,11 +34,16 @@ export class LLMService {
       "LLM Gemini 2.0 Flash request started"
     );
 
-    const runResult = await run("gemini-2-0-flash", "chat_completion", {
-      messages,
-      images,
-      temperature: 0.4,
-    });
+    const runResult = await run(
+      "gemini-2-0-flash",
+      "chat_completion",
+      {
+        messages,
+        images,
+        temperature: 0.4,
+      },
+      options
+    );
 
     const durationMs = Math.round(performance.now() - startTime);
     providerLogger.info(
@@ -72,7 +77,7 @@ export class LLMService {
     return {
       raw: rawOutput,
       json: jsonResult,
-      model: runResult.metadata?.deploymentUsed || "gemini-2-0-flash",
+      model: runResult.metadata?.providerModelId || runResult.metadata?.modelId || "gemini-2-0-flash",
     };
   }
 }

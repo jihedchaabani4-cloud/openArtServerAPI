@@ -9,7 +9,6 @@ import {
   initRegistry,
   getRegistry,
   getModel,
-  getBindings,
 } from "./registry/modelRegistry.js";
 import { validateCanonicalInput } from "./registry/schemaValidator.js";
 import { calculateRetailCredits } from "./execution/pricingCalculator.js";

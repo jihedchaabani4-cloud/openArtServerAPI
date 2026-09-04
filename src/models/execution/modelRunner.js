@@ -6,7 +6,6 @@ import { calculateRetailCredits, calculateWholesaleCostUsd, calculateMargin } fr
 import { circuitBreakerRegistry } from "./circuitBreaker.js";
 import { normalizeError } from "./errorNormalizer.js";
 import { executeProviderSdk } from "../clients/sdk/providerSdkDispatcher.js";
-import { executeRest } from "../clients/genericRestClient.js";
 import { readSseStream } from "../clients/sseStreamReader.js";
 import { getCustomAdapter } from "../clients/customAdapterRunner.js";
 import { resolveCredential } from "../credentials/credentialResolver.js";

@@ -3,7 +3,7 @@ import { ProviderRequestError, ProviderTransientError } from "../../errors/index
 
 /**
  * Official Google GenAI SDK Runner
- * Interfaces with Google AI Studio & Gemini API via the official @google/genai package.
+ * Fully Declarative: Dispatches directly to the SDK method declared in binding.sdkMethod
  * Docs: https://aistudio.google.com/docs/libraries?codelanguage=javascript
  */
 export async function runGoogleSdk({
@@ -21,69 +21,46 @@ export async function runGoogleSdk({
       apiKey,
     });
 
+  // 1. Declarative Method Selection (strictly driven by binding.sdkMethod)
+  const baseMethod = binding.sdkMethod || "generateContent";
+  const streamMethod = binding.sdkStreamMethod || `${baseMethod}Stream`;
+
+  const isStreaming = Boolean(
+    options.onStreamChunk &&
+      (typeof ai.models[streamMethod] === "function" || typeof ai.models[baseMethod] === "function")
+  );
+
+  const activeMethod = isStreaming
+    ? typeof ai.models[streamMethod] === "function"
+      ? streamMethod
+      : baseMethod
+    : baseMethod;
+
+  const sdkFn = ai.models[activeMethod];
+
+  if (typeof sdkFn !== "function") {
+    throw new Error(`Google GenAI SDK method "${activeMethod}" is not supported`);
+  }
+
+  // Ensure standard prompt field is present if textPrompt was provided
+  const normalizedPayload = {
+    ...payload,
+    ...(payload.textPrompt && !payload.prompt ? { prompt: payload.textPrompt } : {}),
+  };
+
   try {
-    // 1. Image Generation (Imagen 3 / Imagen 4)
-    if (binding.operation === "text_to_image") {
-      const response = await ai.models.generateImages({
+    // 2. Execute Streaming if requested
+    if (isStreaming) {
+      const stream = await sdkFn.call(ai.models, {
         model: providerModelId,
-        prompt: payload.textPrompt || payload.prompt,
-        config: {
-          numberOfImages: payload.sampleCount || payload.numberOfImages || 1,
-          aspectRatio: payload.aspectRatio || "1:1",
-          ...(payload.imageSize ? { imageSize: payload.imageSize } : {}),
-          ...(payload.outputMimeType ? { outputMimeType: payload.outputMimeType } : {}),
-        },
-      });
-
-      const generatedImages = response.generatedImages || [];
-      const images = generatedImages.map((img) => {
-        if (img.image?.imageBytes) {
-          return `data:image/png;base64,${img.image.imageBytes}`;
-        }
-        return img.imageUri || img.uri || "";
-      });
-
-      return {
-        predictions: images.map((uri) => ({ bytesBase64Encoded: uri, uri })),
-        images,
-        raw: response,
-      };
-    }
-
-    // 2. Image Editing
-    if (binding.operation === "edit" || binding.operation === "image_to_image") {
-      if (typeof ai.models.editImage === "function" && payload.image) {
-        const response = await ai.models.editImage({
-          model: providerModelId,
-          prompt: payload.textPrompt || payload.prompt,
-          referenceImages: Array.isArray(payload.image) ? payload.image : [payload.image],
-        });
-        const generatedImages = response.generatedImages || [];
-        const images = generatedImages.map((img) => img.imageUri || img.uri || "");
-        return { predictions: images.map((uri) => ({ uri })), images, raw: response };
-      }
-    }
-
-    // 3. Streaming Chat / LLM Generation (Gemini 2.0 / 2.5)
-    if ((options.onStreamChunk || payload.streaming) && typeof ai.models.generateContentStream === "function") {
-      const stream = await ai.models.generateContentStream({
-        model: providerModelId,
-        contents: payload.contents || payload.prompt || payload.messages,
-        config: {
-          ...(payload.temperature !== undefined ? { temperature: payload.temperature } : {}),
-          ...(payload.max_tokens ? { maxOutputTokens: payload.max_tokens } : {}),
-          ...(payload.top_p !== undefined ? { topP: payload.top_p } : {}),
-          ...(payload.system_prompt ? { systemInstruction: payload.system_prompt } : {}),
-        },
+        ...normalizedPayload,
       });
 
       let fullText = "";
       for await (const chunk of stream) {
         const text = chunk.text || "";
         fullText += text;
-        if (options.onStreamChunk) {
-          options.onStreamChunk({ text, raw: chunk });
-        }
+        options.onStreamChunk({ text, raw: chunk });
       }
 
       return {
@@ -92,24 +69,38 @@ export async function runGoogleSdk({
       };
     }
 
-    // 4. Synchronous Content Generation (Gemini LLM)
-    const response = await ai.models.generateContent({
+    // Direct SDK Method Call
+    const response = await sdkFn.call(ai.models, {
       model: providerModelId,
-      contents: payload.contents || payload.prompt || payload.messages,
-      config: {
-        ...(payload.temperature !== undefined ? { temperature: payload.temperature } : {}),
-        ...(payload.max_tokens ? { maxOutputTokens: payload.max_tokens } : {}),
-        ...(payload.top_p !== undefined ? { topP: payload.top_p } : {}),
-        ...(payload.system_prompt ? { systemInstruction: payload.system_prompt } : {}),
-      },
+      ...normalizedPayload,
     });
 
-    return {
-      text: response.text,
-      candidates: response.candidates,
-      outputs: [response.text],
-      raw: response,
-    };
+    // 3. Declarative / Standard Output Normalization
+    if (response?.generatedImages) {
+      const images = response.generatedImages.map((img) => {
+        if (img.image?.imageBytes) {
+          return `data:image/png;base64,${img.image.imageBytes}`;
+        }
+        return img.imageUri || img.uri || "";
+      });
+      return {
+        predictions: images.map((uri) => ({ bytesBase64Encoded: uri, uri })),
+        images,
+        outputs: images,
+        raw: response,
+      };
+    }
+
+    if (response?.text) {
+      return {
+        text: response.text,
+        candidates: response.candidates,
+        outputs: [response.text],
+        raw: response,
+      };
+    }
+
+    return response;
   } catch (err) {
     const errMsg = err.message || "Google GenAI SDK execution error";
     if (err.status === 429 || err.code === 429) {

@@ -5,6 +5,7 @@
   "providerModelId": "imagen-4-ultra",
   "endpoint": "/v1beta/models/imagen-4-ultra:generate",
   "priority": 2,
+  "sdkMethod": "generateImages",
   "status": "active",
   "parameterMap": {
     "prompt": { "providerField": "textPrompt" },

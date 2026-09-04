@@ -112,6 +112,7 @@ describe("Provider SDK Layer & Dynamic API SDK Generator", () => {
         binding: {
           providerModelId: "imagen-4-ultra",
           operation: "text_to_image",
+          sdkMethod: "generateImages",
         },
         payload: {
           textPrompt: "A serene zen garden",

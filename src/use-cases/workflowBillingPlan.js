@@ -98,13 +98,16 @@ export async function calculateWorkflowBillingPlan({
       });
     }
 
-    const credits = Math.max(0, Math.ceil(Number(costResult?.amount ?? costResult?.totalCredits ?? 0)));
+    const rawCost = typeof costResult === "object" && costResult !== null
+      ? (costResult.amount ?? costResult.totalCredits ?? 0)
+      : costResult;
+    const credits = Math.max(0, Math.ceil(Number(rawCost ?? 0)));
     totalCredits += credits;
     breakdowns.push({
       ...billable,
       cost: {
         totalCredits: credits,
-        amount: costResult?.amount || String(credits),
+        amount: String(credits),
         currency: "credits",
         pricingMode: costResult?.pricingMode || "default",
       },

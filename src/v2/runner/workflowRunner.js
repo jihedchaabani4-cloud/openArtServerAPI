@@ -125,10 +125,11 @@ export function estimateNodeBillingAmount(nodeConfig, resolvedInputs = {}) {
 
   const op = resolveOperation(inputsForBilling, domain);
   const costResult = calculateCost(model, op, inputsForBilling);
-  const costNumber = parseFloat(costResult.amount);
+  const rawCost = typeof costResult === "object" && costResult !== null ? costResult.amount : costResult;
+  const costNumber = parseFloat(rawCost);
 
   if (isNaN(costNumber) || costNumber < 0) {
-    throw new Error(`[Billing] Invalid calculated cost "${costResult.amount}" for model "${model}" (${op})`);
+    throw new Error(`[Billing] Invalid calculated cost "${rawCost}" for model "${model}" (${op})`);
   }
 
   return costNumber;

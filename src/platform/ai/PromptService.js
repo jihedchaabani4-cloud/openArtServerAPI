@@ -1,31 +1,7 @@
-import { run } from "../../models/index.js";
+import { llmService } from "./LLMService.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
 
 const aiLogger = createLogger("ai");
-
-async function executeTextCompletion({ systemPrompt, userPrompt, temperature = 0.7 }) {
-    const messages = [];
-    if (systemPrompt) messages.push({ role: "system", content: systemPrompt });
-    if (userPrompt) messages.push({ role: "user", content: userPrompt });
-
-    const result = await run("gemini-2-0-flash", "chat_completion", {
-        messages,
-        temperature,
-    });
-
-    return result.content || "";
-}
-
-async function executeJsonCompletion(params) {
-    const text = await executeTextCompletion(params);
-    let cleaned = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
-    const firstBrace = cleaned.indexOf("{");
-    const lastBrace = cleaned.lastIndexOf("}");
-    if (firstBrace !== -1 && lastBrace > firstBrace) {
-        cleaned = cleaned.slice(firstBrace, lastBrace + 1);
-    }
-    return JSON.parse(cleaned);
-}
 
 export class PromptService {
     constructor() {
@@ -33,11 +9,21 @@ export class PromptService {
     }
 
     async complete({ systemPrompt, userPrompt, temperature = 0.7 }) {
-        return executeTextCompletion({ systemPrompt, userPrompt, temperature });
+        return llmService.generateText({
+            prompt: userPrompt,
+            systemInstruction: systemPrompt,
+            temperature,
+            model: this.modelFamily,
+        });
     }
 
     async completeJSON({ systemPrompt, userPrompt, temperature = 0.7 }) {
-        return executeJsonCompletion({ systemPrompt, userPrompt, temperature });
+        return llmService.generateJSON({
+            prompt: userPrompt,
+            systemInstruction: systemPrompt,
+            temperature,
+            model: this.modelFamily,
+        });
     }
 
     async checkPrompt(prompt) {

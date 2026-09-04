@@ -1,13 +1,13 @@
 /**
- * ElementAnalysisService.js (Upgraded to Exact Frontend Vision AI Engine)
- * Standalone AI Vision Analysis & Taste Profile Service for Express Backend.
- * Handles element media retrieval, multimodal LLM vision inspection (Gemini 3.1 + Groq fallback),
- * JSON schema extraction, and direct database persistence.
+ * ElementAnalysisService.js
+ * Standalone AI Vision Analysis & Taste Profile Service.
+ * Handles element media retrieval, multimodal LLM vision inspection via central LLMService,
+ * JSON schema extraction, and database persistence.
  */
 
 import { supabase } from "../../../lib/supabase.js";
 import elementRepository from "../../db/ElementRepository.js";
-import { llmService } from "#platform/ai/LLMService.js";
+import { llmService } from "../../platform/ai/LLMService.js";
 
 const KEYWORD_EXTRACTION_INSTRUCTION = `
 CRITICAL OUTPUT REQUIREMENT:
@@ -217,10 +217,10 @@ export class ElementAnalysisService {
     const systemInstructions = ELEMENT_TYPE_PROMPTS[mode] || DEFAULT_TYPE_PROMPT;
     const promptText = "Analyze the attached reference images and return the requested JSON object matching the schema.";
 
-    const result = await llmService.generate({
+    const result = await llmService.analyzeVision({
+      images: imageUrls,
       prompt: promptText,
       systemInstruction: systemInstructions,
-      images: imageUrls.slice(0, 6),
       jsonMode: true,
     });
 

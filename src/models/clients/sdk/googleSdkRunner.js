@@ -3,11 +3,12 @@ import { ProviderRequestError, ProviderTransientError } from "../../errors/index
 
 /**
  * Official Google GenAI SDK Runner
- * Interfaces with Google AI models via the @google/genai npm package.
+ * Interfaces with Google AI Studio & Gemini API via the official @google/genai package.
+ * Docs: https://aistudio.google.com/docs/libraries?codelanguage=javascript
  */
 export async function runGoogleSdk({
   binding,
-  payload,
+  payload = {},
   credential,
   options = {},
 }) {
@@ -21,19 +22,19 @@ export async function runGoogleSdk({
     });
 
   try {
-    // Check if operation is image generation
-    if (binding.operation === "text_to_image" || binding.operation === "edit") {
+    // 1. Image Generation (Imagen 3 / Imagen 4)
+    if (binding.operation === "text_to_image") {
       const response = await ai.models.generateImages({
         model: providerModelId,
         prompt: payload.textPrompt || payload.prompt,
         config: {
-          numberOfImages: payload.sampleCount || 1,
+          numberOfImages: payload.sampleCount || payload.numberOfImages || 1,
           aspectRatio: payload.aspectRatio || "1:1",
           ...(payload.imageSize ? { imageSize: payload.imageSize } : {}),
+          ...(payload.outputMimeType ? { outputMimeType: payload.outputMimeType } : {}),
         },
       });
 
-      // Normalize Google output format
       const generatedImages = response.generatedImages || [];
       const images = generatedImages.map((img) => {
         if (img.image?.imageBytes) {
@@ -49,15 +50,64 @@ export async function runGoogleSdk({
       };
     }
 
-    // Default: Content generation (Gemini LLM)
+    // 2. Image Editing
+    if (binding.operation === "edit" || binding.operation === "image_to_image") {
+      if (typeof ai.models.editImage === "function" && payload.image) {
+        const response = await ai.models.editImage({
+          model: providerModelId,
+          prompt: payload.textPrompt || payload.prompt,
+          referenceImages: Array.isArray(payload.image) ? payload.image : [payload.image],
+        });
+        const generatedImages = response.generatedImages || [];
+        const images = generatedImages.map((img) => img.imageUri || img.uri || "");
+        return { predictions: images.map((uri) => ({ uri })), images, raw: response };
+      }
+    }
+
+    // 3. Streaming Chat / LLM Generation (Gemini 2.0 / 2.5)
+    if ((options.onStreamChunk || payload.streaming) && typeof ai.models.generateContentStream === "function") {
+      const stream = await ai.models.generateContentStream({
+        model: providerModelId,
+        contents: payload.contents || payload.prompt || payload.messages,
+        config: {
+          ...(payload.temperature !== undefined ? { temperature: payload.temperature } : {}),
+          ...(payload.max_tokens ? { maxOutputTokens: payload.max_tokens } : {}),
+          ...(payload.top_p !== undefined ? { topP: payload.top_p } : {}),
+          ...(payload.system_prompt ? { systemInstruction: payload.system_prompt } : {}),
+        },
+      });
+
+      let fullText = "";
+      for await (const chunk of stream) {
+        const text = chunk.text || "";
+        fullText += text;
+        if (options.onStreamChunk) {
+          options.onStreamChunk({ text, raw: chunk });
+        }
+      }
+
+      return {
+        text: fullText,
+        outputs: [fullText],
+      };
+    }
+
+    // 4. Synchronous Content Generation (Gemini LLM)
     const response = await ai.models.generateContent({
       model: providerModelId,
-      contents: payload.contents || payload.prompt,
+      contents: payload.contents || payload.prompt || payload.messages,
+      config: {
+        ...(payload.temperature !== undefined ? { temperature: payload.temperature } : {}),
+        ...(payload.max_tokens ? { maxOutputTokens: payload.max_tokens } : {}),
+        ...(payload.top_p !== undefined ? { topP: payload.top_p } : {}),
+        ...(payload.system_prompt ? { systemInstruction: payload.system_prompt } : {}),
+      },
     });
 
     return {
       text: response.text,
       candidates: response.candidates,
+      outputs: [response.text],
       raw: response,
     };
   } catch (err) {

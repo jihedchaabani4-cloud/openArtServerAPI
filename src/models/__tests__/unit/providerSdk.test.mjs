@@ -126,6 +126,66 @@ describe("Provider SDK Layer & Dynamic API SDK Generator", () => {
       assert.ok(generateImagesCalled);
       assert.equal(result.images[0], "https://google.storage/imagen-result.png");
     });
+
+    it("should execute content generation via Google GenAI SDK", async () => {
+      const mockGoogleAi = {
+        models: {
+          generateContent: async ({ model, contents }) => {
+            return {
+              text: "Hello, I am Gemini!",
+              candidates: [{ content: { parts: [{ text: "Hello, I am Gemini!" }] } }],
+            };
+          },
+        },
+      };
+
+      const result = await runGoogleSdk({
+        binding: {
+          providerModelId: "gemini-2.0-flash",
+          operation: "chat_completion",
+        },
+        payload: {
+          prompt: "Say hello",
+        },
+        credential: "dummy_gemini_key",
+        options: {
+          sdkClient: mockGoogleAi,
+        },
+      });
+
+      assert.equal(result.text, "Hello, I am Gemini!");
+      assert.equal(result.outputs[0], "Hello, I am Gemini!");
+    });
+
+    it("should handle streaming tokens with Google GenAI SDK", async () => {
+      const chunks = [];
+      const mockGoogleAi = {
+        models: {
+          generateContentStream: async function* () {
+            yield { text: "Hello " };
+            yield { text: "World!" };
+          },
+        },
+      };
+
+      const result = await runGoogleSdk({
+        binding: {
+          providerModelId: "gemini-2.0-flash",
+          operation: "chat_completion",
+        },
+        payload: {
+          prompt: "Stream hello world",
+        },
+        credential: "dummy_gemini_key",
+        options: {
+          sdkClient: mockGoogleAi,
+          onStreamChunk: (c) => chunks.push(c.text),
+        },
+      });
+
+      assert.equal(result.text, "Hello World!");
+      assert.deepEqual(chunks, ["Hello ", "World!"]);
+    });
   });
 
   describe("Provider SDK Dispatcher", () => {

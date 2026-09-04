@@ -21,8 +21,11 @@ export async function runGoogleSdk({
       apiKey,
     });
 
-  // 1. Declarative Method Selection from binding.sdkMethod (e.g. "generateImages", "generateContent")
-  const method = binding.sdkMethod || "generateImages";
+  // 1. Declarative Method Selection (strictly defined by binding.sdkMethod in JSON)
+  const method = binding.sdkMethod;
+  if (!method) {
+    throw new Error(`Google binding for "${providerModelId}" must declare "sdkMethod" (e.g. "generateImages", "generateContent")`);
+  }
   const sdkPayload = {
     model: providerModelId,
     ...payload,

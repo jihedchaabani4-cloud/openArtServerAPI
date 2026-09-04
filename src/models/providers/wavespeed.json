@@ -4,6 +4,6 @@
   "baseUrl": "https://api.wavespeed.ai",
   "authType": "bearer",
   "authHeader": "Authorization",
-  "clientType": "generic-rest",
+  "clientType": "sdk",
   "defaultTimeoutMs": 30000
 }

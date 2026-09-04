@@ -5,6 +5,7 @@ import { mapToProviderPayload, mapFromProviderResponse } from "../registry/param
 import { calculateRetailCredits, calculateWholesaleCostUsd, calculateMargin } from "./pricingCalculator.js";
 import { circuitBreakerRegistry } from "./circuitBreaker.js";
 import { normalizeError } from "./errorNormalizer.js";
+import { executeProviderSdk } from "../clients/sdk/providerSdkDispatcher.js";
 import { executeRest } from "../clients/genericRestClient.js";
 import { readSseStream } from "../clients/sseStreamReader.js";
 import { getCustomAdapter } from "../clients/customAdapterRunner.js";
@@ -110,12 +111,13 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
         onChunk: options.onStreamChunk,
       });
     } else {
-      rawResponse = await executeRest({
+      rawResponse = await executeProviderSdk({
         provider,
         binding,
         payload: providerPayload,
         credential,
         timeoutMs: options.timeoutMs,
+        options,
       });
     }
 

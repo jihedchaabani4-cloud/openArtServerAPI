@@ -4,6 +4,6 @@
   "baseUrl": "https://generativelanguage.googleapis.com",
   "authType": "apiKey",
   "authQueryParam": "key",
-  "clientType": "generic-rest",
+  "clientType": "sdk",
   "defaultTimeoutMs": 45000
 }

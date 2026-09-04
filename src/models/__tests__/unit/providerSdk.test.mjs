@@ -144,6 +144,7 @@ describe("Provider SDK Layer & Dynamic API SDK Generator", () => {
         binding: {
           providerModelId: "gemini-2.0-flash",
           operation: "chat_completion",
+          sdkMethod: "generateContent",
         },
         payload: {
           prompt: "Say hello",
@@ -173,6 +174,7 @@ describe("Provider SDK Layer & Dynamic API SDK Generator", () => {
         binding: {
           providerModelId: "gemini-2.0-flash",
           operation: "chat_completion",
+          sdkMethod: "generateContent",
         },
         payload: {
           prompt: "Stream hello world",

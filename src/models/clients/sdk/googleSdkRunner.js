@@ -21,107 +21,47 @@ export async function runGoogleSdk({
       apiKey,
     });
 
-  // 1. Declarative Method Selection (strictly driven by binding.sdkMethod)
-  const baseMethod = binding.sdkMethod || "generateContent";
-  const streamMethod = binding.sdkStreamMethod || `${baseMethod}Stream`;
-
-  const isStreaming = Boolean(
-    options.onStreamChunk &&
-      (typeof ai.models[streamMethod] === "function" || typeof ai.models[baseMethod] === "function")
-  );
-
-  const activeMethod = isStreaming
-    ? typeof ai.models[streamMethod] === "function"
-      ? streamMethod
-      : baseMethod
-    : baseMethod;
-
-  const sdkFn = ai.models[activeMethod];
-
-  if (typeof sdkFn !== "function") {
-    throw new Error(`Google GenAI SDK method "${activeMethod}" is not supported`);
-  }
-
-  // Ensure standard prompt field is present if textPrompt was provided
-  const normalizedPayload = {
+  // 1. Declarative Method Selection from binding.sdkMethod (e.g. "generateImages", "generateContent")
+  const method = binding.sdkMethod || "generateImages";
+  const sdkPayload = {
+    model: providerModelId,
     ...payload,
     ...(payload.textPrompt && !payload.prompt ? { prompt: payload.textPrompt } : {}),
   };
 
-  try {
-    // 2. Execute Streaming if requested
-    if (isStreaming) {
-      const stream = await sdkFn.call(ai.models, {
-        model: providerModelId,
-        ...normalizedPayload,
-      });
-
-      let fullText = "";
-      for await (const chunk of stream) {
-        const text = chunk.text || "";
-        fullText += text;
-        options.onStreamChunk({ text, raw: chunk });
-      }
-
-      return {
-        text: fullText,
-        outputs: [fullText],
-      };
+  // 2. Stream execution if requested and supported
+  if (options.onStreamChunk && typeof ai.models[`${method}Stream`] === "function") {
+    const stream = await ai.models[`${method}Stream`](sdkPayload);
+    let fullText = "";
+    for await (const chunk of stream) {
+      const text = chunk.text || "";
+      fullText += text;
+      options.onStreamChunk({ text, raw: chunk });
     }
-
-    // Direct SDK Method Call
-    const response = await sdkFn.call(ai.models, {
-      model: providerModelId,
-      ...normalizedPayload,
-    });
-
-    // 3. Declarative / Standard Output Normalization
-    if (response?.generatedImages) {
-      const images = response.generatedImages.map((img) => {
-        if (img.image?.imageBytes) {
-          return `data:image/png;base64,${img.image.imageBytes}`;
-        }
-        return img.imageUri || img.uri || "";
-      });
-      return {
-        predictions: images.map((uri) => ({ bytesBase64Encoded: uri, uri })),
-        images,
-        outputs: images,
-        raw: response,
-      };
-    }
-
-    if (response?.text) {
-      return {
-        text: response.text,
-        candidates: response.candidates,
-        outputs: [response.text],
-        raw: response,
-      };
-    }
-
-    return response;
-  } catch (err) {
-    const errMsg = err.message || "Google GenAI SDK execution error";
-    if (err.status === 429 || err.code === 429) {
-      const rateLimitErr = new ProviderTransientError(`Google rate limit: ${errMsg}`);
-      rateLimitErr.statusCode = 429;
-      rateLimitErr.code = "RATE_LIMITED";
-      rateLimitErr.raw = err;
-      throw rateLimitErr;
-    }
-    if (err.status >= 500) {
-      const serverErr = new ProviderTransientError(`Google service error: ${errMsg}`);
-      serverErr.statusCode = err.status;
-      serverErr.code = "PROVIDER_UNAVAILABLE";
-      serverErr.raw = err;
-      throw serverErr;
-    }
-
-    const clientErr = new ProviderRequestError(`Google SDK error: ${errMsg}`);
-    clientErr.statusCode = err.status || 400;
-    clientErr.code = "INVALID_INPUT_REJECTED_BY_PROVIDER";
-    clientErr.raw = err;
-    throw clientErr;
+    return { text: fullText, outputs: [fullText] };
   }
+
+  // 3. Direct SDK Call
+  const sdkFn = ai.models[method];
+  if (typeof sdkFn !== "function") {
+    throw new Error(`Google GenAI SDK method "${method}" is not supported`);
+  }
+
+  const response = await sdkFn.call(ai.models, sdkPayload);
+
+  // 4. Return formatted response (standardized for downstream pipeline)
+  if (response?.generatedImages) {
+    const images = response.generatedImages.map((img) => {
+      return img.image?.imageBytes
+        ? `data:image/png;base64,${img.image.imageBytes}`
+        : img.imageUri || img.uri || "";
+    });
+    return { predictions: images.map((uri) => ({ uri })), images, outputs: images, raw: response };
+  }
+
+  if (response?.text) {
+    return { text: response.text, candidates: response.candidates, outputs: [response.text], raw: response };
+  }
+
+  return response;
 }

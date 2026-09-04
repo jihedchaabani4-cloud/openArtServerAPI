@@ -270,5 +270,37 @@ describe("Provider SDK Layer & Dynamic API SDK Generator", () => {
       assert.equal(res.metadata.providerUsed, "wavespeed");
       assert.ok(res.metadata.creditsCharged > 0);
     });
+
+    it("should successfully execute end-to-end Gemini 2.0 Flash run using Google GenAI SDK", async () => {
+      const mockGoogleAi = {
+        models: {
+          generateContent: async ({ model, contents }) => {
+            return {
+              text: "Gemini 2.0 Flash response content",
+              candidates: [{ content: { parts: [{ text: "Gemini 2.0 Flash response content" }] } }],
+            };
+          },
+        },
+      };
+
+      const res = await run(
+        "gemini-2-0-flash",
+        "chat_completion",
+        {
+          messages: [{ role: "user", content: "Explain quantum computing" }],
+          temperature: 0.5,
+        },
+        {
+          sdkClient: mockGoogleAi,
+          credential: "dummy_google_key",
+        }
+      );
+
+      assert.equal(res.status, "success");
+      assert.equal(res.content, "Gemini 2.0 Flash response content");
+      assert.equal(res.text, "Gemini 2.0 Flash response content");
+      assert.equal(res.metadata.providerUsed, "google");
+      assert.equal(res.metadata.providerModelId, "gemini-2.0-flash");
+    });
   });
 });

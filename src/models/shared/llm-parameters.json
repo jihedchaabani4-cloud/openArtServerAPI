@@ -3,8 +3,13 @@
   "parameters": {
     "messages": {
       "type": "array",
-      "required": true,
+      "required": false,
       "description": "Array of conversation messages with role and content"
+    },
+    "images": {
+      "type": "array",
+      "required": false,
+      "description": "Optional array of images (Base64 strings or URLs) for multimodal vision analysis"
     },
     "prompt": {
       "type": "string",

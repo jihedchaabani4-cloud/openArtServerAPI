@@ -185,7 +185,10 @@ export function getRegistry() {
 
 export function getModel(modelId) {
   const { models } = getRegistry();
-  const model = models.get(modelId);
+  let model = models.get(modelId);
+  if (!model && typeof modelId === "string") {
+    model = models.get(modelId.replace(/-/g, "_")) || models.get(modelId.replace(/_/g, "-"));
+  }
   if (!model) {
     throw new UnknownModelFamilyError(modelId);
   }
@@ -203,20 +206,30 @@ export function getProvider(providerId) {
 
 export function getBindings(modelId, operation) {
   const { bindingIndex, models } = getRegistry();
-  if (!models.has(modelId)) {
+  const model =
+    models.get(modelId) ||
+    models.get(typeof modelId === "string" ? modelId.replace(/-/g, "_") : null) ||
+    models.get(typeof modelId === "string" ? modelId.replace(/_/g, "-") : null);
+
+  if (!model) {
     throw new UnknownModelFamilyError(modelId);
   }
-  const model = models.get(modelId);
   if (!model.operations || !model.operations[operation]) {
-    throw new UnknownOperationError(modelId, operation);
+    throw new UnknownOperationError(model.id, operation);
   }
-  const indexKey = `${modelId}:${operation}`;
+  const indexKey = `${model.id}:${operation}`;
   return bindingIndex.get(indexKey) || [];
 }
 
 export function getBinding(modelId, operation, providerId) {
-  const { bindings } = getRegistry();
-  const key = `${modelId}:${operation}:${providerId}`;
+  const { bindings, models } = getRegistry();
+  const model =
+    models.get(modelId) ||
+    models.get(typeof modelId === "string" ? modelId.replace(/-/g, "_") : null) ||
+    models.get(typeof modelId === "string" ? modelId.replace(/_/g, "-") : null);
+
+  const actualId = model ? model.id : modelId;
+  const key = `${actualId}:${operation}:${providerId}`;
   return bindings.get(key) || null;
 }
 

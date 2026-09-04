@@ -1,0 +1,23 @@
+{
+  "modelId": "gemini_2_0_flash",
+  "operation": "chat_completion",
+  "providerId": "google",
+  "providerModelId": "gemini-2.0-flash",
+  "endpoint": "/v1beta/models/gemini-2.0-flash:generateContent",
+  "priority": 1,
+  "sdkMethod": "generateContent",
+  "status": "active",
+  "parameterMap": {
+    "prompt": { "providerField": "contents" },
+    "messages": { "providerField": "contents" },
+    "images": { "providerField": "images" },
+    "system_prompt": { "providerField": "config.systemInstruction" },
+    "temperature": { "providerField": "config.temperature" },
+    "max_tokens": { "providerField": "config.maxOutputTokens" },
+    "top_p": { "providerField": "config.topP" },
+    "streaming": { "providerField": "streaming" }
+  },
+  "pricing": {
+    "base_cost_usd": 0.00
+  }
+}

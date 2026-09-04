@@ -162,6 +162,9 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
     return {
       status: "success",
       data: normalizedOutput,
+      content: normalizedOutput?.content || normalizedOutput?.text || "",
+      text: normalizedOutput?.text || "",
+      images: normalizedOutput?.images || [],
       metadata: {
         generationId,
         modelId,

@@ -1,0 +1,27 @@
+{
+  "id": "gemini_2_0_flash_lite",
+  "domain": "llm",
+  "displayName": "Google Gemini 2.0 Flash-Lite",
+  "description": "Ultra-lightweight, high-speed Gemini 2 model engineered for cost-efficiency and high throughput, completely free in Google AI Studio",
+  "status": "active",
+  "operations": {
+    "chat_completion": {
+      "canonicalInputs": {
+        "prompt": { "type": "string", "required": false },
+        "messages": { "type": "array", "required": false },
+        "images": { "type": "array", "required": false },
+        "system_prompt": { "type": "string", "required": false },
+        "temperature": { "type": "number", "default": 0.7 },
+        "max_tokens": { "type": "number", "default": 2048 },
+        "top_p": { "type": "number", "default": 1.0 },
+        "streaming": { "type": "boolean", "default": false }
+      },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "default": 0
+        }
+      }
+    }
+  }
+}

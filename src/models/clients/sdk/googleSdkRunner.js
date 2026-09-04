@@ -29,6 +29,23 @@ export async function runGoogleSdk({
     ...(payload.textPrompt && !payload.prompt ? { prompt: payload.textPrompt } : {}),
   };
 
+  // Ensure prompt/contents compatibility for Google GenAI methods
+  if (sdkPayload.contents === undefined && sdkPayload.prompt) {
+    sdkPayload.contents = sdkPayload.prompt;
+  } else if (Array.isArray(sdkPayload.contents)) {
+    sdkPayload.contents = sdkPayload.contents.map((item) => {
+      if (typeof item === "string") return item;
+      if (item && item.content && !item.parts) {
+        const textPart = typeof item.content === "string" ? { text: item.content } : item.content;
+        return {
+          role: item.role === "assistant" ? "model" : item.role === "system" ? "user" : item.role,
+          parts: Array.isArray(textPart) ? textPart : [textPart],
+        };
+      }
+      return item;
+    });
+  }
+
   // 2. Stream execution if requested and supported
   if (options.onStreamChunk && typeof ai.models[`${method}Stream`] === "function") {
     const stream = await ai.models[`${method}Stream`](sdkPayload);
@@ -38,7 +55,7 @@ export async function runGoogleSdk({
       fullText += text;
       options.onStreamChunk({ text, raw: chunk });
     }
-    return { text: fullText, outputs: [fullText] };
+    return { text: fullText, content: fullText, outputs: [fullText] };
   }
 
   // 3. Direct SDK Call
@@ -60,7 +77,13 @@ export async function runGoogleSdk({
   }
 
   if (response?.text) {
-    return { text: response.text, candidates: response.candidates, outputs: [response.text], raw: response };
+    return {
+      text: response.text,
+      content: response.text,
+      candidates: response.candidates,
+      outputs: [response.text],
+      raw: response,
+    };
   }
 
   return response;

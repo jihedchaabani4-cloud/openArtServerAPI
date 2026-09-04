@@ -116,7 +116,12 @@ export function mapFromProviderResponse(rawResponse = {}, binding = {}) {
   if (rawResponse.choices && Array.isArray(rawResponse.choices) && rawResponse.choices[0]) {
     const choice = rawResponse.choices[0];
     output.text = choice.message?.content || choice.text || "";
+  } else if (rawResponse.text) {
+    output.text = rawResponse.text;
+  } else if (rawResponse.content) {
+    output.text = rawResponse.content;
   }
+  output.content = output.text;
 
   return output;
 }

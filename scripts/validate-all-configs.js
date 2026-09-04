@@ -15,7 +15,8 @@ try {
   console.log(`✓ 2. Referential Integrity (Providers & Operations) passed`);
   console.log(`✓ 3. Canonical Parameter Vocabulary references passed`);
   console.log(`✓ 4. Composite Key Uniqueness passed`);
-  console.log(`✓ 5. Retail Pricing & Binding Cost consistency passed`);
+  console.log(`✓ 5. Priority Conflict Integrity passed`);
+  console.log(`✓ 6. Mandatory outputMap Declarations passed`);
   console.log("--------------------------------------------------");
   console.log(`Successfully validated in ${duration}ms:`);
   console.log(`  - Models:     ${models.size}`);

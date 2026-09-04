@@ -1,3 +1,7 @@
+import { createLogger } from "../../infrastructure/logging/index.js";
+
+const logger = createLogger("models");
+
 /**
  * Generic Declarative Parameter Mapper
  *
@@ -6,17 +10,22 @@
  */
 
 /**
- * Assigns a value to a nested object path using dot notation (e.g. "options.dimensions.width").
+ * Assigns a value to a nested object path using dot notation or array indexing (e.g. "options.dimensions.width", "images[0].url").
  */
 export function setDeepProperty(target, pathString, value) {
   if (!target || typeof target !== "object") return;
-  const parts = pathString.split(".");
+  // Normalize array indexing: foo[0].bar -> foo.0.bar
+  const normalized = pathString.replace(/\[(\w+)\]/g, ".$1");
+  const parts = normalized.split(".");
   let curr = target;
 
   for (let i = 0; i < parts.length - 1; i++) {
     const part = parts[i];
+    const nextPart = parts[i + 1];
+    const isNextNumeric = /^\d+$/.test(nextPart);
+
     if (!curr[part] || typeof curr[part] !== "object") {
-      curr[part] = {};
+      curr[part] = isNextNumeric ? [] : {};
     }
     curr = curr[part];
   }
@@ -84,19 +93,38 @@ export function mapFromProviderResponse(rawResponse = {}, binding = {}) {
   };
 
   // 1. Explicit outputMap
-  if (binding.outputMap) {
+  if (binding.outputMap && typeof binding.outputMap === "object" && Object.keys(binding.outputMap).length > 0) {
     for (const [targetPath, sourcePath] of Object.entries(binding.outputMap)) {
       const val = getDeepProperty(rawResponse, sourcePath);
       if (val !== undefined) {
         setDeepProperty(output, targetPath, val);
       }
     }
-    if (output.images && output.images.length > 0) {
-      return output;
+    // Normalize string array in images to object array if needed
+    if (Array.isArray(output.images) && output.images.length > 0) {
+      output.images = output.images.map((img) =>
+        typeof img === "string" ? { url: img } : img
+      );
     }
+    if (output.text && !output.content) {
+      output.content = output.text;
+    } else if (output.content && !output.text) {
+      output.text = output.content;
+    }
+    return output;
   }
 
-  // 2. Common heuristic detections
+  // 2. Last resort fallback: Log warning for missing outputMap
+  const bindingId = binding?.modelId && binding?.providerId
+    ? `${binding.modelId}:${binding.operation || "unknown"}:${binding.providerId}`
+    : (binding?.providerId || "unknown");
+
+  logger.warn(
+    { bindingId },
+    `[parameterMapper] Falling back to heuristic response guessing for binding "${bindingId}". An explicit "outputMap" should be defined in the binding manifest.`
+  );
+
+  // Common heuristic detections
   // WaveSpeed/OpenAI standard: data: [ { url }, { b64_json } ]
   if (Array.isArray(rawResponse.data)) {
     output.images = rawResponse.data
@@ -105,7 +133,9 @@ export function mapFromProviderResponse(rawResponse = {}, binding = {}) {
   } else if (Array.isArray(rawResponse.images)) {
     output.images = rawResponse.images.map((img) => (typeof img === "string" ? { url: img } : img));
   } else if (Array.isArray(rawResponse.output)) {
-    output.images = rawResponse.output.map((url) => ({ url }));
+    output.images = rawResponse.output.map((url) => (typeof url === "string" ? { url } : url));
+  } else if (Array.isArray(rawResponse.outputs)) {
+    output.images = rawResponse.outputs.map((item) => (typeof item === "string" ? { url: item } : item));
   } else if (rawResponse.predictions && Array.isArray(rawResponse.predictions)) {
     output.images = rawResponse.predictions
       .filter((p) => p.bytesBase64Encoded || p.imageUri || p.url)

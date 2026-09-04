@@ -90,4 +90,18 @@ describe("Pricing Calculator & Margin Analytics (US3)", () => {
     assert.equal(margin.marginUsd, 1.75);
     assert.equal(Math.round(margin.marginPercent * 10) / 10, 46.7);
   });
+
+  it("should use central billing config for creditToUsdRate and support env override (Task 7)", () => {
+    // Default rate (0.15)
+    const marginDefault = calculateMargin(20, 1.00);
+    assert.equal(marginDefault.retailUsd, 3.00); // 20 * 0.15 = 3.00
+    assert.equal(marginDefault.marginUsd, 2.00); // 3.00 - 1.00 = 2.00
+
+    // Env override
+    process.env.CREDIT_TO_USD_RATE = "0.20";
+    const marginEnv = calculateMargin(20, 1.00);
+    assert.equal(marginEnv.retailUsd, 4.00); // 20 * 0.20 = 4.00
+    assert.equal(marginEnv.marginUsd, 3.00); // 4.00 - 1.00 = 3.00
+    delete process.env.CREDIT_TO_USD_RATE;
+  });
 });

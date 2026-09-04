@@ -7,7 +7,9 @@ import {
   UnknownCanonicalParameterError,
   DuplicateBindingError,
   UnknownModelFamilyError,
-  UnknownOperationError
+  UnknownOperationError,
+  PriorityConflictError,
+  MissingOutputMapError
 } from "../errors/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -117,18 +119,18 @@ export function initRegistry(options = {}) {
     const [mId, op] = indexKey.split(":");
     const model = models.get(mId);
 
-    // Sort bindings by priority ascending (1 is highest priority)
-    bindingList.sort((a, b) => (a.priority || 999) - (b.priority || 999));
+    // Sort bindings by priority ascending (1 is highest priority), tie-break alphabetically by providerId
+    bindingList.sort(
+      (a, b) => (a.priority || 999) - (b.priority || 999) || (a.providerId || "").localeCompare(b.providerId || "")
+    );
 
-    // Validation Rule 5: Priority conflict check
+    // Validation Rule 5: Priority conflict check (hard error on conflict)
     const priorityCounts = {};
     for (const b of bindingList) {
       if (b.status === "active") {
         priorityCounts[b.priority] = (priorityCounts[b.priority] || 0) + 1;
         if (priorityCounts[b.priority] > 1) {
-          console.warn(
-            `[PriorityConflictWarning] Multiple active bindings share priority ${b.priority} for (${mId}, ${op})`
-          );
+          throw new PriorityConflictError(mId, op, b.priority);
         }
       }
 
@@ -156,6 +158,11 @@ export function initRegistry(options = {}) {
             throw new UnknownCanonicalParameterError(mId, op, canonicalKey);
           }
         }
+      }
+
+      // Validation Rule 6: Mandatory outputMap check
+      if (!b.outputMap || typeof b.outputMap !== "object" || Object.keys(b.outputMap).length === 0) {
+        throw new MissingOutputMapError(mId, op, b.providerId);
       }
     }
   }
@@ -243,3 +250,13 @@ export function resetRegistry() {
     bindingIndex: new Map(),
   };
 }
+
+/**
+ * Safe Hot-Reload of Model Registry.
+ * Re-scans and validates manifests. If any validation error occurs,
+ * existing registryState is kept completely intact and untouched.
+ */
+export function reloadRegistry(options = {}) {
+  return initRegistry({ ...options, forceReload: true });
+}
+

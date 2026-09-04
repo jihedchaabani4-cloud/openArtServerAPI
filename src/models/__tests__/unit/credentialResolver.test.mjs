@@ -67,4 +67,42 @@ describe("Credential Resolver (US5)", () => {
     assert.equal(result.apiKey, "db-secret-key-99");
     assert.equal(result.credentialSource, "database");
   });
+
+  it("should isolate BYOK credentials per user and prevent cache leakage between users", async () => {
+    const binding = {
+      providerId: "byok_prov",
+      credentialPolicy: { userBYOK: "allowed" }
+    };
+    const provider = { id: "byok_prov", authType: "bearer" };
+
+    const mockCredentialProviderUserA = {
+      userId: "user-A",
+      getCredential: async () => "key-for-user-A",
+    };
+
+    const mockCredentialProviderUserB = {
+      userId: "user-B",
+      getCredential: async () => "key-for-user-B",
+    };
+
+    // User A resolves and caches their key
+    const resA = await resolveCredential(binding, provider, mockCredentialProviderUserA, null, { userId: "user-A" });
+    assert.equal(resA.apiKey, "key-for-user-A");
+    assert.equal(resA.credentialSource, "user");
+
+    // User B resolves and must get THEIR OWN key, NOT User A's cached key
+    const resB = await resolveCredential(binding, provider, mockCredentialProviderUserB, null, { userId: "user-B" });
+    assert.equal(resB.apiKey, "key-for-user-B");
+    assert.equal(resB.credentialSource, "user");
+
+    // Subsequent resolution for User A should serve from cache with User A's key
+    const cachedA = await resolveCredential(binding, provider, null, null, { userId: "user-A" });
+    assert.equal(cachedA.apiKey, "key-for-user-A");
+    assert.equal(cachedA.credentialSource, "cache");
+
+    // Subsequent resolution for User B should serve from cache with User B's key
+    const cachedB = await resolveCredential(binding, provider, null, null, { userId: "user-B" });
+    assert.equal(cachedB.apiKey, "key-for-user-B");
+    assert.equal(cachedB.credentialSource, "cache");
+  });
 });

@@ -64,6 +64,11 @@ export class LLMService {
 
     let result;
     try {
+      const runOptions = {
+        ...(options.userId ? { userId: options.userId } : { noCharge: true, reason: options.reason || "internal-platform-llm" }),
+        ...options,
+      };
+
       result = await run(
         model,
         "chat_completion",
@@ -72,7 +77,7 @@ export class LLMService {
           images,
           temperature,
         },
-        options
+        runOptions
       );
     } catch (err) {
       const durationMs = Math.round(performance.now() - startTime);

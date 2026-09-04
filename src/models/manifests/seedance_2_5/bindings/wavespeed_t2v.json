@@ -7,15 +7,35 @@
   "priority": 1,
   "status": "active",
   "parameterMap": {
-    "prompt": { "providerField": "prompt" },
-    "duration": { "providerField": "duration" },
-    "aspect_ratio": { "providerField": "aspect_ratio" },
-    "resolution": { "providerField": "resolution" }
+    "prompt": {
+      "providerField": "prompt"
+    },
+    "duration": {
+      "providerField": "duration"
+    },
+    "aspect_ratio": {
+      "providerField": "aspect_ratio"
+    },
+    "resolution": {
+      "providerField": "resolution"
+    }
   },
   "pricing": {
     "base_cost_usd": 0.25,
     "modifiers": {
-      "duration": { "5": 1.0, "10": 1.9 }
+      "duration": {
+        "5": 1,
+        "10": 1.9
+      }
     }
+  },
+  "version": "1.0.0",
+  "outputMap": {
+    "images": "outputs",
+    "videoUrl": "outputs.0"
+  },
+  "pollingConfig": {
+    "pollInterval": 2.5,
+    "timeout": 3600
   }
 }

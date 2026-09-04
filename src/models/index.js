@@ -9,6 +9,7 @@ import {
   initRegistry,
   getRegistry,
   getModel,
+  reloadRegistry,
 } from "./registry/modelRegistry.js";
 import { validateCanonicalInput } from "./registry/schemaValidator.js";
 import { calculateRetailCredits } from "./execution/pricingCalculator.js";
@@ -153,10 +154,12 @@ export function calculateCost(modelFamily, operation, cleanInput = {}) {
 export function estimatePrice(modelFamily, operation, rawInput = {}) {
   const cleanInput = validateInput(modelFamily, operation, rawInput);
   const amount = calculateCost(modelFamily, operation, cleanInput);
+  const model = getModel(modelFamily);
   return {
     amount,
     currency: "credits",
     pricingVersion: "fixed_retail",
+    manifestVersion: model?.version || "1.0.0",
   };
 }
 
@@ -189,14 +192,24 @@ export function resolveOperation(inputs = {}, targetOutput = "image") {
     inputs.image_url || inputs.image || inputs.images?.length || inputs.input_assets?.length
   );
 
+  let inferredOp;
   if (targetOutput === "image") {
-    if (hasImage) return "edit";
-    return "text_to_image";
+    inferredOp = hasImage ? "edit" : "text_to_image";
+  } else if (targetOutput === "text") {
+    inferredOp = "chat_completion";
+  } else {
+    inferredOp = "text_to_image";
   }
 
-  if (targetOutput === "text") {
-    return "chat_completion";
-  }
+  modelsLogger.warn(
+    { targetOutput, inferredOp, inputKeys: Object.keys(inputs) },
+    `[resolveOperation] Operation was inferred as "${inferredOp}" from inputs. Consider passing explicit "operation".`
+  );
 
-  return "text_to_image";
+  return inferredOp;
 }
+
+// --- reloadRegistry -----------------------------------------------------------
+
+export { reloadRegistry };
+

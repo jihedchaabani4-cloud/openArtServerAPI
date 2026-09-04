@@ -15,19 +15,23 @@ export async function runWaveSpeedSdk({
   const providerModelId = binding.providerModelId;
   const apiKey = credential || process.env.WAVESPEED_API_KEY || null;
 
+  const pollingConfig = binding?.pollingConfig || {};
+  const pollInterval = options.pollInterval ?? pollingConfig.pollInterval ?? 2.0;
+  const timeout = options.timeout ?? pollingConfig.timeout ?? 3600;
+
   // Allow injected client for testing/mocking
   const client =
     options.sdkClient ||
     new WavespeedClient(apiKey, {
-      timeout: options.timeout || 3600,
-      pollInterval: options.pollInterval || 2.0,
+      timeout,
+      pollInterval,
       maxRetries: options.maxRetries ?? 0,
       maxConnectionRetries: options.maxConnectionRetries ?? 3,
     });
 
   const runConfig = {
-    pollInterval: options.pollInterval || 2.0,
-    timeout: options.timeout || 3600,
+    pollInterval,
+    timeout,
     enableSyncMode: options.enableSyncMode || false,
   };
 

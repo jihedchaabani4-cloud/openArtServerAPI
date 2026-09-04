@@ -68,6 +68,13 @@ export function validateCanonicalInput(canonicalInputs = {}, rawInput = {}, opti
         throw new UnknownParameterError(rawKey);
       }
     }
+  } else {
+    // If allowUnknown is true, preserve additional properties in sanitized output
+    for (const [rawKey, rawVal] of Object.entries(rawInput)) {
+      if (!Object.prototype.hasOwnProperty.call(cleanInput, rawKey)) {
+        cleanInput[rawKey] = rawVal;
+      }
+    }
   }
 
   return cleanInput;

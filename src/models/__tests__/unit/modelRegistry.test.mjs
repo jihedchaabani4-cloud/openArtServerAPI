@@ -10,12 +10,15 @@ import {
   getModel,
   getProvider,
   getBindings,
+  reloadRegistry,
 } from "../../registry/modelRegistry.js";
 import {
   UnknownProviderReferenceError,
   UnknownOperationReferenceError,
   UnknownCanonicalParameterError,
   DuplicateBindingError,
+  PriorityConflictError,
+  MissingOutputMapError,
 } from "../../errors/index.js";
 
 describe("Model Registry & Fail-Fast Boot Validation", () => {
@@ -37,6 +40,18 @@ describe("Model Registry & Fail-Fast Boot Validation", () => {
         baseUrl: "https://api.wavespeed.ai",
         authType: "bearer",
         clientType: "generic-rest"
+      })
+    );
+
+    // Second provider for priority testing
+    fs.writeFileSync(
+      path.join(tempDir, "providers", "google.json"),
+      JSON.stringify({
+        id: "google",
+        displayName: "Google",
+        baseUrl: "https://generativelanguage.googleapis.com",
+        authType: "apiKey",
+        clientType: "sdk"
       })
     );
 
@@ -86,6 +101,7 @@ describe("Model Registry & Fail-Fast Boot Validation", () => {
         endpoint: "/v1/images",
         priority: 1,
         status: "active",
+        outputMap: { images: "outputs" },
         parameterMap: {
           prompt: { providerField: "prompt" },
           resolution: { providerField: "size", valueMap: { "1k": "1024x1024" } }
@@ -96,7 +112,7 @@ describe("Model Registry & Fail-Fast Boot Validation", () => {
 
     const reg = initRegistry({ rootDir: tempDir, forceReload: true });
     assert.equal(reg.models.size, 1);
-    assert.equal(reg.providers.size, 1);
+    assert.equal(reg.providers.size, 2);
     assert.equal(reg.bindings.size, 1);
 
     const model = getModel("nanobana_pro");
@@ -131,6 +147,7 @@ describe("Model Registry & Fail-Fast Boot Validation", () => {
         providerId: "non_existent_provider",
         priority: 1,
         status: "active",
+        outputMap: { images: "outputs" },
         pricing: { base_cost_usd: 1.0 }
       })
     );
@@ -162,6 +179,7 @@ describe("Model Registry & Fail-Fast Boot Validation", () => {
         providerId: "wavespeed",
         priority: 1,
         status: "active",
+        outputMap: { images: "outputs" },
         pricing: { base_cost_usd: 1.0 }
       })
     );
@@ -198,6 +216,7 @@ describe("Model Registry & Fail-Fast Boot Validation", () => {
         providerId: "wavespeed",
         priority: 1,
         status: "active",
+        outputMap: { images: "outputs" },
         parameterMap: {
           non_existent_param: { providerField: "foo" }
         },
@@ -233,6 +252,7 @@ describe("Model Registry & Fail-Fast Boot Validation", () => {
         providerId: "wavespeed",
         priority: 1,
         status: "active",
+        outputMap: { images: "outputs" },
         pricing: { base_cost_usd: 1.0 }
       })
     );
@@ -246,6 +266,7 @@ describe("Model Registry & Fail-Fast Boot Validation", () => {
         providerId: "wavespeed",
         priority: 2,
         status: "active",
+        outputMap: { images: "outputs" },
         pricing: { base_cost_usd: 1.0 }
       })
     );
@@ -254,5 +275,139 @@ describe("Model Registry & Fail-Fast Boot Validation", () => {
       () => initRegistry({ rootDir: tempDir, forceReload: true }),
       DuplicateBindingError
     );
+  });
+
+  it("should throw PriorityConflictError when multiple active bindings share the same priority", () => {
+    const modelDir = path.join(tempDir, "manifests", "conflict_model");
+    fs.mkdirSync(path.join(modelDir, "bindings"), { recursive: true });
+
+    fs.writeFileSync(
+      path.join(modelDir, "model.json"),
+      JSON.stringify({
+        id: "conflict_model",
+        domain: "image",
+        operations: { text_to_image: { canonicalInputs: {}, retailPricing: { currency: "credits", table: {} } } }
+      })
+    );
+
+    // Binding 1 with priority 1
+    fs.writeFileSync(
+      path.join(modelDir, "bindings", "wavespeed.json"),
+      JSON.stringify({
+        modelId: "conflict_model",
+        operation: "text_to_image",
+        providerId: "wavespeed",
+        priority: 1,
+        status: "active",
+        outputMap: { images: "outputs" },
+        pricing: { base_cost_usd: 1.0 }
+      })
+    );
+
+    // Binding 2 also with priority 1 (conflict!)
+    fs.writeFileSync(
+      path.join(modelDir, "bindings", "google.json"),
+      JSON.stringify({
+        modelId: "conflict_model",
+        operation: "text_to_image",
+        providerId: "google",
+        priority: 1,
+        status: "active",
+        outputMap: { images: "outputs" },
+        pricing: { base_cost_usd: 1.0 }
+      })
+    );
+
+    assert.throws(
+      () => initRegistry({ rootDir: tempDir, forceReload: true }),
+      PriorityConflictError
+    );
+  });
+
+  it("should throw MissingOutputMapError when a binding omits outputMap", () => {
+    const modelDir = path.join(tempDir, "manifests", "no_output_model");
+    fs.mkdirSync(path.join(modelDir, "bindings"), { recursive: true });
+
+    fs.writeFileSync(
+      path.join(modelDir, "model.json"),
+      JSON.stringify({
+        id: "no_output_model",
+        domain: "image",
+        operations: { text_to_image: { canonicalInputs: {}, retailPricing: { currency: "credits", table: {} } } }
+      })
+    );
+
+    fs.writeFileSync(
+      path.join(modelDir, "bindings", "wavespeed.json"),
+      JSON.stringify({
+        modelId: "no_output_model",
+        operation: "text_to_image",
+        providerId: "wavespeed",
+        priority: 1,
+        status: "active",
+        pricing: { base_cost_usd: 1.0 }
+      })
+    );
+
+    assert.throws(
+      () => initRegistry({ rootDir: tempDir, forceReload: true }),
+      MissingOutputMapError
+    );
+  });
+
+  it("should safely hot-reload registry via reloadRegistry and preserve existing state on error", () => {
+    // 1. Initial valid setup
+    const modelDir = path.join(tempDir, "manifests", "valid_model");
+    fs.mkdirSync(path.join(modelDir, "bindings"), { recursive: true });
+
+    fs.writeFileSync(
+      path.join(modelDir, "model.json"),
+      JSON.stringify({
+        id: "valid_model",
+        domain: "image",
+        operations: { text_to_image: { canonicalInputs: {}, retailPricing: { currency: "credits", table: {} } } }
+      })
+    );
+
+    fs.writeFileSync(
+      path.join(modelDir, "bindings", "wavespeed.json"),
+      JSON.stringify({
+        modelId: "valid_model",
+        operation: "text_to_image",
+        providerId: "wavespeed",
+        priority: 1,
+        status: "active",
+        outputMap: { images: "outputs" },
+        pricing: { base_cost_usd: 1.0 }
+      })
+    );
+
+    const initialReg = initRegistry({ rootDir: tempDir, forceReload: true });
+    assert.equal(initialReg.models.has("valid_model"), true);
+
+    // 2. Corrupt directory by adding invalid binding with unknown provider
+    fs.writeFileSync(
+      path.join(modelDir, "bindings", "broken.json"),
+      JSON.stringify({
+        modelId: "valid_model",
+        operation: "text_to_image",
+        providerId: "broken_ghost_prov",
+        priority: 2,
+        status: "active",
+        outputMap: { images: "outputs" },
+        pricing: { base_cost_usd: 1.0 }
+      })
+    );
+
+    // 3. reloadRegistry must throw validation error
+    assert.throws(
+      () => reloadRegistry({ rootDir: tempDir }),
+      UnknownProviderReferenceError
+    );
+
+    // 4. Existing registry state must remain intact and serving
+    const activeReg = getRegistry();
+    assert.equal(activeReg.isInitialized, true);
+    assert.equal(activeReg.models.has("valid_model"), true);
   });
 });

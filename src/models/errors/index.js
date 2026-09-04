@@ -268,3 +268,38 @@ export class AllProvidersUnavailableError extends ModelsSystemError {
     this.operation = operation;
   }
 }
+
+export class MissingUserIdError extends ModelsSystemError {
+  constructor(message = "userId is required for model execution unless noCharge is explicitly granted") {
+    super(message, {
+      retryable: false,
+      safeMessage: "Authentication required: missing userId",
+      statusCode: 401,
+      code: "MISSING_USER_ID"
+    });
+    this.name = "MissingUserIdError";
+  }
+}
+
+export class PriorityConflictError extends ConfigIntegrityError {
+  constructor(modelId, operation, priority) {
+    super(`Multiple active bindings share priority ${priority} for ("${modelId}", "${operation}")`);
+    this.name = "PriorityConflictError";
+    this.code = "PRIORITY_CONFLICT";
+    this.modelId = modelId;
+    this.operation = operation;
+    this.priority = priority;
+  }
+}
+
+export class MissingOutputMapError extends ConfigIntegrityError {
+  constructor(modelId, operation, providerId) {
+    super(`Binding for ("${modelId}", "${operation}", "${providerId}") is missing required "outputMap"`);
+    this.name = "MissingOutputMapError";
+    this.code = "MISSING_OUTPUT_MAP";
+    this.modelId = modelId;
+    this.operation = operation;
+    this.providerId = providerId;
+  }
+}
+

@@ -1,34 +1,52 @@
 import { CredentialError } from "../errors/index.js";
 
-// In-memory credential cache with 5-minute TTL
-const credentialCache = new Map(); // providerId -> { apiKey, expiresAt }
+// In-memory credential cache with 5-minute TTL (acceleration layer over resolution)
+const credentialCache = new Map(); // cacheKey -> { apiKey, expiresAt }
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 /**
- * Resolves credentials for a provider with multi-tiered resolution:
- * 1. In-memory TTL Cache
- * 2. Database `provider_credentials` table lookup (if Supabase client configured)
- * 3. Environment variable fallback (e.g. WAVESPEED_API_KEY, GOOGLE_API_KEY)
- * 4. User BYOK credentials if passed via credentialProvider
+ * Resolves credentials for a provider with secure multi-tiered resolution:
+ * - Acceleration Layer: In-memory TTL Cache (isolated per userId when BYOK is enabled)
+ * - Resolution Tier 1: User BYOK credentials (if allowed/required by policy)
+ * - Resolution Tier 2: Database `provider_credentials` table lookup (if Supabase client configured)
+ * - Resolution Tier 3: Environment variable fallback (e.g. WAVESPEED_API_KEY, GOOGLE_API_KEY)
+ *
+ * The cache acts as an acceleration layer on top of resolution results, NEVER as a cross-user shortcut.
  */
-export async function resolveCredential(binding, provider, credentialProvider = null, dbClient = null) {
+export async function resolveCredential(binding, provider, credentialProvider = null, dbClient = null, options = {}) {
   const providerId = provider?.id || binding?.providerId;
   if (!providerId) {
     throw new CredentialError("Cannot resolve credential: missing providerId");
   }
 
-  // 1. Check in-memory TTL Cache
-  const cached = credentialCache.get(providerId);
-  if (cached && Date.now() < cached.expiresAt) {
-    return { apiKey: cached.apiKey, credentialSource: "cache" };
+  const policy = binding?.credentialPolicy?.userBYOK ?? "forbidden";
+  const isByokPolicy = policy === "required" || policy === "allowed";
+  const userId = options?.userId || binding?.userId || credentialProvider?.userId || null;
+
+  // Derive cache key: strictly isolate by userId whenever BYOK is enabled
+  const cacheKey = isByokPolicy
+    ? (userId ? `${providerId}:user:${userId}` : null)
+    : providerId;
+
+  // 1. Acceleration Layer: Check in-memory TTL Cache
+  if (cacheKey) {
+    const cached = credentialCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt) {
+      return { apiKey: cached.apiKey, credentialSource: "cache" };
+    }
   }
 
-  // 2. Check BYOK if policy requires or allows
-  const policy = binding?.credentialPolicy?.userBYOK ?? "forbidden";
-  if (policy === "required" || policy === "allowed") {
+  // 2. Resolution Tier 1: User BYOK credentials
+  if (isByokPolicy) {
     if (credentialProvider && typeof credentialProvider.getCredential === "function") {
       const key = await credentialProvider.getCredential(provider.auth?.credentialType || providerId);
       if (key) {
+        if (cacheKey) {
+          credentialCache.set(cacheKey, {
+            apiKey: key,
+            expiresAt: Date.now() + CACHE_TTL_MS,
+          });
+        }
         return { apiKey: key, credentialSource: "user" };
       }
     }
@@ -37,7 +55,7 @@ export async function resolveCredential(binding, provider, credentialProvider = 
     }
   }
 
-  // 3. Check Supabase `provider_credentials` table (if dbClient provided or supabase global exists)
+  // 3. Resolution Tier 2: Database `provider_credentials` table
   if (dbClient) {
     try {
       const { data, error } = await dbClient
@@ -47,12 +65,13 @@ export async function resolveCredential(binding, provider, credentialProvider = 
         .single();
 
       if (!error && data?.encrypted_key) {
-        // Simple decryption / key material retrieval
         const resolvedKey = data.encrypted_key;
-        credentialCache.set(providerId, {
-          apiKey: resolvedKey,
-          expiresAt: Date.now() + CACHE_TTL_MS,
-        });
+        if (cacheKey || providerId) {
+          credentialCache.set(cacheKey || providerId, {
+            apiKey: resolvedKey,
+            expiresAt: Date.now() + CACHE_TTL_MS,
+          });
+        }
         return { apiKey: resolvedKey, credentialSource: "database" };
       }
     } catch {
@@ -60,7 +79,7 @@ export async function resolveCredential(binding, provider, credentialProvider = 
     }
   }
 
-  // 4. Platform secret lookup from environment variables
+  // 4. Resolution Tier 3: Platform secret lookup from environment variables
   const envKey = `${providerId.toUpperCase()}_API_KEY`;
   const fallbackEnvKey = `${providerId.toUpperCase()}_KEY`;
   const platformKey =
@@ -74,10 +93,12 @@ export async function resolveCredential(binding, provider, credentialProvider = 
       : null);
 
   if (platformKey) {
-    credentialCache.set(providerId, {
-      apiKey: platformKey,
-      expiresAt: Date.now() + CACHE_TTL_MS,
-    });
+    if (cacheKey || providerId) {
+      credentialCache.set(cacheKey || providerId, {
+        apiKey: platformKey,
+        expiresAt: Date.now() + CACHE_TTL_MS,
+      });
+    }
     return { apiKey: platformKey, credentialSource: "platform_env" };
   }
 
@@ -85,9 +106,14 @@ export async function resolveCredential(binding, provider, credentialProvider = 
   return { apiKey: null, credentialSource: "none" };
 }
 
-export function clearCredentialCache(providerId = null) {
-  if (providerId) {
-    credentialCache.delete(providerId);
+export function clearCredentialCache(key = null) {
+  if (key) {
+    credentialCache.delete(key);
+    for (const k of credentialCache.keys()) {
+      if (k.startsWith(`${key}:`)) {
+        credentialCache.delete(k);
+      }
+    }
   } else {
     credentialCache.clear();
   }

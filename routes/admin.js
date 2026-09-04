@@ -9,6 +9,7 @@ import {
   getAdminWallet,
   getLatestReconciliation,
   updatePricingRule,
+  reloadModels,
 } from "../controllers/adminController.js";
 
 const router = express.Router();
@@ -44,5 +45,8 @@ router.patch(
   walletRateLimit({ max: 10, windowSec: 60, keyPrefix: "rate:admin" }),
   updatePricingRule
 );
+
+// POST /api/admin/models/reload — hot reload models registry safely
+router.post("/models/reload", reloadModels);
 
 export default router;

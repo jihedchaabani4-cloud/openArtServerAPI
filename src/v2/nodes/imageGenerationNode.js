@@ -24,6 +24,7 @@ export async function executeImageGeneration(inputs, ctx) {
     idempotencyKey: `node:${runId}:${nodeId}`,
     userId,
     domain: "image",
+    skipWalletHold: Boolean(ctx.hasWorkflowHold || ctx.skipWalletHold),
   });
 
   // ── Normalize outputs → V2 asset shape ──────────────────────────────────

@@ -8,8 +8,12 @@
   "sdkMethod": "generateImages",
   "status": "active",
   "parameterMap": {
-    "prompt": { "providerField": "textPrompt" },
-    "negative_prompt": { "providerField": "negativePrompt" },
+    "prompt": {
+      "providerField": "textPrompt"
+    },
+    "negative_prompt": {
+      "providerField": "negativePrompt"
+    },
     "resolution": {
       "providerField": "imageSize",
       "valueMap": {
@@ -17,7 +21,9 @@
         "2k": "medium"
       }
     },
-    "aspect_ratio": { "providerField": "aspectRatio" },
+    "aspect_ratio": {
+      "providerField": "aspectRatio"
+    },
     "quality": {
       "providerField": "sampleQuality",
       "valueMap": {
@@ -27,10 +33,20 @@
     }
   },
   "pricing": {
-    "base_cost_usd": 0.60,
+    "base_cost_usd": 0.6,
     "modifiers": {
-      "resolution": { "1k": 1.0, "2k": 1.4 },
-      "quality": { "standard": 1.0, "hd": 1.5 }
+      "resolution": {
+        "1k": 1,
+        "2k": 1.4
+      },
+      "quality": {
+        "standard": 1,
+        "hd": 1.5
+      }
     }
+  },
+  "version": "1.0.0",
+  "outputMap": {
+    "images": "images"
   }
 }

@@ -62,6 +62,30 @@ describe("Provider SDK Layer & Dynamic API SDK Generator", () => {
       assert.equal(result.outputs[0], "https://static.wavespeed.ai/output/image1.png");
     });
 
+    it("should read pollingConfig from binding manifest when options omit them (Task 8)", async () => {
+      let configPassed = null;
+      const mockClient = {
+        run: async (modelId, payload, runConfig) => {
+          configPassed = runConfig;
+          return { outputs: ["https://static.wavespeed.ai/video.mp4"] };
+        },
+      };
+
+      await runWaveSpeedSdk({
+        binding: {
+          providerModelId: "bytedance/seedance-2.5/text-to-video",
+          pollingConfig: { pollInterval: 4.5, timeout: 1800 },
+        },
+        payload: { prompt: "test" },
+        credential: "dummy_key",
+        options: { sdkClient: mockClient },
+      });
+
+      assert.ok(configPassed);
+      assert.equal(configPassed.pollInterval, 4.5);
+      assert.equal(configPassed.timeout, 1800);
+    });
+
     it("should map WavespeedTimeoutException to 504 ProviderTransientError", async () => {
       const mockClient = {
         run: async () => {
@@ -260,6 +284,9 @@ describe("Provider SDK Layer & Dynamic API SDK Generator", () => {
           quality: "hd",
         },
         {
+          userId: "test-user",
+          noCharge: true,
+          reason: "unit-test-mock",
           sdkClient: mockWsClient,
           credential: "dummy_token",
         }
@@ -268,7 +295,7 @@ describe("Provider SDK Layer & Dynamic API SDK Generator", () => {
       assert.equal(res.status, "success");
       assert.equal(res.metadata.modelId, "gpt_image_2");
       assert.equal(res.metadata.providerUsed, "wavespeed");
-      assert.ok(res.metadata.creditsCharged > 0);
+      assert.equal(res.metadata.creditsCharged, 0);
     });
 
     it("should successfully execute end-to-end Gemini 2.0 Flash run using Google GenAI SDK", async () => {
@@ -291,6 +318,9 @@ describe("Provider SDK Layer & Dynamic API SDK Generator", () => {
           temperature: 0.5,
         },
         {
+          userId: "test-user",
+          noCharge: true,
+          reason: "unit-test-mock",
           sdkClient: mockGoogleAi,
           credential: "dummy_google_key",
         }

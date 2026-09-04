@@ -272,3 +272,56 @@ export async function updatePricingRule(req, res) {
     return res.status(500).json({ error: "INTERNAL_ERROR", message: "Failed to update pricing rule." });
   }
 }
+
+/**
+ * POST /api/admin/models/reload
+ * Safe hot-reload of the models registry.
+ * Re-scans manifests and fail-fast validates. If any failure occurs,
+ * the active in-memory registry is kept completely intact and untouched.
+ */
+export async function reloadModels(req, res) {
+  const start = Date.now();
+  const adminUserId = req.adminUser?.id || req.user?.id;
+
+  try {
+    const { reloadRegistry } = await import("../src/models/index.js");
+    const reg = reloadRegistry();
+    const stats = {
+      models: reg.models.size,
+      providers: reg.providers.size,
+      bindings: reg.bindings.size,
+    };
+
+    console.log(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      operation: "admin-reload-models",
+      status: "success",
+      adminUserId,
+      stats,
+      durationMs: Date.now() - start,
+    }));
+
+    return res.status(200).json({
+      status: "success",
+      message: "Models registry reloaded successfully",
+      stats,
+    });
+  } catch (err) {
+    console.error(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      operation: "admin-reload-models",
+      status: "error",
+      adminUserId,
+      error: err.message,
+      code: err.code || "REGISTRY_RELOAD_FAILED",
+      durationMs: Date.now() - start,
+    }));
+
+    return res.status(400).json({
+      status: "error",
+      message: `Failed to reload models registry: ${err.message}`,
+      code: err.code || "REGISTRY_RELOAD_FAILED",
+    });
+  }
+}
+

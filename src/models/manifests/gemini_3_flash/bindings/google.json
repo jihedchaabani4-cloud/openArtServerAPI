@@ -8,16 +8,37 @@
   "sdkMethod": "generateContent",
   "status": "active",
   "parameterMap": {
-    "prompt": { "providerField": "contents" },
-    "messages": { "providerField": "contents" },
-    "images": { "providerField": "images" },
-    "system_prompt": { "providerField": "config.systemInstruction" },
-    "temperature": { "providerField": "config.temperature" },
-    "max_tokens": { "providerField": "config.maxOutputTokens" },
-    "top_p": { "providerField": "config.topP" },
-    "streaming": { "providerField": "streaming" }
+    "prompt": {
+      "providerField": "contents"
+    },
+    "messages": {
+      "providerField": "contents"
+    },
+    "images": {
+      "providerField": "images"
+    },
+    "system_prompt": {
+      "providerField": "config.systemInstruction"
+    },
+    "temperature": {
+      "providerField": "config.temperature"
+    },
+    "max_tokens": {
+      "providerField": "config.maxOutputTokens"
+    },
+    "top_p": {
+      "providerField": "config.topP"
+    },
+    "streaming": {
+      "providerField": "streaming"
+    }
   },
   "pricing": {
-    "base_cost_usd": 0.00
+    "base_cost_usd": 0
+  },
+  "version": "1.0.0",
+  "outputMap": {
+    "text": "text",
+    "content": "text"
   }
 }

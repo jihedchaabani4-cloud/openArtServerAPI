@@ -8,14 +8,38 @@
   "operations": {
     "chat_completion": {
       "canonicalInputs": {
-        "prompt": { "type": "string", "required": false },
-        "messages": { "type": "array", "required": false },
-        "images": { "type": "array", "required": false },
-        "system_prompt": { "type": "string", "required": false },
-        "temperature": { "type": "number", "default": 0.7 },
-        "max_tokens": { "type": "number", "default": 2048 },
-        "top_p": { "type": "number", "default": 1.0 },
-        "streaming": { "type": "boolean", "default": false }
+        "prompt": {
+          "type": "string",
+          "required": false
+        },
+        "messages": {
+          "type": "array",
+          "required": false
+        },
+        "images": {
+          "type": "array",
+          "required": false
+        },
+        "system_prompt": {
+          "type": "string",
+          "required": false
+        },
+        "temperature": {
+          "type": "number",
+          "default": 0.7
+        },
+        "max_tokens": {
+          "type": "number",
+          "default": 2048
+        },
+        "top_p": {
+          "type": "number",
+          "default": 1
+        },
+        "streaming": {
+          "type": "boolean",
+          "default": false
+        }
       },
       "retailPricing": {
         "currency": "credits",
@@ -24,5 +48,6 @@
         }
       }
     }
-  }
+  },
+  "version": "1.0.0"
 }

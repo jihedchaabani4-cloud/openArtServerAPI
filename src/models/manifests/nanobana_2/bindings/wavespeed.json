@@ -7,8 +7,12 @@
   "priority": 1,
   "status": "active",
   "parameterMap": {
-    "prompt": { "providerField": "prompt" },
-    "negative_prompt": { "providerField": "negative_prompt" },
+    "prompt": {
+      "providerField": "prompt"
+    },
+    "negative_prompt": {
+      "providerField": "negative_prompt"
+    },
     "resolution": {
       "providerField": "size",
       "valueMap": {
@@ -16,7 +20,9 @@
         "2k": "2048x2048"
       }
     },
-    "aspect_ratio": { "providerField": "aspect_ratio" },
+    "aspect_ratio": {
+      "providerField": "aspect_ratio"
+    },
     "quality": {
       "providerField": "quality_tier",
       "valueMap": {
@@ -24,13 +30,29 @@
         "hd": "high"
       }
     },
-    "seed": { "providerField": "seed" }
+    "seed": {
+      "providerField": "seed"
+    }
   },
   "pricing": {
     "base_cost_usd": 0.02,
     "modifiers": {
-      "resolution": { "1k": 1.0, "2k": 1.5 },
-      "quality": { "standard": 1.0, "hd": 1.3 }
+      "resolution": {
+        "1k": 1,
+        "2k": 1.5
+      },
+      "quality": {
+        "standard": 1,
+        "hd": 1.3
+      }
     }
+  },
+  "version": "1.0.0",
+  "outputMap": {
+    "images": "outputs"
+  },
+  "pollingConfig": {
+    "pollInterval": 2,
+    "timeout": 3600
   }
 }

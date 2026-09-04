@@ -74,8 +74,10 @@ export function selectBinding(modelId, operation, cleanInput = {}, options = {})
     if (preferred) return preferred;
   }
 
-  // Phase 3: Sort by priority ascending (1 = highest priority)
-  healthy.sort((a, b) => (a.priority || 999) - (b.priority || 999));
+  // Phase 3: Sort by priority ascending (1 = highest priority), tie-break alphabetically by providerId
+  healthy.sort(
+    (a, b) => (a.priority || 999) - (b.priority || 999) || (a.providerId || "").localeCompare(b.providerId || "")
+  );
 
   return healthy[0];
 }

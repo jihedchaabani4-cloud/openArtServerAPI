@@ -69,6 +69,7 @@ describe("Public Facade Contract (T031)", () => {
     });
     assert.equal(estimate.amount, 21);
     assert.equal(estimate.currency, "credits");
+    assert.equal(estimate.manifestVersion, "1.0.0");
   });
 
   it("should resolve operation correctly", () => {

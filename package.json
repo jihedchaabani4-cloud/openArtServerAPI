@@ -24,11 +24,10 @@
     },
     "scripts": {
         "test": "node --test src/models/__tests__/**/*.test.mjs tests/**/*.test.mjs",
+        "models:validate": "node scripts/validate-all-configs.js",
         "start": "node index.js",
         "start:worker": "node src/workers/worker.js",
         "start:v2-worker": "node src/v2/queue/v2WorkflowWorker.js",
-        "architecture:validate": "node test_nodes_architecture_integration.mjs",
-        "v2:validate": "node scripts/v2/validateV2.mjs",
         "dev:api": "nodemon index.js",
         "dev:worker": "nodemon --delay 1500 src/workers/worker.js",
         "dev:v2-worker": "nodemon --delay 1500 src/v2/queue/v2WorkflowWorker.js",

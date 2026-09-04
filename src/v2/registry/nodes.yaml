@@ -38,7 +38,7 @@ llm:
     skills: { type: array, required: true }
     userPrompt: { type: string, required: true }
     images: { type: array, default: [] }
-    model: { type: string, default: "gemini-2-0-flash" }
+    model: { type: string, default: "gemini-3-flash" }
     temperature: { type: number, default: 0.7 }
     jsonMode: { type: boolean, default: false }
     schema: { type: object }

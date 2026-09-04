@@ -111,6 +111,7 @@ export async function executeLLMNode(resolvedInputs, ctx = {}) {
     systemPromptOverride = null,
     images = [],
     context = null,
+    model = undefined,
   } = safe;
 
   // ── 2. Skill Loader & System Prompt Composition ───────────────────────────
@@ -144,6 +145,7 @@ export async function executeLLMNode(resolvedInputs, ctx = {}) {
       systemInstruction: systemPrompt,
       images,
       jsonMode,
+      ...(model ? { model } : {}),
     });
   } catch (llmErr) {
     console.warn(`[LLMNode] LLM call failed (${llmErr.message}). Falling back to passthrough user prompt.`);

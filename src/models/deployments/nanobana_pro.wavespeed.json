@@ -3,8 +3,9 @@
   "id": "nanobana_pro.wavespeed",
   "modelFamily": "nanobana_pro",
   "provider": "wavespeed",
+  "adapter": "wavespeedImageAdapter",
   "status": "active",
-  "providerModelId": "google/nano-banana-pro",
+  "providerModelId": "google/nano-banana-pro/text-to-image",
   "providerModelVersion": "v1.0.0",
   "versionPolicy": "pinned",
   "operations": {

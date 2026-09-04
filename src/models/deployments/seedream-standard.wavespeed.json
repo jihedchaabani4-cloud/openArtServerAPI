@@ -4,7 +4,7 @@
   "modelFamily": "seedream-standard",
   "provider": "wavespeed",
   "status": "active",
-  "providerModelId": "bytedance/seedream-v5.0-lite",
+  "providerModelId": "bytedance/seedream-v5.0-pro",
   "providerModelVersion": "v1.0.0",
   "versionPolicy": "pinned",
   "operations": {

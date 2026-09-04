@@ -24,15 +24,17 @@
 
 import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
+import { createLogger } from "../../infrastructure/logging/index.js";
 
-// ── Structured log helper (FR-011) ───────────────────────────────────────────
+const securityLogger = createLogger("security");
+
 function log(operation, status, meta = {}) {
-    console.log(JSON.stringify({
-        timestamp: new Date().toISOString(),
+    const level = status === "error" ? "error" : "debug";
+    securityLogger[level]({
         operation: `AuditService.${operation}`,
         status,
         ...meta,
-    }));
+    }, `Audit.${operation}: ${status}`);
 }
 
 // ── Lazy admin client (only created if env vars are present) ─────────────────

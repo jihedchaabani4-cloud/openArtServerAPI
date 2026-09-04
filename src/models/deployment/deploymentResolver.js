@@ -8,8 +8,9 @@ import {
 
 export function resolveServableDeployment(modelFamily, operation, { preferredDeployment = null } = {}) {
   const { families, deployments } = getRegistry();
+  const effectiveFamily = (!families.has(modelFamily) && modelFamily === "nano_banana_pro") ? "nanobana_pro" : modelFamily;
 
-  if (!families.has(modelFamily)) {
+  if (!families.has(effectiveFamily)) {
     throw new UnknownModelFamilyError(modelFamily);
   }
 
@@ -29,7 +30,7 @@ export function resolveServableDeployment(modelFamily, operation, { preferredDep
   const servable = [];
 
   for (const dep of deployments.values()) {
-    if (dep.modelFamily === modelFamily && dep.operations && dep.operations[operation]) {
+    if (dep.modelFamily === effectiveFamily && dep.operations && dep.operations[operation]) {
       operationExists = true;
       if (["active", "deprecated"].includes(dep.status)) {
         servable.push(dep);

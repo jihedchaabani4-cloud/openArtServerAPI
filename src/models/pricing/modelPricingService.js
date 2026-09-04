@@ -1,4 +1,5 @@
 import { calculateCostInternal } from "./pricingFormulas.js";
+import { evaluatePricing } from "./pricingEngine.js";
 import { getRegistry } from "../registry/loader.js";
 import { validateInput } from "../validation/validationService.js";
 import {
@@ -9,10 +10,24 @@ import {
 import telemetry, { MODEL_EVENTS } from "../observability/events.js";
 
 export function calculateCost(modelFamily, operation, cleanInputOrUsage = {}, options = {}) {
-  const { families, deployments } = getRegistry();
+  const { families, deployments, pricingRules } = getRegistry();
+  const effectiveFamily = (!families.has(modelFamily) && modelFamily === "nano_banana_pro") ? "nanobana_pro" : modelFamily;
 
-  if (!families.has(modelFamily)) {
+  if (!families.has(effectiveFamily)) {
     throw new UnknownModelFamilyError(modelFamily);
+  }
+
+  const ruleKey = `${effectiveFamily}.${operation}`;
+  if (pricingRules && pricingRules.has(ruleKey)) {
+    const cleanInput = validateInput(effectiveFamily, operation, cleanInputOrUsage);
+    const estimate = evaluatePricing(effectiveFamily, operation, cleanInput);
+    telemetry.emit(MODEL_EVENTS.PRICING_CALCULATED, {
+      modelFamily: effectiveFamily,
+      operation,
+      pricingMode: "multi_tier_rule",
+      amount: estimate.amountString,
+    });
+    return estimate;
   }
 
   // Resolve servable deployment or preferredDeployment

@@ -1,4 +1,7 @@
 import { createWorkflowWithMedia, createWorkflowWithMediaAtomic, appendMediaToWorkflow } from "../../db/workflowMediaOps.js";
+import { createLogger } from "../../infrastructure/logging/index.js";
+
+const storageLogger = createLogger("storage");
 
 /**
  * V2 → V1 Storage Bridge
@@ -101,14 +104,15 @@ export class V1StorageBridge {
           character_info: config?.prompt || "",
           status: "ready",
         });
-        console.log(`[V1StorageBridge] Created 'public.characters' row for workflow=${workflow.id}`);
+        storageLogger.debug({ workflowId: workflow.id }, `Created 'public.characters' row for workflow=${workflow.id}`);
       } catch (charErr) {
-        console.warn(`[V1StorageBridge] Notice creating 'public.characters' row:`, charErr.message);
+        storageLogger.warn({ workflowId: workflow.id, err: charErr }, `Notice creating 'public.characters' row: ${charErr.message}`);
       }
     }
 
-    console.log(
-      `[V1StorageBridge] Placeholder created: workflow=${workflow.id} media=${media.id} (processing)`
+    storageLogger.debug(
+      { workflowId: workflow.id, mediaId: media.id },
+      `Placeholder created: workflow=${workflow.id} media=${media.id} (processing)`
     );
     return { workflow, media };
   }
@@ -160,8 +164,9 @@ export class V1StorageBridge {
       initialStatus: "processing",
     });
 
-    console.log(
-      `[V1StorageBridge] Placeholder appended: workflow=${workflowId} media=${media.id} (processing)`
+    storageLogger.debug(
+      { workflowId, mediaId: media.id },
+      `Placeholder appended: workflow=${workflowId} media=${media.id} (processing)`
     );
     return media;
   }
@@ -187,8 +192,9 @@ export class V1StorageBridge {
       error_message: null,
     });
 
-    console.log(
-      `[V1StorageBridge] Finalized media=${mediaId} → status=${status} url=${asset.url}`
+    storageLogger.debug(
+      { mediaId, status, url: asset.url },
+      `Finalized media=${mediaId} → status=${status} url=${asset.url}`
     );
   }
 
@@ -280,9 +286,9 @@ export class V1StorageBridge {
           character_info: config?.prompt || "",
           status: "ready",
         });
-        console.log(`[V1StorageBridge] Created 'public.characters' row for workflow=${workflow.id}`);
+        storageLogger.debug({ workflowId: workflow.id }, `Created 'public.characters' row for workflow=${workflow.id}`);
       } catch (charErr) {
-        console.warn(`[V1StorageBridge] Notice creating 'public.characters' row:`, charErr.message);
+        storageLogger.warn({ workflowId: workflow.id, err: charErr }, `Notice creating 'public.characters' row: ${charErr.message}`);
       }
     }
 
@@ -343,9 +349,6 @@ export class V1StorageBridge {
   extractAsset(output, nodeType) {
     if (!output) return null;
     if (nodeType === "image-generation") return output.assets?.[0] || null;
-    if (nodeType === "media-transform") return output.asset || null;
-    if (nodeType === "video-generation") return output.asset || null;
-    if (nodeType === "upscale") return output.enhancedAsset || null;
     return null;
   }
 

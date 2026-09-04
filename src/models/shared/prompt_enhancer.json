@@ -1,0 +1,7 @@
+{
+  "$schema": "../schemas/v1/parameter.schema.json",
+  "id": "prompt_enhancer",
+  "type": "boolean",
+  "description": "Automatically expands and enriches the user prompt using LLM prior to generation",
+  "uiHint": "toggle"
+}

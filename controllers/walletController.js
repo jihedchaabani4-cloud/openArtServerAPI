@@ -22,7 +22,7 @@ const TransactionsQuerySchema = z.object({
   beforeId: z.string().uuid().optional(),
 });
 
-const VALID_OPERATION_TYPES = ["IMAGE_GENERATION", "VIDEO_GENERATION", "IMAGE_EDIT", "UPSCALE"];
+const VALID_OPERATION_TYPES = ["IMAGE_GENERATION", "CHARACTER_SHEET"];
 const VALID_QUALITY_TIERS = ["standard", "hd", "4k"];
 
 const PriceQuerySchema = z.object({

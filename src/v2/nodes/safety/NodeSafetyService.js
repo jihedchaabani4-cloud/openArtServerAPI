@@ -21,28 +21,10 @@ const IMAGE_HEIGHT_MAX  = 2048;
 const IMAGE_COUNT_MAX   = 8;
 const IMAGE_PROMPT_MAX  = 2000;
 
-const VIDEO_DURATION_MIN  = 3;
-const VIDEO_DURATION_MAX  = 60;
-const VIDEO_FPS_MIN       = 8;
-const VIDEO_FPS_MAX       = 60;
-const VIDEO_ALLOWED_MODES = ["t2v", "i2v"];
-const VIDEO_ALLOWED_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
-const VIDEO_PROMPT_MAX    = 2000;
-
-const UPSCALE_ALLOWED_FACTORS = [1, 2, 4];
-
-const TRANSFORM_ALLOWED_MODES = [
-  "image_edit",
-  "image_to_image",
-  "image_variation",
-  "video_to_video",
-];
-const TRANSFORM_STRENGTH_MIN = 0.0;
-const TRANSFORM_STRENGTH_MAX = 1.0;
-
 const LLM_PROMPT_MAX      = 4000;
 const LLM_TEMPERATURE_MIN = 0.0;
 const LLM_TEMPERATURE_MAX = 2.0;
+
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -70,17 +52,6 @@ function assertString(nodeId, field, value, maxLength = Infinity) {
   }
 }
 
-function assertUrl(nodeId, field, value) {
-  if (!value || typeof value !== "string" || !value.trim()) {
-    fail(nodeId, field, "must be a non-empty URL string.");
-  }
-  try {
-    new URL(value);
-  } catch {
-    fail(nodeId, field, `"${value}" is not a valid URL.`);
-  }
-}
-
 // ── Public API ───────────────────────────────────────────────────────────────
 
 export const NodeSafetyService = {
@@ -105,9 +76,6 @@ export const NodeSafetyService = {
       const rawCount = Number(inputs.count);
       safe.count = isNaN(rawCount) ? 1 : clamp(rawCount, 1, IMAGE_COUNT_MAX);
     }
-    if (inputs.seed !== undefined && inputs.seed !== null) {
-      safe.seed = Math.abs(Math.floor(Number(inputs.seed))) || null;
-    }
     if (inputs.references !== undefined && inputs.references !== null) {
       safe.references = Array.isArray(inputs.references) ? inputs.references : [];
     }
@@ -115,124 +83,7 @@ export const NodeSafetyService = {
     return safe;
   },
 
-  // ── 2. Video Generation ─────────────────────────────────────────────────
-
-  assertVideoInputs(inputs = {}, nodeId = "video-generation") {
-    assertString(nodeId, "prompt", inputs.prompt, VIDEO_PROMPT_MAX);
-
-    const safe = {
-      ...inputs,
-      prompt: inputs.prompt.trim(),
-    };
-
-    if (inputs.mode !== undefined && inputs.mode !== null) {
-      if (!VIDEO_ALLOWED_MODES.includes(inputs.mode)) {
-        fail(nodeId, "mode", `must be one of: ${VIDEO_ALLOWED_MODES.join(", ")} (got "${inputs.mode}").`);
-      }
-      safe.mode = inputs.mode;
-      if (inputs.mode === "i2v") {
-        assertUrl(nodeId, "startFrame", inputs.startFrame);
-      }
-    }
-
-    if (inputs.aspect_ratio !== undefined && inputs.aspect_ratio !== null) {
-      if (!VIDEO_ALLOWED_RATIOS.includes(inputs.aspect_ratio)) {
-        fail(
-          nodeId,
-          "aspect_ratio",
-          `must be one of: ${VIDEO_ALLOWED_RATIOS.join(", ")} (got "${inputs.aspect_ratio}").`,
-        );
-      }
-      safe.aspect_ratio = inputs.aspect_ratio;
-    }
-
-    if (inputs.duration !== undefined && inputs.duration !== null) {
-      safe.duration = clamp(inputs.duration, VIDEO_DURATION_MIN, VIDEO_DURATION_MAX);
-    }
-    if (inputs.fps !== undefined && inputs.fps !== null) {
-      safe.fps = clamp(inputs.fps, VIDEO_FPS_MIN, VIDEO_FPS_MAX);
-    }
-    if (inputs.motion_strength !== undefined && inputs.motion_strength !== null) {
-      safe.motion_strength = clamp(inputs.motion_strength, 0, 1);
-    }
-    if (inputs.references !== undefined && inputs.references !== null) {
-      safe.references = Array.isArray(inputs.references) ? inputs.references : [];
-    }
-
-    return safe;
-  },
-
-  // ── 3. Upscale ──────────────────────────────────────────────────────────
-
-  assertUpscaleInputs(inputs = {}, nodeId = "upscale") {
-    const asset = inputs.asset;
-    if (!asset || typeof asset !== "object") {
-      fail(nodeId, "asset", "must be a valid asset object.");
-    }
-    assertUrl(nodeId, "asset.url", asset.url);
-
-    const safe = {
-      ...inputs,
-      asset,
-    };
-
-    if (inputs.factor !== undefined && inputs.factor !== null) {
-      const rawFactor = Number(inputs.factor);
-      if (UPSCALE_ALLOWED_FACTORS.includes(rawFactor)) {
-        safe.factor = rawFactor;
-      } else {
-        safe.factor = UPSCALE_ALLOWED_FACTORS.find((f) => f >= rawFactor) ?? UPSCALE_ALLOWED_FACTORS.at(-1);
-      }
-    }
-
-    return safe;
-  },
-
-  // ── 4. Media Transform ──────────────────────────────────────────────────
-
-  assertTransformInputs(inputs = {}, nodeId = "media-transform") {
-    const sourceAsset = inputs.source_asset;
-    if (!sourceAsset || typeof sourceAsset !== "object") {
-      fail(nodeId, "source_asset", "must be a valid asset object.");
-    }
-    assertUrl(nodeId, "source_asset.url", sourceAsset.url);
-
-    assertString(nodeId, "prompt", inputs.prompt, 2000);
-
-    const safe = {
-      ...inputs,
-      source_asset: sourceAsset,
-      prompt: inputs.prompt.trim(),
-    };
-
-    if (inputs.mode !== undefined && inputs.mode !== null) {
-      if (!TRANSFORM_ALLOWED_MODES.includes(inputs.mode)) {
-        fail(
-          nodeId,
-          "mode",
-          `must be one of: ${TRANSFORM_ALLOWED_MODES.join(", ")} (got "${inputs.mode}").`,
-        );
-      }
-      safe.mode = inputs.mode;
-    }
-
-    if (inputs.strength !== undefined && inputs.strength !== null) {
-      safe.strength = clamp(inputs.strength, TRANSFORM_STRENGTH_MIN, TRANSFORM_STRENGTH_MAX);
-    }
-    if (inputs.width !== undefined && inputs.width !== null) {
-      safe.width = clamp(inputs.width, IMAGE_WIDTH_MIN, IMAGE_WIDTH_MAX);
-    }
-    if (inputs.height !== undefined && inputs.height !== null) {
-      safe.height = clamp(inputs.height, IMAGE_HEIGHT_MIN, IMAGE_HEIGHT_MAX);
-    }
-    if (inputs.references !== undefined && inputs.references !== null) {
-      safe.references = Array.isArray(inputs.references) ? inputs.references : [];
-    }
-
-    return safe;
-  },
-
-  // ── 5. LLM ──────────────────────────────────────────────────────────────
+  // ── 2. LLM ──────────────────────────────────────────────────────────────
 
   assertLLMInputs(inputs = {}, nodeId = "llm") {
     assertString(nodeId, "userPrompt", inputs.userPrompt, LLM_PROMPT_MAX);
@@ -266,7 +117,7 @@ export const NodeSafetyService = {
     };
   },
 
-  // ── 6. Prompt Builder ───────────────────────────────────────────────────
+  // ── 3. Prompt Builder ───────────────────────────────────────────────────
 
   assertPromptBuilderInputs(inputs = {}, nodeId = "prompt-builder") {
     let promptText = "";
@@ -281,37 +132,29 @@ export const NodeSafetyService = {
       promptText = (firstChar.description || firstChar.name || "").trim();
     }
 
-    const hasPrompt      = Boolean(promptText);
-    const hasSourceAsset = inputs.source_asset && inputs.source_asset.url;
-    const hasSkill       = inputs.skill && inputs.skill.id;
-
-    if (!hasPrompt && !hasSourceAsset) {
-      fail(
-        nodeId,
-        "prompt / source_asset",
-        "at least one of prompt or source_asset.url must be provided.",
-      );
+    if (!promptText) {
+      fail(nodeId, "prompt", "prompt must be provided.");
     }
 
     if (inputs.skill !== null && inputs.skill !== undefined) {
-      if (!hasSkill) {
+      if (!inputs.skill?.id) {
         fail(nodeId, "skill.id", "skill object must contain a non-empty id string.");
       }
     }
 
     return {
       ...inputs,
-      prompt:       promptText,
-      references:   Array.isArray(inputs.references)
+      prompt:     promptText,
+      references: Array.isArray(inputs.references)
         ? inputs.references.filter(r => r !== null && r !== undefined && r !== "")
         : [],
-      characters:   inputs.characters  ?? [],
-      style:        inputs.style       ?? null,
-      source_asset: inputs.source_asset ?? null,
-      skill:        inputs.skill        ?? null,
-      parameters:   inputs.parameters   ?? {},
+      characters: inputs.characters ?? [],
+      style:      inputs.style      ?? null,
+      skill:      inputs.skill      ?? null,
+      parameters: inputs.parameters ?? {},
     };
   },
+
 };
 
 export default NodeSafetyService;

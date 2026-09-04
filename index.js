@@ -2,7 +2,10 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-import morgan from "morgan";
+import { requestLogger } from "./src/infrastructure/logging/requestLogger.js";
+import { createLogger, LogErrorCodes } from "./src/infrastructure/logging/index.js";
+
+const systemLogger = createLogger("system");
 
 import apiRouter from "./src/api/routes.js";
 import { walletService } from "./src/container.js";
@@ -38,7 +41,7 @@ app.use(
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());
-app.use(morgan("dev"));
+app.use(requestLogger());
 
 // ── Routes ──────────────────────────────────────────────────
 app.use("/api", apiRouter);
@@ -51,12 +54,22 @@ app.use((req, res) => {
 // ── Global error handler ─────────────────────────────────────
 app.use((err, req, res, next) => {
     const statusCode = err.statusCode || 500;
-    
-    // Only log the full stack trace for actual server crashes (500), not for normal 401/404 errors
-    if (statusCode === 500) {
-        console.error(err.stack);
+    const errorCode = err.code || (statusCode >= 500 ? LogErrorCodes.INTERNAL_UNEXPECTED_ERROR : "REQUEST_ERROR");
+
+    if (statusCode >= 500) {
+        systemLogger.error({
+            event: "http.error",
+            errorCode,
+            statusCode,
+            err,
+        }, `${statusCode} - ${err.message}`);
     } else {
-        console.warn(`[${statusCode}] ${err.message}`);
+        systemLogger.warn({
+            event: "http.warning",
+            errorCode,
+            statusCode,
+            err: { message: err.message, code: errorCode },
+        }, `${statusCode} - ${err.message}`);
     }
 
     res.status(statusCode).json({
@@ -69,16 +82,16 @@ app.use((err, req, res, next) => {
 // ── Start server ─────────────────────────────────────────────
 app.listen(PORT, () => {
     const appName = process.env.APP_NAME || "Labveil";
-    console.log(`\n🚀 ${appName} API running on http://localhost:${PORT}\n`);
-    
+    systemLogger.info({ port: PORT, appName }, `${appName} API running on http://localhost:${PORT}`);
+
     // ── Start Cron Jobs ──────────────────────────────────────────
     if (walletService) {
         setInterval(() => {
             walletService.expireStaleHolds().catch(err => {
-                console.error("[Cron] Failed to expire stale holds:", err.message);
+                systemLogger.error({ err, event: "cron.error" }, `Failed to expire stale holds: ${err.message}`);
             });
         }, 10 * 60 * 1000); // Every 10 minutes
-        console.log("🕒 [Cron] Started Stale Holds expiration cron job (runs every 10m).");
+        systemLogger.info({ intervalMinutes: 10 }, "Started Stale Holds expiration cron job (runs every 10m)");
     }
 });
 

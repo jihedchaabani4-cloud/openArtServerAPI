@@ -6,12 +6,17 @@ import {
   settleNodeBilling,
   rollbackNodeBilling,
   isProviderBackedNodeType,
+  estimateNodeBillingAmount,
+  getRunBillingAccumulator,
   getGateways,
 } from "./workflowRunner.js";
 import { jobQueueService } from "../../services/jobQueueService.js";
 import { db } from "../../container.js";
-import { logV2Event } from "../logging/v2Logger.js";
 import { nodeFailure, nodeSuccess } from "../runtime/nodeEnvelope.js";
+import { formatWorkflowError } from "../runtime/errorPolicy.js";
+import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";
+
+const nodeLogger = createLogger("node");
 
 const runRepo = new RunRepository();
 
@@ -31,13 +36,13 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
 
   try {
     if (target === "character" && workflowId && field) {
-      console.log(`💾 [Persistence] Updating character ${workflowId} field "${field}"`);
+      nodeLogger.info({ workflowId, field }, `Updating character ${workflowId} field "${field}"`);
       await db.characters.updateCharacter(workflowId, { [field]: resolvedValue }).catch(() => null);
     } else if (target === "media" && workflowId) {
       const mediaUrl = typeof resolvedValue === "string" ? resolvedValue : (resolvedValue?.url || output?.assets?.[0]?.url || output?.media?.url);
       if (mediaUrl) {
         const targetStepId = step_id || "character_sheet";
-        console.log(`💾 [Persistence] Updating media for workflow ${workflowId} (step_id: ${targetStepId}) to completed`);
+        nodeLogger.info({ workflowId, stepId: targetStepId }, `Updating media for workflow ${workflowId} (step_id: ${targetStepId}) to completed`);
 
         // Find existing processing media placeholder created by createCharacter
         const existingList = await db.media.findByWorkflow(workflowId).catch(() => []);
@@ -52,7 +57,7 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
             status: status || "completed",
             width,
             height,
-          }).catch((err) => console.warn(`[Persistence] Failed to update media placeholder:`, err.message));
+          }).catch((err) => nodeLogger.warn({ workflowId, err }, `Failed to update media placeholder: ${err.message}`));
         } else {
           await db.media.createMedia({
             workflow_id: workflowId,
@@ -62,12 +67,12 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
             status: status || "completed",
             width,
             height,
-          }).catch((err) => console.warn(`[Persistence] Failed to create media fallback:`, err.message));
+          }).catch((err) => nodeLogger.warn({ workflowId, err }, `Failed to create media fallback: ${err.message}`));
         }
       }
     }
   } catch (err) {
-    console.warn(`⚠️ [Persistence] Notice for node ${nodeConfig.id}:`, err.message);
+    nodeLogger.warn({ nodeId: nodeConfig.id, err }, `Persistence notice for node ${nodeConfig.id}: ${err.message}`);
   }
 }
 
@@ -156,15 +161,22 @@ export async function executeNodeJob(runId, nodeId) {
   const nodeRuns = await runRepo.listNodeRuns(runId);
 
   let placeholders = [];
+  const isCoveredByUseCase = Boolean(run?.input?.billing_hold_id);
+  let billingReservation = null;
 
   try {
     // 3. Resolve inputs
     const resolvedInputs = await resolveInputsForNode(run, nodeConfig, nodeRuns);
 
-    console.log(`\n----------------------------------------------------------------`);
-    console.log(`⚡ [character-sheet-v1 Execution Engine]`);
-    console.log(`▶ Stage 1: Resolving inputs for Node "${nodeId}" (${nodeConfig.type})`);
-    console.log(`   Resolved Inputs:`, JSON.stringify(resolvedInputs, null, 2));
+    nodeLogger.info(
+      {
+        nodeId,
+        nodeType: nodeConfig.type,
+        event: LogEvents.WORKFLOW_NODE_STARTED,
+      },
+      `Executing Node "${nodeId}" (${nodeConfig.type})`
+    );
+    nodeLogger.debug({ nodeId, inputs: resolvedInputs }, `Node "${nodeId}" inputs resolved`);
 
     // 4. Update status in database to running and set started_at if attempt is 1
     await runRepo.updateNodeRun(runId, nodeId, {
@@ -182,15 +194,8 @@ export async function executeNodeJob(runId, nodeId) {
       });
     }
 
-    logV2Event({
-      traceId: runId,
-      operation: `node.execute:${nodeId}`,
-      durationMs: 0,
-      status: "success",
-      message: `Starting node ${nodeId}`
-    });
-
     // 5. Invoke node execution
+    const billing = getRunBillingAccumulator(runId);
     const ctx = {
       runId,
       nodeId,
@@ -198,24 +203,38 @@ export async function executeNodeJob(runId, nodeId) {
       traceId: runId,
       attempt: nodeRun.attempt,
       forceProvider: nodeRun.provider_override || null,
+      billing,
     };
 
-    console.log(`💳 ▶ Stage 2: Reserving billing & preparing placeholders for Node "${nodeId}"`);
-    await reserveNodeBilling({
-      run,
-      nodeConfig,
-      resolvedInputs,
-      attempt: nodeRun.attempt,
-    });
+    if (isCoveredByUseCase) {
+      // 🚀 IN-MEMORY BILLING ACCUMULATOR: Zero wallet touches during UseCase execution
+      if (isProviderBackedNodeType(nodeConfig?.type)) {
+        const nodeCost = estimateNodeBillingAmount(nodeConfig, resolvedInputs);
+        ctx.billing?.record({
+          nodeId,
+          nodeType: nodeConfig.type,
+          model: resolvedInputs.model,
+          amount: nodeCost,
+        });
+      }
+    } else {
+      nodeLogger.debug({ nodeId }, `Reserving billing & preparing placeholders for Node "${nodeId}"`);
+      billingReservation = await reserveNodeBilling({
+        run,
+        nodeConfig,
+        resolvedInputs,
+        attempt: nodeRun.attempt,
+      });
+    }
 
-    console.log(`🎨 ▶ Stage 2: Executing Processor "${nodeConfig.type}" for Node "${nodeId}"...`);
+    nodeLogger.debug({ nodeId, nodeType: nodeConfig.type }, `Executing Processor "${nodeConfig.type}" for Node "${nodeId}"`);
     const output = await executeNode(nodeConfig.type, resolvedInputs, ctx);
-    console.log(`   Processor Output Preview:`, JSON.stringify(output, null, 2).slice(0, 300) + '...');
-
-    console.log(`💾 ▶ Stage 3: Persisting outputs for Node "${nodeId}"...`);
+    nodeLogger.debug({ nodeId }, `Persisting outputs for Node "${nodeId}"`);
     await executeNodePersistence({ nodeConfig, output, run, resolvedInputs });
 
-    await settleNodeBilling({ runId, nodeId, nodeConfig, attempt: nodeRun.attempt });
+    if (!isCoveredByUseCase && billingReservation) {
+      await settleNodeBilling({ runId, nodeId, nodeConfig, attempt: nodeRun.attempt, reservation: billingReservation });
+    }
 
     const durationMs = Date.now() - startedAt;
     const envelope = nodeSuccess(output, {
@@ -227,8 +246,14 @@ export async function executeNodeJob(runId, nodeId) {
       modelKey: resolvedInputs.model,
       traceId: runId,
     });
-    console.log(`✅ ▶ Stage 4: Node "${nodeId}" COMPLETED successfully in ${durationMs}ms`);
-    console.log(`----------------------------------------------------------------\n`);
+    nodeLogger.info(
+      {
+        nodeId,
+        durationMs,
+        event: LogEvents.WORKFLOW_NODE_COMPLETED,
+      },
+      `Node "${nodeId}" COMPLETED successfully in ${durationMs}ms`
+    );
 
     // 6. On success: update node status, complete it, and trigger orchestrator
     await runRepo.updateNodeRun(runId, nodeId, {
@@ -249,26 +274,37 @@ export async function executeNodeJob(runId, nodeId) {
       });
     }
 
-    logV2Event({
-      traceId: runId,
-      operation: `node.execute:${nodeId}`,
-      durationMs: Date.now() - startedAt,
-      status: "success",
-      message: `Node ${nodeId} completed successfully`
-    });
-
   } catch (error) {
-    console.error(`❌ [nodeExecutor] Node "${nodeId}" failed: ${error.message}`);
+    nodeLogger.error(
+      {
+        nodeId,
+        runId,
+        err: error,
+        event: LogEvents.WORKFLOW_NODE_FAILED,
+      },
+      `Node "${nodeId}" failed: ${error.message}`
+    );
 
-    await rollbackNodeBilling({ runId, nodeId, nodeConfig, attempt: nodeRun.attempt }).catch(() => {});
+    if (!isCoveredByUseCase && billingReservation) {
+      await rollbackNodeBilling({ runId, nodeId, nodeConfig, attempt: nodeRun.attempt, reservation: billingReservation }).catch(() => {});
+    }
 
     const maxAttempts = nodeConfig?.retry_policy?.max_attempts || 1;
     const currentAttempt = nodeRun?.attempt || 1;
 
-    if (currentAttempt < maxAttempts) {
+    if (currentAttempt < maxAttempts && error?.retryable !== false) {
       const nextAttempt = currentAttempt + 1;
       const fallbackProvider = nodeConfig?.retry_policy?.fallback_provider || nodeRun.provider_override || null;
-      console.log(`🔄 [nodeExecutor] Retrying Node "${nodeId}" (Attempt ${nextAttempt}/${maxAttempts}) with fallback: ${fallbackProvider}`);
+      nodeLogger.warn(
+        {
+          nodeId,
+          runId,
+          attempt: nextAttempt,
+          maxAttempts,
+          fallbackProvider,
+        },
+        `Retrying Node "${nodeId}" (Attempt ${nextAttempt}/${maxAttempts}) with fallback: ${fallbackProvider}`
+      );
 
       await runRepo.updateNodeRun(runId, nodeId, {
         attempt: nextAttempt,
@@ -286,9 +322,10 @@ export async function executeNodeJob(runId, nodeId) {
 
     const workflowId = run?.input?.workflow_id || run?.input?.characterId;
     if (workflowId) {
+      const sanitized = formatWorkflowError(error);
       await db.media.findByWorkflow(workflowId).then((list) => {
         const p = list?.find((m) => m.status === "processing" || m.status === "pending");
-        if (p?.id) return db.media.updateMedia(p.id, { status: "failed", error_message: error.message }).catch(() => {});
+        if (p?.id) return db.media.updateMedia(p.id, { status: "failed", error_message: sanitized.message }).catch(() => {});
       }).catch(() => {});
     }
 
@@ -305,15 +342,6 @@ export async function executeNodeJob(runId, nodeId) {
         metadata: { nodeId, attempt: nodeRun.attempt }
       });
     }
-
-    logV2Event({
-      traceId: runId,
-      operation: `node.execute:${nodeId}`,
-      durationMs: Date.now() - startedAt,
-      status: "error",
-      errorCode: error.code || "NODE_EXECUTION_FAILED",
-      message: `Node ${nodeId} failed: ${error.message}`
-    });
 
     const envelope = nodeFailure(error, {
       workflowRunId: runId,

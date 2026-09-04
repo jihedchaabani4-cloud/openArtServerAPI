@@ -1,0 +1,7 @@
+{
+  "$schema": "../schemas/v1/parameter.schema.json",
+  "id": "fps",
+  "type": "integer",
+  "description": "Frames per second for video generation",
+  "uiHint": "select"
+}

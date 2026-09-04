@@ -12,6 +12,8 @@ const families = new Map();
 const providers = new Map();
 const deployments = new Map();
 const collections = new Map();
+const parameters = new Map();
+const pricingRules = new Map();
 let isLoaded = false;
 
 function readJsonFiles(dirPath) {
@@ -51,6 +53,15 @@ export function loadRegistry({ strict = true } = {}) {
   providers.clear();
   deployments.clear();
   collections.clear();
+  parameters.clear();
+  pricingRules.clear();
+
+  // 0. Shared Canonical Parameters
+  const sharedDir = path.join(modelsRoot, "shared");
+  for (const { data } of readJsonFiles(sharedDir)) {
+    validateStructural(data, "parameter", "1.0");
+    parameters.set(data.id, Object.freeze(data));
+  }
 
   // 1. Families
   const familiesDir = path.join(modelsRoot, "families");
@@ -81,20 +92,35 @@ export function loadRegistry({ strict = true } = {}) {
     collections.set(data.id, Object.freeze(data));
   }
 
-  // 5. Cross-file consistency validation
+  // 5. Pricing Rules
+  const pricingRulesDir = path.join(modelsRoot, "pricing", "rules");
+  for (const { data } of readJsonFiles(pricingRulesDir)) {
+    validateStructural(data, "pricing", "1.0");
+    pricingRules.set(`${data.model}.${data.operation}`, Object.freeze(data));
+  }
+
+  // 6. Cross-file consistency validation
   if (strict && (families.size > 0 || deployments.size > 0)) {
-    validateAllConsistencyChecks({ families, providers, deployments, collections });
+    validateAllConsistencyChecks({ families, providers, deployments, collections, parameters, pricingRules });
   }
 
   isLoaded = true;
-  return { families, providers, deployments, collections };
+  return { families, providers, deployments, collections, parameters, pricingRules };
 }
 
 export function getRegistry() {
   if (!isLoaded) {
     loadRegistry();
   }
-  return { families, providers, deployments, collections };
+  return { families, providers, deployments, collections, parameters, pricingRules };
+}
+
+export function getParameters() {
+  return getRegistry().parameters;
+}
+
+export function getPricingRules() {
+  return getRegistry().pricingRules;
 }
 
 export function resetRegistry() {
@@ -102,5 +128,7 @@ export function resetRegistry() {
   providers.clear();
   deployments.clear();
   collections.clear();
+  parameters.clear();
+  pricingRules.clear();
   isLoaded = false;
 }

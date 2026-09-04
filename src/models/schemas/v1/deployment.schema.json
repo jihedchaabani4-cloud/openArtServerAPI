@@ -10,6 +10,7 @@
     "id": { "type": "string", "pattern": "^[a-z0-9._-]+\\.[a-z0-9_-]+$" },
     "modelFamily": { "type": "string" },
     "provider": { "type": "string" },
+    "adapter": { "type": "string" },
     "status": { "enum": ["draft", "beta", "active", "deprecated", "sunset", "disabled"] },
     "providerModelId": { "type": "string" },
     "providerModelVersion": { "type": "string" },
@@ -34,9 +35,11 @@
       "minProperties": 1,
       "additionalProperties": {
         "type": "object",
-        "required": ["endpoint", "inputs", "outputs", "pricing"],
+        "required": ["endpoint", "outputs"],
         "properties": {
           "endpoint": { "type": "string" },
+          "adapter": { "type": "string" },
+          "timeoutMs": { "type": "number" },
           "inputs": { "type": "object" },
           "outputs": {
             "type": "object",

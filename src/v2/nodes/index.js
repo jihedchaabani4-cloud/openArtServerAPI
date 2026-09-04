@@ -1,25 +1,15 @@
-import { executePromptBuilder } from "./promptBuilderNode.js";
+import { executePromptBuilder }   from "./promptBuilderNode.js";
 import { executeImageGeneration } from "./imageGenerationNode.js";
-import { executeVideoGeneration } from "./videoGenerationNode.js";
-import { executeUpscale } from "./upscaleNode.js";
-import { executeMediaTransform } from "./mediaTransformNode.js";
-import { executeLLM } from "./llmNode.js";
+import { executeLLM }             from "./llmNode.js";
 
 const registry = {
-  "prompt-builder": executePromptBuilder,
+  "prompt-builder":   executePromptBuilder,
   "image-generation": executeImageGeneration,
-  "video-generation": executeVideoGeneration,
-  "upscale": executeUpscale,
-  "media-transform": executeMediaTransform,
-  "llm": executeLLM,
+  "llm":              executeLLM,
 };
 
 /**
  * Dispatch node execution to the corresponding implementation.
- * @param {string} type The node type ID
- * @param {Object} resolvedInputs Inputs resolved from bindings
- * @param {Object} ctx Execution context
- * @returns {Promise<Object>} The node output
  */
 export async function executeNode(type, resolvedInputs, ctx) {
   const executor = registry[type];
@@ -28,3 +18,4 @@ export async function executeNode(type, resolvedInputs, ctx) {
   }
   return executor(resolvedInputs, ctx);
 }
+

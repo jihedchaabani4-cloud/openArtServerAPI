@@ -27,7 +27,7 @@ export async function resolveCredential(deployment, provider, credentialProvider
   const platformKey =
     process.env[envKey] ||
     process.env[fallbackEnvKey] ||
-    (provider.id === "google" ? (process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY) : null);
+    (provider.id === "google" ? (process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || process.env.GOOGLE_AI_STUDIO_API_KEY || process.env.GOOGLE_API_KEY) : null);
 
   if (!platformKey) {
     throw new CredentialError(`No platform credential configured for provider "${provider.id}" (expected env ${envKey})`);

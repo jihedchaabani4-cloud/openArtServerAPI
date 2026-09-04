@@ -4,7 +4,7 @@
   "modelFamily": "pruna_ai",
   "provider": "wavespeed",
   "status": "active",
-  "providerModelId": "pruna/image",
+  "providerModelId": "prunaai/p-image",
   "providerModelVersion": "v1.0.0",
   "versionPolicy": "pinned",
   "operations": {

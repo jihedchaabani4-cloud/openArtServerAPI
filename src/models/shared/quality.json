@@ -1,0 +1,7 @@
+{
+  "$schema": "../schemas/v1/parameter.schema.json",
+  "id": "quality",
+  "type": "enum",
+  "description": "Output detail and rendering quality level",
+  "uiHint": "select"
+}

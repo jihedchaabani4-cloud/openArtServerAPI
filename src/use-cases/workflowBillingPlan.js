@@ -2,9 +2,6 @@ import { calculateCost as defaultCalculateCost, resolveOperation } from "../mode
 
 const BILLABLE_NODE_TYPES = new Set([
   "image-generation",
-  "video-generation",
-  "upscale",
-  "media-transform",
   "llm",
 ]);
 
@@ -19,15 +16,8 @@ function resolveField(node, field, inputs = {}) {
   return undefined;
 }
 
-function determineDomain(node, inputs = {}) {
-  if (node.type === "video-generation") return "video";
+function determineDomain(node) {
   if (node.type === "llm") return "text";
-  if (node.type === "media-transform") {
-    const isVideo = Boolean(
-      inputs.video_url || inputs.video || inputs.duration || inputs.mode === "video_to_video"
-    );
-    return isVideo ? "video" : "image";
-  }
   return "image";
 }
 
@@ -38,19 +28,17 @@ function operationForNode(node, inputs = {}) {
 
 function inputForNode(node, inputs = {}) {
   const operation = operationForNode(node, inputs);
-  const isLLMNode = node.type === "llm";
   const nodeModel = resolveField(node, "model", inputs);
-  const resolvedModel = isLLMNode ? (nodeModel || "gemini-2-0-flash") : (nodeModel || inputs.model);
+  const resolvedModel = nodeModel || inputs.model;
 
+  const isLLMNode = node.type === "llm";
   const rawPrompt = inputs.prompt ?? resolveField(node, "prompt", inputs) ?? resolveField(node, "userPrompt", inputs);
   const messages = isLLMNode
     ? (inputs.messages || (rawPrompt ? [{ role: "user", content: rawPrompt }] : undefined))
     : inputs.messages;
 
-  const rawDuration = inputs.durationSeconds ?? inputs.duration ?? resolveField(node, "durationSeconds", inputs) ?? resolveField(node, "duration", inputs);
   const rawQuality = inputs.quality ?? resolveField(node, "quality", inputs);
   const rawResolution = inputs.resolution ?? resolveField(node, "resolution", inputs);
-  const rawScale = inputs.upscaleScale ?? inputs.factor ?? resolveField(node, "upscaleScale", inputs) ?? resolveField(node, "factor", inputs);
   const rawCount = inputs.count ?? resolveField(node, "count", inputs);
   const rawImageUrl = inputs.image_url ?? inputs.source_url ?? inputs.image ?? resolveField(node, "image_url", inputs) ?? resolveField(node, "image", inputs);
 
@@ -64,10 +52,8 @@ function inputForNode(node, inputs = {}) {
 
   if (messages !== undefined) nodeInput.messages = messages;
   if (rawPrompt !== undefined) nodeInput.prompt = rawPrompt;
-  if (rawDuration !== undefined) nodeInput.durationSeconds = String(rawDuration);
   if (rawQuality !== undefined) nodeInput.quality = rawQuality;
   if (rawResolution !== undefined) nodeInput.resolution = rawResolution;
-  if (rawScale !== undefined) nodeInput.scale = String(rawScale);
   if (rawCount !== undefined) nodeInput.count = Number(rawCount);
   if (rawImageUrl !== undefined) nodeInput.image_url = rawImageUrl;
 

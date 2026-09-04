@@ -1,21 +1,23 @@
 import { supabase } from "../../lib/supabase.js";
 import { AppError } from "../utils/AppError.js";
+import { setContext, createLogger } from "../infrastructure/logging/index.js";
+
+const authLogger = createLogger("auth");
 
 /**
  * Middleware to strictly authenticate users using Supabase Auth.
  * Blocks the request with 401 Unauthorized if token is missing or invalid.
  */
 export const requireAuth = async (req, res, next) => {
-    // ── DEV BYPASS & INTERNAL SECRET ───────────────────────────────────────────
-    if (process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) {
-        req.user = { id: "7d40bff4-7cac-4f2d-8994-2642c90e40e4" }; // use a valid project/user owner ID if needed, or dev-user-id
-        return next();
-    }
-
+    // S2S internal secret check (requires explicit x-user-id header, no hardcoded defaults)
     const internalSecret = req.headers?.["x-internal-secret"];
-    if (internalSecret && internalSecret === (process.env.INTERNAL_SECRET || "openart_internal_s2s_secret_2026")) {
-        req.user = { id: process.env.INTERNAL_USER_ID || "7d40bff4-7cac-4f2d-8994-2642c90e40e4" };
-        return next();
+    if (internalSecret && internalSecret === process.env.INTERNAL_SECRET) {
+        const headerUserId = req.headers?.["x-user-id"];
+        if (headerUserId) {
+            req.user = { id: headerUserId };
+            setContext({ userId: headerUserId });
+            return next();
+        }
     }
 
     try {
@@ -28,10 +30,8 @@ export const requireAuth = async (req, res, next) => {
             token = authHeader.split(" ")[1].trim();
         }
 
-        console.log(`[Auth Middleware] Path: ${req.path}, Has Token: ${!!token}, Has Refresh Token: ${!!refreshToken}`);
-
         if (!token && !refreshToken) {
-            console.log(`[Auth Middleware] Rejecting because no tokens found in cookies or headers`);
+            authLogger.debug({ event: "auth.failed", path: req.path }, "Rejecting because no tokens found in cookies or headers");
             return next(new AppError("Authentication required. Please log in.", 401));
         }
 
@@ -77,14 +77,17 @@ export const requireAuth = async (req, res, next) => {
         }
 
         if (!user) {
+            authLogger.warn({ event: "auth.failed", path: req.path }, "Invalid or expired authentication token");
             return next(new AppError("Invalid or expired authentication token.", 401));
         }
 
-        // Pass user ID in the request
+        // Pass user ID in the request and bind to LogContext
         req.user = { id: user.id };
+        setContext({ userId: user.id });
+        authLogger.debug({ event: "auth.verified", userId: user.id }, `User ${user.id} authenticated`);
         next();
     } catch (err) {
-        console.error("❌ Auth Middleware Error:", err);
+        authLogger.error({ event: "auth.failed", err }, `Authentication process failed: ${err.message}`);
         next(new AppError("Authentication process failed", 500));
     }
 };

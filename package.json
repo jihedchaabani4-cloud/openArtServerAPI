@@ -19,9 +19,11 @@
         "#domain/generation/*.js": "./src/domain/generation/*.js",
         "#domain/project/*.js": "./src/domain/project/*.js",
         "#queue/*.js": "./src/queue/*.js",
+        "#infrastructure/*.js": "./src/infrastructure/*.js",
         "#container.js": "./src/container.js"
     },
     "scripts": {
+        "test": "node --test src/models/__tests__/**/*.test.mjs",
         "start": "node index.js",
         "start:worker": "node src/workers/worker.js",
         "start:v2-worker": "node src/v2/queue/v2WorkflowWorker.js",
@@ -51,10 +53,10 @@
         "express-async-handler": "^1.2.0",
         "express-rate-limit": "^8.3.0",
         "ioredis": "^5.10.1",
-        "morgan": "^1.10.0",
         "multer": "^2.1.1",
         "node-fetch": "^3.3.2",
         "openai": "^6.25.0",
+        "pino": "^10.3.1",
         "sharp": "^0.34.5",
         "socket.io": "^4.8.3",
         "uuid": "^9.0.1",
@@ -66,6 +68,7 @@
         "concurrently": "^9.2.1",
         "eslint-plugin-react-hooks": "^7.0.1",
         "nodemon": "^3.1.0",
+        "pino-pretty": "^13.1.3",
         "supabase": "^2.84.5"
     }
 }

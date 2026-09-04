@@ -1,0 +1,7 @@
+{
+  "$schema": "../schemas/v1/parameter.schema.json",
+  "id": "resolution",
+  "type": "enum",
+  "description": "Output image or video resolution tier",
+  "uiHint": "select"
+}

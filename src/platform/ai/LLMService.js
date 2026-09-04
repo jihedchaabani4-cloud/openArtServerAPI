@@ -6,6 +6,9 @@
  */
 
 import { run } from "../../models/index.js";
+import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";
+
+const providerLogger = createLogger("provider");
 
 export class LLMService {
   /**
@@ -19,17 +22,34 @@ export class LLMService {
    * @returns {Promise<{ raw: string, json?: object, model: string }>}
    */
   async generate({ prompt, systemInstruction = "", images = [], jsonMode = false }) {
+    const startTime = performance.now();
     const fullPromptText = systemInstruction
       ? `${systemInstruction}\n\n${prompt}`
       : prompt;
 
     const messages = [{ role: "user", content: fullPromptText }];
 
+    providerLogger.debug(
+      { provider: "gemini", model: "gemini-2-0-flash", event: LogEvents.PROVIDER_REQUEST_STARTED },
+      "LLM Gemini 2.0 Flash request started"
+    );
+
     const runResult = await run("gemini-2-0-flash", "chat_completion", {
       messages,
       images,
       temperature: 0.4,
     });
+
+    const durationMs = Math.round(performance.now() - startTime);
+    providerLogger.info(
+      {
+        provider: "gemini",
+        model: "gemini-2-0-flash",
+        durationMs,
+        event: LogEvents.PROVIDER_REQUEST_COMPLETED,
+      },
+      `LLM Gemini 2.0 Flash completed in ${durationMs}ms`
+    );
 
     const rawOutput = runResult.content || "";
 
@@ -45,7 +65,7 @@ export class LLMService {
         }
         jsonResult = JSON.parse(cleaned);
       } catch (jsonErr) {
-        console.warn("[LLMService] Failed to parse JSON output:", jsonErr.message);
+        providerLogger.warn({ err: jsonErr }, `Failed to parse JSON output: ${jsonErr.message}`);
       }
     }
 

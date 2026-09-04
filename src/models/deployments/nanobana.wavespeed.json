@@ -4,7 +4,7 @@
   "modelFamily": "nanobana",
   "provider": "wavespeed",
   "status": "active",
-  "providerModelId": "google/nano-banana",
+  "providerModelId": "google/nano-banana-2/text-to-image",
   "providerModelVersion": "v1.0.0",
   "versionPolicy": "pinned",
   "operations": {

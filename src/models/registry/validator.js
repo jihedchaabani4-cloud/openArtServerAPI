@@ -145,9 +145,67 @@ export function validatePassthroughCollision(deployment) {
   return true;
 }
 
-export function validateAllConsistencyChecks({ families, providers, deployments, collections }) {
+export function validateCanonicalReferences({ families, parameters }) {
+  for (const family of families.values()) {
+    for (const [opName, opConfig] of Object.entries(family.operations || {})) {
+      for (const [inputKey, inputDef] of Object.entries(opConfig.inputs || {})) {
+        if (inputDef.ref) {
+          if (!parameters.has(inputDef.ref)) {
+            throw new ConfigIntegrityError(
+              `Model "${family.id}" operation "${opName}" input "${inputKey}" references unknown canonical parameter "${inputDef.ref}"`
+            );
+          }
+        }
+      }
+    }
+  }
+  return true;
+}
+
+export function validatePricingRulesConsistency({ families, pricingRules }) {
+  for (const rule of pricingRules.values()) {
+    const family = families.get(rule.model);
+    if (!family) {
+      throw new PricingConfigError(
+        `Pricing rule for "${rule.model}.${rule.operation}" references unknown model "${rule.model}"`
+      );
+    }
+    const op = family.operations?.[rule.operation];
+    if (!op) {
+      throw new PricingConfigError(
+        `Pricing rule for "${rule.model}.${rule.operation}" references unknown operation "${rule.operation}"`
+      );
+    }
+    if (rule.base_price_per_unit) {
+      const unitParam = rule.base_price_per_unit.unit_param;
+      if (!op.inputs?.[unitParam]) {
+        throw new PricingConfigError(
+          `Pricing rule for "${rule.model}.${rule.operation}" unit_param "${unitParam}" is not declared in model inputs`
+        );
+      }
+    }
+    if (rule.modifiers) {
+      for (const modParam of Object.keys(rule.modifiers)) {
+        if (!op.inputs?.[modParam]) {
+          throw new PricingConfigError(
+            `Pricing rule for "${rule.model}.${rule.operation}" modifier parameter "${modParam}" is not declared in model inputs`
+          );
+        }
+      }
+    }
+  }
+  return true;
+}
+
+export function validateAllConsistencyChecks({ families, providers, deployments, collections, parameters, pricingRules }) {
   validateReferentialIntegrity({ families, providers, deployments });
   validateSingleServableRule(deployments);
+  if (parameters && families) {
+    validateCanonicalReferences({ families, parameters });
+  }
+  if (pricingRules && families) {
+    validatePricingRulesConsistency({ families, pricingRules });
+  }
   for (const deployment of deployments.values()) {
     validatePricingInputsConsistency(deployment);
     validatePassthroughCollision(deployment);

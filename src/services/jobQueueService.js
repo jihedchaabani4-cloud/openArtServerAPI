@@ -1,5 +1,8 @@
 import { Queue } from "bullmq";
 import { randomUUID } from "node:crypto";
+import { getCleanContext, createLogger, LogEvents } from "../infrastructure/logging/index.js";
+
+const queueLogger = createLogger("queue");
 
 export const USECASE_QUEUE_NAME = "v2-workflow-jobs";
 
@@ -11,11 +14,7 @@ export async function getUseCaseQueue() {
     useCaseQueueInstance = new Queue(USECASE_QUEUE_NAME, {
       connection: redisConnection,
       defaultJobOptions: {
-        attempts: 2,
-        backoff: {
-          type: "exponential",
-          delay: 1000,
-        },
+        attempts: 1, // Retries are handled at the Node level inside DAG, NEVER re-run entire UseCase
         removeOnComplete: { count: 100 },
         removeOnFail: { count: 500 },
       },
@@ -64,6 +63,27 @@ export class JobQueueService {
   }) {
     const finalExecutionId = executionId || workflowRunId || input?.workflow_id || randomUUID();
     const queue = await this.getQueue();
+    const jobId = `usecase-${finalExecutionId}`;
+
+    const activeContext = getCleanContext();
+    const jobContext = {
+      ...activeContext,
+      requestId: activeContext.requestId || traceId || finalExecutionId,
+      userId: userId || activeContext.userId,
+      useCase: useCaseId,
+      operation: "run-usecase",
+    };
+
+    queueLogger.info(
+      {
+        event: LogEvents.JOB_QUEUED,
+        jobId,
+        useCase: useCaseId,
+        userId: jobContext.userId,
+      },
+      `Job ${jobId} enqueued for usecase "${useCaseId}"`
+    );
+
     return queue.add(
       "run-usecase",
       {
@@ -75,9 +95,10 @@ export class JobQueueService {
         billingHoldId,
         idempotencyKey,
         traceId: traceId || finalExecutionId,
+        _context: jobContext,
       },
       {
-        jobId: `usecase-${finalExecutionId}`,
+        jobId,
       }
     );
   }
@@ -90,10 +111,13 @@ export class JobQueueService {
    */
   async addNodeExecutionJob(runId, nodeId) {
     const queue = await this.getQueue();
+    const jobId = `node-${runId}-${nodeId}`;
+    const activeContext = getCleanContext();
+
     return queue.add(
       "node-execute",
-      { runId, nodeId },
-      { jobId: `node-${runId}-${nodeId}` }
+      { runId, nodeId, _context: activeContext },
+      { jobId }
     );
   }
 

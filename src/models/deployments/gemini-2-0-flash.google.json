@@ -4,12 +4,12 @@
   "modelFamily": "gemini-2-0-flash",
   "provider": "google",
   "status": "active",
-  "providerModelId": "gemini-2.0-flash",
+  "providerModelId": "gemini-3.5-flash",
   "providerModelVersion": "v1.0.0",
   "versionPolicy": "pinned",
   "operations": {
     "chat_completion": {
-      "endpoint": "/models/gemini-2.0-flash:generateContent",
+      "endpoint": "/models/gemini-3.5-flash:generateContent",
       "inputs": {
         "messages": { "type": "message[]", "required": true },
         "images": { "type": "image_url[]", "required": false },

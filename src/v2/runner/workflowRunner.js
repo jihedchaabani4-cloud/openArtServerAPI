@@ -3,17 +3,38 @@ import { parseBinding } from "../compiler/validateBindings.js";
 import { RunRepository } from "./runRepository.js";
 import { jobQueueService } from "../../services/jobQueueService.js";
 import { getValueAtPath, executeNodeJob } from "./nodeExecutor.js";
-import { logV2Event } from "../logging/v2Logger.js";
 import { calculateCost, resolveOperation } from "../../models/index.js";
+import { BillingAccumulator } from "../runtime/billingAccumulator.js";
+import { formatWorkflowError } from "../runtime/errorPolicy.js";
+import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";
+
+const workflowLogger = createLogger("workflow");
 
 const runRepo = new RunRepository();
 const PROVIDER_BACKED_NODE_TYPES = new Set([
   "image-generation",
-  "video-generation",
-  "upscale",
-  "media-transform",
   "llm",
 ]);
+
+// ── BILLING ACCUMULATOR REGISTRY ──────────────────────────────────────────────
+// Maps runId → BillingAccumulator for in-flight workflow runs.
+//
+// ✅ SAFE: Current architecture runs all nodes sequentially inside ONE process.
+//    executeOrchestration() calls executeNodeJob() via `await` in the same Node.js
+//    process, so this in-memory Map is shared by all nodes of the same workflow run.
+//
+// ⚠️  LIMITATION: If you distribute node execution across separate BullMQ worker
+//    processes (e.g., enqueuing individual node jobs), this Map will NOT be shared.
+//    In that case, migrate to one of:
+//      - Redis Hash keyed by runId (O(1) per node)
+//      - workflow_runs.metadata JSON column (persisted, auto-recoverable on crash)
+//    Do NOT activate distributed node queuing without migrating the accumulator first.
+// ─────────────────────────────────────────────────────────────────────────────
+const activeAccumulators = new Map();
+
+export function getRunBillingAccumulator(runId) {
+  return activeAccumulators.get(runId) || null;
+}
 
 let billingGateway = null;
 let storageGateway = null;
@@ -26,7 +47,7 @@ export function initializeGateways({ billing, storage, events }) {
   billingGateway = billing;
   storageGateway = storage;
   eventRecorder = events;
-  console.log("[V2 Runner] Gateways initialized.");
+  workflowLogger.debug("Gateways initialized");
 }
 
 export function getGateways() {
@@ -41,16 +62,40 @@ export function getNodeBillingReference(runId, nodeId, attempt = 1) {
   return `v2:${runId}:${nodeId}:${attempt}`;
 }
 
+/**
+ * Calculate the billing cost for a single node using the Models Management System.
+ *
+ * ── SINGLE SOURCE OF TRUTH ────────────────────────────────────────────────────
+ * Both the UseCase Upfront Hold (workflowBillingPlan.js) and the BillingAccumulator
+ * (this function) use the SAME `calculateCost` from `models/index.js`.
+ * There is no separate estimator — this IS the canonical pricing calculation.
+ *
+ *   workflowBillingPlan.calculateWorkflowBillingPlan()
+ *     → calculateCost(modelKey, operation, inputs)   [PRE-execution estimate]
+ *
+ *   estimateNodeBillingAmount()
+ *     → calculateCost(model, op, resolvedInputs)     [AT-execution with real inputs]
+ *
+ * The at-execution cost uses fully resolved inputs (actual dimensions, quality, etc.)
+ * so it is MORE accurate than the upfront estimate. Minor deltas (upfront=24, actual=24)
+ * are expected and are the correct behaviour — the Hold covers the maximum possible cost.
+ * ────────────────────────────────────────────────────────────────────────────────
+ *
+ * @param {object} nodeConfig
+ * @param {object} resolvedInputs - Fully resolved runtime inputs for the node
+ * @returns {number} Credit cost (0 for free nodes)
+ */
 export function estimateNodeBillingAmount(nodeConfig, resolvedInputs = {}) {
   const nodeType = nodeConfig?.type;
   if (!isProviderBackedNodeType(nodeType)) {
     return 0;
   }
 
+  const isLLM = nodeType === "llm";
   const model =
     resolvedInputs.model ||
-    nodeConfig?.inputs?.model ||
     nodeConfig?.config?.model ||
+    nodeConfig?.inputs?.model ||
     nodeConfig?.resolved_inputs?.model;
 
   if (!model) {
@@ -60,7 +105,7 @@ export function estimateNodeBillingAmount(nodeConfig, resolvedInputs = {}) {
   let domain = "image";
   if (nodeType === "video-generation") {
     domain = "video";
-  } else if (nodeType === "llm") {
+  } else if (isLLM) {
     domain = "text";
   } else if (nodeType === "media-transform") {
     const isVideo = Boolean(
@@ -72,8 +117,14 @@ export function estimateNodeBillingAmount(nodeConfig, resolvedInputs = {}) {
     domain = isVideo ? "video" : "image";
   }
 
-  const op = resolveOperation(resolvedInputs, domain);
-  const costResult = calculateCost(model, op, resolvedInputs);
+  const inputsForBilling = { ...resolvedInputs, model };
+  if (isLLM && !inputsForBilling.messages) {
+    const textPrompt = resolvedInputs.userPrompt || resolvedInputs.prompt || "Default prompt";
+    inputsForBilling.messages = [{ role: "user", content: textPrompt }];
+  }
+
+  const op = resolveOperation(inputsForBilling, domain);
+  const costResult = calculateCost(model, op, inputsForBilling);
   const costNumber = parseFloat(costResult.amount);
 
   if (isNaN(costNumber) || costNumber < 0) {
@@ -86,13 +137,26 @@ export function estimateNodeBillingAmount(nodeConfig, resolvedInputs = {}) {
 
 export async function reserveNodeBilling({ run, nodeConfig, resolvedInputs = {}, attempt = 1 }) {
   if (!billingGateway || !isProviderBackedNodeType(nodeConfig?.type)) {
-    return null;
+    return { status: "skipped", reason: "non_billable_node_type", amount: 0 };
+  }
+
+  const referenceId = getNodeBillingReference(run.run_id, nodeConfig.id, attempt);
+
+  // If the workflow run has an upfront UseCase billing hold, financial reservation is handled at UseCase level
+  if (run?.input?.billing_hold_id) {
+    return {
+      status: "skipped",
+      reason: "covered_by_usecase_hold",
+      referenceId,
+      amount: 0,
+      parentHoldId: run.input.billing_hold_id,
+    };
   }
 
   return billingGateway.reserve({
     userId: run?.user_id || null,
     amount: estimateNodeBillingAmount(nodeConfig, resolvedInputs),
-    referenceId: getNodeBillingReference(run.run_id, nodeConfig.id, attempt),
+    referenceId,
     metadata: {
       workflowId: run?.workflow_id,
       workflowVersion: run?.workflow_version,
@@ -103,20 +167,28 @@ export async function reserveNodeBilling({ run, nodeConfig, resolvedInputs = {},
   });
 }
 
-export async function settleNodeBilling({ runId, nodeId, nodeConfig, attempt = 1 }) {
+export async function settleNodeBilling({ runId, nodeId, nodeConfig, attempt = 1, reservation = null }) {
   if (!billingGateway || !isProviderBackedNodeType(nodeConfig?.type)) {
-    return null;
+    return { status: "skipped" };
   }
 
-  return billingGateway.settle(getNodeBillingReference(runId, nodeId, attempt));
+  if (reservation && (reservation.status === "skipped" || reservation.amount === 0)) {
+    return { status: "skipped", referenceId: reservation.referenceId };
+  }
+
+  return billingGateway.settle(reservation || getNodeBillingReference(runId, nodeId, attempt));
 }
 
-export async function rollbackNodeBilling({ runId, nodeId, nodeConfig, attempt = 1 }) {
+export async function rollbackNodeBilling({ runId, nodeId, nodeConfig, attempt = 1, reservation = null }) {
   if (!billingGateway || !isProviderBackedNodeType(nodeConfig?.type)) {
-    return null;
+    return { status: "skipped" };
   }
 
-  return billingGateway.rollback(getNodeBillingReference(runId, nodeId, attempt));
+  if (reservation && (reservation.status === "skipped" || reservation.amount === 0)) {
+    return { status: "skipped", referenceId: reservation.referenceId };
+  }
+
+  return billingGateway.rollback(reservation || getNodeBillingReference(runId, nodeId, attempt));
 }
 
 /**
@@ -124,10 +196,12 @@ export async function rollbackNodeBilling({ runId, nodeId, nodeConfig, attempt =
  * @param {import('../contracts/executionGraph.js').ExecutionGraph} plan
  * @param {Object} runtimeInput
  * @param {string} [runId] Optional pre-generated run ID
- * @returns {Promise<{ run_id: string, status: string }>}
+ * @returns {Promise<{ run_id: string, status: string, error?: Object, outputs?: Object }>}
  */
 export async function startWorkflowRun(plan, runtimeInput, runId = null) {
   const finalRunId = runId || randomUUID();
+  const billing = new BillingAccumulator();
+  activeAccumulators.set(finalRunId, billing);
 
   // Create workflow run entry in DB
   await runRepo.createRun({
@@ -162,22 +236,33 @@ export async function startWorkflowRun(plan, runtimeInput, runId = null) {
     });
   }
 
-  logV2Event({
-    traceId: finalRunId,
-    operation: "workflow.start",
+  workflowLogger.info({
+    runId: finalRunId,
+    workflowId: plan.workflow_id,
     durationMs: 0,
-    status: "success",
-    message: `Initialized workflow run ${finalRunId} for ${plan.workflow_id}`
-  });
+    event: LogEvents.WORKFLOW_STARTED,
+  }, `Initialized workflow run ${finalRunId} for ${plan.workflow_id}`);
 
   // Execute workflow orchestration across nodes
   try {
     await executeOrchestration(finalRunId);
   } catch (err) {
-    console.error(`[workflowRunner] Execution error for run ${finalRunId}:`, err);
+    workflowLogger.error({ runId: finalRunId, err, event: LogEvents.WORKFLOW_FAILED }, `Execution error for run ${finalRunId}: ${err.message}`);
   }
 
-  return { run_id: finalRunId, status: "pending" };
+  const finalRun = await runRepo.getRun(finalRunId);
+  const billingBreakdown = billing.getBreakdown();
+  const totalCost = billing.getTotalCost();
+  activeAccumulators.delete(finalRunId);
+
+  return {
+    run_id: finalRunId,
+    status: finalRun?.status || "pending",
+    error: finalRun?.error || null,
+    outputs: finalRun?.outputs || null,
+    billingBreakdown,
+    totalCost,
+  };
 }
 
 /**
@@ -217,9 +302,12 @@ export async function executeOrchestration(runId) {
   // 2. Check for failed nodes
   const failedNode = nodeRuns.find((n) => n.status === "failed");
   if (failedNode) {
+    const rawError = failedNode.error?.envelope?.error || failedNode.error;
+    const formattedError = formatWorkflowError(rawError, failedNode);
+
     await runRepo.updateRun(runId, {
       status: "failed",
-      error: { code: "NODE_FAILED", message: `Workflow failed at node ${failedNode.node_id}` },
+      error: formattedError,
       completed_at: new Date().toISOString()
     });
 
@@ -229,19 +317,24 @@ export async function executeOrchestration(runId) {
         traceId: runId,
         operation: "workflow.complete",
         status: "error",
-        errorCode: "NODE_FAILED",
-        message: `Workflow failed at node ${failedNode.node_id}`
+        errorCode: formattedError.code,
+        message: formattedError.message,
+        metadata: {
+          category: formattedError.category,
+          nodeId: failedNode.node_id,
+          retryable: formattedError.retryable,
+          internalDetails: formattedError.internalDetails,
+        }
       });
     }
 
-    logV2Event({
-      traceId: runId,
-      operation: "workflow.orchestrate",
+    workflowLogger.error({
+      runId,
+      nodeId: failedNode.node_id,
       durationMs: Date.now() - started,
-      status: "error",
-      errorCode: "WORKFLOW_FAILED",
-      message: `Workflow failed at node ${failedNode.node_id}`
-    });
+      errorCode: formattedError.code,
+      event: LogEvents.WORKFLOW_FAILED,
+    }, `Workflow failed at node ${failedNode.node_id} [${formattedError.category}]: ${formattedError.message}`);
     return;
   }
 
@@ -280,13 +373,11 @@ export async function executeOrchestration(runId) {
       });
     }
 
-    logV2Event({
-      traceId: runId,
-      operation: "workflow.orchestrate",
+    workflowLogger.info({
+      runId,
       durationMs: Date.now() - started,
-      status: "success",
-      message: "Workflow completed successfully"
-    });
+      event: LogEvents.WORKFLOW_COMPLETED,
+    }, "Workflow completed successfully");
     return;
   }
 
@@ -315,8 +406,13 @@ export async function executeOrchestration(runId) {
         await executeNodeJob(runId, node.id);
         return await executeOrchestration(runId);
       } catch (err) {
-        console.error(`[workflowRunner] Node execution error (${node.id}):`, err.message);
-        return;
+        workflowLogger.error({ nodeId: node.id, runId, err, event: LogEvents.WORKFLOW_NODE_FAILED }, `Node execution error (${node.id}): ${err.message}`);
+        await runRepo.updateNodeRun(runId, node.id, {
+          status: "failed",
+          error: { code: "NODE_FAILED", message: err.message },
+          completed_at: new Date().toISOString()
+        }).catch(() => {});
+        return await executeOrchestration(runId);
       }
     }
   }
@@ -330,13 +426,11 @@ export async function executeOrchestration(runId) {
       completed_at: new Date().toISOString()
     });
 
-    logV2Event({
-      traceId: runId,
-      operation: "workflow.orchestrate",
+    workflowLogger.error({
+      runId,
       durationMs: Date.now() - started,
-      status: "error",
       errorCode: "ORCHESTRATION_DEADLOCK",
-      message: "Workflow stuck: no nodes running or ready"
-    });
+      event: LogEvents.WORKFLOW_FAILED,
+    }, "Workflow stuck: no nodes running or ready");
   }
 }

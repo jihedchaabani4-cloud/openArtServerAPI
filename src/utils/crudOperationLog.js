@@ -1,3 +1,7 @@
+import { createLogger } from "../infrastructure/logging/index.js";
+
+const dbLogger = createLogger("database");
+
 /**
  * Structured CRUD operation logging for domain service owners.
  */
@@ -19,11 +23,10 @@ export function crudOperationLog({
         ...(message ? { message } : {}),
         ...extra,
     };
-    const line = JSON.stringify(payload);
     if (status === "error") {
-        console.error(`[CRUD] ${line}`);
+        dbLogger.error(payload, `CRUD ${operation} failed: ${message || errorCode || "error"}`);
     } else {
-        console.log(`[CRUD] ${line}`);
+        dbLogger.debug(payload, `CRUD ${operation} (${durationMs != null ? durationMs + "ms" : "ok"})`);
     }
     return payload;
 }

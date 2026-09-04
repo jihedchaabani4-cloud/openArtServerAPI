@@ -7,16 +7,12 @@ export const imageGenerationUseCase = {
   workflowRef: "image-generation-v1",
   billing: { strategy: "per-node" },
   inputSchema: {
-    prompt:      { type: "string",  required: true },
-    references:  { type: "array",   required: false },
-    workflow_id: { type: "string",  required: false },
-    project_id:  { type: "string",  required: false },
-    ratio:       { type: "string",  required: false },
-    width:       { type: "number",  required: false },
-    height:      { type: "number",  required: false },
-    model:       { type: "string",  required: true },
-    quality:     { type: "string",  required: false },
-    count:       { type: "number",  required: false },
+    prompt:     { type: "string", required: true  },
+    references: { type: "array",  required: false },
+    ratio:      { type: "string", required: false },
+    model:      { type: "string", required: true  },
+    quality:    { type: "string", required: false },
+    count:      { type: "number", required: false },
   }
 };
 

@@ -9,8 +9,9 @@ export const characterSheetUseCase = {
     strategy: "per-node"
   },
   inputSchema: {
-    prompt: { type: "string", required: true },
-    model: { type: "string", required: false }
+    prompt:     { type: "string", required: true  },
+    references: { type: "array",  required: false },
+    characters: { type: "array",  required: false },
   }
 };
 

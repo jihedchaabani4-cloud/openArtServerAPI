@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getCatalog } from "../src/models/index.js";
+import { getCatalog, getSchema, estimatePrice } from "../src/models/index.js";
 
 const router = Router();
 
@@ -100,6 +100,51 @@ router.get("/:key", (req, res) => {
         error:     `Model "${key}" not found`,
         available: catalog.map(entry => entry.modelFamily),
     });
+});
+
+// ── GET /api/models/:key/:operation/schema ──────────────────────────────────
+router.get("/:key/:operation/schema", (req, res) => {
+    const { key, operation } = req.params;
+    try {
+        const schema = getSchema(key, operation);
+        return res.json({
+            success: true,
+            data: schema
+        });
+    } catch (err) {
+        return res.status(err.statusCode || 400).json({
+            success: false,
+            error: err.message,
+            code: err.code || "SCHEMA_ERROR"
+        });
+    }
+});
+
+// ── POST /api/models/:key/:operation/estimate-price ─────────────────────────
+router.post("/:key/:operation/estimate-price", (req, res) => {
+    const { key, operation } = req.params;
+    try {
+        const estimate = estimatePrice(key, operation, req.body || {});
+        return res.json({
+            success: true,
+            data: {
+                credits: estimate.amount,
+                amountString: estimate.amountString,
+                currency: estimate.currency,
+                pricingVersion: estimate.pricingVersion,
+                breakdown: {
+                    basePrice: estimate.basePrice,
+                    modifiers: estimate.modifiersApplied
+                }
+            }
+        });
+    } catch (err) {
+        return res.status(err.statusCode || 400).json({
+            success: false,
+            error: err.message,
+            code: err.code || "PRICING_ESTIMATION_ERROR"
+        });
+    }
 });
 
 export default router;

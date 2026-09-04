@@ -4,8 +4,11 @@ import { compileWorkflowById } from "../v2/compiler/compileWorkflow.js";
 import { loadRegistries } from "../v2/registry/registryLoader.js";
 import { UseCaseBillingRuntime } from "../v2/runtime/useCaseBillingRuntime.js";
 import { calculateWorkflowBillingPlan } from "../use-cases/workflowBillingPlan.js";
-import { getErrorDecision } from "../v2/runtime/errorPolicy.js";
-import { logV2Event } from "../v2/logging/v2Logger.js";
+import { ErrorSystem } from "../runtime/ErrorSystem.js";
+import { jobQueueService as defaultJobQueueService } from "./jobQueueService.js";
+import { createLogger, LogEvents } from "../infrastructure/logging/index.js";
+
+const useCaseLogger = createLogger("usecase");
 
 function validateUseCaseInputs(input = {}, schema = {}) {
   for (const [key, fieldConfig] of Object.entries(schema)) {
@@ -49,7 +52,7 @@ export class UseCaseService {
   } = {}) {
     this.walletService = walletService;
     this.pricingService = pricingService;
-    this.jobQueueService = jobQueueService;
+    this.jobQueueService = jobQueueService || defaultJobQueueService;
     this.billingRuntime = billingRuntime || new UseCaseBillingRuntime({ walletService });
   }
 
@@ -98,7 +101,7 @@ export class UseCaseService {
       idempotencyKey: finalIdempotencyKey,
     });
 
-    const queue = jobQueueService || this.jobQueueService || (await import("./jobQueueService.js")).jobQueueService;
+    const queue = jobQueueService || this.jobQueueService;
     const job = await queue.addUseCaseJob({
       useCaseId,
       input: {
@@ -115,21 +118,17 @@ export class UseCaseService {
       traceId: finalTraceId,
     });
 
-    logV2Event({
-      traceId: finalTraceId,
-      operation: "useCaseService.prepareAndEnqueue",
-      durationMs: Date.now() - started,
-      status: "success",
-      message: `UseCase "${useCaseId}" enqueued`,
-      metadata: {
+    useCaseLogger.info(
+      {
+        event: LogEvents.USECASE_STARTED,
         useCaseId,
-        userId,
-        workflowRunId: finalExecutionId,
         jobId: job?.id,
+        workflowRunId: finalExecutionId,
         reservedCredits: reserve.reservedCredits,
-        billingHoldId: reserve.billingHoldId,
+        durationMs: Date.now() - started,
       },
-    });
+      `UseCase "${useCaseId}" prepared and enqueued (${Date.now() - started}ms)`
+    );
 
     return {
       status: "queued",
@@ -162,12 +161,12 @@ export class UseCaseService {
     return { paid: isPaid, billingHoldId: holdId, reservedCredits };
   }
 
-  async settlePreparedBilling(referenceId) {
-    return this.billingRuntime.settleUseCase(referenceId);
+  async settlePreparedBilling(referenceId, extraMetadata = null) {
+    return this.billingRuntime.settleUseCase(referenceId, extraMetadata);
   }
 
-  async rollbackPreparedBilling(referenceId) {
-    return this.billingRuntime.rollbackUseCase(referenceId);
+  async rollbackPreparedBilling(referenceId, extraMetadata = null) {
+    return this.billingRuntime.rollbackUseCase(referenceId, extraMetadata);
   }
 
   async executeQueuedUseCase({ useCaseId, input = {}, userId, billingHoldId = null, traceId = null }) {
@@ -175,43 +174,71 @@ export class UseCaseService {
     const effectiveTraceId = traceId || input.traceId || input.billing_hold_id || randomUUID();
     const guard = this.assertPaidJobHasHold({ useCaseId, input, billingHoldId });
 
-    logV2Event({
-      traceId: effectiveTraceId,
-      operation: "useCaseService.executeQueuedUseCase",
-      durationMs: 0,
-      status: "success",
-      message: `Starting execution of UseCase "${useCaseId}"`,
-      metadata: { useCaseId, userId, paid: guard.paid, billingHoldId: guard.billingHoldId },
-    });
+    useCaseLogger.info(
+      {
+        event: LogEvents.USECASE_STARTED,
+        useCaseId,
+        billingHoldId: guard.billingHoldId,
+      },
+      `Starting execution of UseCase "${useCaseId}"`
+    );
 
     try {
       const result = await this.runUseCase({ useCaseId, input, userId });
       if (guard.paid) {
-        await this.settlePreparedBilling(guard.billingHoldId);
+        await this.settlePreparedBilling(guard.billingHoldId, {
+          node_breakdown: result?.billingBreakdown || [],
+          totalCost: result?.totalCost,
+        });
       }
-      logV2Event({
-        traceId: effectiveTraceId,
-        operation: "useCaseService.executeQueuedUseCase",
-        durationMs: Date.now() - started,
-        status: "success",
-        message: `UseCase "${useCaseId}" completed successfully`,
-        metadata: { useCaseId, userId, settled: guard.paid },
-      });
+      const durationMs = Date.now() - started;
+      useCaseLogger.info(
+        {
+          event: LogEvents.USECASE_COMPLETED,
+          useCaseId,
+          durationMs,
+          settled: guard.paid,
+        },
+        `UseCase "${useCaseId}" completed successfully in ${durationMs}ms`
+      );
       return result;
     } catch (err) {
-      err.runtimeDecision = getErrorDecision(err);
-      if (guard.paid) {
-        await this.rollbackPreparedBilling(guard.billingHoldId).catch(() => {});
-      }
-      logV2Event({
-        traceId: effectiveTraceId,
-        operation: "useCaseService.executeQueuedUseCase",
-        durationMs: Date.now() - started,
-        status: "error",
-        errorCode: err.code || err.runtimeDecision?.errorCode || "USECASE_EXECUTION_FAILED",
-        message: err.message,
-        metadata: { useCaseId, userId, rolledBack: guard.paid, decision: err.runtimeDecision },
+      const report = ErrorSystem.process(err, {
+        runId: effectiveTraceId,
+        userId,
+        nodeId: err?.nodeId,
       });
+      err.errorReport = report;
+
+      if (guard.paid && (report.actions.billingAction === "ROLLBACK" || report.actions.billingAction === "RELEASE")) {
+        await this.rollbackPreparedBilling(guard.billingHoldId, {
+          node_breakdown: err?.billingBreakdown || [],
+          failedMessage: report.system.rawMessage,
+          errorCategory: report.user.category,
+          errorCode: report.user.code,
+          userMessage: report.user.message,
+        }).catch(() => {});
+      }
+
+      if (input?.workflow_id && this.db?.media) {
+        await this.db.media.findByWorkflow(input.workflow_id).then((list) => {
+          const p = list?.find((m) => m.status === "processing" || m.status === "pending");
+          if (p?.id) {
+            return this.db.media.updateMedia(p.id, {
+              status: "failed",
+              error_message: report.user.message,
+            }).catch(() => {});
+          }
+        }).catch(() => {});
+      }
+      useCaseLogger.error({
+        event: LogEvents.USECASE_FAILED,
+        useCaseId,
+        errorCode: report.user.code,
+        category: report.user.category,
+        durationMs: Date.now() - started,
+        err,
+      }, `UseCase "${useCaseId}" failed [${report.user.category}]: ${report.user.message}`);
       throw err;
     }
   }
@@ -226,15 +253,9 @@ export class UseCaseService {
    * @param {Object} [params.pricingService]
    * @returns {Promise<{ executionId: string, status: string, totalCost: number }>}
    */
-  async runUseCase({ useCaseId, input, userId, walletService = null, pricingService = null }) {
+  async runUseCase({ useCaseId, input, userId }) {
     const { run: executeUseCase } = await import("../use-cases/useCaseRunner.js");
-    return executeUseCase({
-      useCaseId,
-      input,
-      userId,
-      walletService: walletService || this.walletService,
-      pricingService: pricingService || this.pricingService,
-    });
+    return executeUseCase({ useCaseId, input, userId });
   }
 
   /**
@@ -252,6 +273,3 @@ export class UseCaseService {
     return listUseCases();
   }
 }
-
-export const useCaseService = new UseCaseService();
-export default useCaseService;

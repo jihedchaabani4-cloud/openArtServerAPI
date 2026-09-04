@@ -1,9 +1,13 @@
 import { loadRegistries } from "../../src/v2/registry/registryLoader.js";
-import { logV2Event } from "../../src/v2/logging/v2Logger.js";
+import { createLogger } from "../../src/infrastructure/logging/index.js";
+
+const controllerLogger = createLogger("controller");
 import { compileWorkflow } from "../../src/v2/compiler/compileWorkflow.js";
 import { startWorkflowRun } from "../../src/v2/runner/workflowRunner.js";
 import { RunRepository } from "../../src/v2/runner/runRepository.js";
 import { postRunRequestSchema } from "../../src/v2/api/v2ApiSchemas.js";
+import { ErrorSystem } from "../../src/runtime/ErrorSystem.js";
+import { sanitizeClientError, DEFAULT_APOLOGY_MESSAGE } from "../../src/v2/runtime/errorPolicy.js";
 
 const runRepo = new RunRepository();
 let cachedRegistries = null;
@@ -21,12 +25,11 @@ export async function getHealth(req, res) {
 
   try {
     const registries = getRegistries();
-    logV2Event({
+    controllerLogger.debug({
       traceId,
       operation: "v2.workflows.health",
       durationMs: Date.now() - started,
-      status: "success",
-    });
+    }, "V2 workflows health check ok");
 
     res.json({
       engine: "v2",
@@ -37,14 +40,13 @@ export async function getHealth(req, res) {
       skill_count: Object.keys(registries.skills).length,
     });
   } catch (error) {
-    logV2Event({
+    controllerLogger.error({
       traceId,
       operation: "v2.workflows.health",
       durationMs: Date.now() - started,
-      status: "error",
+      err: error,
       errorCode: "REGISTRY_LOAD_FAILED",
-      message: error.message,
-    });
+    }, `Health check failed: ${error.message}`);
     res.status(503).json({
       engine: "v2",
       status: "degraded",
@@ -117,14 +119,13 @@ export async function submitWorkflowRun(req, res) {
   // 1. Zod request shape validation
   const parsedBody = postRunRequestSchema.safeParse(req.body);
   if (!parsedBody.success) {
-    logV2Event({
+    controllerLogger.warn({
       traceId,
       operation: "v2.workflows.submit",
       durationMs: Date.now() - started,
-      status: "error",
       errorCode: "INVALID_INPUT",
-      message: parsedBody.error.message
-    });
+      err: parsedBody.error,
+    }, `Validation failed: ${parsedBody.error.message}`);
     return res.status(400).json({
       code: "INVALID_INPUT",
       message: "Request validation failed",
@@ -140,14 +141,13 @@ export async function submitWorkflowRun(req, res) {
     // 2. Resolve workflow
     const workflow = registries.workflows[workflow_id];
     if (!workflow) {
-      logV2Event({
+      controllerLogger.warn({
         traceId,
+        workflow_id,
         operation: "v2.workflows.submit",
         durationMs: Date.now() - started,
-        status: "error",
         errorCode: "WORKFLOW_NOT_FOUND",
-        message: `Workflow "${workflow_id}" not found`
-      });
+      }, `Workflow "${workflow_id}" not found`);
       return res.status(404).json({
         code: "WORKFLOW_NOT_FOUND",
         message: `Workflow "${workflow_id}" not found`
@@ -160,14 +160,13 @@ export async function submitWorkflowRun(req, res) {
       validateRunInput(input, workflow.input_schema);
       resolvedInput = resolveModelInput(input, workflow);
     } catch (validationErr) {
-      logV2Event({
+      controllerLogger.warn({
         traceId,
         operation: "v2.workflows.submit",
         durationMs: Date.now() - started,
-        status: "error",
         errorCode: "INVALID_INPUT",
-        message: validationErr.message
-      });
+        err: validationErr,
+      }, `Validation error: ${validationErr.message}`);
       return res.status(400).json({
         code: "INVALID_INPUT",
         message: validationErr.message
@@ -179,14 +178,13 @@ export async function submitWorkflowRun(req, res) {
     try {
       plan = compileWorkflow(workflow, registries);
     } catch (compilationErr) {
-      logV2Event({
+      controllerLogger.error({
         traceId,
         operation: "v2.workflows.submit",
         durationMs: Date.now() - started,
-        status: "error",
         errorCode: "COMPILATION_FAILED",
-        message: compilationErr.message
-      });
+        err: compilationErr,
+      }, `Compilation failed: ${compilationErr.message}`);
       return res.status(422).json({
         code: "COMPILATION_FAILED",
         message: compilationErr.message,
@@ -202,13 +200,13 @@ export async function submitWorkflowRun(req, res) {
 
     const runResult = await startWorkflowRun(plan, runtimeInput);
 
-    logV2Event({
+    controllerLogger.info({
       traceId: runResult.run_id,
+      runId: runResult.run_id,
+      workflow_id,
       operation: "v2.workflows.submit",
       durationMs: Date.now() - started,
-      status: "success",
-      message: `Successfully submitted workflow run ${runResult.run_id}`
-    });
+    }, `Successfully submitted workflow run ${runResult.run_id}`);
 
     res.status(202).json({
       run_id: runResult.run_id,
@@ -217,18 +215,15 @@ export async function submitWorkflowRun(req, res) {
     });
 
   } catch (err) {
-    logV2Event({
+    const report = ErrorSystem.process(err, { traceId });
+    controllerLogger.error({
       traceId,
       operation: "v2.workflows.submit",
       durationMs: Date.now() - started,
-      status: "error",
-      errorCode: "INTERNAL_SERVER_ERROR",
-      message: err.message
-    });
-    res.status(500).json({
-      code: "INTERNAL_SERVER_ERROR",
-      message: err.message
-    });
+      errorCode: report.user.code,
+      err,
+    }, `Submit workflow run failed: ${err.message}`);
+    res.status(report.user.statusCode).json(report.user);
   }
 }
 
@@ -240,14 +235,13 @@ export async function getWorkflowRunStatus(req, res) {
   try {
     const run = await runRepo.getRun(runId);
     if (!run) {
-      logV2Event({
+      controllerLogger.warn({
         traceId,
+        runId,
         operation: "v2.workflows.status",
         durationMs: Date.now() - started,
-        status: "error",
         errorCode: "RUN_NOT_FOUND",
-        message: `Run ${runId} not found`
-      });
+      }, `Run ${runId} not found`);
       return res.status(404).json({
         code: "RUN_NOT_FOUND",
         message: "Run not found"
@@ -256,14 +250,13 @@ export async function getWorkflowRunStatus(req, res) {
 
     // Ownership check
     if (run.user_id && req.user?.id && run.user_id !== req.user.id) {
-      logV2Event({
+      controllerLogger.warn({
         traceId,
+        runId,
         operation: "v2.workflows.status",
         durationMs: Date.now() - started,
-        status: "error",
         errorCode: "RUN_NOT_FOUND",
-        message: `Run ${runId} not owned by authenticated user ${req.user.id}`
-      });
+      }, `Run ${runId} not owned by authenticated user ${req.user.id}`);
       return res.status(404).json({
         code: "RUN_NOT_FOUND",
         message: "Run not found"
@@ -278,17 +271,18 @@ export async function getWorkflowRunStatus(req, res) {
         attempt: nodeRun.attempt,
         started_at: nodeRun.started_at,
         completed_at: nodeRun.completed_at,
-        ...(nodeRun.error ? { error: nodeRun.error } : {})
+        ...(nodeRun.error ? { error: sanitizeClientError(nodeRun.error) } : {})
       };
     }
 
-    logV2Event({
+    const sanitizedError = run.error ? sanitizeClientError(run.error) : null;
+
+    controllerLogger.debug({
       traceId,
+      runId,
       operation: "v2.workflows.status",
       durationMs: Date.now() - started,
-      status: "success",
-      message: `Retrieved status for run ${runId}`
-    });
+    }, `Retrieved status for run ${runId}`);
 
     res.json({
       run_id: run.run_id,
@@ -297,23 +291,21 @@ export async function getWorkflowRunStatus(req, res) {
       status: run.status,
       nodes,
       ...(run.outputs ? { outputs: run.outputs } : {}),
-      ...(run.error ? { error: run.error } : {}),
+      ...(sanitizedError ? { error: sanitizedError } : {}),
       created_at: run.created_at,
       completed_at: run.completed_at
     });
 
   } catch (err) {
-    logV2Event({
+    const report = ErrorSystem.process(err, { traceId, runId });
+    controllerLogger.error({
       traceId,
+      runId,
       operation: "v2.workflows.status",
       durationMs: Date.now() - started,
-      status: "error",
-      errorCode: "INTERNAL_SERVER_ERROR",
-      message: err.message
-    });
-    res.status(500).json({
-      code: "INTERNAL_SERVER_ERROR",
-      message: err.message
-    });
+      errorCode: report.user.code,
+      err,
+    }, `Get run status failed: ${err.message}`);
+    res.status(report.user.statusCode).json(report.user);
   }
 }

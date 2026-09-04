@@ -7,6 +7,27 @@ export class WaveSpeedAdapter {
       const targetKey = fieldMapping[key] || key;
       payload[targetKey] = val;
     }
+
+    // Normalize quality & resolution for WaveSpeed API requirements
+    if (payload.quality) {
+      const q = String(payload.quality).toLowerCase();
+      if (q === "standard") {
+        payload.quality = "medium";
+      } else if (q === "hd") {
+        payload.quality = "high";
+      } else if (q === "2k") {
+        payload.quality = "medium";
+        payload.resolution = "2k";
+      } else if (q === "4k") {
+        payload.quality = "high";
+        payload.resolution = "4k";
+      } else if (["low", "medium", "high"].includes(q)) {
+        payload.quality = q;
+      } else {
+        payload.quality = "medium";
+      }
+    }
+
     return payload;
   }
 

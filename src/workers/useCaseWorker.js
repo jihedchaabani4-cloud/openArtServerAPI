@@ -6,37 +6,31 @@ import { useCaseService } from "../container.js";
 import { executeNodeJob } from "../v2/runner/nodeExecutor.js";
 import { executeOrchestration } from "../v2/runner/workflowRunner.js";
 import { bootstrapV2 } from "../v2/bootstrap.js";
-import { logV2Event } from "../v2/logging/v2Logger.js";
+import { wrapWorkerJob } from "../infrastructure/logging/workerLogger.js";
+import { createLogger, LogEvents } from "../infrastructure/logging/index.js";
+
+const workerLogger = createLogger("worker");
 
 // Initialize V2 Engine, Gateways, and Register all UseCases in Worker process
 bootstrapV2();
 
-logV2Event({
-  traceId: "usecase-worker-bootstrap",
-  operation: "worker.start",
-  durationMs: 0,
-  status: "success",
-  message: `Specialized UseCase Worker listening on Redis queue: ${USECASE_QUEUE_NAME}`
-});
-
-console.log(`\n================================================================`);
-console.log(`⚡ [UseCase Worker] Active & listening on Redis Queue: "${USECASE_QUEUE_NAME}"`);
-console.log(`================================================================\n`);
+workerLogger.info({
+  event: "worker.start",
+  queue: USECASE_QUEUE_NAME,
+}, `Specialized UseCase Worker listening on Redis queue: "${USECASE_QUEUE_NAME}"`);
 
 /**
  * 🎯 Dedicated UseCase & Node Execution Worker
  */
 export const useCaseWorker = new Worker(
   USECASE_QUEUE_NAME,
-  async (job) => {
+  wrapWorkerJob("usecase-worker", async (job) => {
     const start = Date.now();
 
     // ── Case 1: Full UseCase Execution Job ──────────────────────────────────
     if (job.name === "run-usecase") {
       const { useCaseId, input, userId, billingHoldId } = job.data;
-      console.log(`\n================================================================`);
-      console.log(`🚀 [UseCase Worker] RUNNING USECASE "${useCaseId}" FOR USER #${userId}`);
-      console.log(`================================================================`);
+      workerLogger.debug({ useCaseId, userId }, `Processing UseCase "${useCaseId}" for user ${userId}`);
 
       await useCaseService.executeQueuedUseCase({
         useCaseId,
@@ -44,10 +38,6 @@ export const useCaseWorker = new Worker(
         userId,
         billingHoldId,
       });
-
-      const duration = Date.now() - start;
-      console.log(`✅ [UseCase Worker] USECASE "${useCaseId}" COMPLETED IN ${duration}ms!`);
-      console.log(`================================================================\n`);
       return;
     }
 
@@ -55,28 +45,15 @@ export const useCaseWorker = new Worker(
 
     // ── Case 2: Individual Node Execution Job ───────────────────────────────
     if (nodeId) {
-      console.log(`\n================================================================`);
-      console.log(`⚙️ [UseCase Worker] EXECUTING NODE "${nodeId}" FOR RUN #${runId}`);
-      console.log(`================================================================`);
-
+      workerLogger.debug({ runId, nodeId }, `Executing node "${nodeId}" for run ${runId}`);
       await executeNodeJob(runId, nodeId);
-      const duration = Date.now() - start;
-      console.log(`✅ [UseCase Worker] NODE "${nodeId}" COMPLETED IN ${duration}ms! Triggering orchestration...`);
-      
       await executeOrchestration(runId);
     } else {
       // ── Case 3: Workflow Orchestration Job ─────────────────────────────────
-      console.log(`\n================================================================`);
-      console.log(`🚀 [UseCase Worker] ORCHESTRATING RUN #${runId}`);
-      console.log(`================================================================`);
-
+      workerLogger.debug({ runId }, `Orchestrating run ${runId}`);
       await executeOrchestration(runId);
-      const duration = Date.now() - start;
-      console.log(`✅ [UseCase Worker] ORCHESTRATION STEP FINISHED IN ${duration}ms!`);
     }
-
-    console.log(`================================================================\n`);
-  },
+  }),
   {
     connection: workerRedisConnection,
     concurrency: 10,
@@ -86,15 +63,15 @@ export const useCaseWorker = new Worker(
 );
 
 useCaseWorker.on("active", (job) => {
-  console.log(`⚙️ [UseCase Worker] Job #${job.id} activated on Redis.`);
+  workerLogger.debug({ event: LogEvents.JOB_STARTED, jobId: job.id }, `Job #${job.id} activated on Redis`);
 });
 
 useCaseWorker.on("completed", (job) => {
-  console.log(`🎉 [UseCase Worker] Job #${job.id} marked as COMPLETED.`);
+  workerLogger.debug({ event: LogEvents.JOB_COMPLETED, jobId: job.id }, `Job #${job.id} marked as COMPLETED`);
 });
 
 useCaseWorker.on("failed", (job, err) => {
-  console.error(`❌ [UseCase Worker] Job #${job?.id} FAILED: ${err.message}`);
+  workerLogger.error({ event: LogEvents.JOB_FAILED, jobId: job?.id, err }, `Job #${job?.id} FAILED: ${err.message}`);
 });
 
 export default useCaseWorker;

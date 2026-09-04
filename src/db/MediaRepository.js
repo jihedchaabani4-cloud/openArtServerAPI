@@ -12,9 +12,20 @@ export class MediaRepository extends BaseRepository {
      * @param {string} step_id - "CAE" for init/upload | "CAM", "CAU"... for edits
      */
     async createMedia({ workflow_id, project_id, generation_config_id, step_id, url, width, height, ...extra }) {
+        const resolvedWidth = width ? Number(width) : 1024;
+        const resolvedHeight = height ? Number(height) : 1024;
         const { data, error } = await this.client()
             .from(this.tableName)
-            .insert({ workflow_id, project_id, generation_config_id, step_id, url, width, height, ...extra })
+            .insert({
+                workflow_id,
+                project_id,
+                generation_config_id,
+                step_id,
+                url,
+                width: resolvedWidth,
+                height: resolvedHeight,
+                ...extra
+            })
             .select()
             .single();
         if (error) throw error;

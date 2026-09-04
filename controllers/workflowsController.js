@@ -1,86 +1,7 @@
-import { supabase } from "../lib/supabase.js";
-import { workflowService, projectReadService } from "../src/container.js";
+import { workflowService, projectReadService, db } from "../src/container.js";
+import { createLogger } from "../src/infrastructure/logging/index.js";
 
-// ── BACKEND UTILS (used by services and repositories — NOT direct HTTP handlers) ──
-// These are kept here for backward compatibility with WorkflowCreationService
-// and elementService which call them via WorkflowRepository.
-// WorkflowRepository is now repository-pure and no longer calls these.
-// These can be removed in a future cleanup once all callers migrate to repository methods.
-
-export const getWorkflows = async (filters = {}, options = {}) => {
-    try {
-        const { select = "*", order = { column: "create_time", ascending: false } } = options;
-        // TODO(027): migrate getWorkflows supabase.from("workflow") to WorkflowRepository.findByFilters()
-        let query = supabase.from("workflow").select(select);
-
-        if (order) query = query.order(order.column, { ascending: order.ascending });
-        if (filters.project_id) query = query.eq("project_id", filters.project_id);
-        if (filters.session_id) query = query.eq("session_id", filters.session_id);
-
-        const { data, error } = await query;
-        if (error) throw error;
-        return data;
-    } catch (err) {
-        console.error("❌ Error fetching workflows:", err);
-        throw err;
-    }
-};
-
-export const getWorkflow = async (id) => {
-    try {
-        const { data, error } = await supabase
-            .from("workflow")
-            .select("*")
-            .eq("id", id)
-            .single();
-        if (error) throw error;
-        return data;
-    } catch (err) {
-        console.error(`❌ Error fetching workflow ${id}:`, err);
-        throw err;
-    }
-};
-
-export const createWorkflow = async ({ project_id, session_id, display_name, primary_media_id, variation_index, workflow_type }, options = {}) => {
-    try {
-        const newWorkflow = {
-            project_id:       project_id       || null,
-            session_id:       session_id       || null,
-            display_name:     display_name     || "Untitled Workflow",
-            variation_index:  variation_index  || 0,
-            primary_media_id: primary_media_id || null,
-        };
-        if (workflow_type) newWorkflow.workflow_type = workflow_type;
-
-        const { select = "*" } = options;
-        const { data, error } = await supabase
-            .from("workflow")
-            .insert(newWorkflow)
-            .select(select)
-            .single();
-        if (error) throw error;
-        return data;
-    } catch (err) {
-        console.error("❌ Error creating workflow:", err);
-        throw err;
-    }
-};
-
-export const updateWorkflow = async (id, updates) => {
-    try {
-        const { data, error } = await supabase
-            .from("workflow")
-            .update(updates)
-            .eq("id", id)
-            .select()
-            .single();
-        if (error) throw error;
-        return data;
-    } catch (err) {
-        console.error(`❌ Error updating workflow ${id}:`, err);
-        throw err;
-    }
-};
+const controllerLogger = createLogger("controller");
 
 // ── EXPRESS CONTROLLERS ───────────────────────────────────────────────────────
 // All mutable CRUD actions delegate to WorkflowLifecycleService.
@@ -90,9 +11,7 @@ export const updateWorkflow = async (id, updates) => {
 export const patchWorkflow = async (req, res) => {
     const { id } = req.params;
     const userId = req.user?.id;
-    console.log(`\n======================================================`);
-    console.log(`📡 [workflowsController] PATCH /api/workflows/${id}`);
-    console.log(`👤 User ID: ${userId || "Unauthenticated"}`);
+    controllerLogger.debug({ workflowId: id, userId }, `PATCH /api/workflows/${id}`);
 
     try {
         const { display_name, name, primary_media_id, favorited } = req.body || {};
@@ -111,13 +30,11 @@ export const patchWorkflow = async (req, res) => {
             req,
         });
 
-        console.log(`✅ [workflowsController] patchWorkflow ${id} success`);
-        console.log(`======================================================\n`);
+        controllerLogger.info({ workflowId: id }, `patchWorkflow ${id} success`);
 
         return res.json({ ok: true, workflow: result.workflow });
     } catch (err) {
-        console.error(`❌ [workflowsController] patchWorkflow ${id}:`, err.message);
-        console.log(`======================================================\n`);
+        controllerLogger.error({ workflowId: id, err }, `patchWorkflow ${id} failed: ${err.message}`);
         return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
     }
 };
@@ -176,24 +93,12 @@ export const toggleLike = async (req, res) => {
             return res.status(403).json({ ok: false, message: "Unauthorized access to this workflow" });
         }
 
-        const { data: wf, error: getErr } = await supabase
-            .from("workflow")
-            .select("favorited")
-            .eq("id", id)
-            .single();
-        if (getErr) throw getErr;
-
-        const { data, error } = await supabase
-            .from("workflow")
-            .update({ favorited: !wf.favorited })
-            .eq("id", id)
-            .select()
-            .single();
-        if (error) throw error;
+        const wf = await db.workflows.findById(id, "favorited");
+        const data = await db.workflows.updateFields(id, { favorited: !wf.favorited });
 
         return res.json({ ok: true, favorited: data.favorited });
     } catch (err) {
-        console.error(`❌ Error toggling like for workflow ${req.params.id}:`, err);
+        controllerLogger.error({ workflowId: req.params.id, err }, `Error toggling like for workflow ${req.params.id}: ${err.message}`);
         return res.status(500).json({ ok: false, message: err.message });
     }
 };
@@ -215,7 +120,7 @@ export const bulkToggleLike = async (req, res) => {
             return res.status(403).json({ ok: false, message: "Unauthorized access to one or more workflows" });
         }
 
-        const { data: currentRows, error: getErr } = await supabase
+        const { data: currentRows, error: getErr } = await db.workflows.client()
             .from("workflow")
             .select("id, favorited")
             .in("id", ownedIds);
@@ -225,7 +130,7 @@ export const bulkToggleLike = async (req, res) => {
         const allCurrentlyFavorited = (currentRows || []).every((row) => !!row.favorited);
         const nextFavorited         = explicitFavorited === undefined ? !allCurrentlyFavorited : !!explicitFavorited;
 
-        const { data, error } = await supabase
+        const { data, error } = await db.workflows.client()
             .from("workflow")
             .update({ favorited: nextFavorited })
             .in("id", ownedIds)
@@ -240,7 +145,7 @@ export const bulkToggleLike = async (req, res) => {
             workflows:    data || [],
         });
     } catch (err) {
-        console.error("Bulk like error:", err);
+        controllerLogger.error({ err }, `Bulk like error: ${err.message}`);
         return res.status(500).json({ ok: false, message: err.message });
     }
 };
@@ -264,7 +169,7 @@ export const moveWorkflow = async (req, res) => {
 
         return res.json({ ok: true, workflow: result.workflow, new_session: result.new_session });
     } catch (err) {
-        console.error(`❌ [moveWorkflow] Error moving workflow ${req.params.id}:`, err);
+        controllerLogger.error({ workflowId: req.params.id, err }, `[moveWorkflow] Error moving workflow ${req.params.id}: ${err.message}`);
         return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
     }
 };
@@ -285,7 +190,7 @@ export const setPrimaryMedia = async (req, res) => {
 
         return res.json({ ok: true, primary_media_id: result.primary_media_id });
     } catch (err) {
-        console.error(`❌ Error setting primary media for workflow ${req.params.id}:`, err);
+        controllerLogger.error({ workflowId: req.params.id, err }, `Error setting primary media for workflow ${req.params.id}: ${err.message}`);
         return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
     }
 };
@@ -299,7 +204,7 @@ export const getWorkflowByMedia = async (req, res) => {
         const result = await projectReadService.getWorkflowByMedia({ mediaId: media_id, userId, req });
         return res.json({ ok: true, workflow: result.workflow, items: result.items });
     } catch (err) {
-        console.error("❌ Error fetching workflow by media:", err);
+        controllerLogger.error({ mediaId: req.params.media_id, err }, `Error fetching workflow by media: ${err.message}`);
         return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
     }
 };
@@ -321,7 +226,7 @@ export const detachMediaToNewWorkflow = async (req, res) => {
 
         return res.json({ ok: true, workflow: result.workflow });
     } catch (err) {
-        console.error("❌ Error detaching media to new workflow:", err);
+        controllerLogger.error({ mediaId: req.body?.media_id, err }, `Error detaching media to new workflow: ${err.message}`);
         return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
     }
 };
@@ -341,7 +246,7 @@ export const deleteMedia = async (req, res) => {
             next_primary_media_id: result.next_primary_media_id,
         });
     } catch (err) {
-        console.error(`❌ Error deleting media ${req.params.media_id}:`, err);
+        controllerLogger.error({ mediaId: req.params.media_id, err }, `Error deleting media ${req.params.media_id}: ${err.message}`);
         return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
     }
 };

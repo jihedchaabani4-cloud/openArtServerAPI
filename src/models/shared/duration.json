@@ -1,0 +1,7 @@
+{
+  "$schema": "../schemas/v1/parameter.schema.json",
+  "id": "duration",
+  "type": "integer",
+  "description": "Video output duration in seconds",
+  "uiHint": "slider"
+}

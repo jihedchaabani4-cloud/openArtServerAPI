@@ -10,6 +10,9 @@
 
 import { db } from "../../container.js";
 import { elementRepository } from "../../db/ElementRepository.js";
+import { createLogger } from "../../infrastructure/logging/index.js";
+
+const dbLogger = createLogger("database");
 
 // ── Known workflow_type constants ─────────────────────────────────────────────
 const WORKFLOW_TYPES = Object.freeze({
@@ -313,4 +316,38 @@ export async function resolveWorkflowReferences(workflowIds = []) {
   return results.filter(Boolean);
 }
 
+/**
+ * Resolves the PRIMARY media URL for a workflow.
+ *
+ * This is the canonical function to get the image URL of a GENERATION workflow
+ * when we want to use it as an edit source target.
+ *
+ * Resolution order (via WorkflowRepository.getPrimaryMedia):
+ *   1. workflow.primary_media_id → media.url  (explicit user selection)
+ *   2. First created media for this workflow   (fallback for workflows without primary set)
+ *
+ * NEVER uses "latest by create_time desc" — that would return an edited version
+ * instead of the one the user selected.
+ *
+ * @param {string} workflowId
+ * @returns {Promise<string|null>} the resolved image URL or null
+ */
+export async function resolvePrimaryMediaUrl(workflowId) {
+  if (!workflowId || typeof workflowId !== "string") return null;
+
+  try {
+    const url = await db.workflows.getPrimaryMediaUrl(workflowId);
+    if (url) {
+      dbLogger.debug({ workflowId, url }, `resolvePrimaryMediaUrl "${workflowId}" resolved`);
+      return url;
+    }
+    dbLogger.warn({ workflowId }, `resolvePrimaryMediaUrl "${workflowId}": no URL found on primary media`);
+    return null;
+  } catch (err) {
+    dbLogger.warn({ workflowId, err }, `resolvePrimaryMediaUrl "${workflowId}" error: ${err.message}`);
+    return null;
+  }
+}
+
 export default resolveWorkflowReference;
+

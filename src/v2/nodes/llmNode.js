@@ -58,12 +58,12 @@ function normalizeStructuredJSON(parsed, userPrompt = "") {
     return {
       is_safe: true,
       safety_reason: null,
-      prompt: userPrompt || "High quality creative generation",
-      description: userPrompt || "High quality creative generation",
-      title: "Generated Concept",
+      prompt: userPrompt || "",
+      description: userPrompt || "",
+      title: "",
       keywords: [],
       references: [],
-      generationConfig: { aspectRatio: "16:9" }
+      generationConfig: {}
     };
   }
 
@@ -74,7 +74,7 @@ function normalizeStructuredJSON(parsed, userPrompt = "") {
     ? parsed.description.trim()
     : (typeof parsed.prompt === "string" && parsed.prompt.trim()
         ? parsed.prompt.trim()
-        : (userPrompt || "High quality creative generation"));
+        : (userPrompt || ""));
 
   return {
     ...parsed,
@@ -82,12 +82,12 @@ function normalizeStructuredJSON(parsed, userPrompt = "") {
     safety_reason: safetyReason,
     prompt: promptText,
     description: promptText,
-    title: parsed.title ?? "Generated Concept",
+    title: parsed.title ?? "",
     keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
     references: Array.isArray(parsed.references) ? parsed.references : [],
     generationConfig: parsed.generationConfig && typeof parsed.generationConfig === "object"
       ? parsed.generationConfig
-      : { aspectRatio: "16:9" }
+      : {}
   };
 }
 
@@ -133,16 +133,37 @@ export async function executeLLMNode(resolvedInputs, ctx = {}) {
 
   // Enforce Structured Output JSON format rule if jsonMode is active
   if (jsonMode) {
-    systemPrompt += `\n\nOUTPUT CONTRACT: You MUST return ONLY a strictly valid JSON object matching this schema:\n{\n  "is_safe": true,\n  "safety_reason": null,\n  "title": "Short title",\n  "description": "Enhanced cinematic prompt text",\n  "keywords": ["tag1", "tag2"],\n  "references": [\n    { "assetId": "id", "role": "character_reference | style_reference | product_reference" }\n  ],\n  "generationConfig": {\n    "aspectRatio": "16:9"\n  }\n}`;
+    systemPrompt += `\n\nOUTPUT CONTRACT: You MUST return ONLY a strictly valid JSON object matching this schema:\n{\n  "is_safe": true,\n  "safety_reason": null,\n  "title": "Short title",\n  "description": "Simple, faithful translated prompt text without added embellishments",\n  "keywords": ["tag1", "tag2"],\n  "references": [\n    { "assetId": "id", "role": "character_reference | style_reference | product_reference" }\n  ],\n  "generationConfig": {\n    "aspectRatio": "16:9"\n  }\n}`;
   }
 
   // ── 3. LLM Call & 1-Retry Fallback ─────────────────────────────────────────
-  let result = await llmService.generate({
-    prompt: userPrompt,
-    systemInstruction: systemPrompt,
-    images,
-    jsonMode,
-  });
+  let result;
+  try {
+    result = await llmService.generate({
+      prompt: userPrompt,
+      systemInstruction: systemPrompt,
+      images,
+      jsonMode,
+    });
+  } catch (llmErr) {
+    console.warn(`[LLMNode] LLM call failed (${llmErr.message}). Falling back to passthrough user prompt.`);
+    return {
+      text: userPrompt,
+      json: {
+        is_safe: true,
+        safety_reason: null,
+        title: userPrompt.slice(0, 40),
+        description: userPrompt,
+        prompt: userPrompt,
+        keywords: [],
+        references: [],
+        generationConfig: {},
+      },
+      is_safe: true,
+      safety_reason: null,
+      modelUsed: "fallback-passthrough",
+    };
+  }
 
   let jsonOutput = null;
 

@@ -19,6 +19,10 @@
 
 import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 import { resolveWorkflowReferences } from "../resolvers/WorkflowReferenceResolver.js";
+import { createLogger } from "../../infrastructure/logging/index.js";
+
+const nodeLogger = createLogger("node");
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NOTE: Inline tags like <character:uuid> in the prompt are POSITIONAL MARKERS only.
@@ -165,6 +169,7 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
   let rawPrompt = safe.prompt || "";
 
   // ── Normalize in-memory entities if provided ──────────────────────────────
+
   const inputCharacters = (Array.isArray(safe.characters) ? safe.characters : []).map((c, index) => {
     if (typeof c === "string") {
       return {
@@ -230,7 +235,7 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
   try {
     resolvedList = await resolveWorkflowReferences([...new Set(refIds)]);
   } catch (err) {
-    console.warn(`[PromptBuilder] resolveWorkflowReferences error:`, err.message);
+    nodeLogger.warn({ err }, `resolveWorkflowReferences error: ${err.message}`);
   }
 
   // ── Step 3: Build entity map + deduplicated list ──────────────────────────
@@ -271,30 +276,9 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
   // ── Step 5: Format prompt — replace inline tags with @Name / @imageN ─────
   let formattedPrompt = formatPrompt(rawPrompt, entityMap, idToIndexMap);
 
-  // ── Step 6: Handle skill layouts (e.g. character-sheet, storyboard) ───────
+  // ── Step 6: Prepend unmentioned @Tags & append style ─────────────────────
   let layoutName = null;
   const promptParts = [];
-
-  if (safe.skill && safe.skill.id) {
-    const skillId = safe.skill.id;
-    if (skillId === "character-sheet") {
-      layoutName = "character-sheet";
-      const charNames = characters.map(c => c.name).filter(Boolean);
-      const views = safe.skill.parameters?.views || ["front view", "side view", "back view"];
-      const viewText = Array.isArray(views) ? views.join(", ") : String(views);
-      const parts = [];
-      if (formattedPrompt) parts.push(formattedPrompt);
-      if (charNames.length > 0 && !formattedPrompt.includes(charNames[0])) {
-        parts.push(charNames.join(", "));
-      }
-      parts.push(`character sheet, multiple views, ${viewText}, concept art, clean composition`);
-      formattedPrompt = parts.join(", ");
-    } else if (skillId === "storyboard") {
-      layoutName = "storyboard";
-      const panelCount = safe.skill.parameters?.panel_count ?? 6;
-      formattedPrompt = `${formattedPrompt}, storyboard layout, ${panelCount} panel narrative sequence`;
-    }
-  }
 
   // If an entity was declared in references but not placed in prompt text, prepend @Tag
   const unmentionedTags = [];
@@ -307,7 +291,7 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
     }
   }
 
-  if (unmentionedTags.length > 0 && !safe.skill) {
+  if (unmentionedTags.length > 0) {
     promptParts.push(unmentionedTags.join(", "));
   }
 
@@ -336,11 +320,11 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
     userPrompt: formattedPrompt,
     prompt: finalPromptText,
     layout: layoutName,
-    imageUrls: registry.all,
+    references: registry.all,
     referenceGuide: guideLines,
     standaloneMedia: medias.map(m => ({ label: m.name, tag: m.referenceTags[0] || null })),
     characters: inputCharacters.length > 0 ? inputCharacters : characters,
-    references: inputReferences.length > 0 ? inputReferences : (Array.isArray(safe.references) ? safe.references : []),
+    rawReferences: inputReferences.length > 0 ? inputReferences : (Array.isArray(safe.references) ? safe.references : []),
     entities: {
       characters: characters.map(c => ({
         id: c.entityId || c.id,
@@ -366,7 +350,7 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
       })),
     },
     style: safe.style ?? null,
-    source_asset: safe.source_asset ?? null,
+
     metadata: {
       runId,
       nodeId,
@@ -376,18 +360,17 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
     },
   };
 
-  // ── Log ───────────────────────────────────────────────────────────────────
-  console.log("\n╔══════════════════════════════════════════════════════════════╗");
-  console.log("║              [PromptBuilder] FINAL PROMPT                   ║");
-  console.log("╚══════════════════════════════════════════════════════════════╝");
-  console.log(output);
-  console.log("────────────────────────────────────────────────────────────────");
-  console.log(
-    `[PromptBuilder] Resolved: ${uniqueEntities.length} entities ` +
-    `(${characters.length} characters, ${elements.length} elements, ${medias.length} media) | ` +
-    `Images: ${registry.all.length}`
+  nodeLogger.debug(
+    {
+      finalPrompt: output,
+      entitiesCount: uniqueEntities.length,
+      charactersCount: characters.length,
+      elementsCount: elements.length,
+      mediaCount: medias.length,
+      imagesCount: registry.all.length,
+    },
+    `Resolved final prompt: ${output.slice(0, 100)}...`
   );
-  console.log("────────────────────────────────────────────────────────────────\n");
 
   return { finalPrompt: output, context: finalContext };
 }

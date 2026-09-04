@@ -1,4 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
+import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";
+
+const walletLogger = createLogger("wallet");
+const billingLogger = createLogger("billing");
 
 export class WalletError extends Error {
   constructor(message, code) {
@@ -9,7 +13,7 @@ export class WalletError extends Error {
 }
 
 export class WalletService {
-  HOLD_TTL_SECONDS = 60 * 60;
+  HOLD_TTL_SECONDS = 10 * 60; // 10 minutes TTL per specification clarification
   METADATA_MAX_BYTES = 4096; // FIX: was undefined — validateMetadata() silently skipped size check
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -21,13 +25,15 @@ export class WalletService {
   // See bottom of this file for full CREATE OR REPLACE FUNCTION scripts.
   // ═══════════════════════════════════════════════════════════════════════
 
-  constructor(supabaseUrl, supabaseServiceKey) {
+  constructor(supabaseUrl, supabaseServiceKey, { usageEventRepo = null } = {}) {
     this.supabase = createClient(supabaseUrl, supabaseServiceKey);
     this.defaultInitialBalance = Number(
       process.env.INITIAL_WALLET_BALANCE ||
       process.env.DEFAULT_WALLET_BALANCE ||
       0
     );
+    // Optional usage_events repository (audit trail for free-tier usage)
+    this.usageEventRepo = usageEventRepo || null;
   }
 
   // ─────────────────────────────────────────────
@@ -58,7 +64,7 @@ export class WalletService {
       throw new WalletError(error.message, "DB_ERROR");
     }
 
-    console.log(`[WalletService] Wallet ensured for user ${userId}.`);
+    walletLogger.info({ userId }, `Wallet ensured for user ${userId}`);
     return data;
   }
 
@@ -67,8 +73,165 @@ export class WalletService {
   }
 
   // ─────────────────────────────────────────────
+  // BILLING RESERVATION API (Unified Entry Point)
+  // ─────────────────────────────────────────────
+  // Callers use reserve() / settle() / release() without knowing
+  // whether the cost is zero (NO_CHARGE) or non-zero (CHARGEABLE).
+  // WalletService is the dispatcher — the caller stays clean.
+
+  /**
+   * Unified reservation entry point.
+   *
+   * amount = 0 → NO_CHARGE: records audit event in usage_events,
+   *              zero financial movement, no row in transactions.
+   * amount > 0 → CHARGEABLE: two-phase commit via hold_credits RPC.
+   *
+   * @param {{ userId: string, amount: number, referenceId: string, metadata?: object }} params
+   * @returns {Promise<BillingReservation>}
+   *   { kind: "NO_CHARGE"|"CHARGEABLE", status: "ACTIVE"|"HELD", referenceId, amount, ... }
+   */
+  async reserve({ userId, amount, referenceId, metadata = {} }) {
+    if (!amount || amount <= 0) {
+      // ── Free usage path ───────────────────────────────────────────────────
+      // DESIGN DECISION: usage_events is a Best-Effort audit trail.
+      //
+      //   Financial truth  → transactions table (MUST not fail silently)
+      //   Operational audit → usage_events table (MAY fail gracefully)
+      //
+      // A usage_events failure MUST NOT block execution, because:
+      //   1. The user's financial state (credits) is unaffected (no hold placed).
+      //   2. Blocking execution would punish the user for an observability failure.
+      //   3. The Models Management System logs provider calls independently.
+      //
+      // If you need authoritative metering, promote usage_events to a
+      // separate critical service with its own retry queue.
+      if (this.usageEventRepo) {
+        await this.usageEventRepo
+          .recordActive({ referenceId, userId, metadata })
+          .catch((err) => walletLogger.warn({ event: "billing.usage_event.failed", err }, `usage_events recordActive failed (non-fatal): ${err.message}`));
+      }
+      billingLogger.info({ event: LogEvents.BILLING_COST_CALCULATED, referenceId, amount: 0 }, "Free tier reservation (NO_CHARGE)");
+      return {
+        kind: "NO_CHARGE",
+        status: "ACTIVE",
+        referenceId,
+        amount: 0,
+      };
+    }
+
+    // Paid usage path — existing financial hold
+    const wallet = await this.getWalletOrThrow(userId);
+    const tx = await this._holdForWallet({ wallet, userId, amount, referenceId, metadata });
+    walletLogger.info({ event: LogEvents.WALLET_HOLD_CREATED, referenceId, amount: tx.amount ?? amount, userId }, `Placed credit hold of ${tx.amount ?? amount} credits`);
+    return {
+      kind: "CHARGEABLE",
+      status: "HELD",
+      referenceId: tx.reference_id || referenceId,
+      amount: tx.amount ?? amount,
+      walletId: wallet.id,
+      transaction: tx,
+    };
+  }
+
+  /**
+   * Settle a reservation after successful execution.
+   *
+   * NO_CHARGE → marks usage_events row COMPLETED (no-op on wallet)
+   * CHARGEABLE → commitHoldIdempotent (finalises financial debit)
+   *
+   * @param {BillingReservation} reservation
+   * @returns {Promise<BillingReservation>}
+   */
+  async settle(reservation, extraMetadata = null) {
+    if (!reservation) return null;
+
+    if (reservation.kind === "NO_CHARGE") {
+      if (this.usageEventRepo) {
+        await this.usageEventRepo
+          .markCompleted(reservation.referenceId)
+          .catch((err) => walletLogger.warn({ event: "billing.usage_event.failed", err }, `usage_events markCompleted failed (non-fatal): ${err.message}`));
+      }
+      return { ...reservation, status: "COMPLETED" };
+    }
+
+    // CHARGEABLE — commit the financial hold
+    await this.commitHoldIdempotent(reservation.referenceId, extraMetadata);
+    walletLogger.info({ event: LogEvents.WALLET_CHARGE_COMPLETED, referenceId: reservation.referenceId }, `Committed credit hold for ${reservation.referenceId}`);
+    return { ...reservation, status: "COMMITTED" };
+  }
+
+  /**
+   * Release / rollback a reservation on failure or cancellation.
+   *
+   * NO_CHARGE → marks usage_events row RELEASED (no-op on wallet)
+   * CHARGEABLE → rollback (refunds credits to user wallet)
+   *
+   * @param {BillingReservation} reservation
+   * @param {Object} [extraMetadata=null]
+   * @returns {Promise<BillingReservation>}
+   */
+  async release(reservation, extraMetadata = null) {
+    if (!reservation) return null;
+
+    if (reservation.kind === "NO_CHARGE") {
+      if (this.usageEventRepo) {
+        await this.usageEventRepo
+          .markReleased(reservation.referenceId)
+          .catch((err) => walletLogger.warn({ event: "billing.usage_event.failed", err }, `usage_events markReleased failed (non-fatal): ${err.message}`));
+      }
+      return { ...reservation, status: "RELEASED" };
+    }
+
+    // CHARGEABLE — rollback the financial hold
+    await this.rollback(reservation.referenceId, extraMetadata);
+    walletLogger.info({ event: LogEvents.WALLET_HOLD_RELEASED, referenceId: reservation.referenceId }, `Released credit hold for ${reservation.referenceId}`);
+    return { ...reservation, status: "RELEASED" };
+  }
+
+  // ─────────────────────────────────────────────
   // HOLD / COMMIT / ROLLBACK
   // ─────────────────────────────────────────────
+
+  /**
+   * Internal helper: executes the financial hold given an already-fetched wallet.
+   * Used by both hold() and reserve() to avoid duplicating the RPC logic.
+   */
+  async _holdForWallet({ wallet, amount, referenceId, metadata }) {
+    this.validateMetadata(metadata);
+
+    if (wallet.balance < amount) {
+      throw new WalletError(
+        `Insufficient funds: need ${amount}, have ${wallet.balance}`,
+        "INSUFFICIENT_FUNDS"
+      );
+    }
+
+    const expiresAt = new Date(Date.now() + this.HOLD_TTL_SECONDS * 1000).toISOString();
+
+    const { data: tx, error } = await this.supabase.rpc("hold_credits", {
+      p_wallet_id: wallet.id,
+      p_amount: amount,
+      p_reference_id: referenceId,
+      p_metadata: metadata,
+      p_expires_at: expiresAt,
+    });
+
+    if (error) {
+      if (this.isMissingRpcError(error)) {
+        walletLogger.warn({ rpc: "hold_credits" }, "RPC hold_credits not found, using table fallback");
+        return this.holdFallback({ wallet, amount, referenceId, metadata, expiresAt });
+      }
+      if (error.code === "23505") {
+        throw new WalletError(
+          `Transaction ${referenceId} already exists (duplicate)`,
+          "DUPLICATE_TRANSACTION"
+        );
+      }
+      throw new WalletError(error.message, "DB_ERROR");
+    }
+
+    return tx;
+  }
 
   async hold({ userId, amount, referenceId, metadata = {} }) {
     this.validateMetadata(metadata); // FIX: validate قبل أي شيء
@@ -96,7 +259,7 @@ export class WalletService {
 
     if (error) {
       if (this.isMissingRpcError(error)) {
-        console.warn("[WalletService] RPC hold_credits not found, using table fallback.");
+        walletLogger.warn({ rpc: "hold_credits" }, "RPC hold_credits not found, using table fallback");
         return this.holdFallback({ wallet, amount, referenceId, metadata, expiresAt });
       }
 
@@ -113,31 +276,36 @@ export class WalletService {
     return tx;
   }
 
-  async commit(referenceId) {
-    return this.resolveTransaction(referenceId, "COMPLETED");
+  async commit(referenceId, extraMetadata = null) {
+    return this.resolveTransaction(referenceId, "COMPLETED", extraMetadata);
   }
 
   /**
    * Safe when BullMQ replays the job: if the hold was already committed, this is a no-op.
    */
-  async commitHoldIdempotent(referenceId) {
+  async commitHoldIdempotent(referenceId, extraMetadata = null) {
     if (!referenceId) return;
     try {
-      await this.commit(referenceId);
+      return await this.commit(referenceId, extraMetadata);
     } catch (err) {
-      if (!(err instanceof WalletError)) throw err;
+      const isStatusErr = err.message?.includes("COMPLETED") || err.message?.includes("not PENDING");
       const { data: tx } = await this.supabase
         .from("transactions")
         .select("status")
         .eq("reference_id", referenceId)
         .maybeSingle();
-      if (tx?.status === "COMPLETED") return;
+      if (tx?.status === "COMPLETED") {
+        if (extraMetadata && typeof extraMetadata === "object") {
+          await this._mergeTransactionMetadata(referenceId, extraMetadata).catch(() => {});
+        }
+        return { status: "COMPLETED", reference_id: referenceId };
+      }
       throw err;
     }
   }
 
-  async rollback(referenceId) {
-    return this.resolveTransaction(referenceId, "FAILED");
+  async rollback(referenceId, extraMetadata = null) {
+    return this.resolveTransaction(referenceId, "FAILED", extraMetadata);
   }
 
   // ─────────────────────────────────────────────
@@ -158,7 +326,7 @@ export class WalletService {
 
     if (error) {
       if (this.isMissingRpcError(error)) {
-        console.warn("[WalletService] RPC credit_wallet not found, using table fallback.");
+        walletLogger.warn({ rpc: "credit_wallet" }, "RPC credit_wallet not found, using table fallback");
         return this.creditFallback({ wallet, amount, referenceId, metadata });
       }
 
@@ -254,7 +422,7 @@ export class WalletService {
 
     if (error) {
       if (this.isMissingRpcError(error)) {
-        console.warn("[WalletService] RPC expire_stale_holds not found, using table fallback.");
+        walletLogger.warn({ rpc: "expire_stale_holds" }, "RPC expire_stale_holds not found, using table fallback");
         return this.expireStaleHoldsFallback();
       }
       throw new WalletError(error.message, "DB_ERROR");
@@ -314,7 +482,7 @@ export class WalletService {
     return data;
   }
 
-  async resolveTransaction(referenceId, newStatus) {
+  async resolveTransaction(referenceId, newStatus, extraMetadata = null) {
     const fnName =
       newStatus === "COMPLETED" ? "commit_transaction" : "rollback_transaction";
 
@@ -324,16 +492,38 @@ export class WalletService {
 
     if (error) {
       if (this.isMissingRpcError(error)) {
-        console.warn(`[WalletService] RPC ${fnName} not found, using table fallback.`);
-        return newStatus === "COMPLETED"
-          ? this.commitFallback(referenceId)
-          : this.rollbackFallback(referenceId);
+        walletLogger.warn({ rpc: fnName }, `RPC ${fnName} not found, using table fallback`);
+        const fallbackTx = newStatus === "COMPLETED"
+          ? await this.commitFallback(referenceId)
+          : await this.rollbackFallback(referenceId);
+        if (extraMetadata && typeof extraMetadata === "object") {
+          await this._mergeTransactionMetadata(referenceId, extraMetadata).catch(() => {});
+        }
+        return fallbackTx;
       }
 
       throw new WalletError(error.message, "TRANSACTION_NOT_FOUND");
     }
 
+    if (extraMetadata && typeof extraMetadata === "object") {
+      await this._mergeTransactionMetadata(referenceId, extraMetadata).catch(() => {});
+    }
+
     return tx;
+  }
+
+  async _mergeTransactionMetadata(referenceId, extraMetadata) {
+    const { data: current } = await this.supabase
+      .from("transactions")
+      .select("metadata")
+      .eq("reference_id", referenceId)
+      .maybeSingle();
+
+    const merged = { ...(current?.metadata || {}), ...extraMetadata };
+    await this.supabase
+      .from("transactions")
+      .update({ metadata: merged })
+      .eq("reference_id", referenceId);
   }
 
   isMissingRpcError(error) {

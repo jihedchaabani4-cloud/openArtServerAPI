@@ -1,6 +1,6 @@
 {
   "id": "wavespeed",
-  "baseUrl": "https://api.wavespeed.ai/api/v3",
+  "baseUrl": "https://api.wavespeed.ai",
   "auth": {
     "type": "bearer",
     "credentialType": "wavespeed_api_key"

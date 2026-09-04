@@ -19,9 +19,7 @@ export async function run(context, parameters, deps) {
     return context;
   }
 
-  // Determine mode based on layout or presence of source asset (edit vs gen)
-  const isVideo = context.layout === "video" || context.edit_context?.source_asset?.type === "video";
-  const mode = isVideo ? "video" : "image";
+  const mode = "image";
   const style = context.style || "cinematic";
 
   const result = await deps.promptService.optimizePrompt(rawPrompt, { mode, style });

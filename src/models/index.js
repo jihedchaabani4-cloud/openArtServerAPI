@@ -8,8 +8,13 @@
 import { getRegistry } from "./registry/loader.js";
 import { validateInput as validateInputInternal } from "./validation/validationService.js";
 import { calculateCost as calculateCostInternal } from "./pricing/modelPricingService.js";
+import { evaluatePricing } from "./pricing/pricingEngine.js";
 import { resolveServableDeployment as resolveDeployment } from "./deployment/deploymentResolver.js";
+import { resolveModelSchema } from "./registry/resolver.js";
 import { run as runInternal } from "./execution/runService.js";
+import { createLogger, LogEvents } from "../infrastructure/logging/index.js";
+
+const modelsLogger = createLogger("models");
 
 // --- getCatalog ---------------------------------------------------------------
 
@@ -67,11 +72,9 @@ export function getCatalog(filters = {}) {
 }
 
 // --- getSchema ----------------------------------------------------------------
-
+ 
 export function getSchema(modelFamily, operation) {
-  const deployment = resolveDeployment(modelFamily, operation);
-  const op = deployment.operations[operation];
-  return { inputs: op.inputs || {}, outputs: op.outputs || {} };
+  return resolveModelSchema(modelFamily, operation);
 }
 
 // --- validateInput ------------------------------------------------------------
@@ -83,7 +86,24 @@ export function validateInput(modelFamily, operation, rawInput) {
 // --- calculateCost ------------------------------------------------------------
 
 export function calculateCost(modelFamily, operation, cleanInput) {
-  return calculateCostInternal(modelFamily, operation, cleanInput);
+  const cost = calculateCostInternal(modelFamily, operation, cleanInput);
+  modelsLogger.info(
+    {
+      modelFamily,
+      operation,
+      credits: cost,
+      event: LogEvents.MODELS_COST_CALCULATED,
+    },
+    `Cost calculated: ${cost} credits for ${modelFamily} (${operation})`
+  );
+  return cost;
+}
+
+// --- estimatePrice ------------------------------------------------------------
+
+export function estimatePrice(modelFamily, operation, rawInput = {}) {
+  const cleanInput = validateInputInternal(modelFamily, operation, rawInput);
+  return evaluatePricing(modelFamily, operation, cleanInput);
 }
 
 // --- run ----------------------------------------------------------------------
@@ -91,6 +111,14 @@ export function calculateCost(modelFamily, operation, cleanInput) {
 export async function run(modelFamily, operation, cleanInput, context = {}) {
   // If operation was omitted or auto, resolve it dynamically
   const resolvedOp = operation || resolveOperation(cleanInput, context.domain || "image");
+  modelsLogger.debug(
+    {
+      modelFamily,
+      operation: resolvedOp,
+      event: LogEvents.MODELS_EXECUTION_STARTED,
+    },
+    `Executing model ${modelFamily} (${resolvedOp})`
+  );
   return runInternal(modelFamily, resolvedOp, cleanInput, context);
 }
 
@@ -99,18 +127,9 @@ export async function run(modelFamily, operation, cleanInput, context = {}) {
 export function resolveOperation(inputs = {}, targetOutput = "image") {
   if (inputs.operation) return inputs.operation;
 
-  const hasImage = Boolean(inputs.image_url || inputs.image || inputs.images?.length || inputs.input_assets?.length || inputs.references?.length);
-  const hasVideo = Boolean(inputs.video_url || inputs.video);
-  const isUpscale = Boolean(inputs.factor || inputs.scale || inputs.isUpscale || inputs.target_resolution);
-
-  if (targetOutput === "video") {
-    if (hasVideo) return "video_to_video";
-    if (hasImage) return "image_to_video";
-    return "text_to_video";
-  }
+  const hasImage = Boolean(inputs.image_url || inputs.image || inputs.images?.length || inputs.input_assets?.length);
 
   if (targetOutput === "image") {
-    if (isUpscale) return "image_upscale";
     if (hasImage) return "edit";
     return "text_to_image";
   }
@@ -121,3 +140,4 @@ export function resolveOperation(inputs = {}, targetOutput = "image") {
 
   return "text_to_image";
 }
+

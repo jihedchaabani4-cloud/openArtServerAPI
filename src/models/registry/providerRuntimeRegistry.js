@@ -6,6 +6,7 @@ import { GoogleClient } from "../../providers/google/client.js";
 
 // Providers Adapters
 import { wavespeedAdapter } from "../../adapters/wavespeedAdapter.js";
+import { wavespeedImageAdapter } from "../../adapters/wavespeedImageAdapter.js";
 import { googleAdapter } from "../../adapters/googleAdapter.js";
 
 const clientRegistry = new Map();
@@ -68,4 +69,5 @@ export function listRegisteredRuntimes() {
 
 // ── Auto-register Built-in Providers ─────────────────────────────────────────
 registerProviderRuntime("wavespeed", { ClientClass: WaveSpeedClient, adapter: wavespeedAdapter });
+adapterRegistry.set("wavespeedImageAdapter", wavespeedImageAdapter);
 registerProviderRuntime("google",    { ClientClass: GoogleClient,    adapter: googleAdapter });

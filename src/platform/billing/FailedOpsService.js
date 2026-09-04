@@ -1,4 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
+import { createLogger } from "../../infrastructure/logging/index.js";
+
+const billingLogger = createLogger("billing");
 
 /**
  * FailedOpsService
@@ -43,13 +46,12 @@ export class FailedOpsService {
         .maybeSingle();
 
       if (existing) {
-        console.log(JSON.stringify({
-          timestamp,
+        billingLogger.debug({
           operation: "record-failed-op",
           status: "skipped_duplicate",
           operationType,
           referenceId,
-        }));
+        }, `Skipped recording duplicate failed op (${operationType}:${referenceId})`);
         return;
       }
 
@@ -68,35 +70,32 @@ export class FailedOpsService {
 
       if (error) {
         // Log but do not throw — recording a failed op must never crash the caller
-        console.error(JSON.stringify({
-          timestamp,
+        billingLogger.error({
           operation: "record-failed-op",
           status: "error",
           operationType,
           referenceId,
-          error: error.message,
-        }));
+          err: error,
+        }, `Failed to record failed op (${operationType}:${referenceId}): ${error.message}`);
         return;
       }
 
-      console.log(JSON.stringify({
-        timestamp,
+      billingLogger.info({
         operation: "record-failed-op",
         status: "recorded",
         operationType,
         referenceId,
         userId,
-      }));
+      }, `Recorded failed op (${operationType}:${referenceId}) for user ${userId}`);
     } catch (err) {
       // Never throw from record() — a recording failure must not mask the original error
-      console.error(JSON.stringify({
-        timestamp,
+      billingLogger.error({
         operation: "record-failed-op",
         status: "exception",
         operationType,
         referenceId,
-        error: err?.message,
-      }));
+        err,
+      }, `Exception recording failed op (${operationType}:${referenceId}): ${err?.message}`);
     }
   }
 

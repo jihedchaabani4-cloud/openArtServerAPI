@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["id", "type", "description"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "id": { "type": "string", "pattern": "^[a-z0-9_-]+$" },
+    "type": { "enum": ["string", "enum", "integer", "float", "boolean", "image_url"] },
+    "description": { "type": "string" },
+    "uiHint": { "type": "string" }
+  },
+  "additionalProperties": false
+}

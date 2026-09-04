@@ -4,22 +4,12 @@
  * @param {{ network: boolean }[]} resolvedProcessors
  * @returns {import('../contracts/executionGraph.js').RetryPolicy}
  */
-export function resolveRetryPolicy(defaultPolicy, skillAware, resolvedProcessors) {
+export function resolveRetryPolicy(defaultPolicy = {}, skillAware = false, resolvedProcessors = []) {
   const policy = {
-    max_attempts: defaultPolicy.max_attempts,
-    backoff: defaultPolicy.backoff,
+    max_attempts: defaultPolicy.max_attempts ?? 1,
+    backoff: defaultPolicy.backoff ?? "none",
     ...(defaultPolicy.fallback_provider ? { fallback_provider: defaultPolicy.fallback_provider } : {}),
   };
-
-  const hasNetworkProcessor =
-    skillAware && resolvedProcessors.some((processor) => processor.network === true);
-
-  if (hasNetworkProcessor) {
-    policy.max_attempts = Math.max(2, policy.max_attempts);
-    if (policy.backoff === "none") {
-      policy.backoff = "linear";
-    }
-  }
 
   return policy;
 }

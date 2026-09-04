@@ -1,4 +1,7 @@
 import { run } from "../../models/index.js";
+import { createLogger } from "../../infrastructure/logging/index.js";
+
+const aiLogger = createLogger("ai");
 
 async function executeTextCompletion({ systemPrompt, userPrompt, temperature = 0.7 }) {
     const messages = [];
@@ -91,9 +94,7 @@ export class PromptService {
             wasEnhanced: false,
         };
 
-        const modeHint = mode === "video"
-            ? "for an AI video generation model (focus on motion, camera movement, atmosphere, time flow)"
-            : "for an AI image generation model (focus on visuals, lighting, composition, color palette, artistic style)";
+        const modeHint = "for an AI image generation model (focus on visuals, lighting, composition, color palette, artistic style)";
 
         const systemPrompt = `
 You are a world-class AI Prompt Engineer and professional multilingual translator, specialized in generative AI image and video creation.
@@ -147,15 +148,16 @@ Translate the semantic meaning and enhance it as a professional AI generation pr
             const result = await this.completeJSON({ systemPrompt, userPrompt, temperature: 0.4 });
             const optimized = result.optimized_prompt || prompt;
 
-            console.log(`\n🌍 [PromptOptimizer] Language detected: ${result.original_language || 'unknown'}`);
-            if (result.was_translated) {
-                console.log(`🔄 [PromptOptimizer] Translated from: "${prompt.substring(0, 60)}..."`);
-            }
-            console.log(`✨ [PromptOptimizer] Final prompt:\n   → "${optimized}"`);
-            if (result.changes_summary && result.changes_summary !== 'none') {
-                console.log(`📝 [PromptOptimizer] Changes: ${result.changes_summary}`);
-            }
-            console.log();
+            aiLogger.debug(
+                {
+                    originalLanguage: result.original_language || 'en',
+                    wasTranslated: result.was_translated ?? false,
+                    wasEnhanced: result.was_enhanced ?? false,
+                    changesSummary: result.changes_summary || 'none',
+                    optimizedPrompt: optimized,
+                },
+                `Prompt optimized: language=${result.original_language || 'unknown'}`
+            );
 
             return {
                 optimized,
@@ -165,7 +167,7 @@ Translate the semantic meaning and enhance it as a professional AI generation pr
                 changesSummary:   result.changes_summary   || "none",
             };
         } catch (e) {
-            console.error("[PromptService] optimizePrompt failed:", e.message);
+            aiLogger.warn({ err: e }, `optimizePrompt failed: ${e.message}`);
             return {
                 optimized:        prompt,
                 originalLanguage: "unknown",

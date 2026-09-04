@@ -11,12 +11,9 @@ metadata:
 input_schema:
   required: [prompt]
   properties:
-    prompt: { type: string }
+    prompt:     { type: string }
     characters: { type: array }
     references: { type: array }
-    workflow_id: { type: string }
-    project_id: { type: string }
-    projectId: { type: string }
 
 nodes:
   build_prompt:
@@ -34,6 +31,7 @@ nodes:
       context: "${build_prompt.output.context}"
       images: "${build_prompt.output.context.references}"
     config:
+      model: gemini-2-0-flash
       skills: [llm/translation, llm/character-description, llm/json-output]
       jsonMode: true
     persist:
@@ -45,14 +43,11 @@ nodes:
     type: image-generation
     depends_on: [llm_enrich, build_prompt]
     inputs:
-      prompt: "${llm_enrich.output.json.description}"
+      prompt:     "${llm_enrich.output.json.description}"
       references: "${build_prompt.output.context.references}"
-      workflow_id: "${input.workflow_id}"
-      project_id: "${input.project_id}"
     config:
       model: gpt-image-2
       ratio: "16:9"
-      aspect_ratio: "16:9"
       width: 1344
       height: 768
       count: 1

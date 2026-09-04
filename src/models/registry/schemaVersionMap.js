@@ -17,6 +17,8 @@ export const SCHEMA_VERSIONS = Object.freeze({
     provider: loadSchema("v1/provider.schema.json"),
     deployment: loadSchema("v1/deployment.schema.json"),
     collection: loadSchema("v1/collection.schema.json"),
+    parameter: loadSchema("v1/parameter.schema.json"),
+    pricing: loadSchema("v1/pricing.schema.json"),
   },
 });
 

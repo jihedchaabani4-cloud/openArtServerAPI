@@ -1,7 +1,0 @@
-id: simple-image
-mediaType: image
-template: null
-requiresPrompt: true
-defaultPrompt: ""
-skills:
-  - base-generation

@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { createLogger } from "../logging/index.js";
+
+const defaultLogger = createLogger("workflow");
 
 export class WorkflowEventRecorder {
-  constructor({ logger = console } = {}) {
+  constructor({ logger = defaultLogger } = {}) {
     this.logger = logger;
     this.events = [];
   }
@@ -21,7 +24,7 @@ export class WorkflowEventRecorder {
     };
 
     this.events.push(normalized);
-    this.logger.info?.("[WorkflowEvent]", normalized);
+    this.logger.debug?.({ workflowEvent: normalized }, `Recorded workflow event: ${normalized.operation}`);
     return normalized;
   }
 

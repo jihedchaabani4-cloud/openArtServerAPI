@@ -1,24 +1,22 @@
 import assert from "node:assert/strict";
 import { validateInput } from "../../validation/validationService.js";
-import { SSRFBlockedError, ValidationError } from "../../errors/index.js";
+import { SSRFBlockedError, ValidationError, UnknownParameterError } from "../../errors/index.js";
 import { loadRegistry } from "../../registry/loader.js";
 
 loadRegistry();
 
 console.log("Running Security & Attack Tests...");
 
-// 1. Injection & Unknown fields stripped silently
-const clean = validateInput("nanobana", "text_to_image", {
-  prompt: "A neon dragon",
-  totalCredits: 9999,
-  provider: "hacked",
-  endpoint: "https://evil.com",
-  __proto__: { isAdmin: true }
-});
-assert.equal(clean.totalCredits, undefined, "totalCredits was stripped");
-assert.equal(clean.provider, undefined, "provider was stripped");
-assert.equal(clean.endpoint, undefined, "endpoint was stripped");
-assert.equal(clean.prompt, "A neon dragon");
+// 1. Injection & Unknown fields rejected with UnknownParameterError
+assert.throws(() => {
+  validateInput("nanobana", "text_to_image", {
+    prompt: "A neon dragon",
+    totalCredits: 9999,
+    provider: "hacked",
+    endpoint: "https://evil.com",
+    __proto__: { isAdmin: true }
+  });
+}, UnknownParameterError);
 
 // 2. SSRF metadata IP blocked
 assert.throws(() => {

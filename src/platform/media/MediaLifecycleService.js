@@ -9,9 +9,6 @@ export const MEDIA_WORKFLOW_STATUS = {
 
 const PROVIDER_BACKED_NODE_TYPES = new Set([
   "image-generation",
-  "video-generation",
-  "upscale",
-  "media-transform",
 ]);
 
 function normalizeError(error, fallback = "Generation failed") {
@@ -27,9 +24,6 @@ function inferStepId(nodeType, input = {}, stepIdOverride = null) {
   if (input?.characterId || (Array.isArray(input?.characters) && input.characters.length > 0)) {
     return "character_sheet";
   }
-  if (nodeType === "media-transform") return "EDIT";
-  if (nodeType === "video-generation") return "VID";
-  if (nodeType === "upscale") return "UPSCALE";
   return "GEN";
 }
 
@@ -45,14 +39,11 @@ function buildDisplayName(input = {}) {
 }
 
 function buildGenerationConfig(nodeType, input = {}) {
-  const isEdit =
-    nodeType === "media-transform" || Boolean(input?.source_asset);
-
   return {
     prompt: input?.prompt || "",
     model: input?.model || "unknown",
     aspect_ratio: input?.aspect_ratio || "SQUARE",
-    generation_type: isEdit ? "IMAGE_TO_IMAGE" : "TEXT_ONLY",
+    generation_type: "TEXT_ONLY",
   };
 }
 
@@ -71,20 +62,9 @@ export function normalizeNodeMediaOutputs(nodeConfig, output, { runId, nodeId } 
     return (output.assets || []).map((asset) => withContext(asset, "image"));
   }
 
-  if (nodeConfig.type === "media-transform" && output.asset) {
-    return [withContext(output.asset, "image")];
-  }
-
-  if (nodeConfig.type === "video-generation" && output.asset) {
-    return [withContext(output.asset, "video")];
-  }
-
-  if (nodeConfig.type === "upscale" && output.enhancedAsset) {
-    return [withContext(output.enhancedAsset, "image")];
-  }
-
   return [];
 }
+
 
 /**
  * Single source of truth for V1 workflow + media lifecycle:

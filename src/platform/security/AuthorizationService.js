@@ -8,15 +8,17 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { createLogger } from "../../infrastructure/logging/index.js";
 
-// ── Structured log helper (FR-011) ───────────────────────────────────────────
+const securityLogger = createLogger("security");
+
 function log(operation, status, meta = {}) {
-    console.log(JSON.stringify({
-        timestamp: new Date().toISOString(),
+    const level = status === "denied" || status === "error" ? "warn" : "debug";
+    securityLogger[level]({
         operation: `AuthorizationService.${operation}`,
         status,
         ...meta,
-    }));
+    }, `Authorization.${operation}: ${status}`);
 }
 
 // ── Static RBAC permission map ───────────────────────────────────────────────

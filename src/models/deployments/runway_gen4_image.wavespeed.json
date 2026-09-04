@@ -4,7 +4,7 @@
   "modelFamily": "runway_gen4_image",
   "provider": "wavespeed",
   "status": "active",
-  "providerModelId": "runway/gen4-image",
+  "providerModelId": "runway/gen-4-image/text-to-image",
   "providerModelVersion": "v1.0.0",
   "versionPolicy": "pinned",
   "operations": {

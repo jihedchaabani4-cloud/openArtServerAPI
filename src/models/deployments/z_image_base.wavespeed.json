@@ -4,7 +4,7 @@
   "modelFamily": "z_image_base",
   "provider": "wavespeed",
   "status": "active",
-  "providerModelId": "z-image/base",
+  "providerModelId": "wavespeed-ai/z-image/base",
   "providerModelVersion": "v1.0.0",
   "versionPolicy": "pinned",
   "operations": {

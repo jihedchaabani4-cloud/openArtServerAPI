@@ -1,0 +1,7 @@
+{
+  "$schema": "../schemas/v1/parameter.schema.json",
+  "id": "prompt",
+  "type": "string",
+  "description": "Primary textual generation prompt",
+  "uiHint": "textarea"
+}

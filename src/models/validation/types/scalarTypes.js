@@ -1,4 +1,4 @@
-import { ValidationError } from "../../errors/index.js";
+import { ValidationError, InvalidEnumValueError } from "../../errors/index.js";
 
 export function validateString(key, val, rule = {}) {
   if (typeof val !== "string") {
@@ -16,8 +16,12 @@ export function validateString(key, val, rule = {}) {
 export function validateEnum(key, val, rule = {}) {
   const allowed = Array.isArray(rule.values) ? rule.values : [];
   const strVal = typeof val === "number" ? String(val) : val;
+  if (typeof strVal === "string") {
+    const match = allowed.find((a) => String(a).toLowerCase() === strVal.toLowerCase());
+    if (match !== undefined) return match;
+  }
   if (!allowed.includes(val) && !allowed.includes(strVal)) {
-    throw new ValidationError(`Field "${key}" has invalid value "${val}"`, { field: key });
+    throw new InvalidEnumValueError(key, val, allowed);
   }
   return allowed.includes(val) ? val : strVal;
 }

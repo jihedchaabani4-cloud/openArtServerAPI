@@ -3,12 +3,43 @@
   "type": "object",
   "required": ["id", "domain", "displayName"],
   "properties": {
+    "$schema": { "type": "string" },
     "id": { "type": "string", "pattern": "^[a-z0-9-_]+$" },
     "domain": { "enum": ["image", "video", "text"] },
     "displayName": { "type": "string" },
     "description": { "type": "string" },
     "iconUrl": { "type": "string" },
-    "badge": { "type": "string" }
+    "badge": { "type": "string" },
+    "operations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": { "type": "string" },
+          "description": { "type": "string" },
+          "inputs": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["ref"],
+              "properties": {
+                "ref": { "type": "string" },
+                "required": { "type": "boolean" },
+                "default": {},
+                "values": { "type": "array" },
+                "min": { "type": "number" },
+                "max": { "type": "number" },
+                "max_length": { "type": "integer" },
+                "description": { "type": "string" },
+                "uiHint": { "type": "string" }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
   },
   "additionalProperties": false
 }

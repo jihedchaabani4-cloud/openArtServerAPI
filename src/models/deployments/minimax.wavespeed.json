@@ -4,7 +4,7 @@
   "modelFamily": "minimax",
   "provider": "wavespeed",
   "status": "active",
-  "providerModelId": "minimax/image-01",
+  "providerModelId": "minimax/image-01/text-to-image",
   "providerModelVersion": "v1.0.0",
   "versionPolicy": "pinned",
   "operations": {

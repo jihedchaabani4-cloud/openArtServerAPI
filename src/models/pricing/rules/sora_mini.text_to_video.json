@@ -1,0 +1,21 @@
+{
+  "$schema": "../../schemas/v1/pricing.schema.json",
+  "model": "sora_mini",
+  "operation": "text_to_video",
+  "pricing_version": "2026-09-v1",
+  "currency": "credits",
+  "base_price_per_unit": {
+    "unit_param": "duration",
+    "rate_per_unit": 4
+  },
+  "modifiers": {
+    "resolution": {
+      "720p": { "type": "multiplier", "factor": 1.0, "description": "720p Standard" },
+      "1080p": { "type": "multiplier", "factor": 1.5, "description": "1080p HD (1.5x)" }
+    },
+    "fps": {
+      "24": { "type": "multiplier", "factor": 1.0 },
+      "60": { "type": "multiplier", "factor": 1.5, "description": "60 FPS (1.5x)" }
+    }
+  }
+}

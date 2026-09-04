@@ -1,12 +1,12 @@
-import { getUseCase, listUseCases } from "./useCaseRegistry.js";
+import { getUseCase } from "./useCaseRegistry.js";
 import { compileWorkflowById } from "../v2/compiler/compileWorkflow.js";
 import { startWorkflowRun } from "../v2/runner/workflowRunner.js";
 import { loadRegistries } from "../v2/registry/registryLoader.js";
+import { createLogger, LogEvents } from "../infrastructure/logging/index.js";
+
+const useCaseLogger = createLogger("usecase");
 
 let cachedRegistries = null;
-export function clearRegistryCache() {
-  cachedRegistries = null;
-}
 export function getRegistries() {
   if (process.env.NODE_ENV !== "production") {
     return loadRegistries();
@@ -27,28 +27,19 @@ export async function run({
   userId,
   registries = null,
 }) {
-  console.log(`\n================================================================`);
-  console.log(`🚀 [UseCaseRunner] Starting Use Case Execution`);
-  console.log(`   Use Case ID : ${useCaseId}`);
-  console.log(`   User ID     : ${userId || "anonymous"}`);
-  console.log(`================================================================`);
+  useCaseLogger.debug({ useCaseId, userId }, `Starting Use Case execution: "${useCaseId}"`);
 
   // 1. Resolve Use Case
   const useCase = getUseCase(useCaseId);
   if (!useCase) {
-    console.error(`❌ [UseCaseRunner] Error: Use Case "${useCaseId}" not found`);
+    useCaseLogger.error({ useCaseId }, `Use Case "${useCaseId}" not found`);
     const err = new Error(`Use Case "${useCaseId}" not found`);
     err.statusCode = 404;
     err.code = "USE_CASE_NOT_FOUND";
     throw err;
   }
 
-  // 2. Map source_url → source_asset for V2 compatibility
-  if (input.source_url && !input.source_asset) {
-    input.source_asset = { url: input.source_url, type: "image" };
-  }
-
-  // 3. Resolve registries
+  // 2. Resolve registries
   const finalRegistries = registries || getRegistries();
 
   // 4. Compile V2 workflow
@@ -62,7 +53,7 @@ export async function run({
   let plan;
   try {
     plan = compileWorkflowById(useCase.workflowRef, finalRegistries);
-    console.log(`⚙️ [UseCaseRunner] Workflow compiled: ${useCase.workflowRef}`);
+    useCaseLogger.debug({ workflowRef: useCase.workflowRef }, `Workflow compiled: ${useCase.workflowRef}`);
   } catch (compilationErr) {
     const err = new Error(`Workflow compilation failed: ${compilationErr.message}`);
     err.statusCode = 422;
@@ -73,14 +64,29 @@ export async function run({
 
   // 5. Start workflow run (creates DB records + enqueues nodes)
   const runtimeInput = { ...input, userId };
-  console.log(`🚀 [UseCaseRunner] Dispatching to V2 Engine...`);
+  useCaseLogger.debug({ workflowRef: useCase.workflowRef }, "Dispatching to V2 Engine...");
   const runResult = await startWorkflowRun(plan, runtimeInput);
 
-  console.log(`🎉 [UseCaseRunner] Run ID: ${runResult.run_id} (Status: ${runResult.status})`);
-  console.log(`================================================================\n`);
+  if (runResult.status === "failed") {
+    useCaseLogger.error({ runId: runResult.run_id, err: runResult.error }, `Workflow Run ${runResult.run_id} failed: ${runResult.error?.message || "Unknown error"}`);
+    const err = new Error(runResult.error?.message || `Workflow "${useCase.workflowRef}" failed during execution`);
+    err.code = runResult.error?.code || "WORKFLOW_FAILED";
+    err.category = runResult.error?.category || "SERVER_FAULT";
+    err.userMessage = runResult.error?.message;
+    err.nodeId = runResult.error?.nodeId || null;
+    err.retryable = runResult.error?.retryable ?? false;
+    err.executionId = runResult.run_id;
+    err.billingBreakdown = runResult.billingBreakdown || [];
+    throw err;
+  }
+
+  useCaseLogger.info({ runId: runResult.run_id, status: runResult.status }, `Workflow Run ${runResult.run_id} completed with status: ${runResult.status}`);
 
   return {
     executionId: runResult.run_id,
     status: runResult.status,
+    outputs: runResult.outputs || null,
+    billingBreakdown: runResult.billingBreakdown || [],
+    totalCost: runResult.totalCost ?? 0,
   };
 }

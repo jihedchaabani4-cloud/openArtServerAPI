@@ -25,6 +25,55 @@ export class SSRFBlockedError extends ValidationError {
   }
 }
 
+export class InvalidEnumValueError extends ValidationError {
+  constructor(field, value, allowedValues = []) {
+    super(`Value '${value}' is not allowed for '${field}'. Allowed: ${allowedValues.join(", ")}`, {
+      field,
+      safeMessage: `Invalid value for ${field}. Allowed values: ${allowedValues.join(", ")}`
+    });
+    this.name = "InvalidEnumValueError";
+    this.code = "INVALID_ENUM_VALUE";
+    this.value = value;
+    this.allowedValues = allowedValues;
+  }
+}
+
+export class UnknownParameterError extends ValidationError {
+  constructor(field) {
+    super(`Unknown parameter '${field}' not permitted`, {
+      field,
+      safeMessage: `Unknown parameter '${field}' is not supported`
+    });
+    this.name = "UnknownParameterError";
+    this.code = "UNKNOWN_PARAMETER";
+  }
+}
+
+export class InsufficientCreditsError extends ModelsSystemError {
+  constructor(required, available) {
+    super(`Insufficient credits: required ${required}, available ${available}`, {
+      retryable: false,
+      safeMessage: "Insufficient credits for this generation",
+      statusCode: 402,
+      code: "INSUFFICIENT_CREDITS"
+    });
+    this.required = required;
+    this.available = available;
+  }
+}
+
+export class ReservationExpiredError extends ModelsSystemError {
+  constructor(reservationId) {
+    super(`Reservation '${reservationId}' has expired or was already released`, {
+      retryable: false,
+      safeMessage: "Credit reservation expired",
+      statusCode: 409,
+      code: "RESERVATION_EXPIRED"
+    });
+    this.reservationId = reservationId;
+  }
+}
+
 export class UnknownModelFamilyError extends ModelsSystemError {
   constructor(modelFamily) {
     super(`Model family "${modelFamily}" not found`, {

@@ -1,5 +1,4 @@
 import { run, resolveOperation } from "../../models/index.js";
-import { logV2Event } from "../logging/v2Logger.js";
 import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 
 /**
@@ -13,14 +12,6 @@ export async function executeImageGeneration(inputs, ctx) {
   // ── Safety: validate & sanitise all inputs before any provider work ────────
   const safe = NodeSafetyService.assertImageInputs(inputs, nodeId);
   const started = Date.now();
-
-  logV2Event({
-    traceId,
-    operation: `node.imageGeneration:${nodeId}`,
-    durationMs: 0,
-    status: "success",
-    message: `Starting image generation for node ${nodeId}`,
-  });
 
   const modelFamily = safe.model;
   if (!modelFamily) {
@@ -52,13 +43,6 @@ export async function executeImageGeneration(inputs, ctx) {
   ];
 
   const durationMs = Date.now() - started;
-  logV2Event({
-    traceId,
-    operation: `node.imageGeneration:${nodeId}`,
-    durationMs,
-    status: "success",
-    message: `Image generation completed — 1 asset via ${modelFamily}`,
-  });
 
   return {
     assets,

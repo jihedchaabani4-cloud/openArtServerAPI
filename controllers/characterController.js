@@ -1,5 +1,8 @@
 import { characterService, useCaseService } from "../src/container.js";
 import { randomUUID } from "node:crypto";
+import { createLogger, LogEvents } from "../src/infrastructure/logging/index.js";
+
+const controllerLogger = createLogger("controller");
 
 /**
  * POST /api/characters/create & POST /api/characters
@@ -54,7 +57,7 @@ export async function createCharacter(req, res) {
         let creditErrorMsg = null;
 
         try {
-            console.log(`💳 [characterController] Preparing character "${characterId}" (UseCase: character-sheet-v1)...`);
+            controllerLogger.debug({ characterId, useCase: "character-sheet-v1" }, `Preparing character "${characterId}" (UseCase: character-sheet-v1)`);
             const prepared = await useCaseService.prepareAndEnqueue({
                 useCaseId: "character-sheet-v1",
                 input: runtimeInput,
@@ -63,9 +66,9 @@ export async function createCharacter(req, res) {
                 traceId: characterId,
             });
             taskId = prepared.executionId || prepared.workflowRunId || characterId;
-            console.log(`📤 [characterController] Prepared and enqueued UseCase job "${prepared.jobId}" for character "${characterId}".`);
+            controllerLogger.info({ taskId, characterId }, `Prepared and enqueued UseCase job "${prepared.jobId}" for character "${characterId}"`);
         } catch (creditErr) {
-            console.warn(`⚠️ [characterController] Prepare/enqueue notice for character ${characterId}:`, creditErr.message);
+            controllerLogger.warn({ characterId, err: creditErr }, `Prepare/enqueue notice for character ${characterId}: ${creditErr.message}`);
             hasSufficientCredits = false;
             creditErrorMsg = creditErr.message;
         }
@@ -87,7 +90,7 @@ export async function createCharacter(req, res) {
         });
 
     } catch (err) {
-        console.error(`❌ [characterController] createCharacter error:`, err);
+        controllerLogger.error({ err }, `createCharacter error: ${err.message}`);
         return res.status(500).json({ ok: false, message: err.message });
     }
 }
@@ -143,7 +146,7 @@ export async function generateCharacterSheet(req, res) {
             width: 1344,
             height: 768,
         }).catch((mediaErr) => {
-            console.warn(`⚠️ [characterController] regenerate placeholder notice:`, mediaErr.message);
+            controllerLogger.warn({ characterId, err: mediaErr }, `regenerate placeholder notice: ${mediaErr.message}`);
             return null;
         });
 
@@ -165,7 +168,7 @@ export async function generateCharacterSheet(req, res) {
             project_id: targetProjectId,
         });
     } catch (err) {
-        console.error(`❌ [characterController] generateCharacterSheet error:`, err);
+        controllerLogger.error({ characterId: req.params?.characterId, err }, `generateCharacterSheet error: ${err.message}`);
         const statusCode = err.statusCode || (err.code === "INSUFFICIENT_CREDITS" ? 402 : 500);
         return res.status(statusCode).json({ ok: false, message: err.message });
     }
@@ -180,7 +183,7 @@ export async function generateCharacterDescription(req, res) {
         const result = await characterService.generateDescription({ concept, archetype, style });
         res.json({ ok: true, ...result });
     } catch (err) {
-        console.error(`❌ [characterController] generateCharacterDescription error:`, err);
+        controllerLogger.error({ err }, `generateCharacterDescription error: ${err.message}`);
         res.status(500).json({ ok: false, message: err.message });
     }
 }
@@ -195,7 +198,7 @@ export async function updateCharacter(req, res) {
         const result = await characterService.updateCharacter({ characterId, updates: req.body, userId });
         res.json({ ok: true, ...result });
     } catch (err) {
-        console.error(`❌ [characterController] updateCharacter error:`, err);
+        controllerLogger.error({ characterId: req.params?.characterId, err }, `updateCharacter error: ${err.message}`);
         res.status(500).json({ ok: false, message: err.message });
     }
 }
@@ -210,7 +213,7 @@ export async function deleteCharacter(req, res) {
         const result = await characterService.deleteCharacter({ characterId, userId, req });
         res.json({ ok: true, ...result });
     } catch (err) {
-        console.error(`❌ [characterController] deleteCharacter error:`, err);
+        controllerLogger.error({ characterId: req.params?.characterId, err }, `deleteCharacter error: ${err.message}`);
         res.status(500).json({ ok: false, message: err.message });
     }
 }
@@ -226,7 +229,7 @@ export async function addMediaToCharacter(req, res) {
         const result = await characterService.addMediaToCharacter({ characterId, mediaId, imageUrl, projectId, userId });
         res.json({ ok: true, ...result });
     } catch (err) {
-        console.error(`❌ [characterController] addMediaToCharacter error:`, err);
+        controllerLogger.error({ characterId: req.params?.characterId, err }, `addMediaToCharacter error: ${err.message}`);
         res.status(500).json({ ok: false, message: err.message });
     }
 }
@@ -241,7 +244,7 @@ export async function removeMediaFromCharacter(req, res) {
         const result = await characterService.removeMediaFromCharacter({ characterId, mediaId, userId });
         res.json({ ok: true, ...result });
     } catch (err) {
-        console.error(`❌ [characterController] removeMediaFromCharacter error:`, err);
+        controllerLogger.error({ characterId: req.params?.characterId, err }, `removeMediaFromCharacter error: ${err.message}`);
         res.status(500).json({ ok: false, message: err.message });
     }
 }

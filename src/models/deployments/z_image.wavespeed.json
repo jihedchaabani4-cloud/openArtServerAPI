@@ -4,7 +4,7 @@
   "modelFamily": "z_image",
   "provider": "wavespeed",
   "status": "active",
-  "providerModelId": "z-image/turbo",
+  "providerModelId": "wavespeed-ai/z-image/turbo",
   "providerModelVersion": "v1.0.0",
   "versionPolicy": "pinned",
   "operations": {

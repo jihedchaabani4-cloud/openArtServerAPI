@@ -5,7 +5,6 @@ prompt-builder:
     references: { type: array, default: [] }
     characters: { type: array, default: [] }
     style: { type: string }
-    source_asset: { type: object }           # ← NEW: for edit workflows
   outputs:
     finalPrompt: { type: string }
     context: { type: WorkflowContext }
@@ -28,55 +27,10 @@ image-generation:
     assets: { type: array }
     metadata: { type: object }
   retry:
-    max_attempts: 2
-    backoff: linear
-    fallback_provider: fal
+    max_attempts: 1
+    backoff: none
 
-video-generation:
-  skill_aware: false
-  inputs:
-    prompt: { type: string, required: true }
-    startFrame: { type: object }
-    references: { type: array, default: [] }
-    duration: { type: number, default: 5 }
-    fps: { type: number, default: 24 }
-  outputs:
-    asset: { type: object }
-    metadata: { type: object }
-  retry:
-    max_attempts: 3
-    backoff: exponential
-    fallback_provider: runway
 
-upscale:
-  skill_aware: false
-  inputs:
-    asset: { type: object, required: true }
-    factor: { type: number, default: 2 }
-  outputs:
-    enhancedAsset: { type: object }
-  retry:
-    max_attempts: 2
-    backoff: linear
-
-media-transform:
-  skill_aware: false
-  inputs:
-    prompt: { type: string, required: true }
-    source_asset: { type: object, required: true }   # ← image/video à modifier
-    references: { type: array, default: [] }
-    mode: { type: string, required: true }            # image_edit | video_to_video | image_variation | image_to_image
-    model: { type: string }
-    strength: { type: number, default: 0.75 }
-    width: { type: number }
-    height: { type: number }
-  outputs:
-    asset: { type: object }
-    metadata: { type: object }
-  retry:
-    max_attempts: 2
-    backoff: linear
-    fallback_provider: fal
 
 llm:
   skill_aware: true
@@ -84,7 +38,7 @@ llm:
     skills: { type: array, required: true }
     userPrompt: { type: string, required: true }
     images: { type: array, default: [] }
-    model: { type: string }
+    model: { type: string, default: "gemini-2-0-flash" }
     temperature: { type: number, default: 0.7 }
     jsonMode: { type: boolean, default: false }
     schema: { type: object }
@@ -98,5 +52,5 @@ llm:
     provider: { type: string }
     skillsUsed: { type: array }
   retry:
-    max_attempts: 2
-    backoff: linear
+    max_attempts: 1
+    backoff: none

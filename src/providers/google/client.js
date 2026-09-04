@@ -5,6 +5,9 @@ import {
   ProviderContentPolicyError,
   ProviderMalformedResponseError,
 } from "../../models/errors/index.js";
+import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";
+
+const providerLogger = createLogger("provider");
 
 export class GoogleClient {
   constructor({ baseUrl, apiKey, credential, timeoutMs = 60000 } = {}) {
@@ -34,7 +37,13 @@ export class GoogleClient {
       };
     }
 
-    const modelName = providerModelId || "gemini-2.0-flash";
+    const modelName = providerModelId || "gemini-3.5-flash";
+    const started = Date.now();
+
+    providerLogger.info(
+      { provider: "google", model: modelName, operation, event: LogEvents.PROVIDER_REQUEST_STARTED },
+      `Google request started: ${modelName} (${operation || "call"})`
+    );
 
     try {
       // Execute via official Google Gen AI SDK
@@ -44,13 +53,26 @@ export class GoogleClient {
         config: payload.config || payload.generationConfig,
       });
 
+      const durationMs = Date.now() - started;
+      providerLogger.info(
+        { provider: "google", model: modelName, operation, durationMs, event: LogEvents.PROVIDER_REQUEST_COMPLETED },
+        `Google request completed in ${durationMs}ms`
+      );
+
       return {
         text: response.text || "",
         candidates: response.candidates,
         usageMetadata: response.usageMetadata,
       };
     } catch (err) {
+      const durationMs = Date.now() - started;
       const msg = err.message || String(err);
+
+      providerLogger.error(
+        { provider: "google", model: modelName, operation, durationMs, err, event: LogEvents.PROVIDER_REQUEST_FAILED },
+        `Google request failed in ${durationMs}ms: ${msg}`
+      );
+
       if (err.name === "AbortError" || msg.includes("timeout") || msg.includes("DEADLINE_EXCEEDED")) {
         throw new ProviderTransientError(`Google AI request timed out: ${msg}`);
       }

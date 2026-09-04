@@ -1,19 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { db, jobQueueService, useCaseService } from "../src/container.js";
+import { db, useCaseService } from "../src/container.js";
+import { createLogger, LogEvents } from "../src/infrastructure/logging/index.js";
 
-/** Maps an aspect-ratio string to pixel dimensions (1344 long-edge baseline). */
-function ratioDimensions(ratio = "1:1") {
-    const MAP = {
-        "1:1":  { width: 1024, height: 1024 },
-        "16:9": { width: 1344, height: 768  },
-        "9:16": { width: 768,  height: 1344 },
-        "4:3":  { width: 1152, height: 864  },
-        "3:4":  { width: 864,  height: 1152 },
-        "3:2":  { width: 1152, height: 768  },
-        "2:3":  { width: 768,  height: 1152 },
-    };
-    return MAP[ratio] || MAP["1:1"];
-}
+const controllerLogger = createLogger("controller");
+
+
 
 /**
  * POST /api/images/generated
@@ -27,7 +18,7 @@ function ratioDimensions(ratio = "1:1") {
  */
 export async function generateImage(req, res) {
     try {
-        const { prompt, references = [], ratio, width, height, model, model_name, quality, resolution, count, num_images } = req.body;
+        const { prompt, references = [], ratio, model, quality, count } = req.body;
         const projectId  = req.body.project_id  || req.body.projectId  || null;
         const sessionId  = req.body.session_id  || req.body.sessionId  || null;
 
@@ -38,7 +29,7 @@ export async function generateImage(req, res) {
             return res.status(400).json({ ok: false, message: "project_id is required" });
         }
 
-        const chosenModel  = (model || model_name || "").trim();
+        const chosenModel  = (model || req.body.model_name || "").trim();
         if (!chosenModel) {
             return res.status(400).json({ ok: false, message: "model is required" });
         }
@@ -56,23 +47,36 @@ export async function generateImage(req, res) {
             workflow_type: "GENERATION",
         });
 
-        console.log(`✅ [imageController] Workflow created: ${workflowId}`);
+        controllerLogger.info({ workflowId, projectId }, `Workflow created: ${workflowId}`);
 
-        // ── 2. Create Media placeholder (status: processing) ─────────────────
+        // ── 2. Calculate placeholder dimensions safely ───────────────────────
+        let placeholderWidth = 1024;
+        let placeholderHeight = 1024;
+
+        switch (String(ratio || "").trim()) {
+            case "16:9": placeholderWidth = 1344; placeholderHeight = 768; break;
+            case "9:16": placeholderWidth = 768; placeholderHeight = 1344; break;
+            case "4:3":  placeholderWidth = 1152; placeholderHeight = 864; break;
+            case "3:4":  placeholderWidth = 864; placeholderHeight = 1152; break;
+            case "21:9": placeholderWidth = 1536; placeholderHeight = 640; break;
+            case "1:1":
+            default:     placeholderWidth = 1024; placeholderHeight = 1024; break;
+        }
+
         const media = await db.media.createMedia({
             id:          mediaId,
             workflow_id: workflowId,
             project_id:  projectId,
             step_id:     "image_generation",
             url:         null,
-            width:       width ? Number(width) : null,
-            height:      height ? Number(height) : null,
+            width:       placeholderWidth,
+            height:      placeholderHeight,
             status:      "processing",
         });
 
-        console.log(`✅ [imageController] Media placeholder created: ${mediaId}`);
+        controllerLogger.info({ mediaId, workflowId }, `Media placeholder created: ${mediaId}`);
 
-        // ── 3. Prepare UseCase runtime input (dynamic parameters) ────────────
+        // ── 3. Prepare UseCase runtime input ─────────────────────────────────
         const runtimeInput = {
             prompt:      prompt.trim(),
             references:  Array.isArray(references) ? references : [],
@@ -81,11 +85,11 @@ export async function generateImage(req, res) {
             workflow_id: workflowId,
         };
 
-        if (ratio !== undefined && ratio !== null) runtimeInput.ratio = ratio;
-        if (width !== undefined && width !== null) runtimeInput.width = Number(width);
-        if (height !== undefined && height !== null) runtimeInput.height = Number(height);
-        if (quality !== undefined || resolution !== undefined) runtimeInput.quality = quality || resolution;
-        if (count !== undefined || num_images !== undefined) runtimeInput.count = Number(count || num_images);
+        if (ratio) runtimeInput.ratio = ratio;
+        const rawQuality = quality || req.body.resolution;
+        if (rawQuality) runtimeInput.quality = String(rawQuality).trim().toLowerCase();
+        const rawCount = count || req.body.num_images;
+        if (rawCount) runtimeInput.count = Number(rawCount);
 
         // ── 4. Credit reservation & Redis job dispatch (Upfront Hold) ───────
         let taskId = null;
@@ -94,7 +98,7 @@ export async function generateImage(req, res) {
         let calculatedCost = null;
 
         try {
-            console.log(`💳 [imageController] Preparing & reserving credits (UseCase: image-generation-v1)...`);
+            controllerLogger.debug({ workflowId, useCase: "image-generation-v1" }, "Preparing & reserving credits (UseCase: image-generation-v1)");
             const prepared = await useCaseService.prepareAndEnqueue({
                 useCaseId:   "image-generation-v1",
                 input:       runtimeInput,
@@ -105,10 +109,10 @@ export async function generateImage(req, res) {
 
             taskId = prepared.jobId || prepared.executionId || workflowId;
             calculatedCost = prepared.cost?.totalCredits ?? null;
-            console.log(`✅ [imageController] Reserved ${calculatedCost} credits & enqueued job "${taskId}".`);
+            controllerLogger.info({ calculatedCost, taskId }, `Reserved ${calculatedCost} credits & enqueued job "${taskId}"`);
 
         } catch (creditErr) {
-            console.warn(`⚠️ [imageController] Prepare/enqueue failed:`, creditErr.message);
+            controllerLogger.warn({ workflowId, err: creditErr }, `Prepare/enqueue failed: ${creditErr.message}`);
             hasSufficientCredits = false;
             creditErrorMsg = creditErr.message;
         }
@@ -131,7 +135,7 @@ export async function generateImage(req, res) {
         });
 
     } catch (err) {
-        console.error(`❌ [imageController] generateImage error:`, err);
+        controllerLogger.error({ err }, `generateImage error: ${err.message}`);
         return res.status(500).json({ ok: false, message: err.message });
     }
 }

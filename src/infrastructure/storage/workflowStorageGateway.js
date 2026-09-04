@@ -1,4 +1,7 @@
 import { MediaWorkflowLifecycleService } from "#platform/media/MediaLifecycleService.js";
+import { createLogger } from "../logging/index.js";
+
+const storageLogger = createLogger("storage");
 
 /**
  * Thin adapter over MediaWorkflowLifecycleService for legacy gateway callers.
@@ -63,16 +66,10 @@ export class WorkflowStorageGateway {
           return null;
         }
 
-        const isEdit =
-          nodeType === "media-transform" || (input && input.source_asset);
         const stepId =
-          nodeType === "media-transform"
-            ? "EDIT"
-            : nodeType === "video-generation"
-              ? "VID"
-              : nodeType === "upscale"
-                ? "UPSCALE"
-                : "GEN";
+          workflowId === "character-sheet-v1" || input?.type === "character"
+            ? "character_sheet"
+            : "GEN";
         const displayName = `${workflowId} – ${runId.slice(0, 8)}`;
         const projectId = await this.lifecycle.resolveProjectId(userId, input);
         const sessionId = input.session_id || input.sessionId || null;
@@ -80,7 +77,7 @@ export class WorkflowStorageGateway {
           prompt: input?.prompt || "",
           model: input?.model || asset.metadata?.model || "unknown",
           aspect_ratio: this.lifecycle.getAspectRatio(asset.width, asset.height),
-          generation_type: isEdit ? "IMAGE_TO_IMAGE" : "TEXT_ONLY",
+          generation_type: "TEXT_ONLY",
         };
 
         const derivedWorkflowType =
@@ -103,8 +100,9 @@ export class WorkflowStorageGateway {
           stepId,
         });
 
-        console.log(
-          `[WorkflowStorageGateway] Persisted V1 workflow=${workflow.id} media=${media.id}`
+        storageLogger.info(
+          { workflowId: workflow.id, mediaId: media.id },
+          `Persisted V1 workflow=${workflow.id} media=${media.id}`
         );
         return {
           ...result,
@@ -113,7 +111,7 @@ export class WorkflowStorageGateway {
           v1MediaId: media.id,
         };
       } catch (err) {
-        console.error("[WorkflowStorageGateway] V1 persistence failed:", err);
+        storageLogger.error({ err }, `V1 persistence failed: ${err.message}`);
       }
     }
 

@@ -4,7 +4,7 @@
   "modelFamily": "gpt-image-2",
   "provider": "wavespeed",
   "status": "active",
-  "providerModelId": "openai/gpt-image-2",
+  "providerModelId": "openai/gpt-image-2/text-to-image",
   "providerModelVersion": "v1.0.0",
   "versionPolicy": "pinned",
   "operations": {

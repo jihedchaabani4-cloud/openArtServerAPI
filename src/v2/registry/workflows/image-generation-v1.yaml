@@ -11,16 +11,14 @@ metadata:
 input_schema:
   required: [prompt]
   properties:
-    prompt:      { type: string }
-    references:  { type: array }
-    workflow_id: { type: string }
-    project_id:  { type: string }
-    width:       { type: number }
-    height:      { type: number }
-    ratio:       { type: string }
-    model:       { type: string }
-    quality:     { type: string }
-    count:       { type: number }
+    prompt:     { type: string }
+    references: { type: array }
+    width:      { type: number }
+    height:     { type: number }
+    ratio:      { type: string }
+    model:      { type: string }
+    quality:    { type: string }
+    count:      { type: number }
 
 nodes:
   llm_translate:
@@ -28,6 +26,7 @@ nodes:
     inputs:
       userPrompt: "${input.prompt}"
     config:
+      model: gemini-2-0-flash
       skills: [llm/system-safety, llm/translate, llm/json-output]
       jsonMode: true
 
@@ -43,7 +42,7 @@ nodes:
     depends_on: [build_prompt]
     inputs:
       prompt:     "${build_prompt.output.finalPrompt}"
-      references: "${build_prompt.output.context.imageUrls}"
+      references: "${build_prompt.output.context.references}"
       width:      "${input.width}"
       height:     "${input.height}"
       ratio:      "${input.ratio}"

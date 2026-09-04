@@ -1,10 +1,9 @@
 import { registerUseCase, clearUseCaseRegistry } from "./useCaseRegistry.js";
 import { characterSheetUseCase } from "./definitions/characterSheet.js";
 import { imageGenerationUseCase } from "./definitions/imageGeneration.js";
-import { videoGenerationUseCase } from "./definitions/videoGeneration.js";
-import { imageEditUseCase } from "./definitions/imageEdit.js";
-import { videoEditUseCase } from "./definitions/videoEdit.js";
-import { upscaleUseCase } from "./definitions/upscale.js";
+import { createLogger } from "../infrastructure/logging/index.js";
+
+const systemLogger = createLogger("system");
 
 /**
  * Registers all active Use Cases into the global registry.
@@ -15,18 +14,15 @@ export function registerAllUseCases() {
   const useCases = [
     characterSheetUseCase,
     imageGenerationUseCase,
-    videoGenerationUseCase,
-    imageEditUseCase,
-    videoEditUseCase,
-    upscaleUseCase,
   ];
 
   for (const uc of useCases) {
     try {
       registerUseCase(uc);
-      console.log(`[UseCaseRegistry] Registered Use Case: ${uc.useCaseId}`);
+      systemLogger.debug({ useCaseId: uc.useCaseId }, `Registered Use Case: ${uc.useCaseId}`);
     } catch (err) {
-      console.error(`[UseCaseRegistry] Failed to register Use Case "${uc.useCaseId}":`, err.message);
+      systemLogger.error({ useCaseId: uc.useCaseId, err }, `Failed to register Use Case "${uc.useCaseId}": ${err.message}`);
     }
   }
 }
+

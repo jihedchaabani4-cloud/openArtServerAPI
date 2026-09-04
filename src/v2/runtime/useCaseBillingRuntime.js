@@ -37,30 +37,51 @@ export class UseCaseBillingRuntime {
     const gateway = this.billingGateway;
     const result = gateway
       ? await gateway.reserve({ userId, amount, referenceId, metadata })
-      : await this.walletService?.hold({ userId, amount, referenceId, metadata });
+      : (this.walletService?.reserve
+          ? await this.walletService.reserve({ userId, amount, referenceId, metadata })
+          : await this.walletService?.hold({ userId, amount, referenceId, metadata }));
 
     return {
       billingStatus: BILLING_STATUS.RESERVED,
       billingHoldId: referenceId,
       referenceId,
       reservedCredits: amount,
+      reservation: result,
       transaction: result,
     };
   }
 
-  async settleUseCase(referenceId) {
+  async settleUseCase(reservationOrRef, extraMetadata = null) {
+    if (!reservationOrRef) return { billingStatus: BILLING_STATUS.NOT_REQUIRED };
+    const referenceId = typeof reservationOrRef === "string" ? reservationOrRef : reservationOrRef.referenceId;
     if (!referenceId) return { billingStatus: BILLING_STATUS.NOT_REQUIRED };
-    const result = this.billingGateway
-      ? await this.billingGateway.settle(referenceId)
-      : await this.walletService?.commitHoldIdempotent?.(referenceId) || await this.walletService?.commit?.(referenceId);
+
+    let result;
+    if (this.billingGateway) {
+      result = await this.billingGateway.settle(reservationOrRef);
+    } else if (typeof reservationOrRef === "object" && typeof this.walletService?.settle === "function") {
+      result = await this.walletService.settle(reservationOrRef, extraMetadata);
+    } else {
+      result = await this.walletService?.commitHoldIdempotent?.(referenceId, extraMetadata) || await this.walletService?.commit?.(referenceId, extraMetadata);
+    }
+
     return { billingStatus: BILLING_STATUS.SETTLED, referenceId, transaction: result };
   }
 
-  async rollbackUseCase(referenceId) {
+  async rollbackUseCase(reservationOrRef, extraMetadata = null) {
+    if (!reservationOrRef) return { billingStatus: BILLING_STATUS.NOT_REQUIRED };
+    const referenceId = typeof reservationOrRef === "string" ? reservationOrRef : reservationOrRef.referenceId;
     if (!referenceId) return { billingStatus: BILLING_STATUS.NOT_REQUIRED };
-    const result = this.billingGateway
-      ? await this.billingGateway.rollback(referenceId)
-      : await this.walletService?.rollback?.(referenceId);
+
+    let result;
+    if (this.billingGateway) {
+      result = await this.billingGateway.rollback(reservationOrRef);
+    } else if (typeof reservationOrRef === "object" && typeof this.walletService?.release === "function") {
+      result = await this.walletService.release(reservationOrRef, extraMetadata);
+    } else {
+      result = await this.walletService?.rollback?.(referenceId, extraMetadata);
+    }
+
     return { billingStatus: BILLING_STATUS.REFUNDED, referenceId, transaction: result };
   }
 }

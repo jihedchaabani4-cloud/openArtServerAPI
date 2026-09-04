@@ -4,5 +4,40 @@
   "displayName": "NanoBanana Pro",
   "description": "Maximum quality — 4K, advanced reasoning, typography",
   "iconUrl": "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/minimax.svg",
-  "badge": "PREMIUM"
+  "badge": "PREMIUM",
+  "operations": {
+    "text_to_image": {
+      "schemaVersion": "2026-09-v1",
+      "inputs": {
+        "prompt": {
+          "ref": "prompt",
+          "required": true,
+          "max_length": 2000
+        },
+        "resolution": {
+          "ref": "resolution",
+          "required": false,
+          "values": ["1k", "2k", "4k"],
+          "default": "1k"
+        },
+        "aspect_ratio": {
+          "ref": "aspect_ratio",
+          "required": false,
+          "values": ["1:1", "16:9", "9:16"],
+          "default": "1:1"
+        },
+        "quality": {
+          "ref": "quality",
+          "required": false,
+          "values": ["standard", "hd"],
+          "default": "standard"
+        },
+        "prompt_enhancer": {
+          "ref": "prompt_enhancer",
+          "required": false,
+          "default": false
+        }
+      }
+    }
+  }
 }

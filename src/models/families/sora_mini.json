@@ -1,0 +1,38 @@
+{
+  "id": "sora_mini",
+  "domain": "video",
+  "displayName": "Sora Mini",
+  "description": "Fast video generation model",
+  "badge": "NEW",
+  "operations": {
+    "text_to_video": {
+      "schemaVersion": "2026-09-v1",
+      "inputs": {
+        "prompt": {
+          "ref": "prompt",
+          "required": true,
+          "max_length": 1500
+        },
+        "duration": {
+          "ref": "duration",
+          "required": false,
+          "min": 1,
+          "max": 10,
+          "default": 5
+        },
+        "resolution": {
+          "ref": "resolution",
+          "required": false,
+          "values": ["720p", "1080p"],
+          "default": "720p"
+        },
+        "fps": {
+          "ref": "fps",
+          "required": false,
+          "values": ["24", "60"],
+          "default": "24"
+        }
+      }
+    }
+  }
+}

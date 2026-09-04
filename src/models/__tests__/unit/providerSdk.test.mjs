@@ -300,7 +300,7 @@ describe("Provider SDK Layer & Dynamic API SDK Generator", () => {
       assert.equal(res.content, "Gemini 2.0 Flash response content");
       assert.equal(res.text, "Gemini 2.0 Flash response content");
       assert.equal(res.metadata.providerUsed, "google");
-      assert.equal(res.metadata.providerModelId, "gemini-2.0-flash");
+      assert.equal(res.metadata.providerModelId, "gemini-3.6-flash");
     });
   });
 });

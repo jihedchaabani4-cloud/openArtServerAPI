@@ -296,7 +296,7 @@ describe("PromptService Unit Tests", () => {
       const mockSdkClient = {
         models: {
           generateContent: async ({ model, contents }) => {
-            assert.equal(model, "gemini-2.0-flash");
+            assert.equal(model, "gemini-3.6-flash");
             return {
               text: "A cinematic hyper-realistic rendering of a desert citadel at dusk.",
             };

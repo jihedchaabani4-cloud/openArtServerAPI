@@ -7,7 +7,7 @@ describe("LLMService Integration with Models Management System", () => {
     const mockSdkClient = {
       models: {
         generateContent: async ({ model, contents }) => {
-          assert.equal(model, "gemini-2.0-flash");
+          assert.equal(model, "gemini-3.6-flash");
           return {
             text: "This is a prompt enhancement from Gemini 2.0 Flash.",
           };
@@ -25,7 +25,7 @@ describe("LLMService Integration with Models Management System", () => {
 
     assert.ok(response);
     assert.equal(response.raw, "This is a prompt enhancement from Gemini 2.0 Flash.");
-    assert.equal(response.model, "gemini-2.0-flash");
+    assert.equal(response.model, "gemini-3.6-flash");
   });
 
   it("should parse JSON output in jsonMode", async () => {

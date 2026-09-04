@@ -8,21 +8,23 @@ export class PromptService {
         this.modelFamily = "gemini-2-0-flash";
     }
 
-    async complete({ systemPrompt, userPrompt, temperature = 0.7 }) {
+    async complete({ systemPrompt, userPrompt, temperature = 0.7, options = {} }) {
         return llmService.generateText({
             prompt: userPrompt,
             systemInstruction: systemPrompt,
             temperature,
             model: this.modelFamily,
+            options,
         });
     }
 
-    async completeJSON({ systemPrompt, userPrompt, temperature = 0.7 }) {
+    async completeJSON({ systemPrompt, userPrompt, temperature = 0.7, options = {} }) {
         return llmService.generateJSON({
             prompt: userPrompt,
             systemInstruction: systemPrompt,
             temperature,
             model: this.modelFamily,
+            options,
         });
     }
 

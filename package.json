@@ -23,7 +23,7 @@
         "#container.js": "./src/container.js"
     },
     "scripts": {
-        "test": "node --test src/models/__tests__/**/*.test.mjs",
+        "test": "node --test src/models/__tests__/**/*.test.mjs tests/**/*.test.mjs",
         "start": "node index.js",
         "start:worker": "node src/workers/worker.js",
         "start:v2-worker": "node src/v2/queue/v2WorkflowWorker.js",

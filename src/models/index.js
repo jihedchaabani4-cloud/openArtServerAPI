@@ -11,8 +11,8 @@ import {
   getModel,
   reloadRegistry,
 } from "./registry/modelRegistry.js";
-import { validateCanonicalInput } from "./registry/schemaValidator.js";
-import { calculateRetailCredits } from "./execution/pricingCalculator.js";
+import { validateCanonicalInput } from "./schema/schemaValidator.js";
+import { calculateRetailCredits } from "./pricing/pricingEngine.js";
 import { run as runInternal } from "./execution/modelRunner.js";
 import { createLogger, LogEvents } from "../infrastructure/logging/index.js";
 
@@ -121,7 +121,7 @@ export function validateInput(modelFamily, operation, rawInput = {}) {
     throw new Error(`Operation "${operation}" not supported for model "${modelFamily}"`);
   }
 
-  return validateCanonicalInput(opDef.canonicalInputs || {}, rawInput);
+  return validateCanonicalInput(opDef, rawInput);
 }
 
 // --- calculateCost ------------------------------------------------------------

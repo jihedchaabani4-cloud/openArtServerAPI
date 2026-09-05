@@ -1,13 +1,14 @@
 import { getModel, getProvider } from "../registry/modelRegistry.js";
-import { validateCanonicalInput } from "../registry/schemaValidator.js";
+import { validateCanonicalInput } from "../schema/schemaValidator.js";
 import { selectBinding } from "../registry/bindingSelector.js";
-import { mapToProviderPayload, mapFromProviderResponse } from "../registry/parameterMapper.js";
-import { calculateRetailCredits, calculateWholesaleCostUsd, calculateMargin } from "./pricingCalculator.js";
+import { mapToProviderPayload, mapFromProviderResponse } from "../mapping/parameterMapper.js";
+import { validateOutput } from "../mapping/outputValidator.js";
+import { calculateRetailCredits, calculateWholesaleCostUsd, calculateMargin } from "../pricing/pricingEngine.js";
 import { circuitBreakerRegistry } from "./circuitBreaker.js";
 import { normalizeError } from "./errorNormalizer.js";
-import { executeProviderSdk } from "../clients/sdk/providerSdkDispatcher.js";
-import { readSseStream } from "../clients/sseStreamReader.js";
-import { getCustomAdapter } from "../clients/customAdapterRunner.js";
+import { executeProvider } from "../runtime/providerRuntimeRegistry.js";
+import { readSseStream } from "../runtime/sseStreamReader.js";
+import { getCustomAdapter } from "../runtime/adapters/adapterLoader.js";
 import { resolveCredential } from "../credentials/credentialResolver.js";
 import { walletService as defaultWalletService } from "../../services/walletService.js";
 import { idempotencyStore as defaultIdempotencyStore } from "./idempotencyStore.js";
@@ -56,7 +57,7 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
   }
 
   // 3. Validate Canonical Input
-  const cleanInput = validateCanonicalInput(opDef.canonicalInputs || {}, rawInput, {
+  const cleanInput = validateCanonicalInput(opDef, rawInput, {
     allowUnknown: options.allowUnknown || false,
   });
 
@@ -162,7 +163,7 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
           onChunk: options.onStreamChunk,
         });
       } else {
-        rawResponse = await executeProviderSdk({
+        rawResponse = await executeProvider({
           provider,
           binding,
           payload: providerPayload,
@@ -201,6 +202,17 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
       throw lastErr;
     }
 
+    // Normalize Output
+    let normalizedOutput;
+    if (customAdapter && typeof customAdapter.fromProviderResponse === "function") {
+      normalizedOutput = customAdapter.fromProviderResponse(rawResponse, binding);
+    } else {
+      normalizedOutput = mapFromProviderResponse(rawResponse, binding);
+    }
+
+    // Output Contract Validation (fail-fast before wallet commit)
+    validateOutput(normalizedOutput, binding, model.domain);
+
     // Circuit Breaker Success
     circuitBreakerRegistry.recordSuccess(bindingId);
 
@@ -210,14 +222,6 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
         creditsCharged: creditsRequired,
         generationId,
       });
-    }
-
-    // Normalize Output
-    let normalizedOutput;
-    if (customAdapter && typeof customAdapter.fromProviderResponse === "function") {
-      normalizedOutput = customAdapter.fromProviderResponse(rawResponse, binding);
-    } else {
-      normalizedOutput = mapFromProviderResponse(rawResponse, binding);
     }
 
     const durationMs = Date.now() - startTime;

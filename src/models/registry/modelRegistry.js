@@ -211,34 +211,7 @@ export function getProvider(providerId) {
   return provider;
 }
 
-export function getBindings(modelId, operation) {
-  const { bindingIndex, models } = getRegistry();
-  const model =
-    models.get(modelId) ||
-    models.get(typeof modelId === "string" ? modelId.replace(/-/g, "_") : null) ||
-    models.get(typeof modelId === "string" ? modelId.replace(/_/g, "-") : null);
-
-  if (!model) {
-    throw new UnknownModelFamilyError(modelId);
-  }
-  if (!model.operations || !model.operations[operation]) {
-    throw new UnknownOperationError(model.id, operation);
-  }
-  const indexKey = `${model.id}:${operation}`;
-  return bindingIndex.get(indexKey) || [];
-}
-
-export function getBinding(modelId, operation, providerId) {
-  const { bindings, models } = getRegistry();
-  const model =
-    models.get(modelId) ||
-    models.get(typeof modelId === "string" ? modelId.replace(/-/g, "_") : null) ||
-    models.get(typeof modelId === "string" ? modelId.replace(/_/g, "-") : null);
-
-  const actualId = model ? model.id : modelId;
-  const key = `${actualId}:${operation}:${providerId}`;
-  return bindings.get(key) || null;
-}
+export { getBindings, getBinding } from "./bindingRegistry.js";
 
 export function resetRegistry() {
   registryState = {

@@ -39,6 +39,16 @@
       "default": 1.0,
       "description": "Nucleus sampling parameter"
     },
+    "tools": {
+      "type": "array",
+      "required": false,
+      "description": "Declarations of functions/tools the model can call"
+    },
+    "response_format": {
+      "type": "object",
+      "required": false,
+      "description": "Expected response format (e.g. { type: 'json_object' })"
+    },
     "streaming": {
       "type": "boolean",
       "required": false,

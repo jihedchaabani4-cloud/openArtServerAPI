@@ -37,10 +37,25 @@
       "required": false,
       "description": "Random seed for reproducible outputs"
     },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "description": "Main source image URL or base64 being transformed/edited"
+    },
     "image_url": {
       "type": "string",
       "required": false,
-      "description": "Input image URL for image-to-image or editing operations"
+      "description": "Source image URL for image-to-image or editing operations (alias for input_image)"
+    },
+    "reference_images": {
+      "type": "array",
+      "required": false,
+      "description": "Array of reference images used as visual or character guidance"
+    },
+    "mask": {
+      "type": "string",
+      "required": false,
+      "description": "Mask image URL or base64 indicating the inpaint or edit region"
     },
     "strength": {
       "type": "number",

@@ -4,6 +4,7 @@ import {
   ProviderTransientError,
   UnsupportedCapabilityError,
   AllProvidersUnavailableError,
+  OutputContractViolationError,
 } from "../errors/index.js";
 
 export const StandardErrorCodes = Object.freeze({
@@ -13,6 +14,7 @@ export const StandardErrorCodes = Object.freeze({
   INVALID_INPUT_REJECTED_BY_PROVIDER: "INVALID_INPUT_REJECTED_BY_PROVIDER",
   UNSUPPORTED_CAPABILITY: "UNSUPPORTED_CAPABILITY",
   ALL_PROVIDERS_UNAVAILABLE: "ALL_PROVIDERS_UNAVAILABLE",
+  OUTPUT_CONTRACT_VIOLATION: "OUTPUT_CONTRACT_VIOLATION",
   UNKNOWN_PROVIDER_ERROR: "UNKNOWN_PROVIDER_ERROR",
 });
 
@@ -25,10 +27,11 @@ export function normalizeError(err, context = {}) {
   const rawData = err.raw || err.response?.data || null;
 
   // 1. Check if already one of our typed errors
-  if (err instanceof UnsupportedCapabilityError) {
-    return err;
-  }
-  if (err instanceof AllProvidersUnavailableError) {
+  if (
+    err instanceof UnsupportedCapabilityError ||
+    err instanceof AllProvidersUnavailableError ||
+    err instanceof OutputContractViolationError
+  ) {
     return err;
   }
 

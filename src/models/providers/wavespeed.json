@@ -1,9 +1,11 @@
 {
+  "schemaVersion": "2.0",
   "id": "wavespeed",
   "displayName": "WaveSpeed AI",
   "baseUrl": "https://api.wavespeed.ai",
   "authType": "bearer",
   "authHeader": "Authorization",
+  "runtime": "sdk",
   "clientType": "sdk",
   "defaultTimeoutMs": 30000
 }

@@ -6,11 +6,10 @@ import { validateOutput } from "../mapping/outputValidator.js";
 import { calculateRetailCredits, calculateWholesaleCostUsd, calculateMargin } from "../pricing/pricingEngine.js";
 import { circuitBreakerRegistry } from "./circuitBreaker.js";
 import { normalizeError } from "./errorNormalizer.js";
-import { executeProvider } from "../runtime/providerRuntimeRegistry.js";
-import { readSseStream } from "../runtime/sseStreamReader.js";
+import { defaultRuntimeExecutor } from "./runtimeExecutor.js";
 import { getCustomAdapter } from "../runtime/adapters/adapterLoader.js";
 import { resolveCredential } from "../credentials/credentialResolver.js";
-import { walletService as defaultWalletService } from "../../services/walletService.js";
+import { BillingBridge, defaultBillingBridge } from "./billingBridge.js";
 import { idempotencyStore as defaultIdempotencyStore } from "./idempotencyStore.js";
 import { MissingUserIdError } from "../errors/index.js";
 import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";
@@ -18,9 +17,10 @@ import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";
 const logger = createLogger("models");
 
 /**
- * Universal Model Runner
- * Coordinates validation, pricing, two-phase wallet holds, binding routing,
- * payload translation, execution, circuit breaker tracking, and telemetry.
+ * Universal Model Runner (Freeze V2 — Lean Orchestrator)
+ *
+ * Coordinates validation, pricing resolution, wallet holds, binding routing,
+ * payload translation, execution, output validation, and telemetry.
  */
 export async function run(modelId, operation, rawInput = {}, options = {}) {
   const startTime = Date.now();
@@ -29,9 +29,11 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
   const noCharge = Boolean(options.noCharge);
   const noChargeReason = options.reason || options.noChargeReason || null;
   const skipWalletHold = Boolean(options.skipWalletHold);
-  const walletService = options.walletService || defaultWalletService;
 
-  // 1. Enforce userId requirement (Task 2)
+  const billing = options.billingBridge || (options.walletService ? new BillingBridge(options.walletService) : defaultBillingBridge);
+  const executor = options.runtimeExecutor || defaultRuntimeExecutor;
+
+  // 1. Enforce userId requirement unless noCharge explicitly granted
   if (!userId && !noCharge) {
     throw new MissingUserIdError("userId is required for model execution unless noCharge is explicitly granted");
   }
@@ -49,70 +51,54 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
     );
   }
 
-  // 2. Resolve Model
+  // 2. Resolve Model & Operation
   const model = options.model || getModel(modelId);
   const opDef = model.operations?.[operation];
   if (!opDef) {
     throw new Error(`Operation "${operation}" not supported for model "${modelId}"`);
   }
 
-  // 3. Validate Canonical Input
+  // 3. Validate Canonical Input (Model Universe & Conditional Rules)
   const cleanInput = validateCanonicalInput(opDef, rawInput, {
     allowUnknown: options.allowUnknown || false,
   });
 
-  // 4. Idempotency Check (Task 5) — return early before any wallet hold or provider call
+  // 4. Idempotency Check — return early before wallet hold or provider call
   const idempotencyKey = options.idempotencyKey || rawInput.idempotencyKey || null;
   const store = options.idempotencyStore || defaultIdempotencyStore;
   if (idempotencyKey && store) {
     const cachedResult = await store.get(idempotencyKey);
     if (cachedResult) {
       logger.info(
-        {
-          event: "models.execution.idempotency_hit",
-          idempotencyKey,
-          modelId,
-          operation,
-        },
+        { event: "models.execution.idempotency_hit", idempotencyKey, modelId, operation },
         `Idempotency cache hit for key "${idempotencyKey}". Returning cached execution result without re-billing.`
       );
       return cachedResult;
     }
   }
 
-  // 5. Evaluate Fixed Retail Pricing
-  const creditsRequired = calculateRetailCredits(model, operation, cleanInput);
-
-  // 6. Two-Phase Wallet Hold (Reservation) — supports skipWalletHold (Task 6)
-  let reservation = null;
-  if (!noCharge && !skipWalletHold && userId && walletService && creditsRequired > 0) {
-    reservation = await walletService.reserve({
-      userId,
-      amount: creditsRequired,
-      model: modelId,
-      operation,
-      pricingVersion: "fixed_retail",
-      referenceId: `res_${generationId}`,
-    });
-    logger.info(
-      { event: LogEvents.WALLET_HOLD_CREATED, userId, amount: creditsRequired, generationId },
-      `Held ${creditsRequired} credits for ${modelId} (${operation})`
-    );
-  }
-
-  // 7. Two-Phase Binding Selection (Capability ➔ Health ➔ Priority)
-  const binding = selectBinding(modelId, operation, cleanInput, {
-    ...options,
-    model,
-  });
+  // 5. Select Binding (Capability Filter -> Health Check -> Priority Sort)
+  const binding = selectBinding(modelId, operation, cleanInput, { ...options, model });
   const provider = getProvider(binding.providerId);
   const bindingId = `${binding.modelId}:${binding.operation}:${binding.providerId}`;
 
-  // 8. Wholesale Margin Evaluation
+  // 6. Pricing Evaluation (Model Retail Price with Binding-level Override support)
+  const creditsRequired = calculateRetailCredits(model, operation, cleanInput, binding);
   const wholesaleCostUsd = calculateWholesaleCostUsd(binding, cleanInput);
   const margin = calculateMargin(creditsRequired, wholesaleCostUsd);
 
-  // 9. Resolve Credential (secure BYOK with userId)
+  // 7. Two-Phase Wallet Hold
+  const reservation = await billing.reserveHold({
+    userId,
+    amount: creditsRequired,
+    modelId,
+    operation,
+    generationId,
+    noCharge,
+    skipWalletHold,
+  });
+
+  // 8. Resolve Credential (BYOK isolated by userId)
   let credential = null;
   try {
     const credResult = await resolveCredential(
@@ -123,14 +109,11 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
       { userId }
     );
     credential = credResult?.apiKey || null;
-  } catch (err) {
+  } catch {
     credential = options.credential || null;
-    if (!credential && provider.authType !== "none") {
-      // Allow provider/SDK to throw on execution if required
-    }
   }
 
-  // 10. Transform to Provider Payload
+  // 9. Translate to Provider Payload (Declarative parameterMap + valueMap OR Custom Adapter)
   let providerPayload;
   let customAdapter = null;
   if (binding.customAdapter) {
@@ -144,65 +127,40 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
     providerPayload = mapToProviderPayload(cleanInput, binding);
   }
 
-  // 11. Execute External Provider with Retry-with-Backoff (Task 9)
+  // 10. Execute External Provider via RuntimeExecutor (Retries, Backoff, Streaming)
   let rawResponse;
-  const maxRetries = options.maxRetries ?? 2;
-  const initialBackoffMs = options.initialBackoffMs ?? 150;
-  const attemptsTotal = (binding.streaming && options.onStreamChunk) ? 1 : (maxRetries + 1);
-
-  let lastErr = null;
-  for (let attempt = 1; attempt <= attemptsTotal; attempt++) {
-    try {
-      if (binding.streaming && options.onStreamChunk) {
-        const streamReader = options.streamReader || readSseStream;
-        rawResponse = await streamReader({
-          provider,
-          binding,
-          payload: providerPayload,
-          credential,
-          onChunk: options.onStreamChunk,
-        });
-      } else {
-        rawResponse = await executeProvider({
-          provider,
-          binding,
-          payload: providerPayload,
-          credential,
-          timeoutMs: options.timeoutMs,
-          options,
-        });
-      }
-      lastErr = null;
-      break; // Success!
-    } catch (err) {
-      lastErr = err;
-      const normalized = normalizeError(err, { binding, provider });
-      if (normalized.retryable && attempt < attemptsTotal) {
-        const backoffMs = initialBackoffMs * Math.pow(2, attempt - 1);
-        logger.warn(
-          {
-            modelId,
-            operation,
-            bindingId,
-            attempt,
-            nextAttemptInMs: backoffMs,
-            error: normalized.message,
-          },
-          `[ModelRunner] Retryable provider error on attempt ${attempt}/${attemptsTotal}. Backing off for ${backoffMs}ms...`
-        );
-        await new Promise((resolve) => setTimeout(resolve, backoffMs));
-        continue;
-      }
-      break;
-    }
+  try {
+    rawResponse = await executor.execute({
+      provider,
+      binding,
+      providerPayload,
+      credential,
+      modelId,
+      operation,
+      bindingId,
+      options,
+    });
+  } catch (err) {
+    // Failure in provider execution: trip breaker, release wallet hold, rethrow normalized error
+    circuitBreakerRegistry.recordFailure(bindingId);
+    await billing.releaseHold(reservation, { userId, creditsRequired, reason: err.message });
+    const normalized = normalizeError(err, { binding, provider });
+    logger.error(
+      {
+        event: "models.execution.failed",
+        modelId,
+        operation,
+        providerId: provider.id,
+        error: normalized.message,
+        code: normalized.code,
+      },
+      `Execution failed for ${modelId} (${operation}) via ${provider.id}: ${normalized.message}`
+    );
+    throw normalized;
   }
 
+  // 11. Normalize Output & Validate Strict Output Contract
   try {
-    if (lastErr) {
-      throw lastErr;
-    }
-
-    // Normalize Output
     let normalizedOutput;
     if (customAdapter && typeof customAdapter.fromProviderResponse === "function") {
       normalizedOutput = customAdapter.fromProviderResponse(rawResponse, binding);
@@ -210,19 +168,17 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
       normalizedOutput = mapFromProviderResponse(rawResponse, binding);
     }
 
-    // Output Contract Validation (fail-fast before wallet commit)
+    // Strict output validation (fail-fast: throws OutputContractViolationError on empty URLs)
     validateOutput(normalizedOutput, binding, model.domain);
 
-    // Circuit Breaker Success
+    // Record Circuit Breaker Success
     circuitBreakerRegistry.recordSuccess(bindingId);
 
     // Commit Wallet Hold
-    if (reservation && walletService) {
-      await walletService.commit(reservation.reservationId, {
-        creditsCharged: creditsRequired,
-        generationId,
-      });
-    }
+    await billing.commitHold(reservation, {
+      creditsCharged: creditsRequired,
+      generationId,
+    });
 
     const durationMs = Date.now() - startTime;
 
@@ -263,7 +219,7 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
       },
     };
 
-    // Store in Idempotency Cache if key provided (Task 5)
+    // Store in Idempotency Cache if key provided
     if (idempotencyKey && store) {
       await store.set(idempotencyKey, executionResult, {
         ttlSeconds: options.idempotencyTtlSeconds || 3600,
@@ -272,22 +228,9 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
 
     return executionResult;
   } catch (err) {
-    // Record Circuit Breaker Failure (only after all retries exhausted)
     circuitBreakerRegistry.recordFailure(bindingId);
-
-    // Release Wallet Hold
-    if (reservation && walletService) {
-      await walletService.release(reservation.reservationId, {
-        reason: err.message || "Provider execution failed",
-      });
-      logger.info(
-        { event: LogEvents.WALLET_HOLD_RELEASED, userId, reservationId: reservation.reservationId },
-        `Released ${creditsRequired} credits due to execution error`
-      );
-    }
-
+    await billing.releaseHold(reservation, { userId, creditsRequired, reason: err.message });
     const normalized = normalizeError(err, { binding, provider });
-
     logger.error(
       {
         event: "models.execution.failed",
@@ -297,9 +240,8 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
         error: normalized.message,
         code: normalized.code,
       },
-      `Execution failed for ${modelId} (${operation}) via ${provider.id}: ${normalized.message}`
+      `Post-execution processing failed for ${modelId} (${operation}) via ${provider.id}: ${normalized.message}`
     );
-
     throw normalized;
   }
 }

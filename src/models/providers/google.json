@@ -1,9 +1,11 @@
 {
+  "schemaVersion": "2.0",
   "id": "google",
   "displayName": "Google AI (Imagen / Gemini)",
   "baseUrl": "https://generativelanguage.googleapis.com",
   "authType": "apiKey",
   "authQueryParam": "key",
+  "runtime": "sdk",
   "clientType": "sdk",
   "defaultTimeoutMs": 45000
 }

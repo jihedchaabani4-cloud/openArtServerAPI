@@ -1,5 +1,7 @@
 import path from "path";
 import { fileURLToPath } from "url";
+import { getProvider } from "../registry/modelRegistry.js";
+import { ConfigIntegrityError } from "../errors/index.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -8,20 +10,19 @@ const __dirname = path.dirname(__filename);
 const logger = createLogger("models");
 
 /**
- * Provider Runtime Registry
+ * Provider Runtime Registry (Freeze V2 — Zero Silent Fallback)
  *
- * Maps providerId → runnerFn.
- *
- * Resolution order:
- *   1. Manually registered runner (via registerRunner — useful for tests / overrides)
- *   2. Auto-discovered runner from runtime/<providerId>/runner.js
- *   3. Generic REST runner (runtime/generic/restRunner.js) as universal fallback
+ * Maps providerId → runnerFn based on explicit provider manifest declaration.
  *
  * ── Architecture Principle ─────────────────────────────────────────────────
- * No if (providerId === "wavespeed") ... if (providerId === "google") allowed.
- * Adding a new provider requires only:
- *   a) A JSON config in models/providers/<id>.json
- *   b) An optional runtime/<id>/runner.js (if generic REST is insufficient)
+ * ZERO SILENT FALLBACK:
+ * If a provider declares runtime="sdk" and its dedicated runner cannot be loaded,
+ * the system throws ConfigIntegrityError immediately.
+ *
+ * If a provider does not declare runtime="generic" or runtime="sdk",
+ * the system throws ConfigIntegrityError.
+ *
+ * The system NEVER guesses or silently falls back to generic REST.
  * ────────────────────────────────────────────────────────────────────────────
  */
 const manualRunners = new Map();
@@ -43,7 +44,6 @@ export function registerRunner(providerId, runnerFn) {
 
 /**
  * Get the runner function for a given provider.
- * Auto-discovers from filesystem on first call; caches thereafter.
  *
  * @param {string} providerId
  * @returns {Promise<Function>}
@@ -54,53 +54,78 @@ export async function getRunner(providerId) {
     return manualRunners.get(providerId);
   }
 
-  // 2. Cached from previous auto-discovery
+  // 2. Cached from previous resolution
   if (cachedRunners.has(providerId)) {
     return cachedRunners.get(providerId);
   }
 
-  // 3. Auto-discover: try runtime/<providerId>/runner.js
-  const specificRunnerPath = path.join(__dirname, providerId, "runner.js");
+  // 3. Look up provider declaration in modelRegistry
+  let providerConfig;
   try {
-    const mod = await import(`file://${specificRunnerPath}`);
-    if (typeof mod.run !== "function") {
-      throw new Error(`runtime/${providerId}/runner.js must export a named "run" function`);
-    }
-    const runnerFn = mod.run;
-    cachedRunners.set(providerId, runnerFn);
-    logger.debug(
-      { providerId, source: `runtime/${providerId}/runner.js` },
-      `[RuntimeRegistry] Loaded dedicated runner for provider "${providerId}"`
-    );
-    return runnerFn;
+    providerConfig = getProvider(providerId);
   } catch (err) {
-    if (err.code !== "ERR_MODULE_NOT_FOUND" && !err.message?.includes("Cannot find")) {
-      // Real error in the runner module — re-throw
-      throw err;
-    }
-    // No dedicated runner found — fall through to generic
+    // If not found in registry (e.g. unknown provider reference), propagate error
+    throw err;
   }
 
-  // 4. Fallback: generic REST runner
-  const genericRunnerPath = path.join(__dirname, "generic", "restRunner.js");
-  const genericMod = await import(`file://${genericRunnerPath}`);
-  const genericRunner = genericMod.run;
-  cachedRunners.set(providerId, genericRunner);
-  logger.debug(
-    { providerId, source: "runtime/generic/restRunner.js" },
-    `[RuntimeRegistry] No dedicated runner for "${providerId}". Using generic REST runner.`
+  const runtimeType = providerConfig.runtime || providerConfig.clientType;
+  if (!runtimeType) {
+    throw new ConfigIntegrityError(
+      `Provider "${providerId}" has no explicit "runtime" declared in provider manifest`
+    );
+  }
+
+  // 4. Explicit Generic REST Runner
+  if (runtimeType === "generic" || runtimeType === "api" || runtimeType === "rest") {
+    const genericRunnerPath = path.join(__dirname, "generic", "restRunner.js");
+    const genericMod = await import(`file://${genericRunnerPath}`);
+    const genericRunner = genericMod.run;
+    cachedRunners.set(providerId, genericRunner);
+    logger.debug(
+      { providerId, source: "runtime/generic/restRunner.js" },
+      `[RuntimeRegistry] Loaded declared generic REST runner for provider "${providerId}"`
+    );
+    return genericRunner;
+  }
+
+  // 5. Dedicated SDK Runner
+  if (runtimeType === "sdk") {
+    const specificRunnerPath = path.join(__dirname, providerId, "runner.js");
+    try {
+      const mod = await import(`file://${specificRunnerPath}`);
+      if (typeof mod.run !== "function") {
+        throw new ConfigIntegrityError(
+          `Dedicated runner runtime/${providerId}/runner.js must export a named "run" function`
+        );
+      }
+      const runnerFn = mod.run;
+      cachedRunners.set(providerId, runnerFn);
+      logger.debug(
+        { providerId, source: `runtime/${providerId}/runner.js` },
+        `[RuntimeRegistry] Loaded dedicated SDK runner for provider "${providerId}"`
+      );
+      return runnerFn;
+    } catch (err) {
+      if (err instanceof ConfigIntegrityError) throw err;
+      throw new ConfigIntegrityError(
+        `Provider "${providerId}" declared runtime "sdk" but dedicated runner ` +
+        `runtime/${providerId}/runner.js was not found or failed to load: ${err.message}`
+      );
+    }
+  }
+
+  throw new ConfigIntegrityError(
+    `Provider "${providerId}" declared unrecognized runtime type "${runtimeType}". Valid types: "sdk", "generic"`
   );
-  return genericRunner;
 }
 
 /**
  * Execute a model operation through the registered provider runner.
- * This is the primary entry point replacing executeProviderSdk().
  *
  * @param {object} args
- * @param {object} args.provider     - Provider config object from providers/*.json
- * @param {object} args.binding      - Binding manifest
- * @param {object} args.payload      - Provider-mapped payload
+ * @param {object} args.provider        - Provider config object from providers/*.json
+ * @param {object} args.binding         - Binding manifest
+ * @param {object} args.payload         - Provider-mapped payload
  * @param {string|null} args.credential - Resolved API key
  * @param {number} [args.timeoutMs]
  * @param {object} [args.options]

@@ -321,9 +321,34 @@ describe("Models Management System — Final Architecture Tests", () => {
       assert.equal(res.result, "custom_ok");
     });
 
-    it("should fallback to generic REST runner for unknown providers", async () => {
-      const genericRunner = await getRunner("unregistered_new_provider");
-      assert.equal(typeof genericRunner, "function");
+    it("should enforce Zero Silent Fallback and throw on unknown or undeclared runtime", async () => {
+      await assert.rejects(
+        () => getRunner("unregistered_new_provider"),
+        /Unknown provider reference|ConfigIntegrityError/
+      );
+    });
+
+    it("should support binding-level retailPricing override", () => {
+      const model = {
+        id: "test_model",
+        operations: {
+          text_to_image: {
+            retailPricing: { fixedPrice: 10 },
+          },
+        },
+      };
+
+      // Case A: binding has no override -> inherits model price (10)
+      const standardBinding = { modelId: "test_model", providerId: "p1" };
+      assert.equal(calculateRetailCredits(model, "text_to_image", {}, standardBinding), 10);
+
+      // Case B: binding has explicit retailPricing override -> uses binding price (25)
+      const premiumBinding = {
+        modelId: "test_model",
+        providerId: "p2",
+        retailPricing: { fixedPrice: 25 },
+      };
+      assert.equal(calculateRetailCredits(model, "text_to_image", {}, premiumBinding), 25);
     });
   });
 });

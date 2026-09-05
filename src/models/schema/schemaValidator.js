@@ -1,4 +1,9 @@
-import { UnknownParameterError, InvalidEnumValueError, ValidationError } from "../errors/index.js";
+import {
+  UnknownParameterError,
+  InvalidEnumValueError,
+  ValidationError,
+  UnsupportedCapabilityError,
+} from "../errors/index.js";
 import { evaluateRules } from "./conditionalRules.js";
 
 /**
@@ -99,3 +104,48 @@ export function validateCanonicalInput(operationDefOrSchema = {}, rawInput = {},
 
   return cleanInput;
 }
+
+/**
+ * Validates that cleanInput satisfies the specific binding's implementation constraints.
+ * A binding can only NARROW the model universe (via valueMap or constraints), never widen it.
+ *
+ * @param {object} binding     - Resolved execution binding
+ * @param {object} cleanInput  - Validated canonical input
+ * @throws {UnsupportedCapabilityError} If an input value is not supported by this binding
+ */
+export function validateBindingConstraints(binding, cleanInput = {}) {
+  if (!binding) return;
+
+  // 1. Check parameterMap.valueMap narrowing
+  if (binding.parameterMap) {
+    for (const [canonicalParam, mappingDef] of Object.entries(binding.parameterMap)) {
+      if (mappingDef && mappingDef.valueMap && typeof mappingDef.valueMap === "object") {
+        const callerVal = cleanInput[canonicalParam];
+        if (callerVal !== undefined && callerVal !== null) {
+          const stringVal = String(callerVal);
+          const supportedValues = Object.keys(mappingDef.valueMap);
+          if (supportedValues.length > 0 && !supportedValues.includes(stringVal)) {
+            throw new UnsupportedCapabilityError(
+              `Binding "${binding.providerId}" for model "${binding.modelId}" does not support value "${callerVal}" for parameter "${canonicalParam}". Supported: ${supportedValues.join(", ")}`
+            );
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Check explicit binding.constraints narrowing if declared
+  if (binding.constraints && typeof binding.constraints === "object") {
+    for (const [param, allowedValues] of Object.entries(binding.constraints)) {
+      const callerVal = cleanInput[param];
+      if (callerVal !== undefined && callerVal !== null && Array.isArray(allowedValues)) {
+        if (!allowedValues.includes(callerVal) && !allowedValues.includes(String(callerVal))) {
+          throw new UnsupportedCapabilityError(
+            `Binding "${binding.providerId}" constraint violation: parameter "${param}" value "${callerVal}" is not supported. Supported: ${allowedValues.join(", ")}`
+          );
+        }
+      }
+    }
+  }
+}
+

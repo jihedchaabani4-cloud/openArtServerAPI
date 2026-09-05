@@ -86,6 +86,8 @@ export class UnknownModelFamilyError extends ModelsSystemError {
   }
 }
 
+export const ModelNotFoundError = UnknownModelFamilyError;
+
 export class UnknownOperationError extends ModelsSystemError {
   constructor(modelFamily, operation) {
     super(`Operation "${operation}" not supported for model family "${modelFamily}"`, {
@@ -96,6 +98,54 @@ export class UnknownOperationError extends ModelsSystemError {
     });
     this.modelFamily = modelFamily;
     this.operation = operation;
+  }
+}
+
+export const OperationNotFoundError = UnknownOperationError;
+
+export class BindingNotFoundError extends ModelsSystemError {
+  constructor(bindingId, modelId = null, operation = null) {
+    const detail = modelId && operation ? ` for model "${modelId}" (${operation})` : "";
+    super(`Binding "${bindingId}" not found${detail}`, {
+      retryable: false,
+      safeMessage: "Selected provider binding not found",
+      statusCode: 404,
+      code: "BINDING_NOT_FOUND"
+    });
+    this.name = "BindingNotFoundError";
+    this.bindingId = bindingId;
+    this.modelId = modelId;
+    this.operation = operation;
+  }
+}
+
+export class BindingModelMismatchError extends ModelsSystemError {
+  constructor(bindingId, bindingModelId, requestedModelId) {
+    super(`Binding "${bindingId}" belongs to model "${bindingModelId}", but model "${requestedModelId}" was requested`, {
+      retryable: false,
+      safeMessage: "Binding does not match requested model",
+      statusCode: 400,
+      code: "BINDING_MODEL_MISMATCH"
+    });
+    this.name = "BindingModelMismatchError";
+    this.bindingId = bindingId;
+    this.bindingModelId = bindingModelId;
+    this.requestedModelId = requestedModelId;
+  }
+}
+
+export class BindingOperationMismatchError extends ModelsSystemError {
+  constructor(bindingId, bindingOperation, requestedOperation) {
+    super(`Binding "${bindingId}" is configured for operation "${bindingOperation}", but operation "${requestedOperation}" was requested`, {
+      retryable: false,
+      safeMessage: "Binding does not match requested operation",
+      statusCode: 400,
+      code: "BINDING_OPERATION_MISMATCH"
+    });
+    this.name = "BindingOperationMismatchError";
+    this.bindingId = bindingId;
+    this.bindingOperation = bindingOperation;
+    this.requestedOperation = requestedOperation;
   }
 }
 

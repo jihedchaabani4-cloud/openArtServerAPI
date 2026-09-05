@@ -124,14 +124,17 @@ export function validateInput(modelFamily, operation, rawInput = {}) {
   return validateCanonicalInput(opDef, rawInput);
 }
 
+export { resolveBinding } from "./registry/bindingResolver.js";
+
 // --- calculateCost ------------------------------------------------------------
 
 /**
  * Computes fixed retail credit cost for a model operation.
+ * Supports optional binding parameter for binding-level pricing overrides.
  */
-export function calculateCost(modelFamily, operation, cleanInput = {}) {
+export function calculateCost(modelFamily, operation, cleanInput = {}, binding = null) {
   const model = getModel(modelFamily);
-  const cost = calculateRetailCredits(model, operation, cleanInput);
+  const cost = calculateRetailCredits(model, operation, cleanInput, binding);
 
   modelsLogger.info(
     {

@@ -1,6 +1,6 @@
 import { getModel, getProvider } from "../registry/modelRegistry.js";
-import { validateCanonicalInput } from "../schema/schemaValidator.js";
-import { selectBinding } from "../registry/bindingSelector.js";
+import { resolveBinding } from "../registry/bindingResolver.js";
+import { validateCanonicalInput, validateBindingConstraints } from "../schema/schemaValidator.js";
 import { mapToProviderPayload, mapFromProviderResponse } from "../mapping/parameterMapper.js";
 import { validateOutput } from "../mapping/outputValidator.js";
 import { calculateRetailCredits, calculateWholesaleCostUsd, calculateMargin } from "../pricing/pricingEngine.js";
@@ -17,10 +17,18 @@ import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";
 const logger = createLogger("models");
 
 /**
- * Universal Model Runner (Freeze V2 — Lean Orchestrator)
+ * Universal Model Runner (Phase 1 — Deterministic Explicit Binding Orchestrator)
  *
- * Coordinates validation, pricing resolution, wallet holds, binding routing,
+ * Coordinates validation, pricing calculation, explicit binding resolution,
  * payload translation, execution, output validation, and telemetry.
+ *
+ * Invariant Principles:
+ *   1. Explicit Binding: In Phase 1, execution targets an explicit or default binding.
+ *      No automatic failover to another provider on failure.
+ *   2. Financial Boundary: Models System does NOT own the wallet lifecycle.
+ *      Workflow / Use Case layer manages holds and commits.
+ *   3. Zero Silent Fallback: Missing runtime declarations throw ConfigIntegrityError.
+ *   4. Output Defense: Missing or empty image/video URLs throw OutputContractViolationError.
  */
 export async function run(modelId, operation, rawInput = {}, options = {}) {
   const startTime = Date.now();
@@ -28,9 +36,10 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
   const userId = options.userId || null;
   const noCharge = Boolean(options.noCharge);
   const noChargeReason = options.reason || options.noChargeReason || null;
-  const skipWalletHold = Boolean(options.skipWalletHold);
+  const skipWalletHold = Boolean(options.skipWalletHold || !options.walletService);
 
-  const billing = options.billingBridge || (options.walletService ? new BillingBridge(options.walletService) : defaultBillingBridge);
+  // Optional billing bridge for backward compatibility with isolated test harnesses
+  const billing = options.billingBridge || (options.walletService ? new BillingBridge(options.walletService) : null);
   const executor = options.runtimeExecutor || defaultRuntimeExecutor;
 
   // 1. Enforce userId requirement unless noCharge explicitly granted
@@ -51,19 +60,32 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
     );
   }
 
-  // 2. Resolve Model & Operation
+  // 2. Resolve Logical Model & Operation Def
   const model = options.model || getModel(modelId);
   const opDef = model.operations?.[operation];
   if (!opDef) {
     throw new Error(`Operation "${operation}" not supported for model "${modelId}"`);
   }
 
-  // 3. Validate Canonical Input (Model Universe & Conditional Rules)
+  // 3. Resolve Explicit Binding (Phase 1: Deterministic resolution, no auto-failover)
+  const binding = resolveBinding(
+    options.bindingId || options.preferredProvider,
+    model.id,
+    operation
+  );
+  const provider = getProvider(binding.providerId);
+  const bindingId = `${binding.modelId}:${binding.operation}:${binding.providerId}`;
+
+  // 4. Validate Canonical Input (Model Universe & Conditional Rules)
   const cleanInput = validateCanonicalInput(opDef, rawInput, {
     allowUnknown: options.allowUnknown || false,
   });
 
-  // 4. Idempotency Check — return early before wallet hold or provider call
+  // 5. Enforce Binding Implementation Constraints (Narrowing Only)
+  // Rejects inputs not supported by this specific binding (e.g. 21:9 or 4k when unmapped)
+  validateBindingConstraints(binding, cleanInput);
+
+  // 6. Idempotency Check — return early if duplicate key exists
   const idempotencyKey = options.idempotencyKey || rawInput.idempotencyKey || null;
   const store = options.idempotencyStore || defaultIdempotencyStore;
   if (idempotencyKey && store) {
@@ -77,28 +99,26 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
     }
   }
 
-  // 5. Select Binding (Capability Filter -> Health Check -> Priority Sort)
-  const binding = selectBinding(modelId, operation, cleanInput, { ...options, model });
-  const provider = getProvider(binding.providerId);
-  const bindingId = `${binding.modelId}:${binding.operation}:${binding.providerId}`;
-
-  // 6. Pricing Evaluation (Model Retail Price with Binding-level Override support)
+  // 7. Pure Pricing Evaluation (Telemetry & optional legacy harness)
   const creditsRequired = calculateRetailCredits(model, operation, cleanInput, binding);
   const wholesaleCostUsd = calculateWholesaleCostUsd(binding, cleanInput);
   const margin = calculateMargin(creditsRequired, wholesaleCostUsd);
 
-  // 7. Two-Phase Wallet Hold
-  const reservation = await billing.reserveHold({
-    userId,
-    amount: creditsRequired,
-    modelId,
-    operation,
-    generationId,
-    noCharge,
-    skipWalletHold,
-  });
+  // 8. Financial Hold (Only if walletService explicitly injected by legacy test harness)
+  let reservation = null;
+  if (billing && !skipWalletHold) {
+    reservation = await billing.reserveHold({
+      userId,
+      amount: creditsRequired,
+      modelId,
+      operation,
+      generationId,
+      noCharge,
+      skipWalletHold,
+    });
+  }
 
-  // 8. Resolve Credential (BYOK isolated by userId)
+  // 9. Resolve Credential (BYOK isolated by userId)
   let credential = null;
   try {
     const credResult = await resolveCredential(
@@ -113,7 +133,7 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
     credential = options.credential || null;
   }
 
-  // 9. Translate to Provider Payload (Declarative parameterMap + valueMap OR Custom Adapter)
+  // 10. Translate Payload (Declarative parameterMap + valueMap OR Custom Adapter)
   let providerPayload;
   let customAdapter = null;
   if (binding.customAdapter) {
@@ -127,7 +147,7 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
     providerPayload = mapToProviderPayload(cleanInput, binding);
   }
 
-  // 10. Execute External Provider via RuntimeExecutor (Retries, Backoff, Streaming)
+  // 11. Execute Provider via RuntimeExecutor (Retries for transient errors; NO auto-failover to provider B)
   let rawResponse;
   try {
     rawResponse = await executor.execute({
@@ -141,9 +161,10 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
       options,
     });
   } catch (err) {
-    // Failure in provider execution: trip breaker, release wallet hold, rethrow normalized error
     circuitBreakerRegistry.recordFailure(bindingId);
-    await billing.releaseHold(reservation, { userId, creditsRequired, reason: err.message });
+    if (billing && reservation) {
+      await billing.releaseHold(reservation, { userId, creditsRequired, reason: err.message });
+    }
     const normalized = normalizeError(err, { binding, provider });
     logger.error(
       {
@@ -156,10 +177,11 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
       },
       `Execution failed for ${modelId} (${operation}) via ${provider.id}: ${normalized.message}`
     );
+    // Explicit Failure in Phase 1: Fail immediately, do not switch providers
     throw normalized;
   }
 
-  // 11. Normalize Output & Validate Strict Output Contract
+  // 12. Normalize Output & Validate Strict Output Contract
   try {
     let normalizedOutput;
     if (customAdapter && typeof customAdapter.fromProviderResponse === "function") {
@@ -168,17 +190,19 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
       normalizedOutput = mapFromProviderResponse(rawResponse, binding);
     }
 
-    // Strict output validation (fail-fast: throws OutputContractViolationError on empty URLs)
+    // Strict output validation (throws OutputContractViolationError on empty/missing URLs)
     validateOutput(normalizedOutput, binding, model.domain);
 
     // Record Circuit Breaker Success
     circuitBreakerRegistry.recordSuccess(bindingId);
 
-    // Commit Wallet Hold
-    await billing.commitHold(reservation, {
-      creditsCharged: creditsRequired,
-      generationId,
-    });
+    // Commit legacy reservation if active
+    if (billing && reservation) {
+      await billing.commitHold(reservation, {
+        creditsCharged: creditsRequired,
+        generationId,
+      });
+    }
 
     const durationMs = Date.now() - startTime;
 
@@ -229,7 +253,9 @@ export async function run(modelId, operation, rawInput = {}, options = {}) {
     return executionResult;
   } catch (err) {
     circuitBreakerRegistry.recordFailure(bindingId);
-    await billing.releaseHold(reservation, { userId, creditsRequired, reason: err.message });
+    if (billing && reservation) {
+      await billing.releaseHold(reservation, { userId, creditsRequired, reason: err.message });
+    }
     const normalized = normalizeError(err, { binding, provider });
     logger.error(
       {

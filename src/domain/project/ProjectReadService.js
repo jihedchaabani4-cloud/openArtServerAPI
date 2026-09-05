@@ -7,8 +7,8 @@ function getCatalogPricing() {
     const pricing = {};
     for (const m of catalog) {
         for (const [op, details] of Object.entries(m.operationDetails || {})) {
-            if (details.pricing) {
-                pricing[`${m.modelFamily}.${op}`] = details.pricing;
+            if (details.retailPricing) {
+                pricing[`${m.modelFamily}.${op}`] = details.retailPricing;
             }
         }
     }
@@ -37,7 +37,7 @@ function getModelConfig() {
             description:    m.description || "",
             category:       m.domain,
             tier:           m.badge || "standard",
-            pricing:        opDef.pricing || {},
+            pricing:        opDef.retailPricing || {},
             tags:           m.badge ? [m.badge.toLowerCase()] : [],
             supportedModes: m.operations || [],
             support:        {},

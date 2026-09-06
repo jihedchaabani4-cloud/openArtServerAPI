@@ -71,10 +71,10 @@ export function getNodeBillingReference(runId, nodeId, attempt = 1) {
  * There is no separate estimator — this IS the canonical pricing calculation.
  *
  *   workflowBillingPlan.calculateWorkflowBillingPlan()
- *     → calculateCost(modelKey, operation, inputs)   [PRE-execution estimate]
+ *     → calculateCost(modelKey, inputs)              [PRE-execution estimate]
  *
  *   estimateNodeBillingAmount()
- *     → calculateCost(model, op, resolvedInputs)     [AT-execution with real inputs]
+ *     → calculateCost(model, resolvedInputs)         [AT-execution with real inputs]
  *
  * The at-execution cost uses fully resolved inputs (actual dimensions, quality, etc.)
  * so it is MORE accurate than the upfront estimate. Minor deltas (upfront=24, actual=24)

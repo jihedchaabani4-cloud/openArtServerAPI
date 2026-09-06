@@ -1,11 +1,14 @@
 import { getInternalBindings, getBinding } from "./bindingRegistry.js";
+import { getModel, getModelBindings } from "./modelRegistry.js";
+import { resolveExecutionRoute } from "./routeResolver.js";
 import {
   BindingNotFoundError,
   BindingModelMismatchError,
   BindingOperationMismatchError,
   UnsupportedCapabilityError,
-  MissingOptionError,
 } from "../errors/index.js";
+
+export { resolveExecutionRoute };
 
 /**
  * Normalizes model IDs (handling '-' vs '_') for matching.
@@ -15,47 +18,50 @@ function normalizeId(id) {
 }
 
 /**
- * Deterministic Explicit Binding Resolver (Phase 1)
- *
- * Enforces strict binding validation without automatic provider failover.
- * Verifies that the binding exists, matches the requested model and operation,
- * and is in active status.
- *
- * Supported bindingId formats:
- *   1. "modelId.providerId"           (e.g. "nanobana_pro.wavespeed", "nanobana-pro.google")
- *   2. "providerId"                   (e.g. "wavespeed", "google")
- *   3. "modelId:operation:providerId" (composite key)
- *
- * @param {string} bindingId       - Explicit binding identifier (MANDATORY in Phase 1)
- * @param {string} modelId        - Target canonical model ID
- * @param {string} operation      - Target operation
- * @returns {object} validatedBinding
- */
-/**
- * Resolves the configured provider binding for a given model and operation.
+ * Resolves the configured provider binding for a given model.
  *
  * MODEL-FIRST ARCHITECTURE:
- * External callers supply ONLY modelId and operation. The Models Management
+ * External callers supply ONLY modelId. The Models Management
  * subsystem resolves its configured active provider binding internally.
+ * Operation is NOT required for provider resolution.
  *
- * @param {string} modelId - Target canonical model ID
- * @param {string} operation - Target operation
- * @param {object|string} [options={}] - Options object or explicit bindingId string
+ * @param {string} modelId             - Target canonical model ID
+ * @param {object|string} [arg2={}]     - Options object, or legacy operation string
+ * @param {object|string} [arg3={}]     - Options object when arg2 is legacy operation
  * @returns {object} validated configured binding
  */
-export function resolveBinding(modelId, operation, options = {}) {
-  const opts = typeof options === "string" ? { bindingId: options } : (options || {});
+export function resolveBinding(modelId, arg2 = {}, arg3 = {}) {
+  let operation = null;
+  let options = {};
 
-  const normModelId = normalizeId(modelId);
-  const availableBindings = getInternalBindings(modelId, operation);
+  if (typeof arg2 === "string") {
+    // Legacy 3-arg signature: (modelId, operation, options)
+    operation = arg2;
+    options = typeof arg3 === "string" ? { bindingId: arg3 } : (arg3 || {});
+  } else {
+    // Model-First 2-arg signature: (modelId, options)
+    options = typeof arg2 === "string" ? { bindingId: arg2 } : (arg2 || {});
+  }
+
+  const model = getModel(modelId);
+  const normModelId = normalizeId(model.id);
+
+  // Retrieve bindings: if operation was explicitly supplied, use operation index;
+  // otherwise, use all model bindings directly.
+  let availableBindings = [];
+  if (operation) {
+    availableBindings = getInternalBindings(model.id, operation);
+  } else {
+    availableBindings = getModelBindings(model.id);
+  }
 
   if (!availableBindings || availableBindings.length === 0) {
-    throw new BindingNotFoundError(opts.bindingId || "configured", modelId, operation);
+    throw new BindingNotFoundError(options.bindingId || "configured", modelId, operation || "default");
   }
 
   // Case A: Explicit binding requested (internal tests / admin tools only)
-  if (opts.bindingId) {
-    const targetBindingId = opts.bindingId;
+  if (options.bindingId) {
+    const targetBindingId = options.bindingId;
     let targetProviderId = targetBindingId;
     let targetModelId = null;
     let targetOperation = null;
@@ -76,11 +82,11 @@ export function resolveBinding(modelId, operation, options = {}) {
     if (targetModelId && normalizeId(targetModelId) !== normModelId) {
       throw new BindingModelMismatchError(targetBindingId, targetModelId, modelId);
     }
-    if (targetOperation && targetOperation !== operation) {
+    if (targetOperation && operation && targetOperation !== operation) {
       throw new BindingOperationMismatchError(targetBindingId, targetOperation, operation);
     }
 
-    let matched = getBinding(modelId, operation, targetProviderId);
+    let matched = operation ? getBinding(model.id, operation, targetProviderId) : null;
     if (!matched) {
       matched = availableBindings.find(
         (b) => b.providerId === targetProviderId || b.id === targetBindingId
@@ -88,7 +94,7 @@ export function resolveBinding(modelId, operation, options = {}) {
     }
 
     if (!matched) {
-      throw new BindingNotFoundError(targetBindingId, modelId, operation);
+      throw new BindingNotFoundError(targetBindingId, modelId, operation || "default");
     }
 
     if (matched.status !== "active" && matched.status !== "standby") {
@@ -105,9 +111,26 @@ export function resolveBinding(modelId, operation, options = {}) {
 
   if (activeBindings.length === 0) {
     throw new UnsupportedCapabilityError(
-      `No active provider binding configured for model "${modelId}" (${operation})`
+      `No active provider binding configured for model "${modelId}"${operation ? ` (${operation})` : ""}`
     );
   }
 
   return activeBindings[0];
+}
+
+/**
+ * Resolves both the configured provider binding and its concrete execution route
+ * for a given model and semantic input.
+ *
+ * Guarantees that pricing and execution resolve the EXACT SAME implementation:
+ *   quote implementation === execution implementation
+ *
+ * @param {string} modelId
+ * @param {object} semanticInput
+ * @param {object} [options={}]
+ * @returns {object} concrete execution route
+ */
+export function resolveBindingAndRoute(modelId, semanticInput = {}, options = {}) {
+  const binding = resolveBinding(modelId, options);
+  return resolveExecutionRoute(binding, semanticInput);
 }

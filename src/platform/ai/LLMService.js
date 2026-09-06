@@ -70,7 +70,6 @@ export class LLMService {
 
       result = await run(
         model,
-        "chat_completion",
         {
           messages,
           images,

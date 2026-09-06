@@ -7,6 +7,81 @@
   "aliases": [
     "nanobana"
   ],
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Textual prompt describing the image to generate or edit"
+    },
+    "negative_prompt": {
+      "type": "string",
+      "required": false,
+      "description": "Elements to avoid in the generated output"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "description": "Primary source image URL being transformed or edited"
+    },
+    "reference_images": {
+      "type": "array",
+      "required": false,
+      "description": "Optional array of reference images for composition/style guidance"
+    },
+    "mask": {
+      "type": "string",
+      "required": false,
+      "description": "Mask image URL indicating inpaint or replacement region"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "1k",
+        "2k",
+        "4k"
+      ],
+      "default": "1k"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "1:1",
+        "16:9",
+        "9:16",
+        "4:3",
+        "3:4"
+      ],
+      "default": "1:1"
+    },
+    "quality": {
+      "type": "string",
+      "values": [
+        "standard",
+        "hd"
+      ],
+      "default": "standard"
+    },
+    "seed": {
+      "type": "number",
+      "required": false
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "1k:standard": 10,
+      "1k:hd": 13,
+      "2k:standard": 16,
+      "2k:hd": 21,
+      "4k:standard": 25,
+      "4k:hd": 33
+    },
+    "editTable": {
+      "1k": 18,
+      "2k": 18,
+      "4k": 30
+    }
+  },
   "operations": {
     "text_to_image": {
       "canonicalInputs": {
@@ -78,6 +153,11 @@
           "type": "array",
           "required": false,
           "description": "Optional array of additional reference image URLs"
+        },
+        "mask": {
+          "type": "string",
+          "required": false,
+          "description": "Optional mask image URL for inpainting"
         },
         "aspect_ratio": {
           "type": "string",

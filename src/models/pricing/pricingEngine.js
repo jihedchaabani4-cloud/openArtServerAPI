@@ -51,10 +51,26 @@ function resolveCreditToUsdRate(overrideRate) {
  * @param {object} [binding]   - Optional selected binding (checks for retailPricing override)
  * @returns {number} Integer credit cost (0 is valid)
  */
-export function calculateRetailCredits(model, operation, cleanInput = {}, binding = null) {
-  // 1. Check Binding Override first, then fall back to Model-level retailPricing
-  const opDef = model?.operations?.[operation];
-  const retailPricing = binding?.retailPricing || opDef?.retailPricing;
+export function calculateRetailCredits(model, arg2, arg3 = null, arg4 = null) {
+  let operation = null;
+  let cleanInput = {};
+  let binding = null;
+
+  if (typeof arg2 === "string") {
+    // Legacy 4-arg signature: (model, operation, cleanInput, binding)
+    operation = arg2;
+    cleanInput = arg3 || {};
+    binding = arg4;
+  } else {
+    // Model-First 3-arg signature: (model, cleanInput, binding)
+    cleanInput = arg2 || {};
+    binding = arg3;
+    operation = binding?.operation || binding?.id || null;
+  }
+
+  // 1. Check Binding/Route Override first, then fall back to Model-level retailPricing
+  const opDef = operation ? model?.operations?.[operation] : null;
+  const retailPricing = binding?.retailPricing || opDef?.retailPricing || model?.retailPricing;
 
   if (!retailPricing) {
     return 10; // Default fallback for unknown models
@@ -63,6 +79,16 @@ export function calculateRetailCredits(model, operation, cleanInput = {}, bindin
   // Fixed price (e.g. free LLM platform calls)
   if (typeof retailPricing.fixedPrice === "number") {
     return retailPricing.fixedPrice;
+  }
+
+  // Dedicated edit pricing table if input_image is present
+  if (cleanInput.input_image && retailPricing.editTable) {
+    const res = cleanInput.resolution || "1k";
+    if (retailPricing.editTable[res] !== undefined) {
+      return retailPricing.editTable[res];
+    }
+    const firstEdit = Object.values(retailPricing.editTable)[0];
+    if (typeof firstEdit === "number") return firstEdit;
   }
 
   if (retailPricing.table) {

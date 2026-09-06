@@ -24,6 +24,7 @@ let registryState = {
   sharedParams: new Map(),
   bindings: new Map(),
   bindingIndex: new Map(), // key: `${modelId}:${operation}` -> Array<Binding> sorted by priority
+  modelBindings: new Map(), // key: `${modelId}` -> Array<Binding> sorted by priority
 };
 
 /**
@@ -46,6 +47,7 @@ export function initRegistry(options = {}) {
   const modelAliases = new Map();
   const bindings = new Map();
   const bindingIndex = new Map();
+  const modelBindings = new Map();
 
   // 1. Load Providers
   if (fs.existsSync(providersDir)) {
@@ -118,6 +120,12 @@ export function initRegistry(options = {}) {
             bindingIndex.set(indexKey, []);
           }
           bindingIndex.get(indexKey).push(bindingDef);
+
+          // Group by modelId directly
+          if (!modelBindings.has(bindingDef.modelId)) {
+            modelBindings.set(bindingDef.modelId, []);
+          }
+          modelBindings.get(bindingDef.modelId).push(bindingDef);
         }
       }
     }
@@ -168,18 +176,21 @@ export function initRegistry(options = {}) {
       const domainShared = sharedParams.get(model.domain) || {};
       const canonicalInputs = opDef.canonicalInputs || {};
 
-      if (b.parameterMap) {
-        for (const [canonicalKey, mapDef] of Object.entries(b.parameterMap)) {
-          const isDeclaredInModel = Object.prototype.hasOwnProperty.call(canonicalInputs, canonicalKey);
+      const validateParamMap = (paramMap) => {
+        if (!paramMap) return;
+        for (const [canonicalKey, mapDef] of Object.entries(paramMap)) {
+          const isDeclaredInOp = Object.prototype.hasOwnProperty.call(canonicalInputs, canonicalKey);
+          const isDeclaredInModel = model.canonicalInputs && Object.prototype.hasOwnProperty.call(model.canonicalInputs, canonicalKey);
           const isDeclaredInShared = Object.prototype.hasOwnProperty.call(domainShared, canonicalKey);
 
-          if (!isDeclaredInModel && !isDeclaredInShared) {
+          if (!isDeclaredInOp && !isDeclaredInModel && !isDeclaredInShared) {
             throw new UnknownCanonicalParameterError(mId, op, canonicalKey);
           }
 
           // Anti-Widening Invariant: If binding declares valueMap, ensure values are supported by model canonicalInputs
-          if (mapDef && mapDef.valueMap && canonicalInputs[canonicalKey]?.values) {
-            const modelAllowedValues = canonicalInputs[canonicalKey].values.map(String);
+          const inputDef = canonicalInputs[canonicalKey] || model.canonicalInputs?.[canonicalKey];
+          if (mapDef && mapDef.valueMap && inputDef?.values) {
+            const modelAllowedValues = inputDef.values.map(String);
             for (const valueMapKey of Object.keys(mapDef.valueMap)) {
               if (!modelAllowedValues.includes(String(valueMapKey))) {
                 throw new ConfigIntegrityError(
@@ -189,10 +200,22 @@ export function initRegistry(options = {}) {
             }
           }
         }
+      };
+
+      if (b.parameterMap) {
+        validateParamMap(b.parameterMap);
+      }
+      if (Array.isArray(b.routes)) {
+        for (const route of b.routes) {
+          if (route.parameterMap) {
+            validateParamMap(route.parameterMap);
+          }
+        }
       }
 
       // Validation Rule 6: Mandatory outputMap check
-      if (!b.outputMap || typeof b.outputMap !== "object" || Object.keys(b.outputMap).length === 0) {
+      const effectiveOutputMap = b.outputMap || (b.routes && b.routes[0]?.outputMap);
+      if (!effectiveOutputMap || typeof effectiveOutputMap !== "object" || Object.keys(effectiveOutputMap).length === 0) {
         throw new MissingOutputMapError(mId, op, b.providerId);
       }
     }
@@ -206,6 +229,7 @@ export function initRegistry(options = {}) {
     sharedParams,
     bindings,
     bindingIndex,
+    modelBindings,
   };
 
   return getRegistry();
@@ -257,6 +281,32 @@ export function getProvider(providerId) {
 }
 
 export { getBindings, getBinding, getDefaultBinding } from "./bindingRegistry.js";
+
+/**
+ * Returns all configured provider bindings for a given model (deduplicated by providerId,
+ * sorted by priority ascending).
+ *
+ * @param {string} modelId
+ * @returns {object[]}
+ */
+export function getModelBindings(modelId) {
+  const { modelBindings } = getRegistry();
+  const model = getModel(modelId);
+  const actualId = model ? model.id : modelId;
+  const list = modelBindings?.get(actualId) || [];
+  const seen = new Set();
+  const result = [];
+  for (const b of list) {
+    const key = `${b.modelId}:${b.providerId}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(b);
+    }
+  }
+  return result.sort(
+    (a, b) => (a.priority || 999) - (b.priority || 999) || (a.providerId || "").localeCompare(b.providerId || "")
+  );
+}
 
 
 /**

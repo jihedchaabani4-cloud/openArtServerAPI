@@ -71,7 +71,7 @@ function buildDomainComparison({ domain, operation, defaultParams, defaultCost, 
         .map((entry) => {
             let creditsPerGeneration = defaultCost;
             try {
-                const cost = calculateCost(entry.modelFamily, operation, defaultParams);
+                const cost = calculateCost(entry.modelFamily, defaultParams);
                 creditsPerGeneration = typeof cost === "number" && !isNaN(cost) ? cost : defaultCost;
             } catch {
                 creditsPerGeneration = defaultCost;

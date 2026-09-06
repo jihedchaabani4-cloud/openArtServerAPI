@@ -100,7 +100,7 @@ router.get("/:key/:operation/schema", (req, res) => {
 router.post("/:key/:operation/estimate-price", (req, res) => {
     const { key, operation } = req.params;
     try {
-        const estimate = estimatePrice(key, operation, req.body || {});
+        const estimate = estimatePrice(key, req.body || {});
         return res.json({
             success: true,
             data: {

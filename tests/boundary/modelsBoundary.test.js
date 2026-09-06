@@ -345,65 +345,173 @@ describe("Sealed Models Subsystem Architecture", () => {
     });
   });
 
-  // ── 5. OPERATION INFERENCE TESTS (NEW) ──────────────────────────────────
-  describe("5. Operation Inference — Semantic-First Internal Routing", () => {
-    it("routes to text_to_image when only prompt is supplied", async () => {
+  // ── 5. PROVIDER-OWNED ROUTE RESOLUTION TESTS (Sections 30 & 31) ──────────
+  describe("5. Provider-Owned Route Resolution & Semantic Execution", () => {
+    // Test A — Prompt only
+    it("Test A — Prompt only: routes to provider generation endpoint", async () => {
+      let endpointCalled = null;
       const result = await models.run(
         "nanobana_pro",
-        { prompt: "Coastal Tunis at dusk" },
+        { prompt: "cinematic city", resolution: "2k" },
         {
           userId: "user-1",
-          sdkRunner: async ({ payload }) => ({ outputs: ["https://cdn.example.com/img.png"] }),
-        }
-      );
-      assert.strictEqual(result.metadata.operation, "text_to_image");
-    });
-
-    it("routes to edit when input_image is present alongside prompt", async () => {
-      const result = await models.run(
-        "nanobana_pro",
-        { prompt: "Add clouds to the sky", input_image: "https://cdn.example.com/source.png" },
-        {
-          userId: "user-1",
-          sdkRunner: async ({ payload }) => {
-            // WaveSpeed edit endpoint receives images as an array
-            assert.ok(Array.isArray(payload.images), "images must be an array for edit endpoint");
-            assert.strictEqual(payload.images[0], "https://cdn.example.com/source.png");
-            return { outputs: ["https://cdn.example.com/edited.png"] };
+          sdkRunner: async ({ binding, payload }) => {
+            endpointCalled = binding.endpoint;
+            assert.strictEqual(payload.resolution, "2k");
+            return { outputs: ["https://cdn.example.com/city.png"] };
           },
         }
       );
-      assert.strictEqual(result.metadata.operation, "edit");
-      assert.strictEqual(result.images[0].url, "https://cdn.example.com/edited.png");
+      assert.strictEqual(endpointCalled, "google/nano-banana-pro/text-to-image");
+      assert.strictEqual(result.images[0].url, "https://cdn.example.com/city.png");
     });
 
-    it("calculateCost infers text_to_image when no image input present", () => {
-      const cost = models.calculateCost("nanobana_pro", { prompt: "sky", resolution: "1k" });
-      assert.strictEqual(typeof cost, "number");
-      assert.ok(cost > 0);
+    // Test B — Input image
+    it("Test B — Input image: routes to provider edit endpoint with wrap_array", async () => {
+      let endpointCalled = null;
+      const result = await models.run(
+        "nanobana_pro",
+        {
+          prompt: "change the jacket",
+          input_image: "https://example.com/a.png",
+          resolution: "2k",
+        },
+        {
+          userId: "user-1",
+          sdkRunner: async ({ binding, payload }) => {
+            endpointCalled = binding.endpoint;
+            assert.ok(Array.isArray(payload.images), "input_image must be wrapped to images array");
+            assert.strictEqual(payload.images[0], "https://example.com/a.png");
+            return { outputs: ["https://cdn.example.com/jacket.png"] };
+          },
+        }
+      );
+      assert.strictEqual(endpointCalled, "google/nano-banana-pro/edit");
+      assert.strictEqual(result.images[0].url, "https://cdn.example.com/jacket.png");
     });
 
-    it("calculateCost infers edit when input_image is present", () => {
-      const cost = models.calculateCost("nanobana_pro", {
+    // Test C — Reference images
+    it("Test C — Reference images: passes reference_images to provider", async () => {
+      let passedPayload = null;
+      const result = await models.run(
+        "nanobana_pro",
+        {
+          prompt: "combine the visual style",
+          reference_images: [
+            "https://example.com/a.png",
+            "https://example.com/b.png",
+          ],
+        },
+        {
+          userId: "user-1",
+          sdkRunner: async ({ payload }) => {
+            passedPayload = payload;
+            return { outputs: ["https://cdn.example.com/style.png"] };
+          },
+        }
+      );
+      assert.ok(Array.isArray(passedPayload.reference_images));
+      assert.strictEqual(passedPayload.reference_images.length, 2);
+      assert.strictEqual(result.images[0].url, "https://cdn.example.com/style.png");
+    });
+
+    // Test D — Input image + mask
+    it("Test D — Input image + mask: routes to provider inpaint route", async () => {
+      let endpointCalled = null;
+      let passedPayload = null;
+      const result = await models.run(
+        "nanobana_pro",
+        {
+          prompt: "replace the selected area",
+          input_image: "https://example.com/a.png",
+          mask: "https://example.com/mask.png",
+        },
+        {
+          userId: "user-1",
+          sdkRunner: async ({ binding, payload }) => {
+            endpointCalled = binding.endpoint;
+            passedPayload = payload;
+            return { outputs: ["https://cdn.example.com/inpaint.png"] };
+          },
+        }
+      );
+      assert.strictEqual(endpointCalled, "google/nano-banana-pro/edit");
+      assert.ok(Array.isArray(passedPayload.images));
+      assert.strictEqual(passedPayload.mask, "https://example.com/mask.png");
+      assert.strictEqual(result.images[0].url, "https://cdn.example.com/inpaint.png");
+    });
+
+    it("calculateCost resolves same route as execution deterministically", () => {
+      const genCost = models.calculateCost("nanobana_pro", { prompt: "sky", resolution: "1k" });
+      const editCost = models.calculateCost("nanobana_pro", {
         prompt: "edit this",
         input_image: "https://cdn.example.com/src.png",
         resolution: "1k",
       });
-      assert.strictEqual(typeof cost, "number");
-      assert.ok(cost > 0);
-      // Edit retail pricing (1k: 18) should be greater than text_to_image with no quality (10)
-      assert.ok(cost >= 18, `Expected edit cost >= 18 credits, got ${cost}`);
+      assert.strictEqual(typeof genCost, "number");
+      assert.strictEqual(typeof editCost, "number");
+      assert.ok(editCost > genCost, "Edit price should reflect edit pricing tier");
     });
 
-    it("throws UnknownOperationError with clear message when model has no edit operation", () => {
+    it("rejects input with unsupported parameter for provider binding", () => {
       // gpt_image_2 only has text_to_image — passing input_image should throw
       assert.throws(
         () => models.calculateCost("gpt_image_2", {
           prompt: "edit this",
           input_image: "https://cdn.example.com/src.png",
         }),
-        (err) => err instanceof models.UnknownOperationError
+        (err) => err instanceof models.UnsupportedCapabilityError || err?.code === "UNKNOWN_PARAMETER"
       );
+    });
+
+    // Section 31: Multi-Provider Test
+    it("Section 31: Multi-Provider Test — same Model, same params, WaveSpeed vs Google", async () => {
+      const semanticRequest = {
+        prompt: "Cyberpunk Tunis",
+        input_image: "https://cdn.example.com/base.png",
+        resolution: "2k",
+      };
+
+      // 1. Run under default active provider (WaveSpeed)
+      let wavespeedCalled = false;
+      await models.run("nanobana_pro", semanticRequest, {
+        userId: "user-1",
+        sdkRunner: async ({ binding, payload }) => {
+          wavespeedCalled = true;
+          assert.strictEqual(binding.providerId, "wavespeed");
+          assert.strictEqual(binding.endpoint, "google/nano-banana-pro/edit");
+          assert.ok(Array.isArray(payload.images));
+          return { outputs: ["https://cdn.wavespeed.ai/res.png"] };
+        },
+      });
+      assert.ok(wavespeedCalled, "WaveSpeed should execute under default config");
+
+      // 2. Switch provider configuration to Google
+      const { getRegistry } = await import("../../src/models/registry/modelRegistry.js");
+      const { bindings } = getRegistry();
+      const ws = bindings.get("nanobana_pro:text_to_image:wavespeed");
+      const g = bindings.get("nanobana_pro:text_to_image:google");
+      ws.status = "standby";
+      g.status = "active";
+
+      try {
+        let googleCalled = false;
+        // Caller request is 100% IDENTICAL
+        await models.run("nanobana_pro", semanticRequest, {
+          userId: "user-1",
+          sdkRunner: async ({ binding, payload }) => {
+            googleCalled = true;
+            assert.strictEqual(binding.providerId, "google");
+            assert.strictEqual(payload.sourceImage, "https://cdn.example.com/base.png");
+            assert.strictEqual(payload.imageSize, "medium"); // 2k mapped to medium for Google
+            return { images: [{ imageUri: "https://cdn.google.com/res.png" }] };
+          },
+        });
+        assert.ok(googleCalled, "Google should execute after configuration switch with identical caller code");
+      } finally {
+        ws.status = "active";
+        g.status = "standby";
+      }
     });
   });
 
@@ -564,6 +672,45 @@ describe("Sealed Models Subsystem Architecture", () => {
           );
         }
       }
+    });
+
+    // Section 32: Negative Tests
+    it("Section 32: rejects caller passing provider-specific parameter names", async () => {
+      await assert.rejects(
+        async () => {
+          await models.run(
+            "nanobana_pro",
+            {
+              prompt: "Negative test",
+              imageSize: "medium", // Google-specific parameter name!
+            },
+            { userId: "user-test" }
+          );
+        },
+        (err) => err?.code === "UNKNOWN_PARAMETER" || err?.name === "UnknownParameterError"
+      );
+    });
+
+    it("Section 32: caller cannot override provider via semantic parameters", async () => {
+      let executedProvider = null;
+      await models.run(
+        "nanobana_pro",
+        {
+          prompt: "Override attempt",
+          resolution: "1k",
+        },
+        {
+          userId: "user-test",
+          provider: "google", // Caller attempt to inject provider knob in options
+          preferredProvider: "google",
+          sdkRunner: async ({ binding }) => {
+            executedProvider = binding.providerId;
+            return { outputs: ["https://cdn.example.com/ok.png"] };
+          },
+        }
+      );
+      // Must ignore caller provider knob and execute configured active provider (wavespeed)
+      assert.strictEqual(executedProvider, "wavespeed");
     });
   });
 

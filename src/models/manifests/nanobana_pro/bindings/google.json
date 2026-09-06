@@ -14,6 +14,9 @@
     "negative_prompt": {
       "providerField": "negativePrompt"
     },
+    "input_image": {
+      "providerField": "sourceImage"
+    },
     "resolution": {
       "providerField": "imageSize",
       "valueMap": {

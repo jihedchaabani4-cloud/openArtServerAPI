@@ -3,9 +3,9 @@ import { calculateCost, getCatalog } from "../src/models/index.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function safeCalculateCost(modelKey, operation, input) {
+function safeCalculateCost(modelKey, input) {
     try {
-        return calculateCost(modelKey, operation, input);
+        return calculateCost(modelKey, input);
     } catch {
         return null; // Model not in V2 registry yet — degrade gracefully
     }
@@ -23,7 +23,6 @@ function getModelConfig() {
         const opDef = opDetails[mainOp] || {};
         const defaultCost = safeCalculateCost(
             m.modelFamily,
-            mainOp,
             isVideo ? { durationSeconds: 5, resolution: "720p" } : { quality: "standard" }
         );
 

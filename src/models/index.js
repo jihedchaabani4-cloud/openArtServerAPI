@@ -24,8 +24,7 @@ import {
 import { validateCanonicalInput, validateBindingConstraints, getModelSchema } from "./schema/schemaValidator.js";
 import { calculateRetailCredits } from "./pricing/pricingEngine.js";
 import { run as runInternal } from "./execution/modelRunner.js";
-import { resolveBinding } from "./registry/bindingResolver.js";
-import { resolveExecutionRoute } from "./runtime/routeResolver.js";
+import { resolveExecutionPlan } from "./registry/bindingResolver.js";
 import { createLogger, LogEvents } from "../infrastructure/logging/index.js";
 
 const modelsLogger = createLogger("models");
@@ -156,9 +155,7 @@ export function validateInput(modelFamily, rawInput = {}) {
  * @returns {number} Integer credit cost
  */
 export function calculateCost(modelFamily, cleanInput = {}, options = {}) {
-  const model = getModel(modelFamily);
-  const binding = resolveBinding(model.id, options);
-  const route = resolveExecutionRoute(binding, cleanInput);
+  const { model, route } = resolveExecutionPlan(modelFamily, cleanInput, options);
   validateBindingConstraints(route, cleanInput);
   const cost = calculateRetailCredits(model, cleanInput, route);
 

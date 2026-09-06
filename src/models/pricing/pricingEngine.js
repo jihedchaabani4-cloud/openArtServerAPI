@@ -64,16 +64,6 @@ export function calculateRetailCredits(model, cleanInput = {}, binding = null) {
     return retailPricing.fixedPrice;
   }
 
-  // Dedicated edit pricing table if input_image is present
-  if (cleanInput.input_image && retailPricing.editTable) {
-    const res = cleanInput.resolution || "1k";
-    if (retailPricing.editTable[res] !== undefined) {
-      return retailPricing.editTable[res];
-    }
-    const firstEdit = Object.values(retailPricing.editTable)[0];
-    if (typeof firstEdit === "number") return firstEdit;
-  }
-
   if (retailPricing.table) {
     const table = retailPricing.table;
 

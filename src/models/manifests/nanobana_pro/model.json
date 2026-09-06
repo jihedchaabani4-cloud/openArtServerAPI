@@ -8,9 +8,14 @@
     "nanobana"
   ],
   "capabilities": {
-    "text_to_image": true,
-    "edit": true,
-    "inpainting": true
+    "prompt": true,
+    "input_image": true,
+    "reference_images": true,
+    "mask": true,
+    "aspect_ratio": true,
+    "resolution": true,
+    "quality": true,
+    "seed": true
   },
   "canonicalInputs": {
     "prompt": {
@@ -80,11 +85,6 @@
       "2k:hd": 21,
       "4k:standard": 25,
       "4k:hd": 33
-    },
-    "editTable": {
-      "1k": 18,
-      "2k": 18,
-      "4k": 30
     }
   },
   "operations": {

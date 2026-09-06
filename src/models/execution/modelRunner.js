@@ -1,6 +1,5 @@
-import { getModel, getProvider } from "../registry/modelRegistry.js";
-import { resolveBinding } from "../registry/bindingResolver.js";
-import { resolveExecutionRoute } from "../runtime/routeResolver.js";
+import { getModel } from "../registry/modelRegistry.js";
+import { resolveExecutionPlan } from "../registry/bindingResolver.js";
 import { validateCanonicalInput, validateBindingConstraints, getModelSchema } from "../schema/schemaValidator.js";
 import { mapToProviderPayload, mapFromProviderResponse } from "../mapping/parameterMapper.js";
 import { validateOutput } from "../mapping/outputValidator.js";
@@ -65,15 +64,13 @@ export async function run(modelId, rawInput = {}, options = {}) {
     allowUnknown: options.allowUnknown || false,
   });
 
-  // 4. Resolve Configured Provider Implementation (Binding)
-  const binding = resolveBinding(model.id, options);
-
-  // 5. Provider Runtime Layer resolves concrete execution route based on semantic inputs
-  const route = resolveExecutionRoute(binding, cleanInput);
-  const provider = getProvider(route.providerId);
+  // 4. Resolve Provider Execution Plan (Binding + Concrete Route + Provider)
+  const { binding, route, provider } = resolveExecutionPlan(model.id, cleanInput, options);
+  const routeId = route.id || route.routeId || "default";
   const bindingId = `${route.modelId}:${route.providerId}`;
+  const circuitKey = `${route.modelId}:${route.providerId}:${routeId}`;
 
-  // 6. Enforce Binding Implementation Constraints
+  // 5. Enforce Binding Implementation Constraints
   validateBindingConstraints(route, cleanInput, rawInput);
 
   // 7. Idempotency Check — return early if duplicate key or in-flight promise exists
@@ -125,10 +122,10 @@ export async function run(modelId, rawInput = {}, options = {}) {
       ? customAdapter.toProviderPayload(cleanInput, route)
       : mapToProviderPayload(cleanInput, route);
 
-    // 11. Check Circuit Breaker
-    if (!circuitBreakerRegistry.isAvailable(bindingId)) {
+    // 11. Check Circuit Breaker (Route-Level Execution Identity)
+    if (!circuitBreakerRegistry.isAvailable(circuitKey)) {
       throw new ProviderTransientError(
-        `Provider binding "${bindingId}" is temporarily unavailable (circuit breaker OPEN)`
+        `Provider route "${circuitKey}" is temporarily unavailable (circuit breaker OPEN)`
       );
     }
 
@@ -145,17 +142,19 @@ export async function run(modelId, rawInput = {}, options = {}) {
         options,
       });
     } catch (err) {
-      circuitBreakerRegistry.recordFailure(bindingId);
+      circuitBreakerRegistry.recordFailure(circuitKey);
       const normalized = normalizeError(err, { binding: route, provider });
       logger.error(
         {
           event: "models.execution.failed",
           modelId,
           providerId: provider.id,
+          routeId,
+          circuitKey,
           error: normalized.message,
           code: normalized.code,
         },
-        `Execution failed for ${modelId} via ${provider.id}: ${normalized.message}`
+        `Execution failed for ${modelId} via ${provider.id} (${routeId}): ${normalized.message}`
       );
       throw normalized;
     }
@@ -168,7 +167,7 @@ export async function run(modelId, rawInput = {}, options = {}) {
     // Throws OutputContractViolationError on empty/missing image or video URLs
     validateOutput(normalizedOutput, route, model.domain);
 
-    circuitBreakerRegistry.recordSuccess(bindingId);
+    circuitBreakerRegistry.recordSuccess(circuitKey);
 
     const durationMs = Date.now() - startTime;
 

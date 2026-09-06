@@ -822,7 +822,7 @@ describe("Sealed Models Subsystem Architecture", () => {
         { prompt: "Test 2" },
         {
           userId: "user-1",
-          bindingId: "nanobana_pro.google", // internal test override
+          _testBindingId: "nanobana_pro.google", // internal test override
           sdkRunner: async () => ({ images: [{ imageUri: "https://cdn.example.com/res2.png" }] }),
         }
       );
@@ -970,7 +970,7 @@ describe("Sealed Models Subsystem Architecture", () => {
         },
         {
           userId: "user-test",
-          bindingId: "nanobana_pro.google", // internal test override
+          _testBindingId: "nanobana_pro.google", // internal test override
           sdkRunner: async ({ binding, payload }) => {
             googleEndpoint = binding.endpoint;
             googlePayload = payload;
@@ -1177,6 +1177,55 @@ describe("Sealed Models Subsystem Architecture", () => {
           );
         }
       }
+    });
+
+    // TEST 13 — Capability isolation (semantic capabilities do not dictate provider routing)
+    it("TEST 13: Capability isolation: model capabilities describe input vocabulary; provider route resolution depends only on semantic input and route rules", async () => {
+      const { getModel } = await import("../../src/models/registry/modelRegistry.js");
+      const model = getModel("nanobana_pro");
+      const originalCaps = { ...model.capabilities };
+
+      try {
+        // Change capabilities arbitrarily
+        model.capabilities = { prompt: true, input_image: true, custom_flag: true };
+
+        let resolvedRoute = null;
+        await models.run("nanobana_pro", { prompt: "Test caps isolation", input_image: "https://example.com/a.png" }, {
+          userId: "u-caps",
+          sdkRunner: async ({ binding }) => {
+            resolvedRoute = binding.id;
+            return { outputs: ["https://cdn.example.com/out.png"] };
+          },
+        });
+
+        assert.strictEqual(resolvedRoute, "edit");
+      } finally {
+        model.capabilities = originalCaps;
+      }
+    });
+
+    // TEST 14 — Caller cannot override active configured provider
+    it("TEST 14: Caller cannot override active configured provider: passing bindingId or provider in options is ignored in production path", async () => {
+      let executedProvider = null;
+
+      // Caller attempts to force google via options.bindingId or options.provider
+      await models.run(
+        "nanobana_pro",
+        { prompt: "No override test" },
+        {
+          userId: "u-no-override",
+          bindingId: "nanobana_pro.google", // should be IGNORED
+          provider: "google",               // should be IGNORED
+          providerId: "google",             // should be IGNORED
+          sdkRunner: async ({ binding }) => {
+            executedProvider = binding.providerId;
+            return { outputs: ["https://cdn.example.com/out.png"] };
+          },
+        }
+      );
+
+      // Active configured provider is WaveSpeed, so it must still execute WaveSpeed
+      assert.strictEqual(executedProvider, "wavespeed");
     });
   });
 

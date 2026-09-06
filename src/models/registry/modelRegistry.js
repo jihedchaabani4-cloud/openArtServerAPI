@@ -206,7 +206,37 @@ export function initRegistry(options = {}) {
         validateParamMap(b.parameterMap);
       }
       if (Array.isArray(b.routes)) {
+        const seenRouteIds = new Set();
         for (const route of b.routes) {
+          if (!route.id || typeof route.id !== "string") {
+            throw new ConfigIntegrityError(
+              `Route in binding "${b.providerId}" for model "${mId}" (${op}) is missing a valid string "id".`
+            );
+          }
+          if (seenRouteIds.has(route.id)) {
+            throw new ConfigIntegrityError(
+              `Duplicate route id "${route.id}" found in binding "${b.providerId}" for model "${mId}" (${op}).`
+            );
+          }
+          seenRouteIds.add(route.id);
+
+          if (route.when && typeof route.when === "object") {
+            for (const [condKey, condVal] of Object.entries(route.when)) {
+              if (
+                condVal !== "present" &&
+                condVal !== "absent" &&
+                typeof condVal !== "string" &&
+                typeof condVal !== "number" &&
+                typeof condVal !== "boolean" &&
+                !(typeof condVal === "object" && condVal !== null && condVal.equals !== undefined)
+              ) {
+                throw new ConfigIntegrityError(
+                  `Invalid condition for key "${condKey}" in route "${route.id}" of binding "${b.providerId}": ${JSON.stringify(condVal)}`
+                );
+              }
+            }
+          }
+
           if (route.parameterMap) {
             validateParamMap(route.parameterMap);
           }

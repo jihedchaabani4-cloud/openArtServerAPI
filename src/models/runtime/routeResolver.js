@@ -1,20 +1,16 @@
 import { UnsupportedCapabilityError } from "../errors/index.js";
 
 /**
- * Provider Route Resolver
+ * Provider-Specific Execution Route Resolver
  *
- * Resolves the concrete execution route within a provider binding based on
- * the caller's semantic parameters.
- *
- * ── Architectural Principle ──────────────────────────────────────────────────
- * The Provider binding declares its routes and matching conditions (e.g. when input_image is present).
- * The Generic Models Core does not know, hardcode, or infer any provider's route names or taxonomy.
- * Route decisions belong exclusively to the Provider implementation side.
- * ─────────────────────────────────────────────────────────────────────────────
+ * Owned by the Provider Runtime layer.
+ * Evaluates declared `when` routing rules against semantic inputs.
+ * Implements clean configuration hierarchy:
+ *   Parent Binding Defaults + Route-Specific Overrides
  *
  * @param {object} binding       - Configured provider binding manifest
- * @param {object} semanticInput - Validated canonical semantic inputs
- * @returns {object} Concrete execution route (inherits parent binding context)
+ * @param {object} semanticInput - Validated canonical semantic input
+ * @returns {object} Concrete execution route with merged parameters and endpoints
  */
 export function resolveExecutionRoute(binding, semanticInput = {}) {
   if (!binding) return null;
@@ -67,7 +63,7 @@ export function resolveExecutionRoute(binding, semanticInput = {}) {
     }
   }
 
-  // Section 21: NO SILENT GUESSING — fail explicitly if 0 routes match
+  // Fail explicitly if 0 routes match (no silent guessing)
   if (matchingRoutes.length === 0) {
     const presentKeys = Object.keys(semanticInput).filter((k) => {
       const v = semanticInput[k];
@@ -94,14 +90,17 @@ export function resolveExecutionRoute(binding, semanticInput = {}) {
 
   const selectedRoute = matchingRoutes[0];
 
-  // Compose merged execution context (parent binding defaults overridden by route specifics)
+  // Configuration Hierarchy: Common Binding Defaults + Route-Specific Overrides
   return {
     ...binding,
     ...selectedRoute,
     id: selectedRoute.id || binding.id,
     routeId: selectedRoute.id || null,
     operation: selectedRoute.operation || selectedRoute.id || binding.operation,
-    parameterMap: selectedRoute.parameterMap || binding.parameterMap || {},
+    parameterMap: {
+      ...(binding.parameterMap || {}),
+      ...(selectedRoute.parameterMap || {}),
+    },
     staticPayload: {
       ...(binding.staticPayload || {}),
       ...(selectedRoute.staticPayload || {}),

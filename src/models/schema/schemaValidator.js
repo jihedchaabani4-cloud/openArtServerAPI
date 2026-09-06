@@ -33,6 +33,30 @@ import { evaluateRules } from "./conditionalRules.js";
  * @param {boolean} [opts.allowUnknown=false] - Pass unknown params through
  * @returns {object} cleanInput         - Validated, clean input (unknowns stripped unless allowUnknown)
  */
+/**
+ * Resolves the unified canonical input schema for a model.
+ * If model declares model.canonicalInputs, it is the authoritative source of truth.
+ * Otherwise, merges canonicalInputs across all operations defined on the model,
+ * ensuring no valid semantic parameter is ever dropped or falsely rejected.
+ *
+ * @param {object} model
+ * @returns {object} unified parameter schema map
+ */
+export function getModelSchema(model = {}) {
+  if (model.canonicalInputs && Object.keys(model.canonicalInputs).length > 0) {
+    return model.canonicalInputs;
+  }
+  const merged = {};
+  if (model.operations && typeof model.operations === "object") {
+    for (const opDef of Object.values(model.operations)) {
+      if (opDef?.canonicalInputs) {
+        Object.assign(merged, opDef.canonicalInputs);
+      }
+    }
+  }
+  return merged;
+}
+
 export function validateCanonicalInput(operationDefOrSchema = {}, rawInput = {}, opts = {}) {
   const schema = operationDefOrSchema.canonicalInputs || operationDefOrSchema;
   const rules = operationDefOrSchema.rules || [];

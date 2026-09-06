@@ -7,6 +7,11 @@
   "aliases": [
     "nanobana"
   ],
+  "capabilities": {
+    "text_to_image": true,
+    "edit": true,
+    "inpainting": true
+  },
   "canonicalInputs": {
     "prompt": {
       "type": "string",

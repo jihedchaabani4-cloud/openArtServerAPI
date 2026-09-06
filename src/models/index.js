@@ -21,10 +21,11 @@ import {
   getModel,
   reloadRegistry,
 } from "./registry/modelRegistry.js";
-import { validateCanonicalInput, validateBindingConstraints } from "./schema/schemaValidator.js";
+import { validateCanonicalInput, validateBindingConstraints, getModelSchema } from "./schema/schemaValidator.js";
 import { calculateRetailCredits } from "./pricing/pricingEngine.js";
 import { run as runInternal } from "./execution/modelRunner.js";
-import { resolveBinding, resolveExecutionRoute } from "./registry/bindingResolver.js";
+import { resolveBinding } from "./registry/bindingResolver.js";
+import { resolveExecutionRoute } from "./runtime/routeResolver.js";
 import { createLogger, LogEvents } from "../infrastructure/logging/index.js";
 
 const modelsLogger = createLogger("models");
@@ -73,6 +74,7 @@ export function getCatalog(filters = {}) {
       systemOnly: isSystemOnly,
       visibility: model.visibility || (isSystemOnly ? "internal" : "public"),
       canonicalInputs: model.canonicalInputs || {},
+      capabilities: model.capabilities || {},
       retailPricing: model.retailPricing || null,
       operations,
       operationDetails,
@@ -115,10 +117,8 @@ export function getSchema(modelFamily, operation = null) {
     modelFamily: model.id,
     modelId: model.id,
     domain: model.domain,
-    inputs:
-      model.canonicalInputs ||
-      (model.operations && Object.values(model.operations)[0]?.canonicalInputs) ||
-      {},
+    inputs: getModelSchema(model),
+    capabilities: model.capabilities || {},
     retailPricing: model.retailPricing || null,
     operations: Object.keys(model.operations || {}),
   };
@@ -136,10 +136,7 @@ export function getSchema(modelFamily, operation = null) {
  */
 export function validateInput(modelFamily, rawInput = {}) {
   const model = getModel(modelFamily);
-  const schema =
-    model.canonicalInputs ||
-    (model.operations && Object.values(model.operations)[0]?.canonicalInputs) ||
-    {};
+  const schema = getModelSchema(model);
   return validateCanonicalInput(schema, rawInput);
 }
 

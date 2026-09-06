@@ -6,10 +6,53 @@
   "endpoint": "google/nano-banana-pro/text-to-image",
   "priority": 1,
   "status": "active",
+  "parameterMap": {
+    "prompt": {
+      "providerField": "prompt"
+    },
+    "aspect_ratio": {
+      "providerField": "aspect_ratio"
+    },
+    "resolution": {
+      "providerField": "resolution"
+    },
+    "quality": {
+      "providerField": "quality"
+    },
+    "reference_images": {
+      "providerField": "reference_images"
+    },
+    "seed": {
+      "providerField": "seed"
+    }
+  },
+  "staticPayload": {
+    "output_format": "png"
+  },
+  "pricing": {
+    "base_cost_usd": 0.126,
+    "modifiers": {
+      "resolution": {
+        "1k": 1,
+        "2k": 1.5,
+        "4k": 2.0
+      }
+    }
+  },
+  "retailPricing": {
+    "table": {
+      "1k:standard": 10,
+      "1k:hd": 13,
+      "2k:standard": 16,
+      "2k:hd": 21,
+      "4k:standard": 25,
+      "4k:hd": 33
+    }
+  },
   "routes": [
     {
       "id": "inpaint",
-      "operation": "edit",
+      "operation": "inpaint",
       "when": {
         "input_image": "present",
         "mask": "present"
@@ -17,31 +60,13 @@
       "endpoint": "google/nano-banana-pro/edit",
       "providerModelId": "google/nano-banana-pro/edit",
       "parameterMap": {
-        "prompt": {
-          "providerField": "prompt"
-        },
         "input_image": {
           "providerField": "images",
           "transform": "wrap_array"
         },
         "mask": {
           "providerField": "mask"
-        },
-        "aspect_ratio": {
-          "providerField": "aspect_ratio"
-        },
-        "resolution": {
-          "providerField": "resolution"
-        },
-        "quality": {
-          "providerField": "quality"
-        },
-        "seed": {
-          "providerField": "seed"
         }
-      },
-      "staticPayload": {
-        "output_format": "png"
       },
       "pricing": {
         "base_cost_usd": 0.14,
@@ -70,31 +95,10 @@
       "endpoint": "google/nano-banana-pro/edit",
       "providerModelId": "google/nano-banana-pro/edit",
       "parameterMap": {
-        "prompt": {
-          "providerField": "prompt"
-        },
         "input_image": {
           "providerField": "images",
           "transform": "wrap_array"
-        },
-        "reference_images": {
-          "providerField": "reference_images"
-        },
-        "aspect_ratio": {
-          "providerField": "aspect_ratio"
-        },
-        "resolution": {
-          "providerField": "resolution"
-        },
-        "quality": {
-          "providerField": "quality"
-        },
-        "seed": {
-          "providerField": "seed"
         }
-      },
-      "staticPayload": {
-        "output_format": "png"
       },
       "pricing": {
         "base_cost_usd": 0.14,
@@ -121,88 +125,15 @@
         "input_image": "absent"
       },
       "endpoint": "google/nano-banana-pro/text-to-image",
-      "providerModelId": "google/nano-banana-pro/text-to-image",
-      "parameterMap": {
-        "prompt": {
-          "providerField": "prompt"
-        },
-        "reference_images": {
-          "providerField": "reference_images"
-        },
-        "aspect_ratio": {
-          "providerField": "aspect_ratio"
-        },
-        "resolution": {
-          "providerField": "resolution"
-        },
-        "quality": {
-          "providerField": "quality"
-        },
-        "seed": {
-          "providerField": "seed"
-        }
-      },
-      "staticPayload": {
-        "output_format": "png"
-      },
-      "pricing": {
-        "base_cost_usd": 0.126,
-        "modifiers": {
-          "resolution": {
-            "1k": 1,
-            "2k": 1.5,
-            "4k": 2.0
-          }
-        }
-      },
-      "retailPricing": {
-        "table": {
-          "1k:standard": 10,
-          "1k:hd": 13,
-          "2k:standard": 16,
-          "2k:hd": 21,
-          "4k:standard": 25,
-          "4k:hd": 33
-        }
-      }
+      "providerModelId": "google/nano-banana-pro/text-to-image"
     }
   ],
-  "parameterMap": {
-    "prompt": {
-      "providerField": "prompt"
-    },
-    "aspect_ratio": {
-      "providerField": "aspect_ratio"
-    },
-    "resolution": {
-      "providerField": "resolution"
-    },
-    "quality": {
-      "providerField": "quality"
-    },
-    "seed": {
-      "providerField": "seed"
-    }
-  },
-  "staticPayload": {
-    "output_format": "png"
-  },
-  "pricing": {
-    "base_cost_usd": 0.126,
-    "modifiers": {
-      "resolution": {
-        "1k": 1,
-        "2k": 1.5,
-        "4k": 2.0
-      }
-    }
-  },
-  "version": "1.0.0",
   "outputMap": {
     "images": "outputs"
   },
   "pollingConfig": {
     "pollInterval": 2,
     "timeout": 3600
-  }
+  },
+  "version": "1.0.0"
 }

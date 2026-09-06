@@ -1,6 +1,7 @@
 import { getModel, getProvider } from "../registry/modelRegistry.js";
-import { resolveBinding, resolveExecutionRoute } from "../registry/bindingResolver.js";
-import { validateCanonicalInput, validateBindingConstraints } from "../schema/schemaValidator.js";
+import { resolveBinding } from "../registry/bindingResolver.js";
+import { resolveExecutionRoute } from "../runtime/routeResolver.js";
+import { validateCanonicalInput, validateBindingConstraints, getModelSchema } from "../schema/schemaValidator.js";
 import { mapToProviderPayload, mapFromProviderResponse } from "../mapping/parameterMapper.js";
 import { validateOutput } from "../mapping/outputValidator.js";
 import { calculateRetailCredits, calculateWholesaleCostUsd, calculateMargin } from "../pricing/pricingEngine.js";
@@ -21,32 +22,15 @@ const logger = createLogger("models");
  * Coordinates validation, pricing calculation, provider resolution, route resolution,
  * payload translation, execution, output validation, and telemetry.
  *
- * Architectural Invariants:
+ * Invariants:
  *   1. Model-First: Callers supply ONLY modelId and semantic parameters.
- *      No operation or provider arguments.
- *   2. Provider Ownership: Route selection (e.g. edit vs generation) belongs to the
- *      Provider implementation/configuration, not generic Models Core.
- *   3. Financial Boundary: Models System is 100% financial-agnostic.
- *      Workflow / Use Case layer manages holds and commits.
+ *      Zero operation, provider, or binding arguments.
+ *   2. Provider Ownership: Route selection (e.g. edit vs generation) belongs exclusively
+ *      to the Provider implementation/configuration, not generic Models Core.
+ *   3. Financial Isolation: Models system is 100% financial-agnostic.
  *   4. Output Defense: Missing or empty media URLs throw OutputContractViolationError.
  */
-export async function run(modelId, arg2 = {}, arg3 = {}, arg4 = {}) {
-  let operation = null;
-  let rawInput = {};
-  let options = {};
-
-  if (typeof arg2 === "string") {
-    // Legacy 4-arg signature: (modelId, operation, rawInput, options)
-    operation = arg2;
-    rawInput = arg3 || {};
-    options = arg4 || {};
-  } else {
-    // Model-First 3-arg signature: (modelId, rawInput, options)
-    rawInput = arg2 || {};
-    options = arg3 || {};
-    operation = options.operation || null;
-  }
-
+export async function run(modelId, rawInput = {}, options = {}) {
   const startTime = Date.now();
   const generationId = options.generationId || `gen_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
   const userId = options.userId || null;
@@ -75,26 +59,21 @@ export async function run(modelId, arg2 = {}, arg3 = {}, arg4 = {}) {
   const model = options.model || getModel(modelId);
 
   // 3. Resolve Model Schema and Validate Canonical Semantic Inputs
-  // Model owns its canonicalInputs schema. If legacy operations object exists, fall back to it.
-  const schema =
-    model.canonicalInputs ||
-    (operation ? model.operations?.[operation]?.canonicalInputs : null) ||
-    (model.operations && Object.values(model.operations)[0]?.canonicalInputs) ||
-    {};
-
+  // Uses authoritative model-level schema, merging all parameters if legacy operations exist.
+  const schema = getModelSchema(model);
   const cleanInput = validateCanonicalInput(schema, rawInput, {
     allowUnknown: options.allowUnknown || false,
   });
 
   // 4. Resolve Configured Provider Implementation (Binding)
-  const binding = resolveBinding(model.id, operation || options, options);
+  const binding = resolveBinding(model.id, options);
 
-  // 5. Resolve Provider Route (Provider-owned execution routing based on semantic input)
+  // 5. Provider Runtime Layer resolves concrete execution route based on semantic inputs
   const route = resolveExecutionRoute(binding, cleanInput);
   const provider = getProvider(route.providerId);
-  const bindingId = `${route.modelId}:${route.operation || route.id}:${route.providerId}`;
+  const bindingId = `${route.modelId}:${route.providerId}`;
 
-  // 6. Enforce Binding Implementation Constraints (Narrowing & Parameter Support)
+  // 6. Enforce Binding Implementation Constraints
   validateBindingConstraints(route, cleanInput, rawInput);
 
   // 7. Idempotency Check — return early if duplicate key or in-flight promise exists
@@ -162,7 +141,6 @@ export async function run(modelId, arg2 = {}, arg3 = {}, arg4 = {}) {
         providerPayload,
         credential,
         modelId,
-        operation: route.operation || operation || "execution",
         bindingId,
         options,
       });
@@ -224,7 +202,7 @@ export async function run(modelId, arg2 = {}, arg3 = {}, arg4 = {}) {
       metadata: {
         generationId,
         modelId: model.id,
-        operation: route.operation || operation || "execution",
+        operation: route.operation || route.id || "execution",
         routeId: route.id || route.routeId || null,
         creditsCharged: noCharge ? 0 : creditsRequired,
         durationMs,

@@ -77,8 +77,15 @@ export function mapToProviderPayload(cleanCanonicalInput = {}, binding = {}) {
     if (value === undefined || value === null) continue;
 
     let mappedValue = value;
+
+    // Apply valueMap translation (enum remapping)
     if (mapping.valueMap && Object.prototype.hasOwnProperty.call(mapping.valueMap, value)) {
       mappedValue = mapping.valueMap[value];
+    }
+
+    // Apply scalar → array wrapping (e.g. input_image → images: [url])
+    if (mapping.transform === "wrap_array" && !Array.isArray(mappedValue)) {
+      mappedValue = [mappedValue];
     }
 
     setDeepProperty(providerPayload, mapping.providerField || canonicalKey, mappedValue);

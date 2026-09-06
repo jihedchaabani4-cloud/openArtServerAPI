@@ -27,7 +27,7 @@ describe("Sealed Models Subsystem Architecture", () => {
         "calculateCost",
         "estimatePrice",
         "run",
-        "resolveOperation",
+        // NOTE: resolveOperation is NO LONGER exported — it is internal
         "initRegistry",
         "reloadRegistry",
         "getRegistryStats",
@@ -71,6 +71,8 @@ describe("Sealed Models Subsystem Architecture", () => {
         "resolveBinding",
         "getBindings",
         "getDefaultBinding",
+        // Operation inference is strictly INTERNAL in Semantic-First architecture
+        "resolveOperation",
       ];
 
       for (const name of forbiddenInternalNames) {
@@ -106,8 +108,9 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.ok(typeof stats.bindings === "number" && stats.bindings > 0);
     });
 
-    it("external callers can validate canonical input via public API", () => {
-      const validated = models.validateInput("nanobana_pro", "text_to_image", {
+    it("external callers can validate canonical input via public API (no operation argument)", () => {
+      // Semantic-First: no operation arg — inferred internally from params (no image → text_to_image)
+      const validated = models.validateInput("nanobana_pro", {
         prompt: "Cyberpunk Tunis",
         aspect_ratio: "16:9",
         resolution: "2k",
@@ -118,7 +121,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
       // Rejects missing required field
       assert.throws(
-        () => models.validateInput("nanobana_pro", "text_to_image", {}),
+        () => models.validateInput("nanobana_pro", {}),
         (err) => err instanceof models.ValidationError
       );
     });
@@ -253,22 +256,14 @@ describe("Sealed Models Subsystem Architecture", () => {
         quality: "standard",
       };
 
-      // Model-First: NO bindingId passed!
-      const cost = models.calculateCost(
-        "nanobana_pro",
-        "text_to_image",
-        cleanInput
-      );
+      // Semantic-First: NO operation, NO bindingId passed!
+      const cost = models.calculateCost("nanobana_pro", cleanInput);
 
       assert.strictEqual(typeof cost, "number");
       assert.ok(cost > 0, "Expected positive credit cost");
 
       // Verify that calculateCost is deterministic
-      const cost2 = models.calculateCost(
-        "nanobana_pro",
-        "text_to_image",
-        cleanInput
-      );
+      const cost2 = models.calculateCost("nanobana_pro", cleanInput);
       assert.strictEqual(cost, cost2);
     });
 
@@ -286,26 +281,25 @@ describe("Sealed Models Subsystem Architecture", () => {
     });
   });
 
-  // ── 4. MODEL-FIRST EXECUTION & PRICING TESTS ─────────────────────────────
-  describe("4. Model-First Execution & Pricing", () => {
-    it("calculateCost works deterministically WITHOUT any bindingId option", () => {
-      const cost = models.calculateCost("nanobana_pro", "text_to_image", { prompt: "Test", resolution: "1k" });
+  // ── 4. SEMANTIC-FIRST EXECUTION & PRICING TESTS ───────────────────────────
+  describe("4. Semantic-First Execution & Pricing (no operation argument)", () => {
+    it("calculateCost works deterministically WITHOUT operation or bindingId", () => {
+      const cost = models.calculateCost("nanobana_pro", { prompt: "Test", resolution: "1k" });
       assert.strictEqual(typeof cost, "number");
       assert.ok(cost > 0, "calculateCost should compute cost from configured active binding");
     });
 
-    it("estimatePrice works deterministically WITHOUT any bindingId option", () => {
-      const estimate = models.estimatePrice("nanobana_pro", "text_to_image", { prompt: "Test", resolution: "1k" });
+    it("estimatePrice works deterministically WITHOUT operation or bindingId", () => {
+      const estimate = models.estimatePrice("nanobana_pro", { prompt: "Test", resolution: "1k" });
       assert.strictEqual(typeof estimate, "object");
       assert.ok(estimate.amount > 0, "estimatePrice should compute amount from configured active binding");
       assert.strictEqual(estimate.currency, "credits");
     });
 
-    it("run executes successfully WITHOUT any bindingId option", async () => {
+    it("run executes successfully WITHOUT operation argument", async () => {
       let executedPayload = null;
       const result = await models.run(
         "nanobana_pro",
-        "text_to_image",
         { prompt: "Cyberpunk Tunis", aspect_ratio: "16:9", resolution: "1k" },
         {
           userId: "user-1",
@@ -330,11 +324,11 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(models.getDefaultBinding, undefined, "getDefaultBinding must not be exported on facade");
     });
 
-    it("anti-widening invariant: rejects values unsupported by model or active binding", async () => {
+    it("anti-widening invariant: rejects values unsupported by model or active binding", () => {
       // Model nanobana_pro allows 1k, 2k, 4k. 8k is rejected at schema level.
       assert.throws(
         () => {
-          models.validateInput("nanobana_pro", "text_to_image", {
+          models.validateInput("nanobana_pro", {
             prompt: "Test",
             resolution: "8k",
           });
@@ -351,8 +345,70 @@ describe("Sealed Models Subsystem Architecture", () => {
     });
   });
 
-  // ── 5. PROVIDER LEAKAGE & ABSTRACTION DEFENSE ────────────────────────────
-  describe("5. Provider Leakage & Abstraction Defense", () => {
+  // ── 5. OPERATION INFERENCE TESTS (NEW) ──────────────────────────────────
+  describe("5. Operation Inference — Semantic-First Internal Routing", () => {
+    it("routes to text_to_image when only prompt is supplied", async () => {
+      const result = await models.run(
+        "nanobana_pro",
+        { prompt: "Coastal Tunis at dusk" },
+        {
+          userId: "user-1",
+          sdkRunner: async ({ payload }) => ({ outputs: ["https://cdn.example.com/img.png"] }),
+        }
+      );
+      assert.strictEqual(result.metadata.operation, "text_to_image");
+    });
+
+    it("routes to edit when input_image is present alongside prompt", async () => {
+      const result = await models.run(
+        "nanobana_pro",
+        { prompt: "Add clouds to the sky", input_image: "https://cdn.example.com/source.png" },
+        {
+          userId: "user-1",
+          sdkRunner: async ({ payload }) => {
+            // WaveSpeed edit endpoint receives images as an array
+            assert.ok(Array.isArray(payload.images), "images must be an array for edit endpoint");
+            assert.strictEqual(payload.images[0], "https://cdn.example.com/source.png");
+            return { outputs: ["https://cdn.example.com/edited.png"] };
+          },
+        }
+      );
+      assert.strictEqual(result.metadata.operation, "edit");
+      assert.strictEqual(result.images[0].url, "https://cdn.example.com/edited.png");
+    });
+
+    it("calculateCost infers text_to_image when no image input present", () => {
+      const cost = models.calculateCost("nanobana_pro", { prompt: "sky", resolution: "1k" });
+      assert.strictEqual(typeof cost, "number");
+      assert.ok(cost > 0);
+    });
+
+    it("calculateCost infers edit when input_image is present", () => {
+      const cost = models.calculateCost("nanobana_pro", {
+        prompt: "edit this",
+        input_image: "https://cdn.example.com/src.png",
+        resolution: "1k",
+      });
+      assert.strictEqual(typeof cost, "number");
+      assert.ok(cost > 0);
+      // Edit retail pricing (1k: 18) should be greater than text_to_image with no quality (10)
+      assert.ok(cost >= 18, `Expected edit cost >= 18 credits, got ${cost}`);
+    });
+
+    it("throws UnknownOperationError with clear message when model has no edit operation", () => {
+      // gpt_image_2 only has text_to_image — passing input_image should throw
+      assert.throws(
+        () => models.calculateCost("gpt_image_2", {
+          prompt: "edit this",
+          input_image: "https://cdn.example.com/src.png",
+        }),
+        (err) => err instanceof models.UnknownOperationError
+      );
+    });
+  });
+
+  // ── 6. PROVIDER LEAKAGE & ABSTRACTION DEFENSE ────────────────────────────
+  describe("6. Provider Leakage & Abstraction Defense", () => {
     function getAllFiles(dir) {
       if (!fs.existsSync(dir)) return [];
       return fs.readdirSync(dir, { withFileTypes: true })
@@ -395,7 +451,6 @@ describe("Sealed Models Subsystem Architecture", () => {
     it("model execution returns canonical result shape and enforces strict output contract", async () => {
       const mockResult = await models.run(
         "nanobana_pro",
-        "text_to_image",
         {
           prompt: "Futuristic Carthage",
           aspect_ratio: "16:9",
@@ -430,7 +485,6 @@ describe("Sealed Models Subsystem Architecture", () => {
         async () => {
           await models.run(
             "nanobana_pro",
-            "text_to_image",
             { prompt: "Empty Test" },
             {
               userId: "user-test",
@@ -443,8 +497,8 @@ describe("Sealed Models Subsystem Architecture", () => {
     });
   });
 
-  // ── 6. ZERO PROVIDER/BINDING KNOBS IN APPLICATION LAYER ──────────────────
-  describe("6. Zero Provider/Binding Knobs in Application Layer", () => {
+  // ── 7. ZERO PROVIDER/BINDING KNOBS IN APPLICATION LAYER ──────────────────
+  describe("7. Zero Provider/Binding Knobs in Application Layer", () => {
     function getAllFiles(dir) {
       if (!fs.existsSync(dir)) return [];
       return fs.readdirSync(dir, { withFileTypes: true })
@@ -513,15 +567,14 @@ describe("Sealed Models Subsystem Architecture", () => {
     });
   });
 
-  // ── 7. SECTIONS 38, 39, 40, 41: ARCHITECTURAL VERIFICATION SUITE ──────────
-  describe("7. Model-First Invariant Verification (Sections 38, 39, 40, 41)", () => {
-    // Section 38: Configuration Tests (Test 1, Test 2, Test 3, Test 4)
-    it("Section 38: Provider implementation can be changed via configuration with ZERO application code changes", async () => {
+  // ── 8. ARCHITECTURAL VERIFICATION SUITE (Sections 38, 39, 40, 41) ─────────
+  describe("8. Model-First Invariant Verification (Sections 38, 39, 40, 41)", () => {
+    // Section 38: Configuration Tests
+    it("Section 38: Provider can be changed via configuration with ZERO application code changes", async () => {
       let wavespeedExecuted = false;
       let googleExecuted = false;
 
-      // Test 1: Configured Model: nanobana_pro → WaveSpeed
-      // Caller calls models.run with ONLY model, operation, and canonical params
+      // Semantic-First: no operation arg — caller only supplies model + semantic params
       const canonicalParams = {
         prompt: "Sunset over Sidi Bou Said",
         aspect_ratio: "16:9",
@@ -530,7 +583,6 @@ describe("Sealed Models Subsystem Architecture", () => {
 
       await models.run(
         "nanobana_pro",
-        "text_to_image",
         canonicalParams,
         {
           userId: "user-1",
@@ -548,9 +600,8 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.ok(wavespeedExecuted, "Test 1: WaveSpeed should be executed under default configuration");
 
       // Test 2: Change configuration in registry: nanobana_pro → Google
-      // We switch active binding for nanobana_pro to Google
       const { getRegistry } = await import("../../src/models/registry/modelRegistry.js");
-      const { bindings, bindingIndex } = getRegistry();
+      const { bindings } = getRegistry();
       const wsBinding = bindings.get("nanobana_pro:text_to_image:wavespeed");
       const gBinding = bindings.get("nanobana_pro:text_to_image:google");
 
@@ -558,11 +609,9 @@ describe("Sealed Models Subsystem Architecture", () => {
       gBinding.status = "active";
 
       try {
-        // Test 3: The EXACT same request parameters stay identical:
-        // ZERO application code changes!
+        // Test 3: The EXACT same request parameters stay identical — ZERO application code changes!
         await models.run(
           "nanobana_pro",
-          "text_to_image",
           canonicalParams, // IDENTICAL parameters!
           {
             userId: "user-1",
@@ -584,13 +633,12 @@ describe("Sealed Models Subsystem Architecture", () => {
       }
     });
 
-    // Section 39: Parameter Test
+    // Section 39: Parameter mapping test
     it("Section 39: Caller passes resolution '2k', provider receives mapped payload, caller unaware", async () => {
       let interceptedPayload = null;
 
       await models.run(
         "nanobana_pro",
-        "text_to_image",
         { prompt: "Medina alley", resolution: "2k" },
         {
           userId: "user-1",
@@ -608,12 +656,11 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(interceptedPayload.size, undefined);
     });
 
-    // Section 40: Output Test
+    // Section 40: Output normalization test
     it("Section 40: Different raw provider outputs both normalize to canonical images: [{ url }]", async () => {
       // WaveSpeed raw format: { outputs: ["https://..."] }
       const res1 = await models.run(
         "nanobana_pro",
-        "text_to_image",
         { prompt: "Test 1" },
         {
           userId: "user-1",
@@ -625,7 +672,6 @@ describe("Sealed Models Subsystem Architecture", () => {
       // Google raw format: { images: [{ imageUri: "https://..." }] }
       const res2 = await models.run(
         "nanobana_pro",
-        "text_to_image",
         { prompt: "Test 2" },
         {
           userId: "user-1",
@@ -636,9 +682,8 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.deepStrictEqual(res2.images, [{ url: "https://cdn.example.com/res2.png" }]);
     });
 
-    // Section 41: Billing Test
+    // Section 41: Billing isolation test
     it("Section 41: Models calculates cost without touching Wallet; Use Case orchestrates hold -> run -> commit", async () => {
-      // Mock wallet service outside Models
       const walletEvents = [];
       const mockWalletService = {
         hold: async (userId, cost) => {
@@ -653,9 +698,9 @@ describe("Sealed Models Subsystem Architecture", () => {
         },
       };
 
-      // Simulated Use Case Flow:
       // 1. Calculate Cost via Models (pure calculation, no wallet interaction)
-      const cost = models.calculateCost("nanobana_pro", "text_to_image", { prompt: "Billing test", resolution: "1k" });
+      // Semantic-First: no operation arg
+      const cost = models.calculateCost("nanobana_pro", { prompt: "Billing test", resolution: "1k" });
       assert.ok(cost > 0);
       assert.strictEqual(walletEvents.length, 0, "Models.calculateCost must NOT call wallet");
 
@@ -664,10 +709,9 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(walletEvents.length, 1);
       assert.strictEqual(walletEvents[0].action, "hold");
 
-      // 3. Use Case executes Model via Models Management
+      // 3. Use Case executes Model via Models Management (no operation arg)
       const result = await models.run(
         "nanobana_pro",
-        "text_to_image",
         { prompt: "Billing test", resolution: "1k" },
         {
           userId: "user-1",

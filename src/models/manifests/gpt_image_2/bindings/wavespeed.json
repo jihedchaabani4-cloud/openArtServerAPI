@@ -3,7 +3,7 @@
   "operation": "text_to_image",
   "providerId": "wavespeed",
   "providerModelId": "openai/gpt-image-2/text-to-image",
-  "endpoint": "/api/v3/openai/gpt-image-2/text-to-image",
+  "endpoint": "openai/gpt-image-2/text-to-image",
   "priority": 1,
   "status": "active",
   "parameterMap": {

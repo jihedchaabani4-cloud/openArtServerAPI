@@ -1,6 +1,5 @@
 import {
   calculateCost as defaultCalculateCost,
-  resolveOperation,
 } from "../models/index.js";
 
 const BILLABLE_NODE_TYPES = new Set([
@@ -19,18 +18,14 @@ function resolveField(node, field, inputs = {}) {
   return undefined;
 }
 
-function determineDomain(node) {
-  if (node.type === "llm") return "text";
-  return "image";
-}
-
-function operationForNode(node, inputs = {}) {
-  const domain = determineDomain(node, inputs);
-  return resolveOperation(inputs, domain);
-}
-
+/**
+ * Assembles the canonical semantic input for a billable node.
+ *
+ * The Models Management System infers the operation internally from the
+ * semantic parameters present (e.g. input_image → edit, else → text_to_image).
+ * No operation resolution is done here.
+ */
 function inputForNode(node, inputs = {}) {
-  const operation = operationForNode(node, inputs);
   const nodeModel = resolveField(node, "model", inputs);
   const resolvedModel = nodeModel || inputs.model;
 
@@ -47,7 +42,6 @@ function inputForNode(node, inputs = {}) {
 
   const nodeInput = {
     ...inputs,
-    operation,
     model: resolvedModel,
     modelKey: resolvedModel,
   };
@@ -57,7 +51,8 @@ function inputForNode(node, inputs = {}) {
   if (rawQuality !== undefined) nodeInput.quality = rawQuality;
   if (rawResolution !== undefined) nodeInput.resolution = rawResolution;
   if (rawCount !== undefined) nodeInput.count = Number(rawCount);
-  if (rawImageUrl !== undefined) nodeInput.image_url = rawImageUrl;
+  // Pass image source through as input_image — Models Management infers "edit" operation
+  if (rawImageUrl !== undefined) nodeInput.input_image = rawImageUrl;
 
   return nodeInput;
 }
@@ -69,7 +64,6 @@ export function getBillableNodes(plan, inputs = {}) {
     .map((node) => ({
       nodeId: node.id,
       nodeType: node.type,
-      operation: operationForNode(node, inputs),
       input: inputForNode(node, inputs),
     }));
 }
@@ -89,11 +83,12 @@ export async function calculateWorkflowBillingPlan({
       throw new Error(`[Billing] Missing required model for billable node "${billable.nodeId}" (${billable.nodeType})`);
     }
 
+    // Semantic-First: pass (modelKey, semanticInput) — no explicit operation.
+    // Models Management infers operation internally from semantic params.
     const costResult = typeof calculateCostFn === "function"
-      ? calculateCostFn(modelKey, billable.operation, billable.input)
+      ? calculateCostFn(modelKey, billable.input)
       : calculateCostFn?.calculateCost?.({
           modelKey,
-          operation: billable.operation,
           input: billable.input,
         });
 

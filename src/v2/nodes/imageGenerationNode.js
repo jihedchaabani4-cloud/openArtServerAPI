@@ -1,10 +1,10 @@
-import { run, resolveOperation } from "../../models/index.js";
+import { run } from "../../models/index.js";
 import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 
 /**
  * Executes image generation node via the Model-First Models Management System.
  *
- * @param {object} inputs - { prompt, width, height, count, seed, style, model, quality }
+ * @param {object} inputs - { prompt, width, height, count, seed, style, model, quality, image_url }
  * @param {object} ctx    - { runId, nodeId, userId, traceId, gateways }
  */
 export async function executeImageGeneration(inputs, ctx) {
@@ -20,13 +20,14 @@ export async function executeImageGeneration(inputs, ctx) {
   }
 
   // ── Translate workflow inputs → canonical Models System inputs ─────────────
+  // The Models Management System infers the operation internally from semantic
+  // parameters: if input_image is present → edit; otherwise → text_to_image.
   const canonicalInput = buildCanonicalInput(safe);
-  const operation = resolveOperation(canonicalInput, "image");
 
   // ── Model-First Execution via Models Management System ─────────────────────
-  // Caller supplies ONLY model, operation, canonical input, and context.
-  // Models Management resolves the configured provider implementation internally.
-  const runResult = await run(modelFamily, operation, canonicalInput, {
+  // Caller supplies ONLY model, canonical input, and context.
+  // Models Management resolves operation + configured provider implementation internally.
+  const runResult = await run(modelFamily, canonicalInput, {
     idempotencyKey: `node:${runId}:${nodeId}`,
     userId,
   });
@@ -69,6 +70,7 @@ export async function executeImageGeneration(inputs, ctx) {
  * quality              → quality        (pass-through, already canonical)
  * seed                 → seed           (pass-through)
  * prompt               → prompt         (pass-through, required)
+ * image_url / image    → input_image    (signals edit operation to Models Mgmt)
  * ─── Stripped (not in any model's canonicalInputs): ────────────────────────
  * model, count, references, width, height, ratio, style
  */
@@ -95,6 +97,10 @@ function buildCanonicalInput(safe) {
   // width + height → resolution tier
   const resolution = deriveResolution(safe.width, safe.height);
   if (resolution) canonical.resolution = resolution;
+
+  // image_url / image → input_image (presence signals "edit" operation internally)
+  const imageSource = safe.image_url ?? safe.image ?? safe.input_image ?? null;
+  if (imageSource) canonical.input_image = imageSource;
 
   return canonical;
 }

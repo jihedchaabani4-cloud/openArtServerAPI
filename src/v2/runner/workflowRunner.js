@@ -3,7 +3,7 @@ import { parseBinding } from "../compiler/validateBindings.js";
 import { RunRepository } from "./runRepository.js";
 import { jobQueueService } from "../../services/jobQueueService.js";
 import { getValueAtPath, executeNodeJob } from "./nodeExecutor.js";
-import { calculateCost, resolveOperation } from "../../models/index.js";
+import { calculateCost } from "../../models/index.js";
 import { BillingAccumulator } from "../runtime/billingAccumulator.js";
 import { formatWorkflowError } from "../runtime/errorPolicy.js";
 import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";
@@ -102,35 +102,20 @@ export function estimateNodeBillingAmount(nodeConfig, resolvedInputs = {}) {
     throw new Error(`[Billing] Missing required model for node "${nodeConfig?.id || nodeType}"`);
   }
 
-  let domain = "image";
-  if (nodeType === "video-generation") {
-    domain = "video";
-  } else if (isLLM) {
-    domain = "text";
-  } else if (nodeType === "media-transform") {
-    const isVideo = Boolean(
-      resolvedInputs.video_url ||
-      resolvedInputs.video ||
-      resolvedInputs.duration ||
-      resolvedInputs.mode === "video_to_video"
-    );
-    domain = isVideo ? "video" : "image";
-  }
-
   const inputsForBilling = { ...resolvedInputs, model };
   if (isLLM && !inputsForBilling.messages) {
     const textPrompt = resolvedInputs.userPrompt || resolvedInputs.prompt || "Default prompt";
     inputsForBilling.messages = [{ role: "user", content: textPrompt }];
   }
 
-  const op = resolveOperation(inputsForBilling, domain);
-
-  const costResult = calculateCost(model, op, inputsForBilling);
+  // Semantic-First: pass (model, semanticInput) — no explicit operation.
+  // Models Management infers operation internally from semantic params.
+  const costResult = calculateCost(model, inputsForBilling);
   const rawCost = typeof costResult === "object" && costResult !== null ? costResult.amount : costResult;
   const costNumber = Number(rawCost);
 
   if (isNaN(costNumber) || costNumber < 0) {
-    throw new Error(`[Billing] Invalid calculated cost "${rawCost}" for model "${model}" (${op})`);
+    throw new Error(`[Billing] Invalid calculated cost "${rawCost}" for model "${model}"`);
   }
 
   return costNumber;

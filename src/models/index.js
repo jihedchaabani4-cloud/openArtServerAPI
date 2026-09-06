@@ -3,6 +3,18 @@
  *
  * SEALED SUBSYSTEM: All callers interact through these exported functions.
  * Backed by the Dynamic Multi-Provider Architecture (032).
+ *
+ * ── Semantic-First Architecture ──────────────────────────────────────────────
+ * External callers supply ONLY modelId + semantic parameters.
+ * The Models Management subsystem infers the internal operation entirely
+ * from the semantic parameters provided:
+ *
+ *   { prompt }                       → text_to_image
+ *   { prompt, input_image }          → edit
+ *   { messages }                     → chat_completion
+ *
+ * Operation is NEVER exposed to callers. It is resolved internally.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 
 import {
@@ -16,6 +28,7 @@ import { calculateRetailCredits } from "./pricing/pricingEngine.js";
 import { run as runInternal } from "./execution/modelRunner.js";
 import { resolveBinding } from "./registry/bindingResolver.js";
 import { createLogger, LogEvents } from "../infrastructure/logging/index.js";
+import { UnknownOperationError } from "./errors/index.js";
 
 const modelsLogger = createLogger("models");
 
@@ -24,6 +37,55 @@ try {
   initRegistry();
 } catch (err) {
   modelsLogger.error({ error: err.message }, `Registry boot initialization error: ${err.message}`);
+}
+
+// --- inferOperation (PRIVATE) -------------------------------------------------
+
+/**
+ * Infers the canonical operation name from semantic parameters.
+ *
+ * Resolution rules (evaluated in order):
+ *   1. If params contain `input_image`, `images`, or `image_url` → "edit"
+ *      (only if the model declares an "edit" operation)
+ *   2. If params contain `messages` → "chat_completion"
+ *   3. Default → "text_to_image"
+ *
+ * Throws UnknownOperationError if the inferred operation is not declared
+ * by the model (no silent fallback to a different operation).
+ *
+ * @param {object} model       - Loaded model manifest
+ * @param {object} params      - Semantic parameters from caller
+ * @returns {string} Canonical operation name
+ */
+function inferOperation(model, params = {}) {
+  const operations = model.operations || {};
+
+  // Rule 1: image input signals an edit operation
+  const hasImageInput = Boolean(
+    params.input_image ||
+    (Array.isArray(params.images) && params.images.length > 0) ||
+    params.image_url
+  );
+
+  if (hasImageInput) {
+    if (operations.edit) return "edit";
+    throw new UnknownOperationError(model.id, "edit");
+  }
+
+  // Rule 2: messages array signals a chat/LLM operation
+  if (params.messages) {
+    if (operations.chat_completion) return "chat_completion";
+    if (operations.text_generation) return "text_generation";
+  }
+
+  // Rule 3: default — text_to_image (image domain) or first declared operation
+  if (operations.text_to_image) return "text_to_image";
+
+  // Last resort: use first declared operation
+  const firstOp = Object.keys(operations)[0];
+  if (firstOp) return firstOp;
+
+  throw new UnknownOperationError(model.id, "(none)");
 }
 
 // --- getCatalog ---------------------------------------------------------------
@@ -82,6 +144,7 @@ export function getCatalog(filters = {}) {
 
 /**
  * Returns input schema and pricing details for a given model and operation.
+ * Still accepts explicit operation for schema introspection / admin tooling.
  */
 export function getSchema(modelFamily, operation) {
   const model = getModel(modelFamily);
@@ -104,35 +167,37 @@ export function getSchema(modelFamily, operation) {
 
 /**
  * Validates and sanitizes raw input against canonical schema.
+ * Operation is inferred internally from semantic parameters.
+ *
+ * @param {string} modelFamily
+ * @param {object} rawInput
+ * @returns {object} cleanInput
  */
-export function validateInput(modelFamily, operation, rawInput = {}) {
+export function validateInput(modelFamily, rawInput = {}) {
   const model = getModel(modelFamily);
-  const opDef = model.operations?.[operation];
-  if (!opDef) {
-    throw new Error(`Operation "${operation}" not supported for model "${modelFamily}"`);
-  }
-
+  const operation = inferOperation(model, rawInput);
+  const opDef = model.operations[operation];
   return validateCanonicalInput(opDef, rawInput);
 }
 
 // --- calculateCost ------------------------------------------------------------
 
 /**
- * Computes fixed retail credit cost for a model operation.
+ * Computes fixed retail credit cost for a model based on semantic parameters.
  *
- * MODEL-FIRST ARCHITECTURE:
- * External callers supply ONLY modelFamily, operation, and canonical input.
- * The Models Management subsystem resolves the configured active provider
- * implementation internally.
+ * SEMANTIC-FIRST ARCHITECTURE:
+ * External callers supply ONLY modelFamily and canonical semantic input.
+ * The Models Management subsystem infers the operation and resolves the
+ * configured active provider implementation entirely internally.
  *
  * @param {string} modelFamily
- * @param {string} operation
  * @param {object} cleanInput
  * @param {object} [options={}]
  * @returns {number} Integer credit cost
  */
-export function calculateCost(modelFamily, operation, cleanInput = {}, options = {}) {
+export function calculateCost(modelFamily, cleanInput = {}, options = {}) {
   const model = getModel(modelFamily);
+  const operation = inferOperation(model, cleanInput);
   const binding = resolveBinding(model.id, operation, options);
   const cost = calculateRetailCredits(model, operation, cleanInput, binding);
 
@@ -153,12 +218,12 @@ export function calculateCost(modelFamily, operation, cleanInput = {}, options =
 // --- estimatePrice ------------------------------------------------------------
 
 /**
- * Estimates retail credit cost from raw input.
+ * Estimates retail credit cost from raw semantic input.
  * Resolves the configured active provider implementation internally.
  */
-export function estimatePrice(modelFamily, operation, rawInput = {}, options = {}) {
-  const cleanInput = validateInput(modelFamily, operation, rawInput);
-  const amount = calculateCost(modelFamily, operation, cleanInput, options);
+export function estimatePrice(modelFamily, rawInput = {}, options = {}) {
+  const cleanInput = validateInput(modelFamily, rawInput);
+  const amount = calculateCost(modelFamily, cleanInput, options);
   const model = getModel(modelFamily);
   return {
     amount,
@@ -171,50 +236,30 @@ export function estimatePrice(modelFamily, operation, rawInput = {}, options = {
 // --- run ----------------------------------------------------------------------
 
 /**
- * Executes a model operation via the unified multi-provider runner.
+ * Executes a model via the unified multi-provider runner.
+ *
+ * SEMANTIC-FIRST: No operation parameter. The subsystem infers the
+ * correct internal operation from the semantic parameters provided.
+ *
+ * @param {string} modelFamily
+ * @param {object} semanticParams - Canonical semantic input (prompt, input_image, etc.)
+ * @param {object} [options={}]
+ * @returns {Promise<object>} Execution result
  */
-export async function run(modelFamily, operation, cleanInput = {}, options = {}) {
-  const resolvedOp = operation || resolveOperation(cleanInput, options.domain || "image");
+export async function run(modelFamily, semanticParams = {}, options = {}) {
+  const model = getModel(modelFamily);
+  const operation = inferOperation(model, semanticParams);
 
   modelsLogger.debug(
     {
       modelFamily,
-      operation: resolvedOp,
+      operation,
       event: "models.execution.started",
     },
-    `Executing model ${modelFamily} (${resolvedOp})`
+    `Executing model ${modelFamily} (${operation})`
   );
 
-  return runInternal(modelFamily, resolvedOp, cleanInput, options);
-}
-
-// --- resolveOperation ---------------------------------------------------------
-
-/**
- * Workflow compatibility helper: infers canonical operation from raw inputs.
- */
-export function resolveOperation(inputs = {}, targetOutput = "image") {
-  if (inputs.operation) return inputs.operation;
-
-  const hasImage = Boolean(
-    inputs.image_url || inputs.image || inputs.images?.length || inputs.input_assets?.length
-  );
-
-  let inferredOp;
-  if (targetOutput === "image") {
-    inferredOp = hasImage ? "edit" : "text_to_image";
-  } else if (targetOutput === "text") {
-    inferredOp = "chat_completion";
-  } else {
-    inferredOp = "text_to_image";
-  }
-
-  modelsLogger.warn(
-    { targetOutput, inferredOp, inputKeys: Object.keys(inputs) },
-    `[resolveOperation] Operation was inferred as "${inferredOp}" from inputs. Consider passing explicit "operation".`
-  );
-
-  return inferredOp;
+  return runInternal(modelFamily, operation, semanticParams, { ...options, model });
 }
 
 // --- Registry Lifecycle & Queries --------------------------------------------
@@ -257,4 +302,3 @@ export {
   BindingOperationMismatchError,
   ConfigIntegrityError,
 } from "./errors/index.js";
-

@@ -25,3 +25,35 @@ export class ProviderError extends AppError {}   // upstream AI provider failure
 export class ValidationError extends AppError {} // bad input, NSFW, policy violations
 export class BillingError extends AppError {}    // wallet/credits inconsistencies
 export class SystemError extends AppError {}     // programmer errors / bugs
+
+export class InsufficientCreditsError extends BillingError {
+  constructor(required, available) {
+    super("INSUFFICIENT_CREDITS", `Insufficient credits: required ${required}, available ${available}`, {
+      type: "OPERATIONAL",
+      category: "BILLING_FAULT",
+      statusCode: 402,
+      retryable: false,
+      billingAction: "NONE",
+      context: { required, available },
+    });
+    this.required = required;
+    this.available = available;
+    this.safeMessage = "Insufficient credits for this generation";
+  }
+}
+
+export class ReservationExpiredError extends BillingError {
+  constructor(reservationId) {
+    super("RESERVATION_EXPIRED", `Reservation '${reservationId}' has expired or was already released`, {
+      type: "OPERATIONAL",
+      category: "BILLING_FAULT",
+      statusCode: 409,
+      retryable: false,
+      billingAction: "NONE",
+      context: { reservationId },
+    });
+    this.reservationId = reservationId;
+    this.safeMessage = "Credit reservation expired";
+  }
+}
+

@@ -14,6 +14,7 @@ import {
 import { validateCanonicalInput } from "./schema/schemaValidator.js";
 import { calculateRetailCredits } from "./pricing/pricingEngine.js";
 import { run as runInternal } from "./execution/modelRunner.js";
+import { resolveBinding } from "./registry/bindingResolver.js";
 import { createLogger, LogEvents } from "../infrastructure/logging/index.js";
 
 const modelsLogger = createLogger("models");
@@ -43,18 +44,9 @@ export function getCatalog(filters = {}) {
 
     const operations = Object.keys(model.operations || {});
     const operationDetails = {};
-    const activeProviders = new Set();
 
     for (const opKey of operations) {
       const opDef = model.operations[opKey];
-      const bindings = bindingIndex.get(`${modelId}:${opKey}`) || [];
-
-      for (const b of bindings) {
-        if (b.status === "active") {
-          activeProviders.add(b.providerId);
-        }
-      }
-
       operationDetails[opKey] = {
         inputs: opDef.canonicalInputs || {},
         retailPricing: opDef.retailPricing || null,
@@ -74,7 +66,6 @@ export function getCatalog(filters = {}) {
       operationDetails,
       lifecycleStatus: model.status || "active",
       status: model.status || "active",
-      activeProviders: Array.from(activeProviders),
     };
 
     if (filters.domain && entry.domain !== filters.domain) continue;
@@ -124,26 +115,36 @@ export function validateInput(modelFamily, operation, rawInput = {}) {
   return validateCanonicalInput(opDef, rawInput);
 }
 
-export { resolveBinding } from "./registry/bindingResolver.js";
-
 // --- calculateCost ------------------------------------------------------------
 
 /**
  * Computes fixed retail credit cost for a model operation.
- * Supports optional binding parameter for binding-level pricing overrides.
+ *
+ * MODEL-FIRST ARCHITECTURE:
+ * External callers supply ONLY modelFamily, operation, and canonical input.
+ * The Models Management subsystem resolves the configured active provider
+ * implementation internally.
+ *
+ * @param {string} modelFamily
+ * @param {string} operation
+ * @param {object} cleanInput
+ * @param {object} [options={}]
+ * @returns {number} Integer credit cost
  */
-export function calculateCost(modelFamily, operation, cleanInput = {}, binding = null) {
+export function calculateCost(modelFamily, operation, cleanInput = {}, options = {}) {
   const model = getModel(modelFamily);
+  const binding = resolveBinding(model.id, operation, options);
   const cost = calculateRetailCredits(model, operation, cleanInput, binding);
 
   modelsLogger.info(
     {
       modelFamily,
       operation,
+      bindingId: `${binding.modelId}:${binding.operation}:${binding.providerId}`,
       credits: cost,
       event: LogEvents.MODELS_COST_CALCULATED,
     },
-    `Cost calculated: ${cost} credits for ${modelFamily} (${operation})`
+    `Cost calculated: ${cost} credits for ${modelFamily} (${operation}) via ${binding.providerId}`
   );
 
   return cost;
@@ -153,10 +154,11 @@ export function calculateCost(modelFamily, operation, cleanInput = {}, binding =
 
 /**
  * Estimates retail credit cost from raw input.
+ * Resolves the configured active provider implementation internally.
  */
-export function estimatePrice(modelFamily, operation, rawInput = {}) {
+export function estimatePrice(modelFamily, operation, rawInput = {}, options = {}) {
   const cleanInput = validateInput(modelFamily, operation, rawInput);
-  const amount = calculateCost(modelFamily, operation, cleanInput);
+  const amount = calculateCost(modelFamily, operation, cleanInput, options);
   const model = getModel(modelFamily);
   return {
     amount,
@@ -171,7 +173,7 @@ export function estimatePrice(modelFamily, operation, rawInput = {}) {
 /**
  * Executes a model operation via the unified multi-provider runner.
  */
-export async function run(modelFamily, operation, cleanInput, options = {}) {
+export async function run(modelFamily, operation, cleanInput = {}, options = {}) {
   const resolvedOp = operation || resolveOperation(cleanInput, options.domain || "image");
 
   modelsLogger.debug(
@@ -188,6 +190,9 @@ export async function run(modelFamily, operation, cleanInput, options = {}) {
 
 // --- resolveOperation ---------------------------------------------------------
 
+/**
+ * Workflow compatibility helper: infers canonical operation from raw inputs.
+ */
 export function resolveOperation(inputs = {}, targetOutput = "image") {
   if (inputs.operation) return inputs.operation;
 
@@ -212,7 +217,44 @@ export function resolveOperation(inputs = {}, targetOutput = "image") {
   return inferredOp;
 }
 
-// --- reloadRegistry -----------------------------------------------------------
+// --- Registry Lifecycle & Queries --------------------------------------------
 
-export { reloadRegistry };
+export { initRegistry, reloadRegistry };
+
+/**
+ * Returns summary stats about the loaded registry — for admin/monitoring use.
+ * Does NOT expose internal registry state (Maps, raw manifests, etc.).
+ *
+ * @returns {{ models: number, providers: number, bindings: number }}
+ */
+export function getRegistryStats() {
+  const { models, providers, bindings } = getRegistry();
+  return {
+    models: models.size,
+    providers: providers.size,
+    bindings: bindings.size,
+  };
+}
+
+// --- Models Subsystem Errors --------------------------------------------------
+
+export {
+  ModelsSystemError,
+  ValidationError,
+  MissingOptionError,
+  ProviderTransientError,
+  ProviderRequestError,
+  ProviderContentPolicyError,
+  ProviderMalformedResponseError,
+  OutputContractViolationError,
+  UnsupportedCapabilityError,
+  UnknownModelFamilyError,
+  ModelNotFoundError,
+  UnknownOperationError,
+  OperationNotFoundError,
+  BindingNotFoundError,
+  BindingModelMismatchError,
+  BindingOperationMismatchError,
+  ConfigIntegrityError,
+} from "./errors/index.js";
 

@@ -1,4 +1,7 @@
-import { calculateCost as defaultCalculateCost, resolveOperation } from "../models/index.js";
+import {
+  calculateCost as defaultCalculateCost,
+  resolveOperation,
+} from "../models/index.js";
 
 const BILLABLE_NODE_TYPES = new Set([
   "image-generation",
@@ -47,7 +50,6 @@ function inputForNode(node, inputs = {}) {
     operation,
     model: resolvedModel,
     modelKey: resolvedModel,
-    providerId: resolveField(node, "provider", inputs) ?? inputs.provider,
   };
 
   if (messages !== undefined) nodeInput.messages = messages;
@@ -87,21 +89,18 @@ export async function calculateWorkflowBillingPlan({
       throw new Error(`[Billing] Missing required model for billable node "${billable.nodeId}" (${billable.nodeType})`);
     }
 
-    let costResult;
-    if (typeof calculateCostFn === "function") {
-      costResult = calculateCostFn(modelKey, billable.operation, billable.input);
-    } else if (calculateCostFn && typeof calculateCostFn.calculateCost === "function") {
-      costResult = calculateCostFn.calculateCost({
-        modelKey,
-        operation: billable.operation,
-        input: billable.input,
-      });
-    }
+    const costResult = typeof calculateCostFn === "function"
+      ? calculateCostFn(modelKey, billable.operation, billable.input)
+      : calculateCostFn?.calculateCost?.({
+          modelKey,
+          operation: billable.operation,
+          input: billable.input,
+        });
 
     const rawCost = typeof costResult === "object" && costResult !== null
       ? (costResult.amount ?? costResult.totalCredits ?? 0)
       : costResult;
-    const credits = Math.max(0, Math.ceil(Number(rawCost ?? 0)));
+    const credits = Math.max(0, Math.ceil(Number(rawCost) || 0));
     totalCredits += credits;
     breakdowns.push({
       ...billable,

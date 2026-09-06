@@ -1,5 +1,5 @@
 import path from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { getProvider } from "../registry/modelRegistry.js";
 import { ConfigIntegrityError } from "../errors/index.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
@@ -10,101 +10,57 @@ const __dirname = path.dirname(__filename);
 const logger = createLogger("models");
 
 /**
- * Provider Runtime Registry (Freeze V2 — Zero Silent Fallback)
+ * Provider Runtime Registry (Phase 1 — Zero Silent Fallback)
  *
- * Maps providerId → runnerFn based on explicit provider manifest declaration.
+ * Maps providerId to runnerFn based on explicit provider manifest declaration.
+ * runtime="sdk"     => loads runtime/<provider>/runner.js
+ * runtime="generic" => loads runtime/generic/restRunner.js
+ * Anything else     => ConfigIntegrityError
  *
- * ── Architecture Principle ─────────────────────────────────────────────────
- * ZERO SILENT FALLBACK:
- * If a provider declares runtime="sdk" and its dedicated runner cannot be loaded,
- * the system throws ConfigIntegrityError immediately.
- *
- * If a provider does not declare runtime="generic" or runtime="sdk",
- * the system throws ConfigIntegrityError.
- *
- * The system NEVER guesses or silently falls back to generic REST.
- * ────────────────────────────────────────────────────────────────────────────
+ * ZERO SILENT FALLBACK: no guessing, no default to generic if sdk is declared.
  */
-const manualRunners = new Map();
 const cachedRunners = new Map();
 
 /**
- * Manually register a runner function for a provider.
- * Useful for tests, mocking, or overrides.
- *
- * @param {string} providerId
- * @param {Function} runnerFn  async (args) => rawResponse
- */
-export function registerRunner(providerId, runnerFn) {
-  if (typeof runnerFn !== "function") {
-    throw new Error(`registerRunner: runnerFn for "${providerId}" must be a function`);
-  }
-  manualRunners.set(providerId, runnerFn);
-}
-
-/**
  * Get the runner function for a given provider.
- *
  * @param {string} providerId
  * @returns {Promise<Function>}
  */
 export async function getRunner(providerId) {
-  // 1. Manual override (injected at test/boot time)
-  if (manualRunners.has(providerId)) {
-    return manualRunners.get(providerId);
-  }
-
-  // 2. Cached from previous resolution
   if (cachedRunners.has(providerId)) {
     return cachedRunners.get(providerId);
   }
 
-  // 3. Look up provider declaration in modelRegistry
-  let providerConfig;
-  try {
-    providerConfig = getProvider(providerId);
-  } catch (err) {
-    // If not found in registry (e.g. unknown provider reference), propagate error
-    throw err;
-  }
-
+  const providerConfig = getProvider(providerId);
   const runtimeType = providerConfig.runtime || providerConfig.clientType;
+
   if (!runtimeType) {
     throw new ConfigIntegrityError(
       `Provider "${providerId}" has no explicit "runtime" declared in provider manifest`
     );
   }
 
-  // 4. Explicit Generic REST Runner
   if (runtimeType === "generic" || runtimeType === "api" || runtimeType === "rest") {
     const genericRunnerPath = path.join(__dirname, "generic", "restRunner.js");
-    const genericMod = await import(`file://${genericRunnerPath}`);
+    const genericMod = await import(pathToFileURL(genericRunnerPath).href);
     const genericRunner = genericMod.run;
     cachedRunners.set(providerId, genericRunner);
-    logger.debug(
-      { providerId, source: "runtime/generic/restRunner.js" },
-      `[RuntimeRegistry] Loaded declared generic REST runner for provider "${providerId}"`
-    );
+    logger.debug({ providerId }, `[RuntimeRegistry] Loaded generic REST runner for "${providerId}"`);
     return genericRunner;
   }
 
-  // 5. Dedicated SDK Runner
   if (runtimeType === "sdk") {
     const specificRunnerPath = path.join(__dirname, providerId, "runner.js");
     try {
-      const mod = await import(`file://${specificRunnerPath}`);
+      const mod = await import(pathToFileURL(specificRunnerPath).href);
       if (typeof mod.run !== "function") {
         throw new ConfigIntegrityError(
           `Dedicated runner runtime/${providerId}/runner.js must export a named "run" function`
         );
       }
-      const runnerFn = mod.run;
-      cachedRunners.set(providerId, runnerFn);
-      logger.debug(
-        { providerId, source: `runtime/${providerId}/runner.js` },
-        `[RuntimeRegistry] Loaded dedicated SDK runner for provider "${providerId}"`
-      );
-      return runnerFn;
+      cachedRunners.set(providerId, mod.run);
+      logger.debug({ providerId }, `[RuntimeRegistry] Loaded SDK runner for "${providerId}"`);
+      return mod.run;
     } catch (err) {
       if (err instanceof ConfigIntegrityError) throw err;
       throw new ConfigIntegrityError(
@@ -121,32 +77,14 @@ export async function getRunner(providerId) {
 
 /**
  * Execute a model operation through the registered provider runner.
- *
  * @param {object} args
- * @param {object} args.provider        - Provider config object from providers/*.json
- * @param {object} args.binding         - Binding manifest
- * @param {object} args.payload         - Provider-mapped payload
- * @param {string|null} args.credential - Resolved API key
- * @param {number} [args.timeoutMs]
- * @param {object} [args.options]
  * @returns {Promise<any>} rawResponse
  */
 export async function executeProvider({ provider, binding, payload, credential, timeoutMs, options = {} }) {
-  const providerId = provider.id;
-
-  // Allow injected sdkRunner for unit tests
+  // Allow injected sdkRunner for integration testing without real HTTP calls
   if (typeof options.sdkRunner === "function") {
     return options.sdkRunner({ provider, binding, payload, credential, timeoutMs, options });
   }
-
-  const runnerFn = await getRunner(providerId);
+  const runnerFn = await getRunner(provider.id);
   return runnerFn({ provider, binding, payload, credential, timeoutMs, options });
-}
-
-/**
- * Reset all cached runners (useful in tests).
- */
-export function resetRuntimeRegistry() {
-  manualRunners.clear();
-  cachedRunners.clear();
 }

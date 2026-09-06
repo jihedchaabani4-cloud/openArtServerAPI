@@ -1,6 +1,20 @@
+/**
+ * In-Memory Idempotency Store (Phase 1 — Single-Process In-Flight & TTL Cache)
+ *
+ * ── Deployment & Scaling Semantics ──────────────────────────────────────────
+ * - Same process: Duplicate / concurrent requests with same key are deduplicated
+ * - Process restart: In-memory cache is lost (ephemeral)
+ * - Multiple pods / horizontal scaling: Cache is NOT shared between replicas
+ *
+ * NOTE: For multi-instance / cluster deployments in Phase 2, this must be backed
+ * by a distributed store (e.g. Redis). For Phase 1 single-instance, this process-local
+ * Map provides fast, lock-free deduplication.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
 class InMemoryIdempotencyStore {
   constructor() {
     this.cache = new Map();
+    this.inFlight = new Map(); // key -> Promise
   }
 
   async get(key) {
@@ -22,8 +36,19 @@ class InMemoryIdempotencyStore {
     });
   }
 
-  clear() {
-    this.cache.clear();
+  getInFlight(key) {
+    if (!key) return null;
+    return this.inFlight.get(key) || null;
+  }
+
+  setInFlight(key, promise) {
+    if (!key) return;
+    this.inFlight.set(key, promise);
+  }
+
+  clearInFlight(key) {
+    if (!key) return;
+    this.inFlight.delete(key);
   }
 }
 

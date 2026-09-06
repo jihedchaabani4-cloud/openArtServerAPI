@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { InsufficientCreditsError, ReservationExpiredError } from "../models/errors/index.js";
+import { InsufficientCreditsError, ReservationExpiredError } from "../errors/AppError.js";
 
 /**
  * Lightweight in-memory implementation of the Two-Phase Wallet Protocol.

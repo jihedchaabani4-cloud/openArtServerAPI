@@ -17,13 +17,6 @@ export class ValidationError extends ModelsSystemError {
   }
 }
 
-export class SSRFBlockedError extends ValidationError {
-  constructor(message = "SSRF validation failed: domain not allowed") {
-    super(message, { safeMessage: "This URL host isn't allowed" });
-    this.name = "SSRFBlockedError";
-    this.code = "SSRF_BLOCKED";
-  }
-}
 
 export class InvalidEnumValueError extends ValidationError {
   constructor(field, value, allowedValues = []) {
@@ -49,30 +42,6 @@ export class UnknownParameterError extends ValidationError {
   }
 }
 
-export class InsufficientCreditsError extends ModelsSystemError {
-  constructor(required, available) {
-    super(`Insufficient credits: required ${required}, available ${available}`, {
-      retryable: false,
-      safeMessage: "Insufficient credits for this generation",
-      statusCode: 402,
-      code: "INSUFFICIENT_CREDITS"
-    });
-    this.required = required;
-    this.available = available;
-  }
-}
-
-export class ReservationExpiredError extends ModelsSystemError {
-  constructor(reservationId) {
-    super(`Reservation '${reservationId}' has expired or was already released`, {
-      retryable: false,
-      safeMessage: "Credit reservation expired",
-      statusCode: 409,
-      code: "RESERVATION_EXPIRED"
-    });
-    this.reservationId = reservationId;
-  }
-}
 
 export class UnknownModelFamilyError extends ModelsSystemError {
   constructor(modelFamily) {
@@ -149,19 +118,6 @@ export class BindingOperationMismatchError extends ModelsSystemError {
   }
 }
 
-export class NoServableDeploymentError extends ModelsSystemError {
-  constructor(modelFamily, operation) {
-    super(`No servable deployment found for ("${modelFamily}", "${operation}")`, {
-      retryable: false,
-      safeMessage: "Service temporarily unavailable",
-      statusCode: 503,
-      code: "NO_SERVABLE_DEPLOYMENT"
-    });
-    this.modelFamily = modelFamily;
-    this.operation = operation;
-  }
-}
-
 export class ConfigIntegrityError extends ModelsSystemError {
   constructor(message) {
     super(message, {
@@ -180,17 +136,6 @@ export class CredentialError extends ModelsSystemError {
       safeMessage: "Authentication configuration error",
       statusCode: 401,
       code: "CREDENTIAL_ERROR"
-    });
-  }
-}
-
-export class PricingConfigError extends ModelsSystemError {
-  constructor(message) {
-    super(message, {
-      retryable: false,
-      safeMessage: "Pricing configuration error",
-      statusCode: 500,
-      code: "PRICING_CONFIG_ERROR"
     });
   }
 }
@@ -305,20 +250,6 @@ export class UnsupportedCapabilityError extends ModelsSystemError {
   }
 }
 
-export class AllProvidersUnavailableError extends ModelsSystemError {
-  constructor(modelId, operation) {
-    super(`All provider bindings for model "${modelId}" (${operation}) are currently unavailable (circuit breakers open)`, {
-      retryable: true,
-      safeMessage: "All providers for this model are temporarily unavailable. Please try again shortly.",
-      statusCode: 503,
-      code: "ALL_PROVIDERS_UNAVAILABLE"
-    });
-    this.name = "AllProvidersUnavailableError";
-    this.modelId = modelId;
-    this.operation = operation;
-  }
-}
-
 export class MissingUserIdError extends ModelsSystemError {
   constructor(message = "userId is required for model execution unless noCharge is explicitly granted") {
     super(message, {
@@ -328,6 +259,20 @@ export class MissingUserIdError extends ModelsSystemError {
       code: "MISSING_USER_ID"
     });
     this.name = "MissingUserIdError";
+  }
+}
+
+export class MissingOptionError extends ModelsSystemError {
+  constructor(optionName, message = null) {
+    const finalMessage = message || `Required option "${optionName}" is missing`;
+    super(finalMessage, {
+      retryable: false,
+      safeMessage: `Missing required execution option: ${optionName}`,
+      statusCode: 400,
+      code: "MISSING_OPTION"
+    });
+    this.name = "MissingOptionError";
+    this.optionName = optionName;
   }
 }
 

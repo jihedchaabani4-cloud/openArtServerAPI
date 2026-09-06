@@ -44,10 +44,3 @@ export async function getCustomAdapter(adapterName) {
     throw new Error(`Failed to load custom adapter "${adapterName}": ${err.message}`);
   }
 }
-
-/**
- * Clear the adapter cache (useful in tests).
- */
-export function clearAdapterCache() {
-  adapterCache.clear();
-}

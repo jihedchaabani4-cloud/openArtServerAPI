@@ -71,7 +71,10 @@ export class RuntimeExecutor {
         lastErr = err;
         const normalized = normalizeError(err, { binding, provider });
         if (normalized.retryable && attempt < attemptsTotal) {
-          const backoffMs = initialBackoffMs * Math.pow(2, attempt - 1);
+          const maxBackoffMs = options.maxBackoffMs ?? 2000;
+          const randomFn = options.randomFn || Math.random;
+          const expCeiling = Math.min(maxBackoffMs, initialBackoffMs * Math.pow(2, attempt - 1));
+          const backoffMs = Math.max(1, Math.round(randomFn() * expCeiling));
           logger.warn(
             {
               modelId,
@@ -81,9 +84,10 @@ export class RuntimeExecutor {
               nextAttemptInMs: backoffMs,
               error: normalized.message,
             },
-            `[RuntimeExecutor] Retryable provider error on attempt ${attempt}/${attemptsTotal}. Backing off for ${backoffMs}ms...`
+            `[RuntimeExecutor] Retryable provider error on attempt ${attempt}/${attemptsTotal}. Backing off with jitter for ${backoffMs}ms...`
           );
-          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+          const sleeper = options.sleeper || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+          await sleeper(backoffMs);
           continue;
         }
         throw lastErr;

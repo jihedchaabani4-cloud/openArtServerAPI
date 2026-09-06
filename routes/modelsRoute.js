@@ -3,6 +3,35 @@ import { getCatalog, getSchema, estimatePrice } from "../src/models/index.js";
 
 const router = Router();
 
+function formatModelDto(m) {
+    const isVideo = m.domain === "video";
+    const opDetails = m.operationDetails || {};
+    const mainOp = isVideo ? "text_to_video" : (opDetails.text_to_image ? "text_to_image" : Object.keys(opDetails)[0]);
+    const opDef = opDetails[mainOp] || {};
+
+    return {
+        key:            m.modelFamily,
+        displayName:    m.displayName,
+        description:    m.description || "",
+        category:       m.domain,
+        tier:           m.badge || "standard",
+        pricing:        opDef.retailPricing || opDef.pricing || {},
+        tags:           m.badge ? [m.badge.toLowerCase()] : [],
+        support:        {},
+        supportsEdit:   m.operations.includes("edit"),
+        supportsCamera: isVideo,
+        variants: {
+            t2i:      m.operations.includes("text_to_image"),
+            i2i:      m.operations.includes("edit"),
+            i2iMulti: m.operations.includes("edit"),
+        },
+        icon:           m.iconUrl || "",
+        badge:          m.badge || null,
+        operations:     m.operations,
+        operationDetails: m.operationDetails,
+    };
+}
+
 // ── GET /api/models ───────────────────────────────────────────────────────
 router.get("/", (req, res) => {
     console.log("--- FETCHING MODELS FROM MODELS MANAGEMENT SYSTEM ---");
@@ -10,35 +39,7 @@ router.get("/", (req, res) => {
     const targetDomain = category || domain;
 
     const catalog = getCatalog(targetDomain ? { domain: targetDomain } : {});
-
-    let models = catalog.map((m) => {
-        const isVideo = m.domain === "video";
-        const opDetails = m.operationDetails || {};
-        const mainOp = isVideo ? "text_to_video" : (opDetails.text_to_image ? "text_to_image" : Object.keys(opDetails)[0]);
-        const opDef = opDetails[mainOp] || {};
-
-        return {
-            key:            m.modelFamily,
-            displayName:    m.displayName,
-            description:    m.description || "",
-            category:       m.domain,
-            tier:           m.badge || "standard",
-            pricing:        opDef.pricing || {},
-            tags:           m.badge ? [m.badge.toLowerCase()] : [],
-            support:        {},
-            supportsEdit:   m.operations.includes("edit"),
-            supportsCamera: isVideo,
-            variants: {
-                t2i:      m.operations.includes("text_to_image"),
-                i2i:      m.operations.includes("edit"),
-                i2iMulti: m.operations.includes("edit"),
-            },
-            icon:           m.iconUrl || "",
-            badge:          m.badge || null,
-            operations:     m.operations,
-            operationDetails: m.operationDetails,
-        };
-    });
+    const models = catalog.map(formatModelDto);
 
     console.log("--- MODELS FETCHED ---", models.length);
 
@@ -64,34 +65,9 @@ router.get("/:key", (req, res) => {
     const m = catalog.find(entry => entry.modelFamily === key);
 
     if (m) {
-        const isVideo = m.domain === "video";
-        const opDetails = m.operationDetails || {};
-        const mainOp = isVideo ? "text_to_video" : (opDetails.text_to_image ? "text_to_image" : Object.keys(opDetails)[0]);
-        const opDef = opDetails[mainOp] || {};
-
         return res.json({
             success: true,
-            data: {
-                key:            m.modelFamily,
-                displayName:    m.displayName,
-                description:    m.description || "",
-                category:       m.domain,
-                tier:           m.badge || "standard",
-                pricing:        opDef.pricing || {},
-                tags:           m.badge ? [m.badge.toLowerCase()] : [],
-                support:        {},
-                supportsEdit:   m.operations.includes("edit"),
-                supportsCamera: isVideo,
-                variants: {
-                    t2i:      m.operations.includes("text_to_image"),
-                    i2i:      m.operations.includes("edit"),
-                    i2iMulti: m.operations.includes("edit"),
-                },
-                icon:           m.iconUrl || "",
-                badge:          m.badge || null,
-                operations:     m.operations,
-                operationDetails: m.operationDetails,
-            },
+            data: formatModelDto(m),
         });
     }
 

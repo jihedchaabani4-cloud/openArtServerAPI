@@ -1,10 +1,10 @@
-import { getRegistry } from "./modelRegistry.js";
-import { getBindings, getBinding } from "./bindingRegistry.js";
+import { getInternalBindings, getBinding } from "./bindingRegistry.js";
 import {
   BindingNotFoundError,
   BindingModelMismatchError,
   BindingOperationMismatchError,
   UnsupportedCapabilityError,
+  MissingOptionError,
 } from "../errors/index.js";
 
 /**
@@ -25,80 +25,89 @@ function normalizeId(id) {
  *   1. "modelId.providerId"           (e.g. "nanobana_pro.wavespeed", "nanobana-pro.google")
  *   2. "providerId"                   (e.g. "wavespeed", "google")
  *   3. "modelId:operation:providerId" (composite key)
- *   4. undefined/null                 (uses single/default active binding if available)
  *
- * @param {string|null} bindingId  - Explicit binding identifier
+ * @param {string} bindingId       - Explicit binding identifier (MANDATORY in Phase 1)
  * @param {string} modelId        - Target canonical model ID
  * @param {string} operation      - Target operation
  * @returns {object} validatedBinding
  */
-export function resolveBinding(bindingId, modelId, operation) {
+/**
+ * Resolves the configured provider binding for a given model and operation.
+ *
+ * MODEL-FIRST ARCHITECTURE:
+ * External callers supply ONLY modelId and operation. The Models Management
+ * subsystem resolves its configured active provider binding internally.
+ *
+ * @param {string} modelId - Target canonical model ID
+ * @param {string} operation - Target operation
+ * @param {object|string} [options={}] - Options object or explicit bindingId string
+ * @returns {object} validated configured binding
+ */
+export function resolveBinding(modelId, operation, options = {}) {
+  const opts = typeof options === "string" ? { bindingId: options } : (options || {});
+
   const normModelId = normalizeId(modelId);
-  const availableBindings = getBindings(modelId, operation);
+  const availableBindings = getInternalBindings(modelId, operation);
 
   if (!availableBindings || availableBindings.length === 0) {
-    throw new BindingNotFoundError(bindingId || "default", modelId, operation);
+    throw new BindingNotFoundError(opts.bindingId || "configured", modelId, operation);
   }
 
-  // 1. If no explicit bindingId provided, resolve default/first active binding
-  if (!bindingId) {
-    const active = availableBindings.filter((b) => b.status === "active");
-    if (active.length === 0) {
-      throw new UnsupportedCapabilityError(`No active bindings configured for "${modelId}" (${operation})`);
+  // Case A: Explicit binding requested (internal tests / admin tools only)
+  if (opts.bindingId) {
+    const targetBindingId = opts.bindingId;
+    let targetProviderId = targetBindingId;
+    let targetModelId = null;
+    let targetOperation = null;
+
+    if (typeof targetBindingId === "string") {
+      if (targetBindingId.includes(":")) {
+        const parts = targetBindingId.split(":");
+        targetModelId = parts[0];
+        targetOperation = parts[1];
+        targetProviderId = parts[2];
+      } else if (targetBindingId.includes(".")) {
+        const parts = targetBindingId.split(".");
+        targetModelId = parts[0];
+        targetProviderId = parts[1];
+      }
     }
-    // Return the highest priority active binding
-    return active[0];
-  }
 
-  // 2. Parse provider identifier from bindingId
-  let targetProviderId = bindingId;
-  let targetModelId = null;
-  let targetOperation = null;
-
-  if (typeof bindingId === "string") {
-    if (bindingId.includes(":")) {
-      // Format: "model:operation:provider"
-      const parts = bindingId.split(":");
-      targetModelId = parts[0];
-      targetOperation = parts[1];
-      targetProviderId = parts[2];
-    } else if (bindingId.includes(".")) {
-      // Format: "model.provider"
-      const parts = bindingId.split(".");
-      targetModelId = parts[0];
-      targetProviderId = parts[1];
+    if (targetModelId && normalizeId(targetModelId) !== normModelId) {
+      throw new BindingModelMismatchError(targetBindingId, targetModelId, modelId);
     }
+    if (targetOperation && targetOperation !== operation) {
+      throw new BindingOperationMismatchError(targetBindingId, targetOperation, operation);
+    }
+
+    let matched = getBinding(modelId, operation, targetProviderId);
+    if (!matched) {
+      matched = availableBindings.find(
+        (b) => b.providerId === targetProviderId || b.id === targetBindingId
+      ) || null;
+    }
+
+    if (!matched) {
+      throw new BindingNotFoundError(targetBindingId, modelId, operation);
+    }
+
+    if (matched.status !== "active" && matched.status !== "standby") {
+      throw new UnsupportedCapabilityError(
+        `Selected binding "${targetBindingId}" is inactive (current status: "${matched.status}")`
+      );
+    }
+
+    return matched;
   }
 
-  // 3. Check for Model Mismatch
-  if (targetModelId && normalizeId(targetModelId) !== normModelId) {
-    throw new BindingModelMismatchError(bindingId, targetModelId, modelId);
-  }
+  // Case B: Model-First resolution — resolve the configured active implementation
+  const activeBindings = availableBindings.filter((b) => b.status === "active");
 
-  // 4. Check for Operation Mismatch
-  if (targetOperation && targetOperation !== operation) {
-    throw new BindingOperationMismatchError(bindingId, targetOperation, operation);
-  }
-
-  // 5. Look up binding
-  let matchedBinding = getBinding(modelId, operation, targetProviderId);
-  if (!matchedBinding) {
-    // Also try matching by providerId case-insensitively or via availableBindings
-    matchedBinding = availableBindings.find(
-      (b) => b.providerId === targetProviderId || b.id === bindingId
-    ) || null;
-  }
-
-  if (!matchedBinding) {
-    throw new BindingNotFoundError(bindingId, modelId, operation);
-  }
-
-  // 6. Verify Active Status
-  if (matchedBinding.status !== "active") {
+  if (activeBindings.length === 0) {
     throw new UnsupportedCapabilityError(
-      `Selected binding "${bindingId}" is not active (current status: "${matchedBinding.status}")`
+      `No active provider binding configured for model "${modelId}" (${operation})`
     );
   }
 
-  return matchedBinding;
+  return activeBindings[0];
 }

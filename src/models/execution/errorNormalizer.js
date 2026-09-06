@@ -3,7 +3,6 @@ import {
   ProviderRequestError,
   ProviderTransientError,
   UnsupportedCapabilityError,
-  AllProvidersUnavailableError,
   OutputContractViolationError,
 } from "../errors/index.js";
 
@@ -13,7 +12,6 @@ export const StandardErrorCodes = Object.freeze({
   PROVIDER_UNAVAILABLE: "PROVIDER_UNAVAILABLE",
   INVALID_INPUT_REJECTED_BY_PROVIDER: "INVALID_INPUT_REJECTED_BY_PROVIDER",
   UNSUPPORTED_CAPABILITY: "UNSUPPORTED_CAPABILITY",
-  ALL_PROVIDERS_UNAVAILABLE: "ALL_PROVIDERS_UNAVAILABLE",
   OUTPUT_CONTRACT_VIOLATION: "OUTPUT_CONTRACT_VIOLATION",
   UNKNOWN_PROVIDER_ERROR: "UNKNOWN_PROVIDER_ERROR",
 });
@@ -29,7 +27,6 @@ export function normalizeError(err, context = {}) {
   // 1. Check if already one of our typed errors
   if (
     err instanceof UnsupportedCapabilityError ||
-    err instanceof AllProvidersUnavailableError ||
     err instanceof OutputContractViolationError
   ) {
     return err;
@@ -74,7 +71,7 @@ export function normalizeError(err, context = {}) {
     error.code = StandardErrorCodes.PROVIDER_UNAVAILABLE;
     error.statusCode = 503;
     error.retryable = true;
-    error.safeMessage = "The model provider is temporarily down. Trying fallback provider.";
+    error.safeMessage = "The model provider is temporarily unavailable. Please try again shortly.";
     error.providerRaw = rawData || { message: rawMessage };
     return error;
   }

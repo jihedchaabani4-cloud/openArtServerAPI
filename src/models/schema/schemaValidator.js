@@ -109,14 +109,39 @@ export function validateCanonicalInput(operationDefOrSchema = {}, rawInput = {},
  * Validates that cleanInput satisfies the specific binding's implementation constraints.
  * A binding can only NARROW the model universe (via valueMap or constraints), never widen it.
  *
+ * Additionally verifies that any canonical parameter explicitly supplied by the caller (in rawInput)
+ * is supported and mapped by this binding, preventing silent parameter dropping.
+ *
  * @param {object} binding     - Resolved execution binding
  * @param {object} cleanInput  - Validated canonical input
- * @throws {UnsupportedCapabilityError} If an input value is not supported by this binding
+ * @param {object} [rawInput]  - Raw caller input (used to determine explicitly supplied parameters)
+ * @throws {UnsupportedCapabilityError} If an input value or parameter is not supported by this binding
  */
-export function validateBindingConstraints(binding, cleanInput = {}) {
+export function validateBindingConstraints(binding, cleanInput = {}, rawInput = null) {
   if (!binding) return;
 
-  // 1. Check parameterMap.valueMap narrowing
+  const FRAMEWORK_EXEMPT = new Set(["operation", "userId", "idempotencyKey", "domain"]);
+
+  // 1. Prevent silent parameter dropping: reject canonical parameters supplied by caller that are not supported/mapped
+  if (!binding.customAdapter) {
+    const parameterMap = binding.parameterMap || {};
+    const passthrough = new Set(binding.passthroughParameters || []);
+    const suppliedSource = rawInput !== null && rawInput !== undefined ? rawInput : cleanInput;
+
+    for (const [key, val] of Object.entries(suppliedSource)) {
+      if (val === undefined || val === null || FRAMEWORK_EXEMPT.has(key)) continue;
+      // If the parameter is recognized in cleanInput (canonical schema parameter), it must be mapped
+      if (Object.prototype.hasOwnProperty.call(cleanInput, key)) {
+        if (!Object.prototype.hasOwnProperty.call(parameterMap, key) && !passthrough.has(key)) {
+          throw new UnsupportedCapabilityError(
+            `Binding "${binding.providerId}" for model "${binding.modelId}" does not support parameter "${key}".`
+          );
+        }
+      }
+    }
+  }
+
+  // 2. Check parameterMap.valueMap narrowing
   if (binding.parameterMap) {
     for (const [canonicalParam, mappingDef] of Object.entries(binding.parameterMap)) {
       if (mappingDef && mappingDef.valueMap && typeof mappingDef.valueMap === "object") {
@@ -134,7 +159,7 @@ export function validateBindingConstraints(binding, cleanInput = {}) {
     }
   }
 
-  // 2. Check explicit binding.constraints narrowing if declared
+  // 3. Check explicit binding.constraints narrowing if declared
   if (binding.constraints && typeof binding.constraints === "object") {
     for (const [param, allowedValues] of Object.entries(binding.constraints)) {
       const callerVal = cleanInput[param];

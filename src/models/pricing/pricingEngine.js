@@ -1,4 +1,15 @@
-import { getCreditToUsdRate } from "../../config/billing.js";
+const DEFAULT_CREDIT_TO_USD_RATE = 0.15;
+
+function resolveCreditToUsdRate(overrideRate) {
+  if (typeof overrideRate === "number" && !Number.isNaN(overrideRate)) {
+    return overrideRate;
+  }
+  const envVal = process.env.CREDIT_TO_USD_RATE;
+  if (envVal !== undefined && envVal !== "" && !Number.isNaN(Number(envVal))) {
+    return Number(envVal);
+  }
+  return DEFAULT_CREDIT_TO_USD_RATE;
+}
 
 /**
  * Pricing Engine
@@ -121,8 +132,9 @@ export function calculateWholesaleCostUsd(binding, cleanInput = {}) {
  * @param {number} [creditToUsdRate] - Credit valuation rate
  * @returns {{ retailCredits, retailUsd, wholesaleCostUsd, marginUsd, marginPercent }}
  */
-export function calculateMargin(retailCredits, wholesaleCostUsd, creditToUsdRate = getCreditToUsdRate()) {
-  const retailUsd = Math.round(retailCredits * creditToUsdRate * 100) / 100;
+export function calculateMargin(retailCredits, wholesaleCostUsd, creditToUsdRate = null) {
+  const rate = resolveCreditToUsdRate(creditToUsdRate);
+  const retailUsd = Math.round(retailCredits * rate * 100) / 100;
   const marginUsd = Math.round((retailUsd - wholesaleCostUsd) * 100) / 100;
   const marginPercent = retailUsd > 0 ? Math.round((marginUsd / retailUsd) * 1000) / 10 : 0;
 

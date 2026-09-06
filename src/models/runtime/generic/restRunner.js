@@ -164,19 +164,3 @@ async function _pollTask(taskId, providerContext, options = {}) {
   throw timeoutErr;
 }
 
-/**
- * Factory for creating a standalone generic REST client (backward compat).
- */
-export function createApiSdkClient(providerConfig, credential) {
-  return {
-    run: (providerModelId, payload, opts = {}) =>
-      run({
-        provider: providerConfig,
-        binding: { providerModelId, endpoint: opts.endpoint },
-        payload,
-        credential,
-        timeoutMs: opts.timeoutMs,
-        options: opts,
-      }),
-  };
-}

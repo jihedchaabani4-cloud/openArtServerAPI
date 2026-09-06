@@ -3,49 +3,33 @@
   "operation": "text_to_image",
   "providerId": "wavespeed",
   "providerModelId": "google/nano-banana-pro/text-to-image",
-  "endpoint": "/v1/images/generations",
+  "endpoint": "google/nano-banana-pro/text-to-image",
   "priority": 1,
   "status": "active",
   "parameterMap": {
     "prompt": {
       "providerField": "prompt"
     },
-    "negative_prompt": {
-      "providerField": "negative_prompt"
-    },
     "resolution": {
-      "providerField": "size",
-      "valueMap": {
-        "1k": "1024x1024",
-        "2k": "2048x2048",
-        "4k": "4096x4096"
-      }
+      "providerField": "resolution"
     },
     "aspect_ratio": {
       "providerField": "aspect_ratio"
-    },
-    "quality": {
-      "providerField": "quality_tier",
-      "valueMap": {
-        "standard": "std",
-        "hd": "high"
-      }
     },
     "seed": {
       "providerField": "seed"
     }
   },
+  "staticPayload": {
+    "output_format": "png"
+  },
   "pricing": {
-    "base_cost_usd": 0.8,
+    "base_cost_usd": 0.126,
     "modifiers": {
       "resolution": {
         "1k": 1,
-        "2k": 1.6,
-        "4k": 2.5
-      },
-      "quality": {
-        "standard": 1,
-        "hd": 1.3
+        "2k": 1.5,
+        "4k": 2.0
       }
     }
   },

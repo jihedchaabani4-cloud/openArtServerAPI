@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { initRegistry } from "../src/models/registry/modelRegistry.js";
+import { initRegistry } from "../src/models/index.js";
 
 console.log("==================================================");
 console.log("  Models Management System — CI Config Validator  ");
@@ -17,6 +17,7 @@ try {
   console.log(`✓ 4. Composite Key Uniqueness passed`);
   console.log(`✓ 5. Priority Conflict Integrity passed`);
   console.log(`✓ 6. Mandatory outputMap Declarations passed`);
+  console.log(`✓ 7. Anti-Widening Invariant (valueMap within Model universe) passed`);
   console.log("--------------------------------------------------");
   console.log(`Successfully validated in ${duration}ms:`);
   console.log(`  - Models:     ${models.size}`);

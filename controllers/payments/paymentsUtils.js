@@ -64,30 +64,27 @@ function floorMediaCount(packageCredits, modelCredits) {
     return Math.floor(credits / cost);
 }
 
-function buildImageComparison(packages) {
-    const catalog = getCatalog({ domain: "image" });
+function buildDomainComparison({ domain, operation, defaultParams, defaultCost, unitLabel, basis, packages }) {
+    const catalog = getCatalog({ domain });
 
     return catalog
         .map((entry) => {
-            let creditsPerGeneration = 10;
+            let creditsPerGeneration = defaultCost;
             try {
-                const cost = calculateCost(entry.modelFamily, "text_to_image", { quality: "standard" });
-                creditsPerGeneration = parseFloat(cost.amount);
+                const cost = calculateCost(entry.modelFamily, operation, defaultParams);
+                creditsPerGeneration = typeof cost === "number" && !isNaN(cost) ? cost : defaultCost;
             } catch {
-                creditsPerGeneration = 10;
+                creditsPerGeneration = defaultCost;
             }
 
             return {
                 key: entry.modelFamily,
                 displayName: entry.displayName || entry.modelFamily,
                 icon: entry.iconUrl || "",
-                category: "image",
+                category: domain,
                 creditsPerGeneration,
-                unitLabel: "image",
-                basis: {
-                    operation: "generated",
-                    quality: "standard",
-                },
+                unitLabel,
+                basis,
                 packageCounts: packages.map((pkg) => ({
                     packageId: pkg.id,
                     credits: pkg.credits,
@@ -98,38 +95,28 @@ function buildImageComparison(packages) {
         .sort((a, b) => a.creditsPerGeneration - b.creditsPerGeneration);
 }
 
+function buildImageComparison(packages) {
+    return buildDomainComparison({
+        domain: "image",
+        operation: "text_to_image",
+        defaultParams: { quality: "standard" },
+        defaultCost: 10,
+        unitLabel: "image",
+        basis: { operation: "generated", quality: "standard" },
+        packages,
+    });
+}
+
 function buildVideoComparison(packages) {
-    const catalog = getCatalog({ domain: "video" });
-
-    return catalog
-        .map((entry) => {
-            let creditsPerGeneration = 20;
-            try {
-                const cost = calculateCost(entry.modelFamily, "text_to_video", { durationSeconds: 5, resolution: "720p" });
-                creditsPerGeneration = parseFloat(cost.amount);
-            } catch {
-                creditsPerGeneration = 20;
-            }
-
-            return {
-                key: entry.modelFamily,
-                displayName: entry.displayName || entry.modelFamily,
-                icon: entry.iconUrl || "",
-                category: "video",
-                creditsPerGeneration,
-                unitLabel: "video",
-                basis: {
-                    durationSeconds: 5,
-                    resolution: "720p",
-                },
-                packageCounts: packages.map((pkg) => ({
-                    packageId: pkg.id,
-                    credits: pkg.credits,
-                    count: floorMediaCount(pkg.credits, creditsPerGeneration),
-                })),
-            };
-        })
-        .sort((a, b) => a.creditsPerGeneration - b.creditsPerGeneration);
+    return buildDomainComparison({
+        domain: "video",
+        operation: "text_to_video",
+        defaultParams: { durationSeconds: 5, resolution: "720p" },
+        defaultCost: 20,
+        unitLabel: "video",
+        basis: { durationSeconds: 5, resolution: "720p" },
+        packages,
+    });
 }
 
 export function buildModelsComparison(packages) {

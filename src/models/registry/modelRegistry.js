@@ -7,9 +7,9 @@ import {
   UnknownCanonicalParameterError,
   DuplicateBindingError,
   UnknownModelFamilyError,
-  UnknownOperationError,
   PriorityConflictError,
-  MissingOutputMapError
+  MissingOutputMapError,
+  ConfigIntegrityError
 } from "../errors/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -19,6 +19,7 @@ const DEFAULT_MODELS_ROOT = path.resolve(__dirname, "..");
 let registryState = {
   isInitialized: false,
   models: new Map(),
+  modelAliases: new Map(),
   providers: new Map(),
   sharedParams: new Map(),
   bindings: new Map(),
@@ -42,6 +43,7 @@ export function initRegistry(options = {}) {
   const providers = new Map();
   const sharedParams = new Map();
   const models = new Map();
+  const modelAliases = new Map();
   const bindings = new Map();
   const bindingIndex = new Map();
 
@@ -84,6 +86,12 @@ export function initRegistry(options = {}) {
       modelDef._sourcePath = modelPath;
       models.set(modelDef.id, modelDef);
 
+      if (Array.isArray(modelDef.aliases)) {
+        for (const alias of modelDef.aliases) {
+          modelAliases.set(alias, modelDef.id);
+        }
+      }
+
       // Load nested bindings
       const bindingsDir = path.join(manifestsDir, modelId, "bindings");
       if (fs.existsSync(bindingsDir)) {
@@ -92,6 +100,7 @@ export function initRegistry(options = {}) {
           const bindingPath = path.join(bindingsDir, file);
           const bindingDef = JSON.parse(fs.readFileSync(bindingPath, "utf8"));
           bindingDef.modelId = bindingDef.modelId || modelDef.id;
+          bindingDef.id = bindingDef.id || `${bindingDef.modelId}.${bindingDef.providerId}`;
           bindingDef._sourcePath = bindingPath;
 
           const compositeKey = `${bindingDef.modelId}:${bindingDef.operation}:${bindingDef.providerId}`;
@@ -124,6 +133,16 @@ export function initRegistry(options = {}) {
       (a, b) => (a.priority || 999) - (b.priority || 999) || (a.providerId || "").localeCompare(b.providerId || "")
     );
 
+    // Validation: Unambiguous Active Configuration (Phase 1)
+    // Exactly one active provider binding is permitted per (model, operation).
+    const activeBindings = bindingList.filter((b) => b.status === "active");
+    if (activeBindings.length > 1) {
+      throw new ConfigIntegrityError(
+        `Ambiguous active configuration: multiple active bindings found for model "${mId}" (${op}): ` +
+        `[${activeBindings.map((b) => b.providerId).join(", ")}]. Exactly one active provider binding is permitted per operation.`
+      );
+    }
+
     // Validation Rule 5: Priority conflict check (hard error on conflict)
     const priorityCounts = {};
     for (const b of bindingList) {
@@ -150,12 +169,24 @@ export function initRegistry(options = {}) {
       const canonicalInputs = opDef.canonicalInputs || {};
 
       if (b.parameterMap) {
-        for (const canonicalKey of Object.keys(b.parameterMap)) {
+        for (const [canonicalKey, mapDef] of Object.entries(b.parameterMap)) {
           const isDeclaredInModel = Object.prototype.hasOwnProperty.call(canonicalInputs, canonicalKey);
           const isDeclaredInShared = Object.prototype.hasOwnProperty.call(domainShared, canonicalKey);
 
           if (!isDeclaredInModel && !isDeclaredInShared) {
             throw new UnknownCanonicalParameterError(mId, op, canonicalKey);
+          }
+
+          // Anti-Widening Invariant: If binding declares valueMap, ensure values are supported by model canonicalInputs
+          if (mapDef && mapDef.valueMap && canonicalInputs[canonicalKey]?.values) {
+            const modelAllowedValues = canonicalInputs[canonicalKey].values.map(String);
+            for (const valueMapKey of Object.keys(mapDef.valueMap)) {
+              if (!modelAllowedValues.includes(String(valueMapKey))) {
+                throw new ConfigIntegrityError(
+                  `Binding "${b.providerId}" for model "${mId}" (${op}) attempts to widen parameter "${canonicalKey}" with unsupported value "${valueMapKey}". Model allowed: ${modelAllowedValues.join(", ")}`
+                );
+              }
+            }
           }
         }
       }
@@ -170,6 +201,7 @@ export function initRegistry(options = {}) {
   registryState = {
     isInitialized: true,
     models,
+    modelAliases,
     providers,
     sharedParams,
     bindings,
@@ -191,11 +223,24 @@ export function getRegistry() {
 }
 
 export function getModel(modelId) {
-  const { models } = getRegistry();
-  let model = models.get(modelId);
-  if (!model && typeof modelId === "string") {
-    model = models.get(modelId.replace(/-/g, "_")) || models.get(modelId.replace(/_/g, "-"));
+  const { models, modelAliases } = getRegistry();
+  if (!modelId || typeof modelId !== "string") {
+    throw new UnknownModelFamilyError(String(modelId));
   }
+
+  let model = models.get(modelId);
+  if (!model) {
+    const normalized = modelId.replace(/-/g, "_");
+    model = models.get(normalized) || models.get(modelId.replace(/_/g, "-"));
+
+    if (!model && modelAliases) {
+      const canonicalId = modelAliases.get(modelId) || modelAliases.get(normalized);
+      if (canonicalId) {
+        model = models.get(canonicalId);
+      }
+    }
+  }
+
   if (!model) {
     throw new UnknownModelFamilyError(modelId);
   }
@@ -211,18 +256,8 @@ export function getProvider(providerId) {
   return provider;
 }
 
-export { getBindings, getBinding } from "./bindingRegistry.js";
+export { getBindings, getBinding, getDefaultBinding } from "./bindingRegistry.js";
 
-export function resetRegistry() {
-  registryState = {
-    isInitialized: false,
-    models: new Map(),
-    providers: new Map(),
-    sharedParams: new Map(),
-    bindings: new Map(),
-    bindingIndex: new Map(),
-  };
-}
 
 /**
  * Safe Hot-Reload of Model Registry.

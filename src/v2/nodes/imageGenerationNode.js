@@ -2,14 +2,15 @@ import { run, resolveOperation } from "../../models/index.js";
 import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 
 /**
+ * Executes image generation node via the Model-First Models Management System.
+ *
  * @param {object} inputs - { prompt, width, height, count, seed, style, model, quality }
- * @param {object} ctx    - { runId, nodeId, userId, traceId, forceProvider, gateways }
- * @returns {Promise<{ assets: object[], metadata: object }>}
+ * @param {object} ctx    - { runId, nodeId, userId, traceId, gateways }
  */
 export async function executeImageGeneration(inputs, ctx) {
-  const { runId, nodeId, traceId, userId } = ctx;
+  const { runId, nodeId, userId } = ctx;
 
-  // ── Safety: validate & sanitise all inputs before any provider work ────────
+  // ── Safety: validate & sanitise all inputs before any model work ────────
   const safe = NodeSafetyService.assertImageInputs(inputs, nodeId);
   const started = Date.now();
 
@@ -19,31 +20,20 @@ export async function executeImageGeneration(inputs, ctx) {
   }
 
   // ── Translate workflow inputs → canonical Models System inputs ─────────────
-  // The workflow YAML uses legacy field names (ratio, width, height) that are
-  // NOT canonical parameters in any model manifest.  This mapping step converts
-  // them to the canonical vocabulary before hitting schemaValidator.
   const canonicalInput = buildCanonicalInput(safe);
   const operation = resolveOperation(canonicalInput, "image");
 
-  // ── Direct execution via Models Management System ─────────────────────────
+  // ── Model-First Execution via Models Management System ─────────────────────
+  // Caller supplies ONLY model, operation, canonical input, and context.
+  // Models Management resolves the configured provider implementation internally.
   const runResult = await run(modelFamily, operation, canonicalInput, {
     idempotencyKey: `node:${runId}:${nodeId}`,
     userId,
-    domain: "image",
-    skipWalletHold: Boolean(ctx.hasWorkflowHold || ctx.skipWalletHold),
   });
 
   // ── Normalize outputs → V2 asset shape ──────────────────────────────────
-  const imageUrl =
-    runResult.images?.[0]?.url ??
-    runResult.url ??
-    runResult.data?.url ??
-    "";
-
-  const providerUsed =
-    runResult.metadata?.providerUsed ??
-    runResult.metadata?.deploymentUsed ??
-    modelFamily;
+  // External code consumes only canonical result.images — no raw provider fields.
+  const imageUrl = runResult.images?.[0]?.url ?? "";
 
   const assets = [
     {
@@ -53,9 +43,7 @@ export async function executeImageGeneration(inputs, ctx) {
       width: safe.width ?? null,
       height: safe.height ?? null,
       metadata: {
-        provider: providerUsed,
         model: modelFamily,
-        ...(runResult.metadata ?? {}),
       },
     },
   ];
@@ -64,7 +52,7 @@ export async function executeImageGeneration(inputs, ctx) {
 
   return {
     assets,
-    metadata: { model: modelFamily, latencyMs: durationMs, metadata: runResult.metadata },
+    metadata: { model: modelFamily, latencyMs: durationMs },
   };
 }
 

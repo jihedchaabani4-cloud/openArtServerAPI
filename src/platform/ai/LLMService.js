@@ -7,7 +7,6 @@
  * Backed 100% by the central Models Management System (src/models/index.js)
  * with Google Gemini 2.0 Flash as the default workhorse model.
  */
-
 import { run } from "../../models/index.js";
 import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";
 
@@ -105,21 +104,20 @@ export class LLMService {
 
     logger.info(
       {
-        model: result.metadata?.providerModelId || result.metadata?.modelId || model,
-        providerUsed: result.metadata?.providerUsed || "google",
+        model: result.metadata?.modelId || model,
         durationMs,
         outputLength: rawOutput.length,
         jsonParsed: Boolean(jsonResult),
         event: LogEvents.PROVIDER_REQUEST_COMPLETED,
       },
-      `[LLMService] Completed in ${durationMs}ms via ${result.metadata?.providerUsed || "google"}`
+      `[LLMService] Completed in ${durationMs}ms for model "${model}"`
     );
 
     return {
       raw: rawOutput,
       content: rawOutput,
       json: jsonResult,
-      model: result.metadata?.providerModelId || result.metadata?.modelId || model,
+      model: result.metadata?.modelId || model,
       durationMs,
     };
   }

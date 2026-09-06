@@ -6,7 +6,7 @@
   "endpoint": "/v1beta/models/imagen-4-ultra:generate",
   "priority": 2,
   "sdkMethod": "generateImages",
-  "status": "active",
+  "status": "standby",
   "parameterMap": {
     "prompt": {
       "providerField": "textPrompt"

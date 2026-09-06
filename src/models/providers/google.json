@@ -7,5 +7,11 @@
   "authQueryParam": "key",
   "runtime": "sdk",
   "clientType": "sdk",
-  "defaultTimeoutMs": 45000
+  "defaultTimeoutMs": 45000,
+  "envKeys": [
+    "GEMINI_API_KEY",
+    "GOOGLE_AI_API_KEY",
+    "GOOGLE_AI_STUDIO_API_KEY",
+    "GOOGLE_API_KEY"
+  ]
 }

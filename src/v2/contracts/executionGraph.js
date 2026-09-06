@@ -6,7 +6,6 @@
  * @typedef {Object} RetryPolicy
  * @property {number} max_attempts
  * @property {BackoffStrategy} backoff
- * @property {string} [fallback_provider]
  */
 
 /**

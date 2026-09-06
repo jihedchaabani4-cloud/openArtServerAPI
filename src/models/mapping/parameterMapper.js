@@ -1,3 +1,4 @@
+import { MissingOutputMapError } from "../errors/index.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
 
 const logger = createLogger("models");
@@ -126,11 +127,21 @@ export function mapFromProviderResponse(rawResponse = {}, binding = {}) {
       }
     }
 
-    // Normalize string array in images to object array
+    // Normalize string array or provider-specific image objects into canonical { url }
     if (Array.isArray(output.images) && output.images.length > 0) {
-      output.images = output.images.map((img) =>
-        typeof img === "string" ? { url: img } : img
-      );
+      output.images = output.images.map((img) => {
+        if (typeof img === "string") return { url: img };
+        if (img && typeof img === "object") {
+          const url = img.url || img.imageUri || img.uri || img.src;
+          if (url) {
+            const canonicalImg = { url };
+            if (img.width) canonicalImg.width = img.width;
+            if (img.height) canonicalImg.height = img.height;
+            return canonicalImg;
+          }
+        }
+        return img;
+      });
     }
 
     // Sync text ↔ content
@@ -143,53 +154,10 @@ export function mapFromProviderResponse(rawResponse = {}, binding = {}) {
     return output;
   }
 
-  // 2. Last resort fallback — heuristic detection + warning
-  const bindingId =
-    binding?.modelId && binding?.providerId
-      ? `${binding.modelId}:${binding.operation || "unknown"}:${binding.providerId}`
-      : binding?.providerId || "unknown";
-
-  logger.warn(
-    { bindingId },
-    `[parameterMapper] Falling back to heuristic response guessing for binding "${bindingId}". ` +
-    `An explicit "outputMap" should be defined in the binding manifest.`
+  // 2. Strict Invariant: Missing outputMap is a configuration error (Zero Heuristic Guessing)
+  throw new MissingOutputMapError(
+    binding?.modelId || "unknown",
+    binding?.operation || "unknown",
+    binding?.providerId || "unknown"
   );
-
-  // Common heuristic detections
-  if (Array.isArray(rawResponse.data)) {
-    output.images = rawResponse.data
-      .filter((item) => item.url || item.image_url)
-      .map((item) => ({ url: item.url || item.image_url }));
-  } else if (Array.isArray(rawResponse.images)) {
-    output.images = rawResponse.images.map((img) =>
-      typeof img === "string" ? { url: img } : img
-    );
-  } else if (Array.isArray(rawResponse.output)) {
-    output.images = rawResponse.output.map((url) =>
-      typeof url === "string" ? { url } : url
-    );
-  } else if (Array.isArray(rawResponse.outputs)) {
-    output.images = rawResponse.outputs.map((item) =>
-      typeof item === "string" ? { url: item } : item
-    );
-  } else if (rawResponse.predictions && Array.isArray(rawResponse.predictions)) {
-    output.images = rawResponse.predictions
-      .filter((p) => p.bytesBase64Encoded || p.imageUri || p.url)
-      .map((p) => ({
-        url: p.imageUri || p.url || `data:image/png;base64,${p.bytesBase64Encoded}`,
-      }));
-  }
-
-  // LLM text completion
-  if (rawResponse.choices && Array.isArray(rawResponse.choices) && rawResponse.choices[0]) {
-    const choice = rawResponse.choices[0];
-    output.text = choice.message?.content || choice.text || "";
-  } else if (rawResponse.text) {
-    output.text = rawResponse.text;
-  } else if (rawResponse.content) {
-    output.text = rawResponse.content;
-  }
-  output.content = output.text;
-
-  return output;
 }

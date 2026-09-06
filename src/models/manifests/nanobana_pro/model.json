@@ -4,6 +4,9 @@
   "displayName": "NanoBanana Pro",
   "description": "State-of-the-art high-fidelity photorealistic image generation model",
   "status": "active",
+  "aliases": [
+    "nanobana"
+  ],
   "operations": {
     "text_to_image": {
       "canonicalInputs": {

@@ -202,7 +202,6 @@ export async function executeNodeJob(runId, nodeId) {
       userId: run.user_id,
       traceId: runId,
       attempt: nodeRun.attempt,
-      forceProvider: nodeRun.provider_override || null,
       billing,
     };
 
@@ -294,22 +293,19 @@ export async function executeNodeJob(runId, nodeId) {
 
     if (currentAttempt < maxAttempts && error?.retryable !== false) {
       const nextAttempt = currentAttempt + 1;
-      const fallbackProvider = nodeConfig?.retry_policy?.fallback_provider || nodeRun.provider_override || null;
       nodeLogger.warn(
         {
           nodeId,
           runId,
           attempt: nextAttempt,
           maxAttempts,
-          fallbackProvider,
         },
-        `Retrying Node "${nodeId}" (Attempt ${nextAttempt}/${maxAttempts}) with fallback: ${fallbackProvider}`
+        `Retrying Node "${nodeId}" (Attempt ${nextAttempt}/${maxAttempts})`
       );
 
       await runRepo.updateNodeRun(runId, nodeId, {
         attempt: nextAttempt,
         status: "pending",
-        provider_override: fallbackProvider,
       });
 
       return executeNodeJob(runId, nodeId);

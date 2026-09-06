@@ -80,17 +80,24 @@ export async function resolveCredential(binding, provider, credentialProvider = 
   }
 
   // 4. Resolution Tier 3: Platform secret lookup from environment variables
-  const envKey = `${providerId.toUpperCase()}_API_KEY`;
-  const fallbackEnvKey = `${providerId.toUpperCase()}_KEY`;
-  const platformKey =
-    process.env[envKey] ||
-    process.env[fallbackEnvKey] ||
-    (providerId === "google"
-      ? (process.env.GEMINI_API_KEY ||
-         process.env.GOOGLE_AI_API_KEY ||
-         process.env.GOOGLE_AI_STUDIO_API_KEY ||
-         process.env.GOOGLE_API_KEY)
-      : null);
+  let platformKey = null;
+
+  // Check explicit provider manifest envKeys first (declarative)
+  if (Array.isArray(provider?.envKeys)) {
+    for (const key of provider.envKeys) {
+      if (process.env[key]) {
+        platformKey = process.env[key];
+        break;
+      }
+    }
+  }
+
+  // Generic fallback: <PROVIDER>_API_KEY or <PROVIDER>_KEY
+  if (!platformKey) {
+    const envKey = `${providerId.toUpperCase()}_API_KEY`;
+    const fallbackEnvKey = `${providerId.toUpperCase()}_KEY`;
+    platformKey = process.env[envKey] || process.env[fallbackEnvKey] || null;
+  }
 
   if (platformKey) {
     if (cacheKey || providerId) {
@@ -104,17 +111,4 @@ export async function resolveCredential(binding, provider, credentialProvider = 
 
   // If no key found
   return { apiKey: null, credentialSource: "none" };
-}
-
-export function clearCredentialCache(key = null) {
-  if (key) {
-    credentialCache.delete(key);
-    for (const k of credentialCache.keys()) {
-      if (k.startsWith(`${key}:`)) {
-        credentialCache.delete(k);
-      }
-    }
-  } else {
-    credentialCache.clear();
-  }
 }

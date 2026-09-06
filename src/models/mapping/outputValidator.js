@@ -53,16 +53,20 @@ export function validateOutput(normalizedOutput, binding, domain) {
   }
 }
 
+function _hasValidMediaUrl(items, topLevelUrl) {
+  const hasInList =
+    Array.isArray(items) &&
+    items.length > 0 &&
+    items.some((item) => typeof item?.url === "string" && item.url.trim() !== "");
+
+  const hasTopLevel =
+    typeof topLevelUrl === "string" && topLevelUrl.trim() !== "";
+
+  return hasInList || hasTopLevel;
+}
+
 function _requireImageUrl(normalizedOutput, binding, domain) {
-  const hasImageUrl =
-    Array.isArray(normalizedOutput.images) &&
-    normalizedOutput.images.length > 0 &&
-    normalizedOutput.images.some((img) => typeof img?.url === "string" && img.url.trim() !== "");
-
-  const hasTopLevelUrl =
-    typeof normalizedOutput.url === "string" && normalizedOutput.url.trim() !== "";
-
-  if (!hasImageUrl && !hasTopLevelUrl) {
+  if (!_hasValidMediaUrl(normalizedOutput.images, normalizedOutput.url)) {
     throw new OutputContractViolationError(
       `Provider returned no valid image URL for domain "${domain}" ` +
       `(binding: ${_bindingLabel(binding)}). ` +
@@ -72,11 +76,9 @@ function _requireImageUrl(normalizedOutput, binding, domain) {
 }
 
 function _requireVideoUrl(normalizedOutput, binding, domain) {
-  // Video output may come as images[0].url (single video file) or url
   const hasUrl =
-    (Array.isArray(normalizedOutput.images) &&
-      normalizedOutput.images.some((item) => typeof item?.url === "string" && item.url.trim() !== "")) ||
-    (typeof normalizedOutput.url === "string" && normalizedOutput.url.trim() !== "");
+    _hasValidMediaUrl(normalizedOutput.videos, normalizedOutput.url) ||
+    _hasValidMediaUrl(normalizedOutput.images, null);
 
   if (!hasUrl) {
     throw new OutputContractViolationError(

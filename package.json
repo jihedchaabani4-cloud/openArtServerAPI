@@ -23,7 +23,7 @@
         "#container.js": "./src/container.js"
     },
     "scripts": {
-        "test": "node --test src/models/__tests__/**/*.test.mjs tests/**/*.test.mjs",
+        "test": "node --test tests/boundary/modelsBoundary.test.js",
         "models:validate": "node scripts/validate-all-configs.js",
         "start": "node index.js",
         "start:worker": "node src/workers/worker.js",

@@ -284,13 +284,9 @@ export async function reloadModels(req, res) {
   const adminUserId = req.adminUser?.id || req.user?.id;
 
   try {
-    const { reloadRegistry } = await import("../src/models/index.js");
-    const reg = reloadRegistry();
-    const stats = {
-      models: reg.models.size,
-      providers: reg.providers.size,
-      bindings: reg.bindings.size,
-    };
+    const { reloadRegistry, getRegistryStats } = await import("../src/models/index.js");
+    reloadRegistry();
+    const stats = getRegistryStats();
 
     console.log(JSON.stringify({
       timestamp: new Date().toISOString(),

@@ -8,7 +8,6 @@ export function resolveRetryPolicy(defaultPolicy = {}, skillAware = false, resol
   const policy = {
     max_attempts: defaultPolicy.max_attempts ?? 1,
     backoff: defaultPolicy.backoff ?? "none",
-    ...(defaultPolicy.fallback_provider ? { fallback_provider: defaultPolicy.fallback_provider } : {}),
   };
 
   return policy;

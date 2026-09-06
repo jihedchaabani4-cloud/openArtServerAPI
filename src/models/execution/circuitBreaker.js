@@ -67,14 +67,6 @@ export class CircuitBreakerRegistry {
       entry.cooldownUntil = Date.now() + this.cooldownDurationMs;
     }
   }
-
-  reset(bindingId) {
-    this.states.delete(bindingId);
-  }
-
-  resetAll() {
-    this.states.clear();
-  }
 }
 
 export const circuitBreakerRegistry = new CircuitBreakerRegistry();

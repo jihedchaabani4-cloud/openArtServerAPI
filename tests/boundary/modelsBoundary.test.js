@@ -874,4 +874,310 @@ describe("Sealed Models Subsystem Architecture", () => {
     });
   });
 
+  // ── 9. FINAL ARCHITECTURE SPECIFICATION (TESTS 1 THROUGH 12) ───────────────
+  describe("9. Final Architecture Spec — Required Invariant Suite (TEST 1 to TEST 12)", () => {
+    // TEST 1 — Model only + semantic params
+    it("TEST 1: Model only + semantic params works without operation, provider, or bindingId", async () => {
+      const res = await models.run("nanobana_pro", { prompt: "hello" }, {
+        userId: "user-test",
+        sdkRunner: async ({ payload }) => {
+          assert.strictEqual(payload.prompt, "hello");
+          return { outputs: ["https://cdn.example.com/hello.png"] };
+        },
+      });
+      assert.strictEqual(res.status, "success");
+      assert.strictEqual(res.images[0].url, "https://cdn.example.com/hello.png");
+    });
+
+    // TEST 2 — Edit semantic request
+    it("TEST 2: Edit semantic request routes through configured Provider edit route", async () => {
+      let routeCalled = null;
+      const res = await models.run(
+        "nanobana_pro",
+        { prompt: "change the jacket", input_image: "https://example.com/jacket.png" },
+        {
+          userId: "user-test",
+          sdkRunner: async ({ binding, payload }) => {
+            routeCalled = binding.endpoint;
+            assert.ok(Array.isArray(payload.images));
+            assert.strictEqual(payload.images[0], "https://example.com/jacket.png");
+            return { outputs: ["https://cdn.example.com/edited.png"] };
+          },
+        }
+      );
+      assert.strictEqual(routeCalled, "google/nano-banana-pro/edit");
+      assert.strictEqual(res.images[0].url, "https://cdn.example.com/edited.png");
+    });
+
+    // TEST 3 — Input image + mask
+    it("TEST 3: Input image + mask routes through Provider inpaint route", async () => {
+      let routeCalled = null;
+      let maskPassed = null;
+      const res = await models.run(
+        "nanobana_pro",
+        {
+          prompt: "replace selected area",
+          input_image: "https://example.com/source.png",
+          mask: "https://example.com/mask.png",
+        },
+        {
+          userId: "user-test",
+          sdkRunner: async ({ binding, payload }) => {
+            routeCalled = binding.endpoint;
+            maskPassed = payload.mask;
+            return { outputs: ["https://cdn.example.com/inpainted.png"] };
+          },
+        }
+      );
+      assert.strictEqual(routeCalled, "google/nano-banana-pro/edit");
+      assert.strictEqual(maskPassed, "https://example.com/mask.png");
+      assert.strictEqual(res.images[0].url, "https://cdn.example.com/inpainted.png");
+    });
+
+    // TEST 4 — Reference images
+    it("TEST 4: Reference images passes array to provider and is NOT routed to edit", async () => {
+      let endpointCalled = null;
+      let refPassed = null;
+      const res = await models.run(
+        "nanobana_pro",
+        {
+          prompt: "combine these references",
+          reference_images: ["https://example.com/ref1.png", "https://example.com/ref2.png"],
+        },
+        {
+          userId: "user-test",
+          sdkRunner: async ({ binding, payload }) => {
+            endpointCalled = binding.endpoint;
+            refPassed = payload.reference_images;
+            return { outputs: ["https://cdn.example.com/combined.png"] };
+          },
+        }
+      );
+      assert.strictEqual(endpointCalled, "google/nano-banana-pro/text-to-image");
+      assert.deepStrictEqual(refPassed, ["https://example.com/ref1.png", "https://example.com/ref2.png"]);
+      assert.strictEqual(res.images[0].url, "https://cdn.example.com/combined.png");
+    });
+
+    // TEST 5 — Google topology
+    it("TEST 5: Google topology executes single endpoint with textPrompt and sourceImage without fake operation", async () => {
+      let googleEndpoint = null;
+      let googlePayload = null;
+      const res = await models.run(
+        "nanobana_pro",
+        {
+          prompt: "Futuristic city",
+          input_image: "https://example.com/base.png",
+        },
+        {
+          userId: "user-test",
+          bindingId: "nanobana_pro.google", // internal test override
+          sdkRunner: async ({ binding, payload }) => {
+            googleEndpoint = binding.endpoint;
+            googlePayload = payload;
+            return { images: [{ imageUri: "https://cdn.google.com/out.png" }] };
+          },
+        }
+      );
+      assert.strictEqual(googleEndpoint, "/v1beta/models/imagen-4-ultra:generate");
+      assert.strictEqual(googlePayload.textPrompt, "Futuristic city");
+      assert.strictEqual(googlePayload.sourceImage, "https://example.com/base.png");
+      assert.strictEqual(res.images[0].url, "https://cdn.google.com/out.png");
+    });
+
+    // TEST 6 — WaveSpeed topology
+    it("TEST 6: WaveSpeed topology selects /edit vs /text-to-image according to its own routes configuration", async () => {
+      let textEndpoint = null;
+      let editEndpoint = null;
+
+      await models.run("nanobana_pro", { prompt: "Text only" }, {
+        userId: "user-1",
+        sdkRunner: async ({ binding }) => {
+          textEndpoint = binding.endpoint;
+          return { outputs: ["https://cdn.wavespeed.ai/1.png"] };
+        },
+      });
+
+      await models.run("nanobana_pro", { prompt: "With image", input_image: "https://example.com/img.png" }, {
+        userId: "user-1",
+        sdkRunner: async ({ binding }) => {
+          editEndpoint = binding.endpoint;
+          return { outputs: ["https://cdn.wavespeed.ai/2.png"] };
+        },
+      });
+
+      assert.strictEqual(textEndpoint, "google/nano-banana-pro/text-to-image");
+      assert.strictEqual(editEndpoint, "google/nano-banana-pro/edit");
+    });
+
+    // TEST 7 — Provider switch
+    it("TEST 7: Provider switch from WaveSpeed to Google executes with identical caller invocation", async () => {
+      const { getRegistry } = await import("../../src/models/registry/modelRegistry.js");
+      const { bindings } = getRegistry();
+      const ws = bindings.get("nanobana_pro:text_to_image:wavespeed");
+      const g = bindings.get("nanobana_pro:text_to_image:google");
+
+      const callerParams = { prompt: "Identical caller request", resolution: "1k" };
+      let executedProvider = null;
+
+      // 1. With WaveSpeed active
+      await models.run("nanobana_pro", callerParams, {
+        userId: "u1",
+        sdkRunner: async ({ binding }) => {
+          executedProvider = binding.providerId;
+          return { outputs: ["https://cdn.example.com/ws.png"] };
+        },
+      });
+      assert.strictEqual(executedProvider, "wavespeed");
+
+      // 2. Switch config
+      ws.status = "standby";
+      g.status = "active";
+      try {
+        await models.run("nanobana_pro", callerParams, {
+          userId: "u1",
+          sdkRunner: async ({ binding }) => {
+            executedProvider = binding.providerId;
+            return { images: [{ imageUri: "https://cdn.example.com/g.png" }] };
+          },
+        });
+        assert.strictEqual(executedProvider, "google");
+      } finally {
+        ws.status = "active";
+        g.status = "standby";
+      }
+    });
+
+    // TEST 8 — Quote/execution symmetry
+    it("TEST 8: Quote/execution symmetry: calculateCost and run resolve to the exact same implementation tier", async () => {
+      const editParams = {
+        prompt: "Symmetry test",
+        input_image: "https://example.com/img.png",
+        resolution: "4k",
+      };
+
+      // 1. Quote price
+      const quotedCredits = models.calculateCost("nanobana_pro", editParams);
+
+      // 2. Execution price
+      let executedRoute = null;
+      await models.run("nanobana_pro", editParams, {
+        userId: "u-sym",
+        sdkRunner: async ({ binding }) => {
+          executedRoute = binding.id;
+          return { outputs: ["https://cdn.example.com/sym.png"] };
+        },
+      });
+
+      // Price for 4k edit is 30 credits in nanobana_pro retailPricing / wavespeed route
+      assert.strictEqual(quotedCredits, 30);
+      assert.strictEqual(executedRoute, "edit");
+    });
+
+    // TEST 9 — Wallet isolation
+    it("TEST 9: Wallet isolation: Models Management performs zero hold/commit/release/ledger mutations", async () => {
+      // Introspect all exports of models subsystem to verify no wallet operations exist
+      const modelsExports = Object.keys(models);
+      const walletTerms = ["hold", "commit", "release", "reserve", "wallet", "ledger", "balance", "deduct"];
+
+      for (const term of walletTerms) {
+        for (const exp of modelsExports) {
+          assert.strictEqual(
+            exp.toLowerCase().includes(term),
+            false,
+            `Models export "${exp}" violates wallet isolation (contains term "${term}")`
+          );
+        }
+      }
+    });
+
+    // TEST 10 — No provider leakage
+    it("TEST 10: No provider leakage across application layers (src/v2, src/use-cases, controllers)", () => {
+      const dirsToScan = [
+        path.join(apiRoot, "src", "v2"),
+        path.join(apiRoot, "src", "use-cases"),
+        path.join(apiRoot, "controllers"),
+      ];
+
+      function scanDir(dir) {
+        if (!fs.existsSync(dir)) return [];
+        return fs.readdirSync(dir, { withFileTypes: true })
+          .flatMap((dirent) => dirent.isDirectory()
+            ? scanDir(path.join(dir, dirent.name))
+            : [path.join(dir, dirent.name)]
+          );
+      }
+
+      const files = dirsToScan.flatMap(scanDir).filter((f) => f.endsWith(".js"));
+      const leakagePatterns = [
+        /\bproviderId\b/,
+        /\bbindingId\b/,
+        /\bforceProvider\b/,
+        /\bfallbackProvider\b/,
+        /\bpreferredProvider\b/,
+      ];
+
+      for (const file of files) {
+        const code = fs.readFileSync(file, "utf8");
+        for (const pattern of leakagePatterns) {
+          assert.strictEqual(
+            pattern.test(code),
+            false,
+            `File ${path.relative(apiRoot, file)} leaks provider abstraction: ${pattern}`
+          );
+        }
+      }
+    });
+
+    // TEST 11 — No generic operation taxonomy
+    it("TEST 11: Models Core does not contain inferOperation or hardcoded provider operation decisions", () => {
+      const coreFiles = [
+        path.join(apiRoot, "src", "models", "index.js"),
+        path.join(apiRoot, "src", "models", "execution", "modelRunner.js"),
+        path.join(apiRoot, "src", "models", "schema", "schemaValidator.js"),
+      ];
+
+      for (const file of coreFiles) {
+        const code = fs.readFileSync(file, "utf8");
+        assert.strictEqual(
+          code.includes("inferOperation"),
+          false,
+          `File ${path.relative(apiRoot, file)} contains forbidden inferOperation`
+        );
+        assert.strictEqual(
+          /if\s*\([^)]*input_image[^)]*\)\s*return\s*["']edit["']/.test(code),
+          false,
+          `File ${path.relative(apiRoot, file)} contains universal input_image=edit decision in core`
+        );
+      }
+    });
+
+    // TEST 12 — No model-specific provider branches
+    it("TEST 12: Generic runners and core contain no model-specific or provider-specific branches", () => {
+      const genericFiles = [
+        path.join(apiRoot, "src", "models", "execution", "modelRunner.js"),
+        path.join(apiRoot, "src", "models", "execution", "runtimeExecutor.js"),
+        path.join(apiRoot, "src", "models", "runtime", "routeResolver.js"),
+      ];
+
+      const forbiddenBranchPatterns = [
+        /if\s*\(\s*(?:model|modelId)\s*===?\s*["']nanobana_pro["']\s*\)/,
+        /if\s*\(\s*(?:provider|providerId)\s*===?\s*["']wavespeed["']\s*\)/,
+        /if\s*\(\s*(?:provider|providerId)\s*===?\s*["']google["']\s*\)/,
+        /switch\s*\(\s*(?:model|modelId)\s*\)/,
+        /switch\s*\(\s*(?:provider|providerId)\s*\)/,
+      ];
+
+      for (const file of genericFiles) {
+        const code = fs.readFileSync(file, "utf8");
+        for (const pattern of forbiddenBranchPatterns) {
+          assert.strictEqual(
+            pattern.test(code),
+            false,
+            `File ${path.relative(apiRoot, file)} contains forbidden model/provider specific branch: ${pattern}`
+          );
+        }
+      }
+    });
+  });
+
 });

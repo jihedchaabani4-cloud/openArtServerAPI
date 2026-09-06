@@ -51,7 +51,7 @@ function inputForNode(node, inputs = {}) {
   if (rawQuality !== undefined) nodeInput.quality = rawQuality;
   if (rawResolution !== undefined) nodeInput.resolution = rawResolution;
   if (rawCount !== undefined) nodeInput.count = Number(rawCount);
-  // Pass image source through as input_image — Models Management infers "edit" operation
+  // Pass image source through as input_image for provider route resolution
   if (rawImageUrl !== undefined) nodeInput.input_image = rawImageUrl;
 
   return nodeInput;
@@ -83,8 +83,8 @@ export async function calculateWorkflowBillingPlan({
       throw new Error(`[Billing] Missing required model for billable node "${billable.nodeId}" (${billable.nodeType})`);
     }
 
-    // Semantic-First: pass (modelKey, semanticInput) — no explicit operation.
-    // Models Management infers operation internally from semantic params.
+    // Model-First: pass (modelKey, semanticInput) — no explicit operation.
+    // Models Management resolves configured provider and route internally from semantic params.
     const costResult = typeof calculateCostFn === "function"
       ? calculateCostFn(modelKey, billable.input)
       : calculateCostFn?.calculateCost?.({

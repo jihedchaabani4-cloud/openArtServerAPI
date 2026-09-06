@@ -20,13 +20,13 @@ export async function executeImageGeneration(inputs, ctx) {
   }
 
   // ── Translate workflow inputs → canonical Models System inputs ─────────────
-  // The Models Management System infers the operation internally from semantic
-  // parameters: if input_image is present → edit; otherwise → text_to_image.
+  // The Models Management System resolves the provider route internally from semantic
+  // parameters: if input_image is present → provider edit route; otherwise → provider generation route.
   const canonicalInput = buildCanonicalInput(safe);
 
   // ── Model-First Execution via Models Management System ─────────────────────
   // Caller supplies ONLY model, canonical input, and context.
-  // Models Management resolves operation + configured provider implementation internally.
+  // Models Management resolves configured provider and execution topology internally.
   const runResult = await run(modelFamily, canonicalInput, {
     idempotencyKey: `node:${runId}:${nodeId}`,
     userId,
@@ -70,7 +70,7 @@ export async function executeImageGeneration(inputs, ctx) {
  * quality              → quality        (pass-through, already canonical)
  * seed                 → seed           (pass-through)
  * prompt               → prompt         (pass-through, required)
- * image_url / image    → input_image    (signals edit operation to Models Mgmt)
+ * image_url / image    → input_image    (semantic source image)
  * ─── Stripped (not in any model's canonicalInputs): ────────────────────────
  * model, count, references, width, height, ratio, style
  */
@@ -98,7 +98,7 @@ function buildCanonicalInput(safe) {
   const resolution = deriveResolution(safe.width, safe.height);
   if (resolution) canonical.resolution = resolution;
 
-  // image_url / image → input_image (presence signals "edit" operation internally)
+  // image_url / image → input_image (semantic source image)
   const imageSource = safe.image_url ?? safe.image ?? safe.input_image ?? null;
   if (imageSource) canonical.input_image = imageSource;
 

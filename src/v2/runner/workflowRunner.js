@@ -108,8 +108,8 @@ export function estimateNodeBillingAmount(nodeConfig, resolvedInputs = {}) {
     inputsForBilling.messages = [{ role: "user", content: textPrompt }];
   }
 
-  // Semantic-First: pass (model, semanticInput) — no explicit operation.
-  // Models Management infers operation internally from semantic params.
+  // Model-First: pass (model, semanticInput) — no explicit operation.
+  // Models Management resolves configured provider and route internally from semantic params.
   const costResult = calculateCost(model, inputsForBilling);
   const rawCost = typeof costResult === "object" && costResult !== null ? costResult.amount : costResult;
   const costNumber = Number(rawCost);

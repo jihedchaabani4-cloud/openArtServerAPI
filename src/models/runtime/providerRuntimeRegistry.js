@@ -4,10 +4,48 @@ import { getProvider } from "../registry/modelRegistry.js";
 import { ConfigIntegrityError } from "../errors/index.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
 
+import { resolveWaveSpeedRoute } from "./wavespeed/resolver.js";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const logger = createLogger("models");
+
+/**
+ * Provider Resolver Registry
+ * Maps providerId to provider-owned execution topology resolvers.
+ */
+const providerResolvers = new Map([
+  ["wavespeed", resolveWaveSpeedRoute],
+]);
+
+/**
+ * Resolves the concrete execution route through the provider-owned resolver.
+ * Providers with custom topologies (like WaveSpeed) resolve their own routes.
+ * Providers without custom resolvers (like Google) return the binding directly.
+ *
+ * @param {string} providerId
+ * @param {object} binding
+ * @param {object} semanticInput
+ * @param {object} [context={}]
+ * @returns {object} resolved concrete route
+ */
+export function resolveProviderRoute(providerId, binding, semanticInput = {}, context = {}) {
+  const resolver = providerResolvers.get(providerId);
+  if (typeof resolver === "function") {
+    return resolver(binding, semanticInput, context);
+  }
+  return binding;
+}
+
+/**
+ * Register a custom provider resolver (e.g. for extensions or mock providers).
+ * @param {string} providerId
+ * @param {Function} resolverFn
+ */
+export function registerProviderResolver(providerId, resolverFn) {
+  providerResolvers.set(providerId, resolverFn);
+}
 
 /**
  * Provider Runtime Registry (Phase 1 — Zero Silent Fallback)

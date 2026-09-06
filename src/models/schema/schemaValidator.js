@@ -48,9 +48,27 @@ export function getModelSchema(model = {}) {
   }
   const merged = {};
   if (model.operations && typeof model.operations === "object") {
-    for (const opDef of Object.values(model.operations)) {
+    const opEntries = Object.values(model.operations);
+    const opCount = opEntries.length;
+    const requiredCounts = {};
+
+    for (const opDef of opEntries) {
       if (opDef?.canonicalInputs) {
-        Object.assign(merged, opDef.canonicalInputs);
+        for (const [k, v] of Object.entries(opDef.canonicalInputs)) {
+          if (!merged[k]) {
+            merged[k] = { ...v };
+          }
+          if (v.required) {
+            requiredCounts[k] = (requiredCounts[k] || 0) + 1;
+          }
+        }
+      }
+    }
+
+    // Only mark required if required across all declared operations
+    for (const [k, v] of Object.entries(merged)) {
+      if (v.required && (requiredCounts[k] || 0) < opCount) {
+        merged[k] = { ...v, required: false };
       }
     }
   }

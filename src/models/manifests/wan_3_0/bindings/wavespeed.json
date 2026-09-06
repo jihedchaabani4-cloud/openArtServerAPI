@@ -1,0 +1,137 @@
+{
+  "modelId": "wan_3_0",
+  "operation": "text_to_video",
+  "providerId": "wavespeed",
+  "providerModelId": "wan/wan-3.0/text-to-video",
+  "endpoint": "/api/v3/wan/wan-3.0/text-to-video",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "prompt": {
+      "providerField": "prompt"
+    },
+    "duration": {
+      "providerField": "duration"
+    },
+    "aspect_ratio": {
+      "providerField": "aspect_ratio"
+    },
+    "resolution": {
+      "providerField": "resolution"
+    }
+  },
+  "pricing": {
+    "base_cost_usd": 0.20,
+    "modifiers": {
+      "duration": {
+        "5": 1,
+        "10": 1.9
+      }
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "5": 35,
+      "10": 65,
+      "default": 35
+    }
+  },
+  "routes": [
+    {
+      "id": "image_to_video",
+      "operation": "image_to_video",
+      "when": {
+        "input_image": "present"
+      },
+      "providerModelId": "wan/wan-3.0/image-to-video",
+      "endpoint": "/api/v3/wan/wan-3.0/image-to-video",
+      "parameterMap": {
+        "prompt": {
+          "providerField": "prompt"
+        },
+        "input_image": {
+          "providerField": "image_url"
+        },
+        "image_url": {
+          "providerField": "image_url"
+        },
+        "duration": {
+          "providerField": "duration"
+        },
+        "aspect_ratio": {
+          "providerField": "aspect_ratio"
+        },
+        "resolution": {
+          "providerField": "resolution"
+        }
+      },
+      "pricing": {
+        "base_cost_usd": 0.22,
+        "modifiers": {
+          "duration": {
+            "5": 1,
+            "10": 1.8
+          }
+        }
+      },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "5": 38,
+          "10": 70,
+          "default": 38
+        }
+      }
+    },
+    {
+      "id": "text_to_video",
+      "operation": "text_to_video",
+      "when": {
+        "input_image": "absent"
+      },
+      "providerModelId": "wan/wan-3.0/text-to-video",
+      "endpoint": "/api/v3/wan/wan-3.0/text-to-video",
+      "parameterMap": {
+        "prompt": {
+          "providerField": "prompt"
+        },
+        "duration": {
+          "providerField": "duration"
+        },
+        "aspect_ratio": {
+          "providerField": "aspect_ratio"
+        },
+        "resolution": {
+          "providerField": "resolution"
+        }
+      },
+      "pricing": {
+        "base_cost_usd": 0.20,
+        "modifiers": {
+          "duration": {
+            "5": 1,
+            "10": 1.9
+          }
+        }
+      },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "5": 35,
+          "10": 65,
+          "default": 35
+        }
+      }
+    }
+  ],
+  "outputMap": {
+    "images": "outputs",
+    "videoUrl": "outputs.0"
+  },
+  "pollingConfig": {
+    "pollInterval": 2.5,
+    "timeout": 3600
+  },
+  "version": "1.0.0"
+}

@@ -4,6 +4,86 @@
   "displayName": "ByteDance Seedance 2.5",
   "description": "Hollywood-grade cinematic video generation model from ByteDance with director-level motion control",
   "status": "active",
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "image_url": true,
+    "duration": true,
+    "aspect_ratio": true,
+    "resolution": true,
+    "fps": true,
+    "camera_motion": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Textual prompt describing the video scene"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "description": "Main source image URL being transformed to video"
+    },
+    "image_url": {
+      "type": "string",
+      "required": false,
+      "description": "Source image URL for image-to-video generation"
+    },
+    "duration": {
+      "type": "number",
+      "values": [
+        "5",
+        "10"
+      ],
+      "default": "5",
+      "description": "Video duration in seconds"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "16:9",
+        "9:16",
+        "1:1",
+        "4:3",
+        "3:4",
+        "21:9"
+      ],
+      "default": "16:9",
+      "description": "Video aspect ratio"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "480p",
+        "720p",
+        "1080p"
+      ],
+      "default": "720p",
+      "description": "Video resolution tier"
+    },
+    "fps": {
+      "type": "number",
+      "values": [
+        "24",
+        "30"
+      ],
+      "default": "24",
+      "description": "Frames per second"
+    },
+    "camera_motion": {
+      "type": "string",
+      "values": [
+        "static",
+        "pan_left",
+        "pan_right",
+        "zoom_in",
+        "zoom_out"
+      ],
+      "default": "static",
+      "description": "Camera motion effect"
+    }
+  },
   "operations": {
     "text_to_video": {
       "canonicalInputs": {

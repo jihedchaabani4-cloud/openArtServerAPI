@@ -4,6 +4,70 @@
   "displayName": "Alibaba Wan 3.0",
   "description": "State-of-the-art cinematic video generation model by Alibaba capable of up to 30s coherent video",
   "status": "active",
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "image_url": true,
+    "duration": true,
+    "aspect_ratio": true,
+    "resolution": true,
+    "fps": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Textual prompt describing the video scene"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "description": "Main source image URL being transformed to video"
+    },
+    "image_url": {
+      "type": "string",
+      "required": false,
+      "description": "Source image URL for image-to-video generation"
+    },
+    "duration": {
+      "type": "number",
+      "values": [
+        "5",
+        "10"
+      ],
+      "default": "5",
+      "description": "Video duration in seconds"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "16:9",
+        "9:16",
+        "1:1"
+      ],
+      "default": "16:9",
+      "description": "Video aspect ratio"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "480p",
+        "720p",
+        "1080p"
+      ],
+      "default": "720p",
+      "description": "Video resolution tier"
+    },
+    "fps": {
+      "type": "number",
+      "values": [
+        "24",
+        "30"
+      ],
+      "default": "24",
+      "description": "Frames per second"
+    }
+  },
   "operations": {
     "text_to_video": {
       "canonicalInputs": {

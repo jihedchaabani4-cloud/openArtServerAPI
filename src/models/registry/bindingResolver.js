@@ -1,5 +1,5 @@
 import { getModel, getModelBindings, getProvider } from "./modelRegistry.js";
-import { resolveExecutionRoute } from "../runtime/routeResolver.js";
+import { resolveProviderRoute } from "../runtime/providerRuntimeRegistry.js";
 import {
   BindingNotFoundError,
   BindingModelMismatchError,
@@ -111,7 +111,7 @@ export function resolveExecutionPlan(modelId, semanticInput = {}, options = {}) 
     binding = resolveConfiguredBinding(model.id);
   }
 
-  const route = resolveExecutionRoute(binding, semanticInput);
+  const route = resolveProviderRoute(binding.providerId, binding, semanticInput, { model, options });
   const provider = getProvider(route.providerId);
 
   return {

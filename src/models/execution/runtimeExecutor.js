@@ -32,7 +32,6 @@ export class RuntimeExecutor {
     providerPayload,
     credential,
     modelId,
-    operation,
     bindingId,
     options = {},
   }) {
@@ -78,7 +77,6 @@ export class RuntimeExecutor {
           logger.warn(
             {
               modelId,
-              operation,
               bindingId,
               attempt,
               nextAttemptInMs: backoffMs,

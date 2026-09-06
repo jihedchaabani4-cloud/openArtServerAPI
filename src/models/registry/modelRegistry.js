@@ -310,8 +310,6 @@ export function getProvider(providerId) {
   return provider;
 }
 
-export { getBindings, getBinding, getDefaultBinding } from "./bindingRegistry.js";
-
 /**
  * Returns all configured provider bindings for a given model (deduplicated by providerId,
  * sorted by priority ascending).

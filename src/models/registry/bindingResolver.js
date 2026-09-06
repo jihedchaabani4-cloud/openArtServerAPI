@@ -6,8 +6,6 @@ import {
   UnsupportedCapabilityError,
 } from "../errors/index.js";
 
-export { resolveExecutionRoute };
-
 function normalizeId(id) {
   return typeof id === "string" ? id.replace(/-/g, "_") : id;
 }
@@ -122,19 +120,4 @@ export function resolveExecutionPlan(modelId, semanticInput = {}, options = {}) 
     route,
     provider,
   };
-}
-
-/**
- * Backward-compatible internal helper for resolveBinding.
- */
-export function resolveBinding(modelId, options = {}) {
-  if (options?._testBindingId) {
-    return resolveBindingForTest(modelId, options._testBindingId);
-  }
-  return resolveConfiguredBinding(modelId);
-}
-
-export function resolveBindingAndRoute(modelId, semanticInput = {}, options = {}) {
-  const { route } = resolveExecutionPlan(modelId, semanticInput, options);
-  return route;
 }

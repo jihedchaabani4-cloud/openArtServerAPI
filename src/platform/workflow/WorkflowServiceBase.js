@@ -17,18 +17,9 @@ import { randomUUID } from "node:crypto";
 import { supabase } from "../../../lib/supabase.js";
 import { assertMediaUsable } from "../../../lib/mediaGuards.js";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
+import { extractStoragePath } from "../../utils/storagePath.js";
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
-
-function extractStoragePath(url) {
-    if (!url || typeof url !== "string") return null;
-    const parts = url.split("/public/");
-    if (parts.length > 1) {
-        const subParts = parts[1].split("/");
-        return subParts.slice(1).join("/");
-    }
-    return null;
-}
 
 function normalizeWorkflowIds(input) {
     const values = Array.isArray(input) ? input : [input];

@@ -46,7 +46,6 @@ function resolveCreditToUsdRate(overrideRate) {
  *   4. First numeric value in table
  *
  * @param {object} model       - Full model manifest (from modelRegistry)
- * @param {string} operation   - Operation name (e.g. "text_to_image")
  * @param {object} cleanInput  - Validated canonical inputs
  * @param {object} [binding]   - Optional selected binding (checks for retailPricing override)
  * @returns {number} Integer credit cost (0 is valid)

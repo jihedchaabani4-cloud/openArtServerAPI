@@ -4,9 +4,6 @@ import { getCatalog, getModelSchema, getSchema, estimatePrice } from "../src/mod
 const router = Router();
 
 function formatModelDto(m) {
-    const isVideo = m.domain === "video";
-    const supportsEdit = Boolean(m.parameters?.input_image);
-
     return {
         key:            m.modelFamily || m.id,
         displayName:    m.displayName,
@@ -15,14 +12,6 @@ function formatModelDto(m) {
         tier:           m.badge || "standard",
         pricing:        m.retailPricing || {},
         tags:           m.badge ? [m.badge.toLowerCase()] : [],
-        support:        {},
-        supportsEdit,
-        supportsCamera: isVideo,
-        variants: {
-            t2i:      m.domain === "image",
-            i2i:      supportsEdit,
-            i2iMulti: supportsEdit,
-        },
         icon:           m.iconUrl || "",
         badge:          m.badge || null,
         parameters:     m.parameters || {},

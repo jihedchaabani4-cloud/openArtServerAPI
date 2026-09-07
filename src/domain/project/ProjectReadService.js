@@ -24,9 +24,6 @@ function getModelConfig() {
     const catalog = getCatalog();
 
     const models = catalog.map((m) => {
-        const isVideo = m.domain === "video";
-        const supportsEdit = Boolean(m.parameters?.input_image);
-
         return {
             key:            m.modelFamily || m.id,
             displayName:    m.displayName,
@@ -36,16 +33,9 @@ function getModelConfig() {
             pricing:        m.retailPricing || {},
             tags:           m.badge ? [m.badge.toLowerCase()] : [],
             supportedModes: m.domain ? [m.domain] : [],
-            support:        {},
-            supportsEdit,
-            supportsCamera: isVideo,
-            variants: {
-                t2i:      m.domain === "image",
-                i2i:      supportsEdit,
-                i2iMulti: supportsEdit,
-            },
             icon:           m.iconUrl || "",
             badge:          m.badge || null,
+            parameters:     m.parameters || {},
         };
     });
 

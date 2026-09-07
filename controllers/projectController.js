@@ -15,13 +15,10 @@ function safeCalculateCost(modelKey, input) {
 
 function getModelConfig() {
     const catalog = getCatalog();
-
     const models = catalog.map((m) => {
-        const isVideo = m.domain === "video";
-        const supportsEdit = Boolean(m.parameters?.input_image);
         const defaultCost = safeCalculateCost(
             m.modelFamily || m.id,
-            isVideo ? { duration: 5, resolution: "720p" } : { quality: "standard" }
+            m.domain === "video" ? { duration: 5, resolution: "720p" } : { quality: "standard" }
         );
 
         return {
@@ -33,16 +30,9 @@ function getModelConfig() {
             pricing:        { ...(m.retailPricing || {}), defaultCost },
             tags:           m.badge ? [m.badge.toLowerCase()] : [],
             supportedModes: m.domain ? [m.domain] : [],
-            support:        {},
-            supportsEdit,
-            supportsCamera: isVideo,
-            variants: {
-                t2i:      m.domain === "image",
-                i2i:      supportsEdit,
-                i2iMulti: supportsEdit,
-            },
             icon:           m.iconUrl || "",
             badge:          m.badge || null,
+            parameters:     m.parameters || {},
         };
     });
 

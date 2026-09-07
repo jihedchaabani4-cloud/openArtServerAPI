@@ -1272,6 +1272,9 @@ describe("Sealed Models Subsystem Architecture", () => {
         assert.ok(entry.parameters, `Catalog entry ${entry.modelId} must expose parameters schema`);
         assert.strictEqual(typeof entry.parameters, "object");
         assert.strictEqual(entry.canonicalInputs, undefined, `Catalog entry ${entry.modelId} must NOT leak duplicate canonicalInputs`);
+        assert.strictEqual(entry.capabilities, undefined, `Catalog entry ${entry.modelId} must NOT leak capabilities`);
+        assert.strictEqual(entry.variants, undefined, `Catalog entry ${entry.modelId} must NOT leak variants`);
+        assert.strictEqual(entry.support, undefined, `Catalog entry ${entry.modelId} must NOT leak support`);
       }
 
       // Check specific canonical inputs on nanobana_pro
@@ -1285,6 +1288,8 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(schema.domain, "image");
       assert.strictEqual(schema.parameters.prompt.required, true);
       assert.strictEqual(schema.canonicalInputs, undefined, "getModelSchema must NOT leak duplicate canonicalInputs");
+      assert.strictEqual(schema.capabilities, undefined, "getModelSchema must NOT leak capabilities");
+      assert.strictEqual(schema.operations, undefined, "getModelSchema must NOT leak operations");
     });
 
     // TEST 4 — Catalog hides provider internals
@@ -1299,6 +1304,9 @@ describe("Sealed Models Subsystem Architecture", () => {
         assert.strictEqual(entry.routes, undefined, `entry ${entry.modelId} must not leak routes`);
         assert.strictEqual(entry.operations, undefined, `entry ${entry.modelId} must not leak operations`);
         assert.strictEqual(entry.operationDetails, undefined, `entry ${entry.modelId} must not leak operationDetails`);
+        assert.strictEqual(entry.capabilities, undefined, `entry ${entry.modelId} must not leak capabilities`);
+        assert.strictEqual(entry.variants, undefined, `entry ${entry.modelId} must not leak variants`);
+        assert.strictEqual(entry.support, undefined, `entry ${entry.modelId} must not leak support`);
       }
     });
 
@@ -1875,6 +1883,20 @@ describe("Sealed Models Subsystem Architecture", () => {
         ),
         (err) => err.name === "ConfigIntegrityError" && err.message.includes("Execution plan configuration mismatch")
       );
+    });
+
+    // TEST 23 — Model DTO purity in project & HTTP layer
+    it("TEST 23: Model DTOs exposed to frontend contain zero variants, zero support, and zero operational shims", async () => {
+      const catalog = models.getCatalog();
+      for (const m of catalog) {
+        assert.strictEqual(m.variants, undefined, `Catalog entry ${m.id} must not have variants`);
+        assert.strictEqual(m.support, undefined, `Catalog entry ${m.id} must not have support`);
+        assert.strictEqual(m.supportsEdit, undefined, `Catalog entry ${m.id} must not have supportsEdit`);
+        assert.strictEqual(m.supportsCamera, undefined, `Catalog entry ${m.id} must not have supportsCamera`);
+        assert.strictEqual(m.capabilities, undefined, `Catalog entry ${m.id} must not have capabilities`);
+        assert.strictEqual(m.canonicalInputs, undefined, `Catalog entry ${m.id} must not have canonicalInputs`);
+        assert.strictEqual(m.operations, undefined, `Catalog entry ${m.id} must not have operations`);
+      }
     });
 
   });

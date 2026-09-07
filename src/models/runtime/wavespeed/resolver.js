@@ -1,6 +1,5 @@
 import { resolveImageRoute } from "./image/resolver.js";
 import { resolveVideoRoute } from "./video/resolver.js";
-import { resolveLlmRoute } from "./llm/resolver.js";
 import { resolveUpscaleRoute } from "./upscale/resolver.js";
 import { UnsupportedCapabilityError } from "../../errors/index.js";
 
@@ -10,10 +9,13 @@ import { UnsupportedCapabilityError } from "../../errors/index.js";
  * Owned exclusively by the WaveSpeed Provider Execution Layer.
  * Entrypoint for WaveSpeed route resolution.
  *
- * Resolves the concrete execution plan based on:
- *   1. Model Domain / Category (image, video, llm, upscale)
- *   2. WaveSpeed model configuration (binding.routes)
- *   3. Semantic parameters
+ * Supported topologies for this phase:
+ *   - image (text-to-image, edit, inpaint, composition)
+ *   - video (text-to-video, image-to-video, video-to-video)
+ *   - upscale (image & video resolution upscaling)
+ *
+ * NOTE: LLM is intentionally EXCLUDED from WaveSpeed in this phase
+ * (LLM is provided exclusively by Google Studio).
  *
  * Invariants:
  *   - Provider-owned: generic Models Core has zero knowledge of WaveSpeed routes
@@ -28,18 +30,21 @@ import { UnsupportedCapabilityError } from "../../errors/index.js";
 export function resolveWaveSpeedRoute(binding, semanticInput = {}, context = {}) {
   if (!binding) return null;
 
-  // Domain belongs to the logical model; fallback to binding declaration
-  const domain = context.model?.domain || binding.domain || "image";
+  // Domain belongs to the logical model; fallback to context or binding declaration
+  const domain = context.model?.domain || context.domain || binding.domain || "image";
 
   switch (domain) {
     case "image":
       return resolveImageRoute(binding, semanticInput, context);
     case "video":
       return resolveVideoRoute(binding, semanticInput, context);
-    case "llm":
-      return resolveLlmRoute(binding, semanticInput, context);
     case "upscale":
       return resolveUpscaleRoute(binding, semanticInput, context);
+    case "llm":
+      throw new UnsupportedCapabilityError(
+        `WaveSpeed execution topology does not support domain "llm" for model "${binding.modelId}". ` +
+        `LLM services are provided exclusively by Google Studio in this phase.`
+      );
     default:
       throw new UnsupportedCapabilityError(
         `WaveSpeed execution topology does not support model domain "${domain}" for model "${binding.modelId}"`

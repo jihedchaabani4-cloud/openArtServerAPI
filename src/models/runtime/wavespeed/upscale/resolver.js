@@ -12,7 +12,7 @@ import { evaluateWaveSpeedRoutes } from "../common/routeEvaluator.js";
  * No model-specific branching.
  *
  * @param {object} binding       - WaveSpeed binding manifest
- * @param {object} semanticInput - Canonical semantic input (image_url, scale_factor, etc.)
+ * @param {object} semanticInput - Canonical semantic input (input_image, scale_factor, etc.)
  * @param {object} context       - Execution context { model }
  * @returns {object} Concrete execution route
  */
@@ -22,9 +22,20 @@ export function resolveUpscaleRoute(binding, semanticInput = {}, context = {}) {
     return binding;
   }
 
-  return evaluateWaveSpeedRoutes(binding, binding.routes, semanticInput, "upscale");
+  // Canonical normalization for upscale inputs:
+  // Alias input_image <-> image_url so route rules match reliably
+  const normalizedInput = { ...semanticInput };
+  if (normalizedInput.input_image && !normalizedInput.image_url) {
+    normalizedInput.image_url = normalizedInput.input_image;
+  } else if (normalizedInput.image_url && !normalizedInput.input_image) {
+    normalizedInput.input_image = normalizedInput.image_url;
+  }
+
+  return evaluateWaveSpeedRoutes(binding, binding.routes, normalizedInput, "upscale");
 }
 
 export const WaveSpeedUpscaleResolver = {
   resolve: resolveUpscaleRoute,
 };
+
+export default resolveUpscaleRoute;

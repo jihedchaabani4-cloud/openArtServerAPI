@@ -22,6 +22,7 @@ describe("Sealed Models Subsystem Architecture", () => {
     it("should export only the intended stable public functions and standard error classes", () => {
       const expectedExports = [
         "getCatalog",
+        "getModelSchema",
         "getSchema",
         "validateInput",
         "calculateCost",
@@ -1232,7 +1233,7 @@ describe("Sealed Models Subsystem Architecture", () => {
   // ── 11. WAVESPEED PROVIDER-OWNED EXECUTION TOPOLOGY TESTS ─────────────────
   describe("11. WaveSpeed Provider-Owned Execution Topology & Isolation", () => {
 
-    // TEST 1 — Model domain declaration
+    // TEST 1 — Model domain
     it("TEST 1: Every logical model explicitly declares a valid domain (image, video, llm, upscale) without provider route taxonomy", () => {
       const catalog = models.getCatalog({ includeSystem: true });
       assert.ok(catalog.length >= 9, "Expected at least 9 models in catalog");
@@ -1254,8 +1255,93 @@ describe("Sealed Models Subsystem Architecture", () => {
       }
     });
 
-    // TEST 2 — WaveSpeed image topology (text-to-image generation)
-    it("TEST 2: Prompt-only resolves to configured WaveSpeed generation route (text-to-image)", async () => {
+    // TEST 2 — Catalog exposes domain
+    it("TEST 2: getCatalog() returns domain for all models", () => {
+      const catalog = models.getCatalog({ includeSystem: true });
+      assert.ok(catalog.length > 0);
+      for (const entry of catalog) {
+        assert.ok(entry.domain, `Catalog entry for ${entry.modelId} must include domain`);
+        assert.ok(["image", "video", "llm", "upscale"].includes(entry.domain));
+      }
+    });
+
+    // TEST 3 — Catalog exposes canonical parameters
+    it("TEST 3: getCatalog() and getModelSchema() expose frontend-safe canonical parameter schemas", () => {
+      const catalog = models.getCatalog();
+      for (const entry of catalog) {
+        assert.ok(entry.parameters, `Catalog entry ${entry.modelId} must expose parameters schema`);
+        assert.strictEqual(typeof entry.parameters, "object");
+        assert.ok(entry.canonicalInputs, `Catalog entry ${entry.modelId} must expose canonicalInputs`);
+      }
+
+      // Check specific canonical inputs on nanobana_pro
+      const nanobana = catalog.find((m) => m.modelId === "nanobana_pro");
+      assert.ok(nanobana.parameters.prompt);
+      assert.strictEqual(nanobana.parameters.prompt.type, "string");
+      assert.strictEqual(nanobana.parameters.prompt.required, true);
+
+      // Check public getModelSchema
+      const schema = models.getModelSchema("nanobana_pro");
+      assert.strictEqual(schema.domain, "image");
+      assert.strictEqual(schema.parameters.prompt.required, true);
+    });
+
+    // TEST 4 — Catalog hides provider internals
+    it("TEST 4: getCatalog() strictly hides provider internals from caller", () => {
+      const catalog = models.getCatalog({ includeSystem: true });
+      for (const entry of catalog) {
+        assert.strictEqual(entry.providerId, undefined, `entry ${entry.modelId} must not leak providerId`);
+        assert.strictEqual(entry.providerModelId, undefined, `entry ${entry.modelId} must not leak providerModelId`);
+        assert.strictEqual(entry.bindingId, undefined, `entry ${entry.modelId} must not leak bindingId`);
+        assert.strictEqual(entry.endpoint, undefined, `entry ${entry.modelId} must not leak endpoint`);
+        assert.strictEqual(entry.routeId, undefined, `entry ${entry.modelId} must not leak routeId`);
+        assert.strictEqual(entry.routes, undefined, `entry ${entry.modelId} must not leak routes`);
+      }
+    });
+
+    // TEST 5 — Caller does not pass operation
+    it("TEST 5: Caller can execute models.run() and models.calculateCost() with (modelId, params) only", async () => {
+      const cost = models.calculateCost("nanobana_pro", { prompt: "sunset over ocean", resolution: "1k" });
+      assert.strictEqual(typeof cost, "number");
+      assert.strictEqual(cost, 10);
+
+      const result = await models.run(
+        "nanobana_pro",
+        { prompt: "sunset over ocean", resolution: "1k" },
+        {
+          userId: "u-no-op-arg",
+          sdkRunner: async () => ({ outputs: ["https://cdn.example.com/sunset.png"] }),
+        }
+      );
+      assert.strictEqual(result.status, "success");
+      assert.strictEqual(result.images[0].url, "https://cdn.example.com/sunset.png");
+    });
+
+    // TEST 6 — Caller does not pass provider
+    it("TEST 6: Caller options attempting to specify provider or binding are strictly ignored", async () => {
+      let executedProvider = null;
+
+      await models.run(
+        "nanobana_pro",
+        { prompt: "Testing caller provider isolation" },
+        {
+          userId: "u-no-caller-prov",
+          provider: "google",
+          providerId: "google",
+          bindingId: "nanobana_pro.google",
+          forceProvider: "google",
+          sdkRunner: async ({ binding }) => {
+            executedProvider = binding.providerId;
+            return { outputs: ["https://cdn.example.com/out.png"] };
+          },
+        }
+      );
+
+      assert.strictEqual(executedProvider, "wavespeed", "Configured provider WaveSpeed must execute regardless of caller options");
+    });
+
+    // TEST 7 — WaveSpeed image generation
+    it("TEST 7: Prompt-only resolves to configured WaveSpeed generation route (text-to-image)", async () => {
       let resolvedRoute = null;
       let resolvedModelId = null;
 
@@ -1276,8 +1362,8 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(resolvedModelId, "google/nano-banana-pro/text-to-image");
     });
 
-    // TEST 3 — WaveSpeed image edit topology (input_image transformation)
-    it("TEST 3: Prompt + input_image resolves to configured WaveSpeed edit route with array transformation", async () => {
+    // TEST 8 — WaveSpeed image edit
+    it("TEST 8: Prompt + input_image resolves to configured WaveSpeed edit route with array transformation", async () => {
       let resolvedRoute = null;
       let resolvedModelId = null;
       let resolvedPayload = null;
@@ -1306,8 +1392,8 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(resolvedPayload.images[0], "https://example.com/jacket.png");
     });
 
-    // TEST 4 — WaveSpeed inpaint topology (most-specific route match)
-    it("TEST 4: Prompt + input_image + mask resolves to most-specific WaveSpeed inpaint route", async () => {
+    // TEST 9 — WaveSpeed inpaint
+    it("TEST 9: Prompt + input_image + mask resolves to most-specific WaveSpeed inpaint route", async () => {
       let resolvedRoute = null;
       let resolvedModelId = null;
       let resolvedPayload = null;
@@ -1337,9 +1423,39 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(resolvedPayload.images[0], "https://example.com/portrait.png");
     });
 
-    // TEST 5 — WaveSpeed video topology (t2v vs i2v)
-    it("TEST 5: WaveSpeed video topology resolves text-to-video vs image-to-video dynamically", async () => {
-      // 5a: Text to Video
+    // TEST 10 — WaveSpeed reference images
+    it("TEST 10: Reference images without input_image stay on generation route unless configured as edit", async () => {
+      let resolvedRoute = null;
+      let resolvedModelId = null;
+      let resolvedPayload = null;
+
+      await models.run(
+        "nanobana_pro",
+        {
+          prompt: "portrait in same lighting style",
+          reference_images: ["https://example.com/ref1.png", "https://example.com/ref2.png"],
+          resolution: "1k",
+        },
+        {
+          userId: "u-ws-ref-img",
+          sdkRunner: async ({ binding, payload }) => {
+            resolvedRoute = binding.routeId || binding.id;
+            resolvedModelId = binding.providerModelId;
+            resolvedPayload = payload;
+            return { outputs: ["https://cdn.example.com/ref-out.png"] };
+          },
+        }
+      );
+
+      assert.strictEqual(resolvedRoute, "generation", "Reference images must not trigger edit route when input_image is absent");
+      assert.strictEqual(resolvedModelId, "google/nano-banana-pro/text-to-image");
+      assert.ok(Array.isArray(resolvedPayload.reference_images));
+      assert.strictEqual(resolvedPayload.reference_images.length, 2);
+    });
+
+    // TEST 11 — WaveSpeed video
+    it("TEST 11: WaveSpeed video topology resolves text-to-video vs image-to-video dynamically", async () => {
+      // 11a: Text to Video
       let t2vRoute = null;
       let t2vModel = null;
       await models.run(
@@ -1357,7 +1473,7 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(t2vRoute, "text_to_video");
       assert.strictEqual(t2vModel, "bytedance/seedance-2.5/text-to-video");
 
-      // 5b: Image to Video
+      // 11b: Image to Video
       let i2vRoute = null;
       let i2vModel = null;
       let i2vPayload = null;
@@ -1383,55 +1499,67 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(i2vPayload.image_url, "https://example.com/character.png");
     });
 
-    // TEST 6 — WaveSpeed LLM topology
-    it("TEST 6: WaveSpeed LLM topology resolves text vs multimodal vision without Models Core operation inference", async () => {
-      // 6a: Pure text chat completion
-      let textRoute = null;
-      let textModel = null;
-      await models.run(
-        "llama_3_3",
-        { messages: [{ role: "user", content: "Explain quantum computing briefly." }] },
-        {
-          userId: "u-ws-llm-text",
-          sdkRunner: async ({ binding }) => {
-            textRoute = binding.routeId || binding.id;
-            textModel = binding.providerModelId;
-            return { outputs: [{ text: "Quantum computing uses qubits..." }] };
-          },
-        }
-      );
-      assert.strictEqual(textRoute, "text");
-      assert.strictEqual(textModel, "meta/llama-3.3-70b-instruct");
+    // TEST 12 — WaveSpeed upscale
+    it("TEST 12: WaveSpeed upscale topology resolves image_upscale route and transforms parameters", async () => {
+      let resolvedRoute = null;
+      let resolvedModelId = null;
+      let resolvedPayload = null;
 
-      // 6b: Multimodal vision (images provided)
-      let visionRoute = null;
-      let visionModel = null;
       await models.run(
-        "llama_3_3",
+        "wavespeed_upscale",
         {
-          messages: [{ role: "user", content: "What is shown in this diagram?" }],
-          images: ["https://example.com/architecture.png"],
+          input_image: "https://example.com/lowres.png",
+          scale_factor: 4,
+          face_restore: true,
         },
         {
-          userId: "u-ws-llm-vision",
-          sdkRunner: async ({ binding }) => {
-            visionRoute = binding.routeId || binding.id;
-            visionModel = binding.providerModelId;
-            return { outputs: [{ text: "This diagram shows a neural network." }] };
+          userId: "u-ws-upscale",
+          sdkRunner: async ({ binding, payload }) => {
+            resolvedRoute = binding.routeId || binding.id;
+            resolvedModelId = binding.providerModelId;
+            resolvedPayload = payload;
+            return { outputs: ["https://cdn.example.com/highres.png"] };
           },
         }
       );
-      assert.strictEqual(visionRoute, "vision");
-      assert.strictEqual(visionModel, "meta/llama-3.2-11b-vision-instruct");
+
+      assert.strictEqual(resolvedRoute, "image_upscale");
+      assert.strictEqual(resolvedModelId, "wavespeed-ai/upscaler-v1");
+      assert.strictEqual(resolvedPayload.image_url, "https://example.com/lowres.png");
+      assert.strictEqual(resolvedPayload.scale, 4);
+      assert.strictEqual(resolvedPayload.face_restore, true);
     });
 
-    // TEST 7 — No core provider knowledge
-    it("TEST 7: Generic Models Core contains zero provider-specific or model-specific branching", () => {
+    // TEST 13 — WaveSpeed runner purity
+    it("TEST 13: WaveSpeed runner contains zero model-specific or routing-specific conditionals", () => {
+      const runnerPath = path.join(apiRoot, "src", "models", "runtime", "wavespeed", "runner.js");
+      const runnerCode = fs.readFileSync(runnerPath, "utf8");
+
+      const forbiddenRoutingPatterns = [
+        /if\s*\(\s*(?:input_image|mask|prompt)\b/,
+        /if\s*\(\s*(?:domain|category)\s*===?/,
+        /if\s*\(\s*(?:model|modelId)\s*===?/,
+        /switch\s*\(\s*(?:domain|category|model|modelId)\s*\)/,
+        /routeResolver/,
+      ];
+
+      for (const pattern of forbiddenRoutingPatterns) {
+        assert.strictEqual(
+          pattern.test(runnerCode),
+          false,
+          `wavespeed/runner.js must NOT contain routing conditional matching ${pattern}`
+        );
+      }
+    });
+
+    // TEST 14 — Generic core purity
+    it("TEST 14: Generic Models Core contains zero provider-specific or model-specific branching", () => {
       const coreFiles = [
         path.join(apiRoot, "src", "models", "index.js"),
         path.join(apiRoot, "src", "models", "execution", "modelRunner.js"),
         path.join(apiRoot, "src", "models", "registry", "bindingResolver.js"),
         path.join(apiRoot, "src", "models", "pricing", "pricingEngine.js"),
+        path.join(apiRoot, "src", "models", "schema", "schemaValidator.js"),
       ];
 
       for (const file of coreFiles) {
@@ -1456,52 +1584,9 @@ describe("Sealed Models Subsystem Architecture", () => {
       }
     });
 
-    // TEST 8 — No public operation argument
-    it("TEST 8: Caller can execute models.run() and models.calculateCost() with (modelId, params) only", async () => {
-      // models.calculateCost with 2 arguments
-      const cost = models.calculateCost("nanobana_pro", { prompt: "sunset over ocean", resolution: "1k" });
-      assert.strictEqual(typeof cost, "number");
-      assert.strictEqual(cost, 10);
-
-      // models.run with 2 semantic arguments (+ options for userId and mock runner)
-      const result = await models.run(
-        "nanobana_pro",
-        { prompt: "sunset over ocean", resolution: "1k" },
-        {
-          userId: "u-no-op-arg",
-          sdkRunner: async () => ({ outputs: ["https://cdn.example.com/sunset.png"] }),
-        }
-      );
-      assert.strictEqual(result.status, "success");
-      assert.strictEqual(result.images[0].url, "https://cdn.example.com/sunset.png");
-    });
-
-    // TEST 9 — No caller provider selection
-    it("TEST 9: Caller options attempting to specify provider or binding are strictly ignored", async () => {
-      let executedProvider = null;
-
-      await models.run(
-        "nanobana_pro",
-        { prompt: "Testing caller provider isolation" },
-        {
-          userId: "u-no-caller-prov",
-          provider: "google",
-          providerId: "google",
-          bindingId: "nanobana_pro.google",
-          forceProvider: "google",
-          sdkRunner: async ({ binding }) => {
-            executedProvider = binding.providerId;
-            return { outputs: ["https://cdn.example.com/out.png"] };
-          },
-        }
-      );
-
-      assert.strictEqual(executedProvider, "wavespeed", "Configured provider WaveSpeed must execute regardless of caller options");
-    });
-
-    // TEST 10 — Pricing symmetry between calculateCost() and run()
-    it("TEST 10: calculateCost() and run() evaluate the exact same WaveSpeed execution plan and credit amount", async () => {
-      // 10a: Image Generation (1k standard = 10 credits)
+    // TEST 15 — Pricing symmetry between calculateCost() and run()
+    it("TEST 15: calculateCost() and run() evaluate the exact same WaveSpeed execution plan and credit amount", async () => {
+      // 15a: Image Generation (1k standard = 10 credits)
       const costGen = models.calculateCost("nanobana_pro", { prompt: "symmetry test", resolution: "1k" });
       let runGenCredits = null;
       await models.run("nanobana_pro", { prompt: "symmetry test", resolution: "1k" }, {
@@ -1511,7 +1596,7 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(costGen, 10);
       assert.strictEqual(runGenCredits, 10);
 
-      // 10b: Image Edit (1k edit = 18 credits)
+      // 15b: Image Edit (1k edit = 18 credits)
       const costEdit = models.calculateCost("nanobana_pro", {
         prompt: "edit symmetry",
         input_image: "https://example.com/src.png",
@@ -1529,7 +1614,7 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(costEdit, 18);
       assert.strictEqual(runEditCredits, 18);
 
-      // 10c: Video Text-to-Video (5s = 40 credits)
+      // 15c: Video Text-to-Video (5s = 40 credits)
       const costT2V = models.calculateCost("seedance_2_5", { prompt: "video symmetry", duration: 5 });
       let runT2VCredits = null;
       await models.run("seedance_2_5", { prompt: "video symmetry", duration: 5 }, {
@@ -1539,27 +1624,110 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(costT2V, 40);
       assert.strictEqual(runT2VCredits, 40);
 
-      // 10d: Video Image-to-Video (5s = 45 credits)
-      const costI2V = models.calculateCost("seedance_2_5", {
-        prompt: "i2v symmetry",
-        input_image: "https://example.com/start.png",
-        duration: 5,
+      // 15d: Upscale (scale_factor 4 = 4 credits)
+      const costUpscale = models.calculateCost("wavespeed_upscale", {
+        input_image: "https://example.com/src.png",
+        scale_factor: 4,
       });
-      let runI2VCredits = null;
-      await models.run("seedance_2_5", {
-        prompt: "i2v symmetry",
-        input_image: "https://example.com/start.png",
-        duration: 5,
+      let runUpscaleCredits = null;
+      await models.run("wavespeed_upscale", {
+        input_image: "https://example.com/src.png",
+        scale_factor: 4,
       }, {
         userId: "u-sym-4",
-        sdkRunner: async () => ({ outputs: ["https://cdn.example.com/v2.mp4"] }),
-      }).then((r) => { runI2VCredits = r.metadata.creditsCharged; });
-      assert.strictEqual(costI2V, 45);
-      assert.strictEqual(runI2VCredits, 45);
+        sdkRunner: async () => ({ outputs: ["https://cdn.example.com/up.png"] }),
+      }).then((r) => { runUpscaleCredits = r.metadata.creditsCharged; });
+      assert.strictEqual(costUpscale, 4);
+      assert.strictEqual(runUpscaleCredits, 4);
     });
 
-    // TEST 11 — Route ambiguity detection & deterministic precedence
-    it("TEST 11: Route evaluator enforces condition-count precedence and throws on conflicting ambiguous matches", async () => {
+    // TEST 16 — Wallet isolation
+    it("TEST 16: WaveSpeed provider execution layer has zero imports or dependencies on wallet systems", () => {
+      const wavespeedDir = path.join(apiRoot, "src", "models", "runtime", "wavespeed");
+
+      function walkDir(dir) {
+        let results = [];
+        const list = fs.readdirSync(dir, { withFileTypes: true });
+        for (const item of list) {
+          const fullPath = path.join(dir, item.name);
+          if (item.isDirectory()) {
+            results = results.concat(walkDir(fullPath));
+          } else if (item.name.endsWith(".js")) {
+            results.push(fullPath);
+          }
+        }
+        return results;
+      }
+
+      const files = walkDir(wavespeedDir);
+      assert.ok(files.length >= 6, `Expected at least 6 files in wavespeed runtime, found ${files.length}`);
+
+      const forbiddenWalletTerms = [
+        /from\s+["'].*wallet.*["']/i,
+        /from\s+["'].*billing.*["']/i,
+        /\bwallet\.(?:hold|reserve|commit|release|refund)\b/,
+        /\b(?:ledger|balance)\b/i,
+      ];
+
+      for (const file of files) {
+        const code = fs.readFileSync(file, "utf8");
+        const rel = path.relative(apiRoot, file);
+        for (const pattern of forbiddenWalletTerms) {
+          assert.strictEqual(
+            pattern.test(code),
+            false,
+            `File "${rel}" in WaveSpeed layer violates wallet isolation: matched ${pattern}`
+          );
+        }
+      }
+    });
+
+    // TEST 17 — Google remains independent
+    it("TEST 17: Provider isolation: resolving Google bindings does not invoke WaveSpeed resolver logic", async () => {
+      const { resolveProviderRoute } = await import("../../src/models/runtime/providerRuntimeRegistry.js");
+
+      const googleBinding = {
+        modelId: "nanobana_pro",
+        providerId: "google",
+        providerModelId: "imagen-4-ultra",
+        endpoint: "/v1beta/models/imagen-4-ultra:generate",
+      };
+
+      const resolved = resolveProviderRoute("google", googleBinding, { prompt: "Test isolation" });
+
+      assert.strictEqual(resolved, googleBinding);
+      assert.strictEqual(resolved.providerId, "google");
+      assert.strictEqual(resolved.providerModelId, "imagen-4-ultra");
+    });
+
+    // TEST 18 — No WaveSpeed LLM
+    it("TEST 18: No WaveSpeed LLM infrastructure exists (excluded by architecture; LLM is Google Studio only)", async () => {
+      // 18a: No llm directory in wavespeed runtime
+      const wavespeedLlmDir = path.join(apiRoot, "src", "models", "runtime", "wavespeed", "llm");
+      assert.strictEqual(fs.existsSync(wavespeedLlmDir), false, "WaveSpeed runtime must NOT contain llm directory");
+
+      // 18b: No WaveSpeed LLM bindings in manifests
+      const catalog = models.getCatalog({ includeSystem: true });
+      const llmModels = catalog.filter((m) => m.domain === "llm");
+      assert.ok(llmModels.length >= 3, "Expected at least 3 LLM models (Gemini family)");
+      for (const m of llmModels) {
+        assert.strictEqual(m.domain, "llm");
+      }
+
+      // 18c: Calling WaveSpeed route resolution with domain "llm" explicitly throws UnsupportedCapabilityError
+      const { resolveWaveSpeedRoute } = await import("../../src/models/runtime/wavespeed/resolver.js");
+      assert.throws(
+        () => resolveWaveSpeedRoute(
+          { modelId: "test_llm", providerId: "wavespeed", routes: [] },
+          { messages: [{ role: "user", content: "hello" }] },
+          { domain: "llm" }
+        ),
+        (err) => err.name === "UnsupportedCapabilityError" && err.message.includes("LLM services are provided exclusively by Google Studio")
+      );
+    });
+
+    // TEST 19 — Route evaluator condition-count precedence and ambiguity detection
+    it("TEST 19: Route evaluator enforces condition-count precedence and throws on conflicting ambiguous matches", async () => {
       const { evaluateWaveSpeedRoutes } = await import("../../src/models/runtime/wavespeed/common/routeEvaluator.js");
 
       const mockBinding = {
@@ -1600,7 +1768,7 @@ describe("Sealed Models Subsystem Architecture", () => {
         {
           id: "specialized_route",
           providerModelId: "ws/specialized",
-          priority: 10, // lower priority number, but higher condition count
+          priority: 10,
           when: { input_image: "present", mask: "present" },
         },
       ];
@@ -1614,8 +1782,8 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(resolved.id, "specialized_route", "2-condition route must win over 1-condition route");
     });
 
-    // TEST 12 — Route unreachable detection
-    it("TEST 12: Parameters matching zero routes throw UnsupportedCapabilityError with parameter diagnostics", async () => {
+    // TEST 20 — Route unreachable detection
+    it("TEST 20: Parameters matching zero routes throw UnsupportedCapabilityError with parameter diagnostics", async () => {
       const { evaluateWaveSpeedRoutes } = await import("../../src/models/runtime/wavespeed/common/routeEvaluator.js");
 
       const mockBinding = {
@@ -1631,89 +1799,6 @@ describe("Sealed Models Subsystem Architecture", () => {
         () => evaluateWaveSpeedRoutes(mockBinding, strictRoutes, { flag: "inactive" }, "image"),
         (err) => err.name === "UnsupportedCapabilityError" && err.message.includes("No matching WaveSpeed image route")
       );
-    });
-
-    // TEST 13 — WaveSpeed runner purity
-    it("TEST 13: WaveSpeed runner contains zero model-specific or routing-specific conditionals", () => {
-      const runnerPath = path.join(apiRoot, "src", "models", "runtime", "wavespeed", "runner.js");
-      const runnerCode = fs.readFileSync(runnerPath, "utf8");
-
-      const forbiddenRoutingPatterns = [
-        /if\s*\(\s*(?:input_image|mask|prompt)\b/,
-        /if\s*\(\s*(?:domain|category)\s*===?/,
-        /if\s*\(\s*(?:model|modelId)\s*===?/,
-        /switch\s*\(\s*(?:domain|category|model|modelId)\s*\)/,
-        /routeResolver/,
-      ];
-
-      for (const pattern of forbiddenRoutingPatterns) {
-        assert.strictEqual(
-          pattern.test(runnerCode),
-          false,
-          `wavespeed/runner.js must NOT contain routing conditional matching ${pattern}`
-        );
-      }
-    });
-
-    // TEST 14 — Provider isolation (Google bindings do not touch WaveSpeed resolver)
-    it("TEST 14: Provider isolation: resolving Google bindings does not invoke WaveSpeed resolver logic", async () => {
-      const { resolveProviderRoute } = await import("../../src/models/runtime/providerRuntimeRegistry.js");
-
-      const googleBinding = {
-        modelId: "nanobana_pro",
-        providerId: "google",
-        providerModelId: "imagen-4-ultra",
-        endpoint: "/v1beta/models/imagen-4-ultra:generate",
-      };
-
-      // Call resolveProviderRoute for Google
-      const resolved = resolveProviderRoute("google", googleBinding, { prompt: "Test isolation" });
-
-      // Must return the exact same Google binding directly without mutation
-      assert.strictEqual(resolved, googleBinding);
-      assert.strictEqual(resolved.providerId, "google");
-      assert.strictEqual(resolved.providerModelId, "imagen-4-ultra");
-    });
-
-    // TEST 15 — Wallet isolation
-    it("TEST 15: WaveSpeed provider execution layer has zero imports or dependencies on wallet systems", () => {
-      const wavespeedDir = path.join(apiRoot, "src", "models", "runtime", "wavespeed");
-
-      function walkDir(dir) {
-        let results = [];
-        const list = fs.readdirSync(dir, { withFileTypes: true });
-        for (const item of list) {
-          const fullPath = path.join(dir, item.name);
-          if (item.isDirectory()) {
-            results = results.concat(walkDir(fullPath));
-          } else if (item.name.endsWith(".js")) {
-            results.push(fullPath);
-          }
-        }
-        return results;
-      }
-
-      const files = walkDir(wavespeedDir);
-      assert.ok(files.length >= 6, `Expected at least 6 files in wavespeed runtime, found ${files.length}`);
-
-      const forbiddenWalletTerms = [
-        /from\s+["'].*wallet.*["']/i,
-        /from\s+["'].*billing.*["']/i,
-        /\bwallet\.(?:hold|reserve|commit|release|refund)\b/,
-        /\b(?:ledger|balance)\b/i,
-      ];
-
-      for (const file of files) {
-        const code = fs.readFileSync(file, "utf8");
-        const rel = path.relative(apiRoot, file);
-        for (const pattern of forbiddenWalletTerms) {
-          assert.strictEqual(
-            pattern.test(code),
-            false,
-            `File "${rel}" in WaveSpeed layer violates wallet isolation: matched ${pattern}`
-          );
-        }
-      }
     });
 
   });

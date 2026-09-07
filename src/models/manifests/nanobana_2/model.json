@@ -4,6 +4,64 @@
   "displayName": "NanoBanana 2",
   "description": "Fast, high-efficiency lightweight photorealistic image generation model",
   "status": "active",
+  "capabilities": {
+    "prompt": true,
+    "negative_prompt": true,
+    "resolution": true,
+    "aspect_ratio": true,
+    "quality": true,
+    "seed": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true
+    },
+    "negative_prompt": {
+      "type": "string",
+      "required": false
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "1k",
+        "2k"
+      ],
+      "default": "1k"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "1:1",
+        "16:9",
+        "9:16",
+        "4:3",
+        "3:4"
+      ],
+      "default": "1:1"
+    },
+    "quality": {
+      "type": "string",
+      "values": [
+        "standard",
+        "hd"
+      ],
+      "default": "standard"
+    },
+    "seed": {
+      "type": "number",
+      "required": false
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "1k:standard": 8,
+      "1k:hd": 11,
+      "2k:standard": 14,
+      "2k:hd": 18
+    }
+  },
   "operations": {
     "text_to_image": {
       "canonicalInputs": {

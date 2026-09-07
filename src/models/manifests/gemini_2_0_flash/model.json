@@ -5,6 +5,56 @@
   "description": "Next-generation multimodal reasoning and language model from Google DeepMind with ultra-fast speed, 1M context window, and generous free tier in Google AI Studio",
   "status": "active",
   "systemOnly": true,
+  "capabilities": {
+    "prompt": true,
+    "messages": true,
+    "images": true,
+    "system_prompt": true,
+    "temperature": true,
+    "max_tokens": true,
+    "top_p": true,
+    "streaming": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": false
+    },
+    "messages": {
+      "type": "array",
+      "required": false
+    },
+    "images": {
+      "type": "array",
+      "required": false
+    },
+    "system_prompt": {
+      "type": "string",
+      "required": false
+    },
+    "temperature": {
+      "type": "number",
+      "default": 0.7
+    },
+    "max_tokens": {
+      "type": "number",
+      "default": 2048
+    },
+    "top_p": {
+      "type": "number",
+      "default": 1
+    },
+    "streaming": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "default": 1
+    }
+  },
   "operations": {
     "chat_completion": {
       "canonicalInputs": {

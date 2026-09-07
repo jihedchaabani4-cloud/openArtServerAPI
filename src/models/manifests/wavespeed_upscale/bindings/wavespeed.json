@@ -1,0 +1,90 @@
+{
+  "modelId": "wavespeed_upscale",
+  "operation": "upscale",
+  "providerId": "wavespeed",
+  "providerModelId": "wavespeed-ai/upscaler-v1",
+  "endpoint": "/api/v3/wavespeed-ai/upscaler-v1",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "input_image": {
+      "providerField": "image_url"
+    },
+    "image_url": {
+      "providerField": "image_url"
+    },
+    "scale_factor": {
+      "providerField": "scale"
+    },
+    "face_restore": {
+      "providerField": "face_restore"
+    }
+  },
+  "pricing": {
+    "base_cost_usd": 0.015,
+    "modifiers": {
+      "scale_factor": {
+        "2": 1,
+        "4": 1.8
+      }
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "2": 2,
+      "4": 4,
+      "default": 2
+    }
+  },
+  "routes": [
+    {
+      "id": "image_upscale",
+      "operation": "upscale",
+      "when": {
+        "input_image": "present"
+      },
+      "providerModelId": "wavespeed-ai/upscaler-v1",
+      "endpoint": "/api/v3/wavespeed-ai/upscaler-v1",
+      "parameterMap": {
+        "input_image": {
+          "providerField": "image_url"
+        },
+        "image_url": {
+          "providerField": "image_url"
+        },
+        "scale_factor": {
+          "providerField": "scale"
+        },
+        "face_restore": {
+          "providerField": "face_restore"
+        }
+      },
+      "pricing": {
+        "base_cost_usd": 0.015,
+        "modifiers": {
+          "scale_factor": {
+            "2": 1,
+            "4": 1.8
+          }
+        }
+      },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "2": 2,
+          "4": 4,
+          "default": 2
+        }
+      }
+    }
+  ],
+  "outputMap": {
+    "images": "outputs"
+  },
+  "pollingConfig": {
+    "pollInterval": 2,
+    "timeout": 1200
+  },
+  "version": "1.0.0"
+}

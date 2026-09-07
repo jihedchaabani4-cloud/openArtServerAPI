@@ -21,7 +21,7 @@ import {
   getModel,
   reloadRegistry,
 } from "./registry/modelRegistry.js";
-import { validateCanonicalInput, validateBindingConstraints, getModelSchema } from "./schema/schemaValidator.js";
+import { validateCanonicalInput, validateBindingConstraints, getModelSchema as getModelSchemaInternal } from "./schema/schemaValidator.js";
 import { calculateRetailCredits } from "./pricing/pricingEngine.js";
 import { run as runInternal } from "./execution/modelRunner.js";
 import { resolveExecutionPlan } from "./registry/bindingResolver.js";
@@ -40,6 +40,7 @@ try {
 
 /**
  * Returns catalog of available models matching optional filters.
+ * Exposes a safe, frontend-ready Model contract without leaking provider internals.
  */
 export function getCatalog(filters = {}) {
   const { models } = getRegistry();
@@ -52,6 +53,7 @@ export function getCatalog(filters = {}) {
     if (!filters.includeSystem && !filters.systemOnly && isSystemOnly) continue;
     if (filters.systemOnly && !isSystemOnly) continue;
 
+    const schema = model.canonicalInputs || getModelSchemaInternal(model);
     const operations = Object.keys(model.operations || {});
     const operationDetails = {};
 
@@ -64,21 +66,24 @@ export function getCatalog(filters = {}) {
     }
 
     const entry = {
-      modelFamily: model.id,
+      id: model.id,
       modelId: model.id,
+      modelFamily: model.id,
       displayName: model.displayName,
       description: model.description || "",
       iconUrl: model.iconUrl || "",
       domain: model.domain,
       systemOnly: isSystemOnly,
       visibility: model.visibility || (isSystemOnly ? "internal" : "public"),
-      canonicalInputs: model.canonicalInputs || {},
+      parameters: schema,
+      canonicalInputs: schema,
       capabilities: model.capabilities || {},
       retailPricing: model.retailPricing || null,
+      status: model.status || "active",
+      version: model.version || "1.0.0",
       operations,
       operationDetails,
       lifecycleStatus: model.status || "active",
-      status: model.status || "active",
     };
 
     if (filters.domain && entry.domain !== filters.domain) continue;
@@ -91,11 +96,41 @@ export function getCatalog(filters = {}) {
   return entries;
 }
 
-// --- getSchema ----------------------------------------------------------------
+// --- getModelSchema -----------------------------------------------------------
 
 /**
- * Returns input schema and pricing details for a given model.
- * Optionally accepts explicit operation for schema introspection / admin tooling.
+ * Returns the authoritative Model-level parameter contract and metadata.
+ * Directly consumable by frontend UI builders and application callers.
+ * Does NOT require or accept an operation parameter.
+ *
+ * @param {string|object} modelOrFamily - Canonical model ID or model object
+ * @returns {object} Full Model contract
+ */
+export function getModelSchema(modelOrFamily) {
+  const model = typeof modelOrFamily === "string" ? getModel(modelOrFamily) : modelOrFamily;
+  const schema = getModelSchemaInternal(model);
+
+  return {
+    id: model.id,
+    modelId: model.id,
+    modelFamily: model.id,
+    displayName: model.displayName,
+    description: model.description || "",
+    domain: model.domain,
+    parameters: schema,
+    canonicalInputs: schema,
+    capabilities: model.capabilities || {},
+    retailPricing: model.retailPricing || null,
+    status: model.status || "active",
+    version: model.version || "1.0.0",
+  };
+}
+
+// --- getSchema (Legacy Compatibility Helper) ----------------------------------
+
+/**
+ * Legacy schema introspection helper.
+ * @deprecated Use getModelSchema(modelFamily) instead.
  */
 export function getSchema(modelFamily, operation = null) {
   const model = getModel(modelFamily);
@@ -103,24 +138,18 @@ export function getSchema(modelFamily, operation = null) {
   if (operation && model.operations?.[operation]) {
     const opDef = model.operations[operation];
     return {
+      id: model.id,
       modelFamily: model.id,
       modelId: model.id,
       operation,
       domain: model.domain,
       inputs: opDef.canonicalInputs || {},
+      parameters: opDef.canonicalInputs || {},
       retailPricing: opDef.retailPricing || null,
     };
   }
 
-  return {
-    modelFamily: model.id,
-    modelId: model.id,
-    domain: model.domain,
-    inputs: getModelSchema(model),
-    capabilities: model.capabilities || {},
-    retailPricing: model.retailPricing || null,
-    operations: Object.keys(model.operations || {}),
-  };
+  return getModelSchema(modelFamily);
 }
 
 // --- validateInput ------------------------------------------------------------

@@ -1,0 +1,78 @@
+{
+  "id": "wavespeed_upscale",
+  "domain": "upscale",
+  "displayName": "WaveSpeed AI Upscaler",
+  "description": "High-fidelity AI image and media resolution upscaling with facial restoration",
+  "status": "active",
+  "capabilities": {
+    "input_image": true,
+    "image_url": true,
+    "scale_factor": true,
+    "face_restore": true
+  },
+  "canonicalInputs": {
+    "input_image": {
+      "type": "string",
+      "required": true,
+      "description": "Source image URL to be upscaled"
+    },
+    "image_url": {
+      "type": "string",
+      "required": false,
+      "description": "Alias for input_image"
+    },
+    "scale_factor": {
+      "type": "number",
+      "values": [
+        "2",
+        "4"
+      ],
+      "default": 2,
+      "description": "Upscaling multiplier (2x or 4x)"
+    },
+    "face_restore": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether to enhance and restore facial details"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "2": 2,
+      "4": 4,
+      "default": 2
+    }
+  },
+  "operations": {
+    "upscale": {
+      "canonicalInputs": {
+        "input_image": {
+          "type": "string",
+          "required": true
+        },
+        "scale_factor": {
+          "type": "number",
+          "values": [
+            "2",
+            "4"
+          ],
+          "default": 2
+        },
+        "face_restore": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "2": 2,
+          "4": 4,
+          "default": 2
+        }
+      }
+    }
+  },
+  "version": "1.0.0"
+}

@@ -86,6 +86,33 @@ export function initRegistry(options = {}) {
       const modelDef = JSON.parse(fs.readFileSync(modelPath, "utf8"));
       modelDef.id = modelDef.id || modelId;
       modelDef._sourcePath = modelPath;
+
+      // Validation: Reject Model capability keys that match provider operation taxonomy
+      if (modelDef.capabilities && typeof modelDef.capabilities === "object") {
+        const FORBIDDEN_OPERATION_TAXONOMY_REGEX = /^(?:text_to_|image_to_|video_to_|edit$|inpaint$|upscale$)/i;
+        const FORBIDDEN_SPECIFIC_KEYS = new Set([
+          "text_to_image",
+          "image_to_image",
+          "image_to_video",
+          "text_to_video",
+          "video_to_video",
+          "edit",
+          "inpaint",
+          "upscale",
+          "image_upscale",
+          "video_upscale",
+        ]);
+
+        for (const capKey of Object.keys(modelDef.capabilities)) {
+          if (FORBIDDEN_SPECIFIC_KEYS.has(capKey) || FORBIDDEN_OPERATION_TAXONOMY_REGEX.test(capKey)) {
+            throw new ConfigIntegrityError(
+              `Model "${modelDef.id}" capability contains forbidden provider operation taxonomy key "${capKey}". ` +
+              `Model capabilities must be semantic only (e.g. input_image, reference_images, mask).`
+            );
+          }
+        }
+      }
+
       models.set(modelDef.id, modelDef);
 
       if (Array.isArray(modelDef.aliases)) {

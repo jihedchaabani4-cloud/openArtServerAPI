@@ -113,11 +113,21 @@ export function resolveExecutionPlan(modelId, semanticInput = {}, options = {}) 
 
   const route = resolveProviderRoute(binding.providerId, binding, semanticInput, { model, options });
   const provider = getProvider(route.providerId);
+  const routeId = route.id || route.routeId || "default";
+  const configVersion = binding.version || model.version || "1.0.0";
+  const planIdentity = {
+    modelId: model.id,
+    providerId: route.providerId,
+    routeId,
+    configVersion,
+    id: `${model.id}:${route.providerId}:${routeId}:${configVersion}`,
+  };
 
   return {
     model,
     binding,
     route,
     provider,
+    planIdentity,
   };
 }

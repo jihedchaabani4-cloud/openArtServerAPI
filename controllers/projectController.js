@@ -18,30 +18,28 @@ function getModelConfig() {
 
     const models = catalog.map((m) => {
         const isVideo = m.domain === "video";
-        const opDetails = m.operationDetails || {};
-        const mainOp = isVideo ? "text_to_video" : (opDetails.text_to_image ? "text_to_image" : Object.keys(opDetails)[0]);
-        const opDef = opDetails[mainOp] || {};
+        const supportsEdit = Boolean(m.parameters?.input_image);
         const defaultCost = safeCalculateCost(
-            m.modelFamily,
-            isVideo ? { durationSeconds: 5, resolution: "720p" } : { quality: "standard" }
+            m.modelFamily || m.id,
+            isVideo ? { duration: 5, resolution: "720p" } : { quality: "standard" }
         );
 
         return {
-            key:            m.modelFamily,
+            key:            m.modelFamily || m.id,
             displayName:    m.displayName,
             description:    m.description || "",
             category:       m.domain,
             tier:           m.badge || "standard",
-            pricing:        { ...(opDef.pricing || {}), defaultCost },
+            pricing:        { ...(m.retailPricing || {}), defaultCost },
             tags:           m.badge ? [m.badge.toLowerCase()] : [],
-            supportedModes: m.operations || [],
+            supportedModes: m.domain ? [m.domain] : [],
             support:        {},
-            supportsEdit:   m.operations.includes("edit"),
+            supportsEdit,
             supportsCamera: isVideo,
             variants: {
-                t2i:      m.operations.includes("text_to_image"),
-                i2i:      m.operations.includes("edit"),
-                i2iMulti: m.operations.includes("edit"),
+                t2i:      m.domain === "image",
+                i2i:      supportsEdit,
+                i2iMulti: supportsEdit,
             },
             icon:           m.iconUrl || "",
             badge:          m.badge || null,

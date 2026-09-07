@@ -1266,12 +1266,12 @@ describe("Sealed Models Subsystem Architecture", () => {
     });
 
     // TEST 3 — Catalog exposes canonical parameters
-    it("TEST 3: getCatalog() and getModelSchema() expose frontend-safe canonical parameter schemas", () => {
+    it("TEST 3: getCatalog() and getModelSchema() expose frontend-safe canonical parameter schemas without duplicate canonicalInputs", () => {
       const catalog = models.getCatalog();
       for (const entry of catalog) {
         assert.ok(entry.parameters, `Catalog entry ${entry.modelId} must expose parameters schema`);
         assert.strictEqual(typeof entry.parameters, "object");
-        assert.ok(entry.canonicalInputs, `Catalog entry ${entry.modelId} must expose canonicalInputs`);
+        assert.strictEqual(entry.canonicalInputs, undefined, `Catalog entry ${entry.modelId} must NOT leak duplicate canonicalInputs`);
       }
 
       // Check specific canonical inputs on nanobana_pro
@@ -1284,10 +1284,11 @@ describe("Sealed Models Subsystem Architecture", () => {
       const schema = models.getModelSchema("nanobana_pro");
       assert.strictEqual(schema.domain, "image");
       assert.strictEqual(schema.parameters.prompt.required, true);
+      assert.strictEqual(schema.canonicalInputs, undefined, "getModelSchema must NOT leak duplicate canonicalInputs");
     });
 
     // TEST 4 — Catalog hides provider internals
-    it("TEST 4: getCatalog() strictly hides provider internals from caller", () => {
+    it("TEST 4: getCatalog() strictly hides provider internals and operation taxonomy from caller", () => {
       const catalog = models.getCatalog({ includeSystem: true });
       for (const entry of catalog) {
         assert.strictEqual(entry.providerId, undefined, `entry ${entry.modelId} must not leak providerId`);
@@ -1296,6 +1297,8 @@ describe("Sealed Models Subsystem Architecture", () => {
         assert.strictEqual(entry.endpoint, undefined, `entry ${entry.modelId} must not leak endpoint`);
         assert.strictEqual(entry.routeId, undefined, `entry ${entry.modelId} must not leak routeId`);
         assert.strictEqual(entry.routes, undefined, `entry ${entry.modelId} must not leak routes`);
+        assert.strictEqual(entry.operations, undefined, `entry ${entry.modelId} must not leak operations`);
+        assert.strictEqual(entry.operationDetails, undefined, `entry ${entry.modelId} must not leak operationDetails`);
       }
     });
 
@@ -1798,6 +1801,79 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.throws(
         () => evaluateWaveSpeedRoutes(mockBinding, strictRoutes, { flag: "inactive" }, "image"),
         (err) => err.name === "UnsupportedCapabilityError" && err.message.includes("No matching WaveSpeed image route")
+      );
+    });
+
+    // TEST 21 — Capability purity & operation taxonomy rejection
+    it("TEST 21: Model capabilities contain no provider operation taxonomy and config validator rejects operation keys", async () => {
+      const { getRegistry } = await import("../../src/models/registry/modelRegistry.js");
+      const { models: loadedModels } = getRegistry();
+
+      const forbiddenOps = new Set([
+        "text_to_image",
+        "image_to_image",
+        "image_to_video",
+        "text_to_video",
+        "video_to_video",
+        "edit",
+        "inpaint",
+        "upscale",
+      ]);
+
+      // Every registered model must have zero operation taxonomy keys in capabilities
+      for (const [modelId, model] of loadedModels.entries()) {
+        if (model.capabilities) {
+          for (const capKey of Object.keys(model.capabilities)) {
+            assert.strictEqual(
+              forbiddenOps.has(capKey),
+              false,
+              `Model "${modelId}" must not contain operation taxonomy key "${capKey}" in capabilities`
+            );
+          }
+        }
+      }
+    });
+
+    // TEST 22 — Quote / Execution plan identity consistency
+    it("TEST 22: Quote/execution plan identity is deterministic and prevents silent execution under a mutated plan", async () => {
+      // 22a: estimatePrice returns planIdentity
+      const estimate = models.estimatePrice("nanobana_pro", { prompt: "quote consistency test", resolution: "1k" });
+      assert.ok(estimate.planIdentity, "estimatePrice must return planIdentity");
+      assert.strictEqual(typeof estimate.planIdentity, "string");
+      assert.ok(estimate.planIdentity.includes("nanobana_pro:wavespeed:generation:"));
+
+      // 22b: calculateCost with returnQuote: true returns planIdentity
+      const quote = models.calculateCost("nanobana_pro", { prompt: "quote consistency test", resolution: "1k" }, { returnQuote: true });
+      assert.strictEqual(quote.credits, 10);
+      assert.ok(quote.planIdentity);
+      assert.strictEqual(quote.planIdentity, estimate.planIdentity);
+
+      // 22c: models.run with matching planIdentity succeeds and records planIdentity in metadata
+      const runResult = await models.run(
+        "nanobana_pro",
+        { prompt: "quote consistency test", resolution: "1k" },
+        {
+          userId: "u-plan-test",
+          planIdentity: quote.planIdentity,
+          sdkRunner: async () => ({ outputs: ["https://cdn.example.com/out.png"] }),
+        }
+      );
+      assert.strictEqual(runResult.status, "success");
+      assert.strictEqual(runResult.metadata.planIdentity, quote.planIdentity);
+
+      // 22d: models.run with mutated/mismatched planIdentity throws ConfigIntegrityError fail-fast
+      const mutatedPlan = "nanobana_pro:wavespeed:edit:9.9.9";
+      await assert.rejects(
+        () => models.run(
+          "nanobana_pro",
+          { prompt: "quote consistency test", resolution: "1k" },
+          {
+            userId: "u-plan-test-fail",
+            planIdentity: mutatedPlan,
+            sdkRunner: async () => ({ outputs: ["https://cdn.example.com/out.png"] }),
+          }
+        ),
+        (err) => err.name === "ConfigIntegrityError" && err.message.includes("Execution plan configuration mismatch")
       );
     });
 

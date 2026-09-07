@@ -1,34 +1,31 @@
 import { Router } from "express";
-import { getCatalog, getSchema, estimatePrice } from "../src/models/index.js";
+import { getCatalog, getModelSchema, getSchema, estimatePrice } from "../src/models/index.js";
 
 const router = Router();
 
 function formatModelDto(m) {
     const isVideo = m.domain === "video";
-    const opDetails = m.operationDetails || {};
-    const mainOp = isVideo ? "text_to_video" : (opDetails.text_to_image ? "text_to_image" : Object.keys(opDetails)[0]);
-    const opDef = opDetails[mainOp] || {};
+    const supportsEdit = Boolean(m.parameters?.input_image);
 
     return {
-        key:            m.modelFamily,
+        key:            m.modelFamily || m.id,
         displayName:    m.displayName,
         description:    m.description || "",
         category:       m.domain,
         tier:           m.badge || "standard",
-        pricing:        opDef.retailPricing || opDef.pricing || {},
+        pricing:        m.retailPricing || {},
         tags:           m.badge ? [m.badge.toLowerCase()] : [],
         support:        {},
-        supportsEdit:   m.operations.includes("edit"),
+        supportsEdit,
         supportsCamera: isVideo,
         variants: {
-            t2i:      m.operations.includes("text_to_image"),
-            i2i:      m.operations.includes("edit"),
-            i2iMulti: m.operations.includes("edit"),
+            t2i:      m.domain === "image",
+            i2i:      supportsEdit,
+            i2iMulti: supportsEdit,
         },
         icon:           m.iconUrl || "",
         badge:          m.badge || null,
-        operations:     m.operations,
-        operationDetails: m.operationDetails,
+        parameters:     m.parameters || {},
     };
 }
 
@@ -78,7 +75,25 @@ router.get("/:key", (req, res) => {
     });
 });
 
-// ── GET /api/models/:key/:operation/schema ──────────────────────────────────
+// ── GET /api/models/:key/schema ──────────────────────────────────────────
+router.get("/:key/schema", (req, res) => {
+    const { key } = req.params;
+    try {
+        const schema = getModelSchema(key);
+        return res.json({
+            success: true,
+            data: schema
+        });
+    } catch (err) {
+        return res.status(err.statusCode || 404).json({
+            success: false,
+            error: err.message,
+            code: err.code || "SCHEMA_ERROR"
+        });
+    }
+});
+
+// ── GET /api/models/:key/:operation/schema (Legacy Compatibility) ───────────
 router.get("/:key/:operation/schema", (req, res) => {
     const { key, operation } = req.params;
     try {

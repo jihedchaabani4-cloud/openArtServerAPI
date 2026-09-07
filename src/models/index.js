@@ -41,6 +41,7 @@ try {
 /**
  * Returns catalog of available models matching optional filters.
  * Exposes a safe, frontend-ready Model contract without leaking provider internals.
+ * Single canonical parameter representation: parameters.
  */
 export function getCatalog(filters = {}) {
   const { models } = getRegistry();
@@ -54,16 +55,6 @@ export function getCatalog(filters = {}) {
     if (filters.systemOnly && !isSystemOnly) continue;
 
     const schema = model.canonicalInputs || getModelSchemaInternal(model);
-    const operations = Object.keys(model.operations || {});
-    const operationDetails = {};
-
-    for (const opKey of operations) {
-      const opDef = model.operations[opKey];
-      operationDetails[opKey] = {
-        inputs: opDef.canonicalInputs || {},
-        retailPricing: opDef.retailPricing || null,
-      };
-    }
 
     const entry = {
       id: model.id,
@@ -73,22 +64,14 @@ export function getCatalog(filters = {}) {
       description: model.description || "",
       iconUrl: model.iconUrl || "",
       domain: model.domain,
-      systemOnly: isSystemOnly,
-      visibility: model.visibility || (isSystemOnly ? "internal" : "public"),
       parameters: schema,
-      canonicalInputs: schema,
-      capabilities: model.capabilities || {},
       retailPricing: model.retailPricing || null,
       status: model.status || "active",
       version: model.version || "1.0.0",
-      operations,
-      operationDetails,
-      lifecycleStatus: model.status || "active",
     };
 
     if (filters.domain && entry.domain !== filters.domain) continue;
-    if (filters.operation && !entry.operations.includes(filters.operation)) continue;
-    if (filters.status && entry.lifecycleStatus !== filters.status) continue;
+    if (filters.status && entry.status !== filters.status) continue;
 
     entries.push(entry);
   }
@@ -102,6 +85,7 @@ export function getCatalog(filters = {}) {
  * Returns the authoritative Model-level parameter contract and metadata.
  * Directly consumable by frontend UI builders and application callers.
  * Does NOT require or accept an operation parameter.
+ * Single canonical parameter representation: parameters.
  *
  * @param {string|object} modelOrFamily - Canonical model ID or model object
  * @returns {object} Full Model contract
@@ -118,8 +102,6 @@ export function getModelSchema(modelOrFamily) {
     description: model.description || "",
     domain: model.domain,
     parameters: schema,
-    canonicalInputs: schema,
-    capabilities: model.capabilities || {},
     retailPricing: model.retailPricing || null,
     status: model.status || "active",
     version: model.version || "1.0.0",
@@ -164,8 +146,8 @@ export function getSchema(modelFamily, operation = null) {
  */
 export function validateInput(modelFamily, rawInput = {}) {
   const model = getModel(modelFamily);
-  const schema = getModelSchema(model);
-  return validateCanonicalInput(schema, rawInput);
+  const modelContract = getModelSchema(model);
+  return validateCanonicalInput(modelContract.parameters, rawInput);
 }
 
 // --- calculateCost ------------------------------------------------------------
@@ -184,7 +166,7 @@ export function validateInput(modelFamily, rawInput = {}) {
  * @returns {number} Integer credit cost
  */
 export function calculateCost(modelFamily, cleanInput = {}, options = {}) {
-  const { model, route } = resolveExecutionPlan(modelFamily, cleanInput, options);
+  const { model, route, planIdentity } = resolveExecutionPlan(modelFamily, cleanInput, options);
   validateBindingConstraints(route, cleanInput);
   const cost = calculateRetailCredits(model, cleanInput, route);
 
@@ -194,10 +176,19 @@ export function calculateCost(modelFamily, cleanInput = {}, options = {}) {
       providerId: route.providerId,
       routeId: route.id || route.routeId || "default",
       credits: cost,
+      planIdentity: planIdentity?.id,
       event: LogEvents.MODELS_COST_CALCULATED,
     },
     `Cost calculated: ${cost} credits for ${modelFamily} via ${route.providerId}`
   );
+
+  if (options.returnQuote || options.includePlanIdentity) {
+    return {
+      credits: cost,
+      planIdentity: planIdentity?.id || null,
+      planDetails: planIdentity || null,
+    };
+  }
 
   return cost;
 }
@@ -210,13 +201,15 @@ export function calculateCost(modelFamily, cleanInput = {}, options = {}) {
  */
 export function estimatePrice(modelFamily, rawInput = {}, options = {}) {
   const cleanInput = validateInput(modelFamily, rawInput);
-  const amount = calculateCost(modelFamily, cleanInput, options);
-  const model = getModel(modelFamily);
+  const { model, route, planIdentity } = resolveExecutionPlan(modelFamily, cleanInput, options);
+  validateBindingConstraints(route, cleanInput);
+  const amount = calculateRetailCredits(model, cleanInput, route);
   return {
     amount,
     currency: "credits",
     pricingVersion: "fixed_retail",
     manifestVersion: model?.version || "1.0.0",
+    planIdentity: planIdentity?.id || null,
   };
 }
 

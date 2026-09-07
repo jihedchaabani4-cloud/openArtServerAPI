@@ -18,6 +18,7 @@ try {
   console.log(`✓ 5. Priority Conflict Integrity passed`);
   console.log(`✓ 6. Mandatory outputMap Declarations passed`);
   console.log(`✓ 7. Anti-Widening Invariant (valueMap within Model universe) passed`);
+  console.log(`✓ 8. Model Semantic Capabilities Validation (no operation taxonomy) passed`);
   console.log("--------------------------------------------------");
   console.log(`Successfully validated in ${duration}ms:`);
   console.log(`  - Models:     ${models.size}`);

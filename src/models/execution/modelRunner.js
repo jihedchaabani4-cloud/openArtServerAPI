@@ -10,7 +10,7 @@ import { defaultRuntimeExecutor } from "./runtimeExecutor.js";
 import { getCustomAdapter } from "../runtime/adapters/adapterLoader.js";
 import { resolveCredential } from "../credentials/credentialResolver.js";
 import { idempotencyStore as defaultIdempotencyStore } from "./idempotencyStore.js";
-import { MissingUserIdError, ProviderTransientError } from "../errors/index.js";
+import { MissingUserIdError, ProviderTransientError, ConfigIntegrityError } from "../errors/index.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
 
 const logger = createLogger("models");
@@ -65,10 +65,22 @@ export async function run(modelId, rawInput = {}, options = {}) {
   });
 
   // 4. Resolve Provider Execution Plan (Binding + Concrete Route + Provider)
-  const { binding, route, provider } = resolveExecutionPlan(model.id, cleanInput, options);
+  const { binding, route, provider, planIdentity } = resolveExecutionPlan(model.id, cleanInput, options);
   const routeId = route.id || route.routeId || "default";
   const bindingId = `${route.modelId}:${route.providerId}`;
   const circuitKey = `${route.modelId}:${route.providerId}:${routeId}`;
+
+  // Enforce quote/execution plan consistency if expectedPlanIdentity or planIdentity provided
+  const expectedPlanId = typeof options.expectedPlanIdentity === "string"
+    ? options.expectedPlanIdentity
+    : (options.expectedPlanIdentity?.id || options.planIdentity?.id || (typeof options.planIdentity === "string" ? options.planIdentity : null));
+
+  if (expectedPlanId && planIdentity?.id && expectedPlanId !== planIdentity.id) {
+    throw new ConfigIntegrityError(
+      `Execution plan configuration mismatch: quoted plan "${expectedPlanId}" does not match current plan "${planIdentity.id}". ` +
+      `Configuration or execution route changed between quote and execution.`
+    );
+  }
 
   // 5. Enforce Binding Implementation Constraints
   validateBindingConstraints(route, cleanInput, rawInput);
@@ -203,6 +215,7 @@ export async function run(modelId, rawInput = {}, options = {}) {
         modelId: model.id,
         operation: route.operation || route.id || "execution",
         routeId: route.id || route.routeId || null,
+        planIdentity: planIdentity?.id || null,
         creditsCharged: noCharge ? 0 : creditsRequired,
         durationMs,
       },

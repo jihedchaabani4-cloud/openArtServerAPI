@@ -76,7 +76,7 @@ export function getModelSchema(model = {}) {
 }
 
 export function validateCanonicalInput(operationDefOrSchema = {}, rawInput = {}, opts = {}) {
-  const schema = operationDefOrSchema.canonicalInputs || operationDefOrSchema;
+  const schema = operationDefOrSchema.parameters || operationDefOrSchema.canonicalInputs || operationDefOrSchema;
   const rules = operationDefOrSchema.rules || [];
   const allowUnknown = opts.allowUnknown === true;
 

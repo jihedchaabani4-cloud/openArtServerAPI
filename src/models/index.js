@@ -279,4 +279,5 @@ export {
   BindingModelMismatchError,
   BindingOperationMismatchError,
   ConfigIntegrityError,
+  NoEligibleBindingError,
 } from "./errors/index.js";

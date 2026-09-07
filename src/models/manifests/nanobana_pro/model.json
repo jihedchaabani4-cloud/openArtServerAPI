@@ -5,7 +5,9 @@
   "description": "State-of-the-art high-fidelity photorealistic image generation model",
   "status": "active",
   "aliases": [
-    "nanobana"
+    "nanobana",
+    "nano-banana-pro",
+    "nano_banana_pro"
   ],
   "capabilities": {
     "prompt": true,

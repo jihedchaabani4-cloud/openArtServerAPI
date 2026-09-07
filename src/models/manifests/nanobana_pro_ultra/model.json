@@ -1,0 +1,101 @@
+{
+  "id": "nanobana_pro_ultra",
+  "domain": "image",
+  "displayName": "NanoBanana Pro Ultra",
+  "description": "Next-generation ultra-high-resolution photorealistic image model supporting up to 8K rendering",
+  "status": "active",
+  "aliases": [
+    "nano-banana-pro-ultra",
+    "nano_banana_pro_ultra",
+    "nanobana-pro-ultra"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "reference_images": true,
+    "mask": true,
+    "aspect_ratio": true,
+    "resolution": true,
+    "quality": true,
+    "seed": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Textual prompt describing the image to generate or edit"
+    },
+    "negative_prompt": {
+      "type": "string",
+      "required": false,
+      "description": "Elements to avoid in the generated output"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "description": "Primary source image URL being transformed or edited"
+    },
+    "reference_images": {
+      "type": "array",
+      "required": false,
+      "description": "Optional array of reference images for composition/style guidance"
+    },
+    "mask": {
+      "type": "string",
+      "required": false,
+      "description": "Mask image URL indicating inpaint or replacement region"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "1k",
+        "2k",
+        "4k",
+        "8k"
+      ],
+      "default": "1k"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "1:1",
+        "16:9",
+        "9:16",
+        "4:3",
+        "3:4"
+      ],
+      "default": "1:1"
+    },
+    "quality": {
+      "type": "string",
+      "values": [
+        "standard",
+        "hd",
+        "ultra"
+      ],
+      "default": "standard"
+    },
+    "seed": {
+      "type": "number",
+      "required": false
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "1k:standard": 15,
+      "1k:hd": 18,
+      "2k:standard": 24,
+      "2k:hd": 30,
+      "4k:standard": 36,
+      "4k:hd": 45,
+      "8k:standard": 60,
+      "8k:hd": 75,
+      "1k": 15,
+      "2k": 24,
+      "4k": 36,
+      "8k": 60
+    }
+  },
+  "version": "1.0.0"
+}

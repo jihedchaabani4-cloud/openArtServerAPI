@@ -1,0 +1,58 @@
+{
+  "id": "seedance_2_5_extend",
+  "domain": "video",
+  "displayName": "ByteDance Seedance 2.5 Extend",
+  "description": "Video extension model for extending existing Seedance video clips with seamless cinematic motion",
+  "status": "active",
+  "aliases": [
+    "seedance-2-5-extend",
+    "seedance_2.5_extend",
+    "seedance-2.5-extend"
+  ],
+  "capabilities": {
+    "input_video": true,
+    "prompt": true,
+    "duration": true,
+    "resolution": true
+  },
+  "canonicalInputs": {
+    "input_video": {
+      "type": "string",
+      "required": true,
+      "description": "Existing video URL to extend"
+    },
+    "prompt": {
+      "type": "string",
+      "required": false,
+      "description": "Textual prompt guiding the video extension continuation"
+    },
+    "duration": {
+      "type": "number",
+      "values": [
+        "5",
+        "10"
+      ],
+      "default": "5",
+      "description": "Extension duration in seconds"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "480p",
+        "720p",
+        "1080p"
+      ],
+      "default": "720p",
+      "description": "Output video resolution"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "5": 30,
+      "10": 55,
+      "default": 30
+    }
+  },
+  "version": "1.0.0"
+}

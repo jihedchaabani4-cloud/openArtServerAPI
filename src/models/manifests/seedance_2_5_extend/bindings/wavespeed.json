@@ -1,0 +1,39 @@
+{
+  "modelId": "seedance_2_5_extend",
+  "providerId": "wavespeed",
+  "providerModelId": "bytedance/seedance-2.5/video-extend",
+  "endpoint": "bytedance/seedance-2.5/video-extend",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "input_video": {
+      "providerField": "video_url"
+    },
+    "prompt": {
+      "providerField": "prompt"
+    },
+    "duration": {
+      "providerField": "duration"
+    },
+    "resolution": {
+      "providerField": "resolution"
+    }
+  },
+  "pricing": {
+    "base_cost_usd": 0.20,
+    "modifiers": {
+      "duration": {
+        "5": 1,
+        "10": 1.8
+      }
+    }
+  },
+  "outputMap": {
+    "video": "outputs"
+  },
+  "pollingConfig": {
+    "pollInterval": 2,
+    "timeout": 3600
+  },
+  "version": "1.0.0"
+}

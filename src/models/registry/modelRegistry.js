@@ -113,6 +113,14 @@ export function initRegistry(options = {}) {
         }
       }
 
+      // Validation (C1 / Test L): Reject forbidden field names such as canonicalParameters
+      if (modelDef.canonicalParameters !== undefined) {
+        throw new ConfigIntegrityError(
+          `Model "${modelDef.id}" uses forbidden field "canonicalParameters". ` +
+          `Established repository convention requires "canonicalInputs".`
+        );
+      }
+
       models.set(modelDef.id, modelDef);
 
       if (Array.isArray(modelDef.aliases)) {
@@ -130,6 +138,7 @@ export function initRegistry(options = {}) {
           const bindingDef = JSON.parse(fs.readFileSync(bindingPath, "utf8"));
           bindingDef.modelId = bindingDef.modelId || modelDef.id;
           bindingDef.id = bindingDef.id || `${bindingDef.modelId}.${bindingDef.providerId}`;
+          bindingDef.operation = bindingDef.operation || "default";
           bindingDef._sourcePath = bindingPath;
 
           const compositeKey = `${bindingDef.modelId}:${bindingDef.operation}:${bindingDef.providerId}`;
@@ -193,15 +202,15 @@ export function initRegistry(options = {}) {
         throw new UnknownProviderReferenceError(b.providerId, `binding (${compositeKeyFrom(b)})`);
       }
 
-      // Validation Rule 2: Operation exists in canonical model
-      if (!model || !model.operations || !model.operations[op]) {
+      // Validation Rule 2: Operation exists in canonical model (or model has canonicalInputs)
+      if (!model || (!model.canonicalInputs && (!model.operations || !model.operations[op]))) {
         throw new UnknownOperationReferenceError(mId, op);
       }
 
       // Validation Rule 3: Canonical inputs check
-      const opDef = model.operations[op];
+      const opDef = model.operations?.[op] || {};
       const domainShared = sharedParams.get(model.domain) || {};
-      const canonicalInputs = opDef.canonicalInputs || {};
+      const canonicalInputs = opDef.canonicalInputs || model.canonicalInputs || {};
 
       const validateParamMap = (paramMap) => {
         if (!paramMap) return;

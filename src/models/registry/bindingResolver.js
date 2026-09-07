@@ -4,6 +4,7 @@ import {
   BindingNotFoundError,
   BindingModelMismatchError,
   UnsupportedCapabilityError,
+  NoEligibleBindingError,
 } from "../errors/index.js";
 
 function normalizeId(id) {
@@ -25,15 +26,13 @@ export function resolveConfiguredBinding(modelId) {
   const availableBindings = getModelBindings(model.id);
 
   if (!availableBindings || availableBindings.length === 0) {
-    throw new BindingNotFoundError("configured", modelId);
+    throw new NoEligibleBindingError(modelId);
   }
 
   const activeBindings = availableBindings.filter((b) => b.status === "active");
 
   if (activeBindings.length === 0) {
-    throw new UnsupportedCapabilityError(
-      `No active provider binding configured for model "${modelId}"`
-    );
+    throw new NoEligibleBindingError(modelId);
   }
 
   return activeBindings[0];
@@ -80,7 +79,7 @@ export function resolveBindingForTest(modelId, targetBindingId) {
   ) || null;
 
   if (!matched) {
-    throw new BindingNotFoundError(targetBindingId, modelId);
+    throw new NoEligibleBindingError(modelId, targetProviderId);
   }
 
   return matched;

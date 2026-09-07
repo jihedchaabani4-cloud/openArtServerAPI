@@ -88,6 +88,21 @@ export class BindingNotFoundError extends ModelsSystemError {
   }
 }
 
+export class NoEligibleBindingError extends ModelsSystemError {
+  constructor(modelId, providerId = null) {
+    const detail = providerId ? ` under provider "${providerId}"` : "";
+    super(`No eligible active provider binding found for model "${modelId}"${detail}`, {
+      retryable: false,
+      safeMessage: "No eligible provider binding is available for this model",
+      statusCode: 422,
+      code: "NO_ELIGIBLE_BINDING",
+    });
+    this.name = "NoEligibleBindingError";
+    this.modelId = modelId;
+    this.providerId = providerId;
+  }
+}
+
 export class BindingModelMismatchError extends ModelsSystemError {
   constructor(bindingId, bindingModelId, requestedModelId) {
     super(`Binding "${bindingId}" belongs to model "${bindingModelId}", but model "${requestedModelId}" was requested`, {

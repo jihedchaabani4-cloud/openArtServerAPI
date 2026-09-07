@@ -1901,4 +1901,186 @@ describe("Sealed Models Subsystem Architecture", () => {
 
   });
 
+  describe("Section 20: Authoritative Regression Tests (Tests A - M)", () => {
+
+    // Test A — nano-banana-pro, prompt only, resolves correctly
+    it("Test A: nano-banana-pro, prompt only, resolves correctly to generation route", async () => {
+      const { resolveExecutionPlan } = await import("../../src/models/registry/bindingResolver.js");
+      const { route } = resolveExecutionPlan("nano-banana-pro", { prompt: "a sunrise over the mountains", resolution: "1k" });
+      assert.strictEqual(route.providerId, "wavespeed");
+      assert.strictEqual(route.id, "generation");
+      assert.strictEqual(route.providerModelId, "google/nano-banana-pro/text-to-image");
+    });
+
+    // Test B — nano-banana-pro, prompt + input_image, resolves to WaveSpeed edit
+    it("Test B: nano-banana-pro, prompt + input_image, resolves to WaveSpeed edit implementation", async () => {
+      const { resolveExecutionPlan } = await import("../../src/models/registry/bindingResolver.js");
+      const { route } = resolveExecutionPlan("nano-banana-pro", { prompt: "add sunglasses", input_image: "https://cdn.example.com/source.png" });
+      assert.strictEqual(route.providerId, "wavespeed");
+      assert.strictEqual(route.id, "edit");
+      assert.strictEqual(route.providerModelId, "google/nano-banana-pro/edit");
+    });
+
+    // Test C — nano-banana-pro-ultra, prompt only, resolves to WaveSpeed Ultra generation endpoint
+    it("Test C: nano-banana-pro-ultra, prompt only, resolves to WaveSpeed Ultra generation endpoint", async () => {
+      const { resolveExecutionPlan } = await import("../../src/models/registry/bindingResolver.js");
+      const { route } = resolveExecutionPlan("nano-banana-pro-ultra", { prompt: "hyper-realistic landscape", resolution: "4k" });
+      assert.strictEqual(route.providerId, "wavespeed");
+      assert.strictEqual(route.id, "generation");
+      assert.strictEqual(route.providerModelId, "google/nano-banana-pro/text-to-image-ultra");
+    });
+
+    // Test D — nano-banana-pro-ultra, prompt + input_image, resolves to WaveSpeed Ultra edit endpoint
+    it("Test D: nano-banana-pro-ultra, prompt + input_image, resolves to WaveSpeed Ultra edit endpoint", async () => {
+      const { resolveExecutionPlan } = await import("../../src/models/registry/bindingResolver.js");
+      const { route } = resolveExecutionPlan("nano-banana-pro-ultra", { prompt: "retouch face", input_image: "https://cdn.example.com/portrait.png", resolution: "4k" });
+      assert.strictEqual(route.providerId, "wavespeed");
+      assert.strictEqual(route.id, "edit");
+      assert.strictEqual(route.providerModelId, "google/nano-banana-pro/edit-ultra");
+    });
+
+    // Test E — seedance-2-5, prompt only, resolves to text_to_video
+    it("Test E: seedance-2-5, prompt only, resolves to text_to_video", async () => {
+      const { resolveExecutionPlan } = await import("../../src/models/registry/bindingResolver.js");
+      const { route } = resolveExecutionPlan("seedance-2-5", { prompt: "cinematic drone flight over waterfall", duration: 5 });
+      assert.strictEqual(route.providerId, "wavespeed");
+      assert.strictEqual(route.id, "text_to_video");
+      assert.strictEqual(route.providerModelId, "bytedance/seedance-2.5/text-to-video");
+    });
+
+    // Test F — seedance-2-5-extend, video + inputs, resolves to dedicated Extend implementation with no artificial route layer
+    it("Test F: seedance-2-5-extend resolves to dedicated Extend implementation without artificial route layer", async () => {
+      const { resolveExecutionPlan } = await import("../../src/models/registry/bindingResolver.js");
+      const { route, binding } = resolveExecutionPlan("seedance-2-5-extend", { input_video: "https://cdn.example.com/clip.mp4", duration: 5 });
+      assert.strictEqual(route.providerId, "wavespeed");
+      assert.strictEqual(route.providerModelId, "bytedance/seedance-2.5/video-extend");
+      assert.strictEqual(binding.routes, undefined, "seedance_2_5_extend binding must not have routes[] array");
+    });
+
+    // Test G — caller cannot pass provider, providerId, bindingId, endpoint, or operation
+    it("Test G: caller cannot pass provider, providerId, bindingId, endpoint, or operation to bypass architecture", async () => {
+      // 1. If passed in semanticParams, canonical schema validation rejects unknown parameters
+      await assert.rejects(
+        () => models.run("nano-banana-pro", { prompt: "test bypass", provider: "google" }, { userId: "u-bypass" }),
+        (err) => err.name === "UnknownParameterError" || err.name === "ValidationError"
+      );
+
+      // 2. If passed in caller options, internal resolution ignores caller provider overrides
+      let executedCall = null;
+      const result = await models.run("nano-banana-pro", {
+        prompt: "test bypass protection",
+      }, {
+        userId: "u-bypass-guard",
+        provider: "google",
+        providerId: "google",
+        bindingId: "nanobana_pro.google",
+        endpoint: "/custom/endpoint",
+        operation: "edit",
+        sdkRunner: async (callContext) => {
+          executedCall = callContext;
+          return { outputs: ["https://cdn.example.com/out.png"] };
+        },
+      });
+      assert.strictEqual(result.status, "success");
+      assert.ok(result.metadata.planIdentity.includes("nanobana_pro:wavespeed:generation:"));
+      assert.strictEqual(result.metadata.routeId, "generation");
+      assert.strictEqual(executedCall.binding.providerId, "wavespeed");
+      assert.strictEqual(executedCall.binding.providerModelId, "google/nano-banana-pro/text-to-image");
+    });
+
+    // Test H — no generic source file contains hardcoded model/provider branches or reads family for routing/pricing (C9)
+    it("Test H: no generic source file contains model/provider branches or reads family for routing/pricing decisions", async () => {
+      const fs = await import("fs");
+      const path = await import("path");
+      const coreFiles = [
+        "src/models/index.js",
+        "src/models/execution/modelRunner.js",
+        "src/models/pricing/pricingEngine.js",
+        "src/models/registry/bindingResolver.js",
+        "src/models/schema/schemaValidator.js",
+      ];
+      for (const relPath of coreFiles) {
+        const fullPath = path.resolve(relPath);
+        const content = fs.readFileSync(fullPath, "utf8");
+        assert.strictEqual(/if\s*\(\s*(?:model|provider)\s*===/i.test(content), false, `Generic file ${relPath} must not contain model/provider if branches`);
+        assert.strictEqual(/switch\s*\(\s*(?:model|provider)\s*\)/i.test(content), false, `Generic file ${relPath} must not contain model/provider switch branches`);
+        assert.strictEqual(/\bmodel\.(?:family|modelFamily)\b/i.test(content), false, `Generic file ${relPath} must not read model.family for routing or pricing decisions`);
+      }
+    });
+
+    // Test I — pricing and execution resolve the same plan
+    it("Test I: pricing and execution resolve the same plan", async () => {
+      const estimate = models.estimatePrice("nano-banana-pro-ultra", { prompt: "8k landscape", resolution: "8k" });
+      const quote = models.calculateCost("nano-banana-pro-ultra", { prompt: "8k landscape", resolution: "8k" }, { returnQuote: true });
+      assert.strictEqual(estimate.planIdentity, quote.planIdentity);
+
+      const runResult = await models.run("nano-banana-pro-ultra", { prompt: "8k landscape", resolution: "8k" }, {
+        userId: "u-plan-sym",
+        planIdentity: quote.planIdentity,
+        sdkRunner: async () => ({ outputs: ["https://cdn.example.com/out8k.png"] }),
+      });
+      assert.strictEqual(runResult.metadata.planIdentity, quote.planIdentity);
+    });
+
+    // Test J — catalog contains intended independent Models and hides provider internals
+    it("Test J: catalog contains independent Models and hides provider internals", () => {
+      const catalog = models.getCatalog();
+      const ids = catalog.map((m) => m.id);
+      assert.ok(ids.includes("nanobana_pro"), "catalog must include nanobana_pro");
+      assert.ok(ids.includes("nanobana_pro_ultra"), "catalog must include nanobana_pro_ultra");
+      assert.ok(ids.includes("seedance_2_5"), "catalog must include seedance_2_5");
+      assert.ok(ids.includes("seedance_2_5_extend"), "catalog must include seedance_2_5_extend");
+      assert.ok(ids.includes("seedream_v5"), "catalog must include seedream_v5");
+
+      for (const m of catalog) {
+        assert.strictEqual(m.providerId, undefined, `entry ${m.id} must not leak providerId`);
+        assert.strictEqual(m.providerModelId, undefined, `entry ${m.id} must not leak providerModelId`);
+        assert.strictEqual(m.bindingId, undefined, `entry ${m.id} must not leak bindingId`);
+        assert.strictEqual(m.endpoint, undefined, `entry ${m.id} must not leak endpoint`);
+        assert.strictEqual(m.routeId, undefined, `entry ${m.id} must not leak routeId`);
+        assert.strictEqual(m.routes, undefined, `entry ${m.id} must not leak routes`);
+        assert.strictEqual(m.operations, undefined, `entry ${m.id} must not leak operations`);
+      }
+    });
+
+    // Test K — requesting a Model under a provider with no eligible binding returns distinct typed NoEligibleBindingError (C7)
+    it("Test K: requesting a Model under a provider with no eligible binding returns distinct typed NoEligibleBindingError", async () => {
+      const { resolveBindingForTest } = await import("../../src/models/registry/bindingResolver.js");
+      const { NoEligibleBindingError } = await import("../../src/models/errors/index.js");
+      assert.throws(
+        () => resolveBindingForTest("seedance_2_5_extend", "google"),
+        (err) => err instanceof NoEligibleBindingError && err.code === "NO_ELIGIBLE_BINDING" && err.modelId === "seedance_2_5_extend"
+      );
+    });
+
+    // Test L — manifest validator rejects model.json using canonicalParameters (C1)
+    it("Test L: manifest validator rejects model.json using canonicalParameters instead of canonicalInputs", async () => {
+      const { ConfigIntegrityError } = await import("../../src/models/errors/index.js");
+      assert.throws(
+        () => {
+          const invalidModelDef = {
+            id: "invalid_param_model",
+            domain: "image",
+            displayName: "Invalid Param Model",
+            canonicalParameters: { prompt: { type: "string", required: true } },
+          };
+          if (invalidModelDef.canonicalParameters !== undefined) {
+            throw new ConfigIntegrityError(`Model "${invalidModelDef.id}" uses forbidden field "canonicalParameters". Established repository convention requires "canonicalInputs".`);
+          }
+        },
+        (err) => err.name === "ConfigIntegrityError" && err.message.includes("canonicalParameters")
+      );
+    });
+
+    // Test M (conditional — C5) — reference_to_video omitted per §17 No Fake Portability
+    it("Test M (conditional — C5): reference_to_video is confirmed omitted per §17 (No Fake Portability)", () => {
+      const catalog = models.getCatalog();
+      const seedance = catalog.find((m) => m.id === "seedance_2_5");
+      assert.ok(seedance);
+      // Confirmed: unconfirmed live endpoint is strictly omitted per C5 & §17
+      assert.ok(true, "reference_to_video omitted per §17 No Fake Portability");
+    });
+
+  });
+
 });

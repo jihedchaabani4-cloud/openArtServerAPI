@@ -60,7 +60,24 @@ export function assertWalletConfiguredForEnvironment() {
     }
 }
 
+/**
+ * Enforce that production environments must never boot without a strong INTERNAL_SECRET (>= 32 chars).
+ */
+export function assertSecurityConfiguredForEnvironment() {
+    const isProd = process.env.NODE_ENV === "production";
+    const secret = process.env.INTERNAL_SECRET;
+
+    if (isProd) {
+        if (!secret || typeof secret !== "string" || secret.trim().length < 32) {
+            throw new Error(
+                "Fatal: INTERNAL_SECRET is required in production (NODE_ENV=production) and must be at least 32 characters long."
+            );
+        }
+    }
+}
+
 assertWalletConfiguredForEnvironment();
+assertSecurityConfiguredForEnvironment();
 
 const _supabaseForUsageEvents = process.env.SUPABASE_URL && walletServiceKey
     ? createClient(process.env.SUPABASE_URL, walletServiceKey)

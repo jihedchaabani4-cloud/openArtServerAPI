@@ -1,6 +1,7 @@
 import { supabase } from "../../lib/supabase.js";
 import { AppError } from "../utils/AppError.js";
 import { setContext, createLogger } from "../infrastructure/logging/index.js";
+import { safeCompareSecret } from "../platform/security/secretComparison.js";
 
 const authLogger = createLogger("auth");
 
@@ -11,7 +12,7 @@ const authLogger = createLogger("auth");
 export const requireAuth = async (req, res, next) => {
     // S2S internal secret check (requires explicit x-user-id header, no hardcoded defaults)
     const internalSecret = req.headers?.["x-internal-secret"];
-    if (internalSecret && internalSecret === process.env.INTERNAL_SECRET) {
+    if (internalSecret && safeCompareSecret(internalSecret, process.env.INTERNAL_SECRET)) {
         const headerUserId = req.headers?.["x-user-id"];
         if (headerUserId) {
             req.user = { id: headerUserId };

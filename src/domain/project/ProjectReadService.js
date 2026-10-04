@@ -1,6 +1,7 @@
 import { supabase, supabaseAdmin } from "../../../lib/supabase.js";
 import { getCatalog } from "../../models/index.js";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
+import { safeCompareSecret } from "../../platform/security/secretComparison.js";
 
 function getCatalogPricing() {
     const catalog = getCatalog();
@@ -339,9 +340,9 @@ export class ProjectReadService {
 
         const isAuthorized = await this._verifyMediaOwnership(mediaId, userId, req);
         if (!isAuthorized) {
-            throw new CrudServiceError("Unauthorized access to this media", {
-                statusCode: 403,
-                errorCode: "FORBIDDEN",
+            throw new CrudServiceError("Media not found", {
+                statusCode: 404,
+                errorCode: "NOT_FOUND",
             });
         }
 
@@ -364,7 +365,7 @@ export class ProjectReadService {
 
     async _verifyMediaOwnership(mediaId, userId, req = null) {
         const secret = req?.headers?.["x-internal-secret"];
-        const isInternal = secret && secret === (process.env.INTERNAL_SECRET || "openart_internal_s2s_secret_2026");
+        const isInternal = Boolean(secret && safeCompareSecret(secret, process.env.INTERNAL_SECRET));
         const isDev = process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true;
 
         if (isInternal || isDev) return true;

@@ -199,6 +199,7 @@ describe("Sibling Media Cleanup & Deadlock Boundary Tests (Task T8 / BUG-08)", (
       run_id: runId,
       workflow_id: workflowId,
       status: "running",
+      v1_workflow_id: workflowId,
       input: { workflow_id: workflowId },
       execution_plan: plan,
     });

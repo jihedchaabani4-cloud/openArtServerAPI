@@ -18,6 +18,33 @@ const memoryNodeRuns = new Map(); // key: runId:nodeId
 
 export class RunRepository {
   static useMemoryFallback = false;
+  static clientOverride = null;
+
+  getClient() {
+    return RunRepository.clientOverride || supabaseAdmin;
+  }
+
+  _normalizeRunRow(data) {
+    if (!data) return null;
+    const v1WorkflowId = data.v1_workflow_id !== undefined && data.v1_workflow_id !== null
+      ? data.v1_workflow_id
+      : (data.execution_plan?.targetWorkflowId || null);
+
+    const targetMediaIds = Array.isArray(data.target_media_ids) && data.target_media_ids.length > 0
+      ? data.target_media_ids
+      : (Array.isArray(data.execution_plan?.targetMediaIds) && data.execution_plan.targetMediaIds.length > 0
+          ? data.execution_plan.targetMediaIds
+          : (Array.isArray(data.target_media_ids) ? data.target_media_ids : []));
+
+    const metadata = data.metadata || data.execution_plan?.metadata || {};
+
+    data.v1_workflow_id = v1WorkflowId;
+    data.target_media_ids = targetMediaIds;
+    data.targetWorkflowId = v1WorkflowId;
+    data.targetMediaIds = targetMediaIds;
+    data.metadata = metadata;
+    return data;
+  }
 
   /**
    * Create a new workflow run and optionally initialize its node runs.
@@ -25,19 +52,17 @@ export class RunRepository {
    * @returns {Promise<Object>} The created run
    */
   async createRun(run) {
-    const targetWorkflowId = run.targetWorkflowId !== undefined
-      ? run.targetWorkflowId
-      : (run.target_workflow_id || run.execution_plan?.targetWorkflowId || run.input?.serverWorkflowId || run.input?.workflow_id || null);
-    const targetMediaIds = run.targetMediaIds !== undefined
-      ? run.targetMediaIds
-      : (run.target_media_ids || run.execution_plan?.targetMediaIds || (run.input?.media_id ? [run.input.media_id] : (run.input?.mediaIds || [])));
-    const executionPlan = {
-      ...(run.execution_plan || {}),
-      targetWorkflowId,
-      targetMediaIds,
-    };
+    const v1WorkflowId = run.v1_workflow_id !== undefined
+      ? run.v1_workflow_id
+      : (run.targetWorkflowId || null);
+    const targetMediaIds = run.target_media_ids !== undefined
+      ? run.target_media_ids
+      : (run.targetMediaIds || []);
+    const metadata = run.metadata || {};
 
-    if (RunRepository.useMemoryFallback || !supabaseAdmin) {
+    const client = this.getClient();
+
+    if (RunRepository.useMemoryFallback || !client) {
       const data = {
         run_id: run.run_id || randomUUID(),
         workflow_id: run.workflow_id,
@@ -45,9 +70,12 @@ export class RunRepository {
         user_id: run.user_id || null,
         status: run.status || "pending",
         input: run.input,
-        execution_plan: executionPlan,
-        targetWorkflowId,
-        targetMediaIds,
+        execution_plan: run.execution_plan || {},
+        metadata,
+        v1_workflow_id: v1WorkflowId,
+        target_media_ids: targetMediaIds,
+        targetWorkflowId: v1WorkflowId,
+        targetMediaIds: targetMediaIds,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
@@ -56,7 +84,7 @@ export class RunRepository {
     }
 
     try {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await client
         .from("v2_workflow_runs")
         .insert({
           run_id: run.run_id,
@@ -65,7 +93,10 @@ export class RunRepository {
           user_id: run.user_id || null,
           status: run.status || "pending",
           input: run.input,
-          execution_plan: executionPlan,
+          execution_plan: run.execution_plan || {},
+          metadata,
+          v1_workflow_id: v1WorkflowId,
+          target_media_ids: targetMediaIds,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         })
@@ -80,11 +111,7 @@ export class RunRepository {
         }
         throw error;
       }
-      if (data) {
-        data.targetWorkflowId = data.execution_plan?.targetWorkflowId || null;
-        data.targetMediaIds = data.execution_plan?.targetMediaIds || [];
-      }
-      return data;
+      return this._normalizeRunRow(data);
     } catch (err) {
       if (err.code === "PGRST205") {
         RunRepository.useMemoryFallback = true;
@@ -101,22 +128,20 @@ export class RunRepository {
    * @returns {Promise<Object|null>} The run or null
    */
   async getRun(runId) {
-    if (RunRepository.useMemoryFallback || !supabaseAdmin) {
-      return memoryRuns.get(runId) || null;
+    const client = this.getClient();
+    if (RunRepository.useMemoryFallback || !client) {
+      const run = memoryRuns.get(runId) || null;
+      return this._normalizeRunRow(run);
     }
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await client
       .from("v2_workflow_runs")
       .select("*")
       .eq("run_id", runId)
       .maybeSingle();
 
     if (error) throw error;
-    if (data) {
-      data.targetWorkflowId = data.execution_plan?.targetWorkflowId || null;
-      data.targetMediaIds = data.execution_plan?.targetMediaIds || [];
-    }
-    return data;
+    return this._normalizeRunRow(data);
   }
 
   /**
@@ -126,7 +151,8 @@ export class RunRepository {
    * @returns {Promise<Object>} The updated run
    */
   async updateRun(runId, patch) {
-    if (RunRepository.useMemoryFallback || !supabaseAdmin) {
+    const client = this.getClient();
+    if (RunRepository.useMemoryFallback || !client) {
       const current = memoryRuns.get(runId);
       if (!current) throw new Error(`Run ${runId} not found in memory`);
       const updated = {
@@ -134,15 +160,12 @@ export class RunRepository {
         ...patch,
         updated_at: new Date().toISOString()
       };
-      if (updated.execution_plan) {
-        updated.targetWorkflowId = updated.execution_plan.targetWorkflowId || updated.targetWorkflowId || null;
-        updated.targetMediaIds = updated.execution_plan.targetMediaIds || updated.targetMediaIds || [];
-      }
-      memoryRuns.set(runId, updated);
-      return updated;
+      const normalized = this._normalizeRunRow(updated);
+      memoryRuns.set(runId, normalized);
+      return normalized;
     }
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await client
       .from("v2_workflow_runs")
       .update({
         ...patch,
@@ -153,11 +176,7 @@ export class RunRepository {
       .single();
 
     if (error) throw error;
-    if (data) {
-      data.targetWorkflowId = data.execution_plan?.targetWorkflowId || null;
-      data.targetMediaIds = data.execution_plan?.targetMediaIds || [];
-    }
-    return data;
+    return this._normalizeRunRow(data);
   }
 
   /**
@@ -166,7 +185,8 @@ export class RunRepository {
    * @returns {Promise<Object>} The created node run
    */
   async createNodeRun(nodeRun) {
-    if (RunRepository.useMemoryFallback || !supabaseAdmin) {
+    const client = this.getClient();
+    if (RunRepository.useMemoryFallback || !client) {
       const data = {
         run_id: nodeRun.run_id,
         node_id: nodeRun.node_id,
@@ -182,7 +202,7 @@ export class RunRepository {
       return data;
     }
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await client
       .from("v2_workflow_run_nodes")
       .insert({
         run_id: nodeRun.run_id,
@@ -209,11 +229,12 @@ export class RunRepository {
    * @returns {Promise<Object|null>} The node run or null
    */
   async getNodeRun(runId, nodeId) {
-    if (RunRepository.useMemoryFallback || !supabaseAdmin) {
+    const client = this.getClient();
+    if (RunRepository.useMemoryFallback || !client) {
       return memoryNodeRuns.get(`${runId}:${nodeId}`) || null;
     }
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await client
       .from("v2_workflow_run_nodes")
       .select("*")
       .eq("run_id", runId)
@@ -232,7 +253,8 @@ export class RunRepository {
    * @returns {Promise<Object>} The updated node run
    */
   async updateNodeRun(runId, nodeId, patch) {
-    if (RunRepository.useMemoryFallback || !supabaseAdmin) {
+    const client = this.getClient();
+    if (RunRepository.useMemoryFallback || !client) {
       const key = `${runId}:${nodeId}`;
       const current = memoryNodeRuns.get(key);
       if (!current) throw new Error(`Node run ${key} not found in memory`);
@@ -244,7 +266,7 @@ export class RunRepository {
       return updated;
     }
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await client
       .from("v2_workflow_run_nodes")
       .update(patch)
       .eq("run_id", runId)
@@ -262,7 +284,8 @@ export class RunRepository {
    * @returns {Promise<Object[]>} All node runs
    */
   async listNodeRuns(runId) {
-    if (RunRepository.useMemoryFallback || !supabaseAdmin) {
+    const client = this.getClient();
+    if (RunRepository.useMemoryFallback || !client) {
       const results = [];
       for (const [key, value] of memoryNodeRuns.entries()) {
         if (key.startsWith(`${runId}:`)) {
@@ -272,7 +295,7 @@ export class RunRepository {
       return results;
     }
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await client
       .from("v2_workflow_run_nodes")
       .select("*")
       .eq("run_id", runId);

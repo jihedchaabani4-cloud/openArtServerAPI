@@ -75,6 +75,7 @@ export class UseCaseService {
     traceId = null,
     executionId = null,
     jobQueueService = null,
+    serverContext = null,
   }) {
     const started = Date.now();
     const useCase = getUseCase(useCaseId);
@@ -113,17 +114,30 @@ export class UseCaseService {
 
     const queue = jobQueueService || this.jobQueueService;
 
+    const effectiveServerWorkflowId = serverContext?.workflowId || serverContext?.v1_workflow_id || input.serverWorkflowId || input.workflow_id || null;
+    const effectiveServerMediaIds = serverContext?.mediaIds || input.serverMediaIds || (input.media_id ? [input.media_id] : []);
+    const effectiveServerProjectId = serverContext?.projectId || input.serverProjectId || input.project_id || null;
+
     let job;
     try {
       job = await queue.addUseCaseJob({
         useCaseId,
         input: {
           ...input,
+          ...(effectiveServerWorkflowId ? { serverWorkflowId: effectiveServerWorkflowId } : {}),
+          ...(effectiveServerMediaIds?.length > 0 ? { serverMediaIds: effectiveServerMediaIds } : {}),
+          ...(effectiveServerProjectId ? { serverProjectId: effectiveServerProjectId } : {}),
           billing_hold_id: reserve.billingHoldId,
           billing_status: reserve.billingStatus,
           reserved_credits: reserve.reservedCredits,
         },
         userId,
+        serverContext: serverContext || {
+          workflowId: effectiveServerWorkflowId,
+          v1_workflow_id: effectiveServerWorkflowId,
+          mediaIds: effectiveServerMediaIds,
+          projectId: effectiveServerProjectId,
+        },
         executionId: finalExecutionId,
         workflowRunId: finalExecutionId,
         billingHoldId: reserve.billingHoldId,

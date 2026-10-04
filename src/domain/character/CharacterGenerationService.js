@@ -63,16 +63,7 @@ export class CharacterGenerationService {
             const charName = name?.trim() || prompt?.slice(0, 40) || "Untitled Character";
             const charPrompt = prompt?.trim() || charName;
 
-            // 1. Prepare Direct UseCase Runtime Input
-            const runtimeInput = {
-                project_id: projectId,
-                workflow_id: characterId,
-                prompt: charPrompt,
-                references: Array.isArray(references) ? references : [],
-                characters: [{ name: charName, description: charPrompt }],
-            };
-
-            // 2. Create placeholder media record so UI shows loading state immediately
+            // 1. Create placeholder media record so UI shows loading state immediately
             let placeholderMedia = null;
             try {
                 placeholderMedia = await this.db.media.createMedia({
@@ -88,6 +79,22 @@ export class CharacterGenerationService {
                 console.warn(`⚠️ [CharacterGenerationService] placeholder media notice:`, mediaErr.message);
             }
 
+            const mediaId = placeholderMedia?.id || null;
+            const serverMediaIds = mediaId ? [mediaId] : [];
+
+            // 2. Prepare Direct UseCase Runtime Input with verified server-side targets
+            const runtimeInput = {
+                project_id: projectId,
+                workflow_id: characterId,
+                media_id: mediaId,
+                serverWorkflowId: characterId,
+                serverMediaIds,
+                serverProjectId: projectId,
+                prompt: charPrompt,
+                references: Array.isArray(references) ? references : [],
+                characters: [{ name: charName, description: charPrompt }],
+            };
+
             // 3. Dispatch UseCase job with credit reservation
             let taskId = null;
             let hasSufficientCredits = true;
@@ -101,6 +108,12 @@ export class CharacterGenerationService {
                         userId,
                         executionId: characterId,
                         traceId: characterId,
+                        serverContext: {
+                            workflowId: characterId,
+                            v1_workflow_id: characterId,
+                            mediaIds: serverMediaIds,
+                            projectId,
+                        },
                     });
                     taskId = prepared.executionId || prepared.workflowRunId || characterId;
                 } catch (creditErr) {

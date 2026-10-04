@@ -149,13 +149,16 @@ export async function generateImage(req, res) {
     // ── 3. Prepare UseCase runtime input ─────────────────────────────────────
     // Only workflow-level fields at root. All model-specific params are in `parameters`.
     const runtimeInput = {
-      prompt:      prompt.trim(),
-      model:       chosenModel,
-      references:  sanitizedReferences,
-      parameters:  (parameters && typeof parameters === "object") ? parameters : {},
-      project_id:  projectId,
-      workflow_id: workflowId,
-      media_id:    mediaId,
+      prompt:           prompt.trim(),
+      model:            chosenModel,
+      references:       sanitizedReferences,
+      parameters:       (parameters && typeof parameters === "object") ? parameters : {},
+      project_id:       projectId,
+      workflow_id:      workflowId,
+      media_id:         mediaId,
+      serverWorkflowId: workflowId,
+      serverMediaIds:   [mediaId],
+      serverProjectId:  projectId,
     };
 
 
@@ -173,6 +176,12 @@ export async function generateImage(req, res) {
         userId,
         executionId: workflowId,
         traceId:     workflowId,
+        serverContext: {
+          workflowId,
+          v1_workflow_id: workflowId,
+          mediaIds: [mediaId],
+          projectId,
+        },
       });
       taskId         = prepared.jobId || prepared.executionId || workflowId;
       calculatedCost = prepared.cost?.totalCredits ?? null;

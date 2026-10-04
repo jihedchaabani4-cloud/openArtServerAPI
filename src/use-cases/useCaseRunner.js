@@ -63,11 +63,12 @@ export async function run({
   }
 
   // 5. Start workflow run (creates DB records + enqueues nodes)
-  const serverWorkflowId = input.serverWorkflowId || input.workflow_id || input.characterId || null;
+  const serverWorkflowId = input.serverWorkflowId || input.workflow_id || null;
   const serverMediaIds = input.serverMediaIds || (input.media_id ? [input.media_id] : (input.mediaIds || []));
   const serverProjectId = input.serverProjectId || input.project_id || input.projectId || null;
   const serverContext = {
     workflowId: serverWorkflowId,
+    v1_workflow_id: serverWorkflowId,
     mediaIds: serverMediaIds,
     projectId: serverProjectId,
   };

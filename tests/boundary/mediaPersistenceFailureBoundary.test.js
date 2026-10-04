@@ -106,6 +106,8 @@ describe("Media Persistence Failure Boundary Tests (Task T7 / BUG-02)", () => {
       run_id: runId,
       workflow_id: "wf-test-persist",
       status: "running",
+      v1_workflow_id: "wf-test-persist",
+      target_media_ids: ["placeholder-999"],
       input: { workflow_id: "wf-test-persist", media_id: "placeholder-999", prompt: "A cinematic portrait" },
       execution_plan: plan,
     });
@@ -205,6 +207,8 @@ describe("Media Persistence Failure Boundary Tests (Task T7 / BUG-02)", () => {
       run_id: runId,
       workflow_id: "wf-test-persist-retry",
       status: "running",
+      v1_workflow_id: "wf-test-persist-retry",
+      target_media_ids: ["placeholder-retry"],
       input: { workflow_id: "wf-test-persist-retry", media_id: "placeholder-retry", prompt: "Retry test prompt" },
       execution_plan: plan,
     });

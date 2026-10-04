@@ -15,6 +15,7 @@ import { db } from "../../container.js";
 import { nodeFailure, nodeSuccess } from "../runtime/nodeEnvelope.js";
 import { formatWorkflowError } from "../runtime/errorPolicy.js";
 import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";
+import { resolveMediaMetadata } from "../../platform/media/mediaMetadataResolver.js";
 
 const nodeLogger = createLogger("node");
 
@@ -35,44 +36,67 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
     : value;
 
   try {
+    if ((target === "character" || target === "media") && !workflowId) {
+      throw new Error(`Persistence target "${target}" requires workflow_id in run input`);
+    }
+
     if (target === "character" && workflowId && field) {
       nodeLogger.info({ workflowId, field }, `Updating character ${workflowId} field "${field}"`);
-      await db.characters.updateCharacter(workflowId, { [field]: resolvedValue }).catch(() => null);
+      await db.characters.updateCharacter(workflowId, { [field]: resolvedValue });
     } else if (target === "media" && workflowId) {
       const mediaUrl = typeof resolvedValue === "string" ? resolvedValue : (resolvedValue?.url || output?.assets?.[0]?.url || output?.media?.url);
-      if (mediaUrl) {
-        const targetStepId = step_id || "character_sheet";
-        nodeLogger.info({ workflowId, stepId: targetStepId }, `Updating media for workflow ${workflowId} (step_id: ${targetStepId}) to completed`);
+      if (!mediaUrl) {
+        throw new Error(`Resolved mediaUrl is empty or missing from node output`);
+      }
 
-        // Find existing processing media placeholder created by createCharacter
-        const existingList = await db.media.findByWorkflow(workflowId).catch(() => []);
-        const placeholder = existingList?.find((m) => m.step_id === targetStepId || m.status === "processing" || m.status === "pending");
+      const targetStepId = step_id || "character_sheet";
+      nodeLogger.info({ workflowId, stepId: targetStepId }, `Updating media for workflow ${workflowId} (step_id: ${targetStepId}) to completed`);
 
-        const width = output?.assets?.[0]?.width || resolvedInputs?.width || nodeConfig?.config?.width || 1344;
-        const height = output?.assets?.[0]?.height || resolvedInputs?.height || nodeConfig?.config?.height || 768;
+      // Find existing processing media placeholder created by controller
+      const existingList = await db.media.findByWorkflow(workflowId);
+      const mediaMeta = resolveMediaMetadata({
+        ...(output?.assets?.[0] || {}),
+        ...resolvedInputs,
+        parameters: resolvedInputs?.parameters,
+      });
+      const width = mediaMeta.width;
+      const height = mediaMeta.height;
 
-        if (placeholder?.id) {
-          await db.media.updateMedia(placeholder.id, {
-            url: mediaUrl,
-            status: status || "completed",
-            width,
-            height,
-          }).catch((err) => nodeLogger.warn({ workflowId, err }, `Failed to update media placeholder: ${err.message}`));
-        } else {
-          await db.media.createMedia({
-            workflow_id: workflowId,
-            project_id: projectId,
-            step_id: targetStepId,
-            url: mediaUrl,
-            status: status || "completed",
-            width,
-            height,
-          }).catch((err) => nodeLogger.warn({ workflowId, err }, `Failed to create media fallback: ${err.message}`));
-        }
+      const placeholder = existingList?.find((m) => m.step_id === targetStepId && (m.status === "processing" || m.status === "pending"))
+        || existingList?.find((m) => m.step_id === targetStepId)
+        || existingList?.[0];
+
+      if (placeholder?.id) {
+        await db.media.updateMedia(placeholder.id, {
+          url: mediaUrl,
+          status: status || "completed",
+          width,
+          height,
+        });
+      } else {
+        await db.media.createMedia({
+          workflow_id: workflowId,
+          project_id: projectId,
+          step_id: targetStepId,
+          url: mediaUrl,
+          status: status || "completed",
+          width,
+          height,
+        });
       }
     }
   } catch (err) {
-    nodeLogger.warn({ nodeId: nodeConfig.id, err }, `Persistence notice for node ${nodeConfig.id}: ${err.message}`);
+    nodeLogger.error(
+      { nodeId: nodeConfig.id, workflowId, err, event: LogEvents.WORKFLOW_NODE_FAILED },
+      `Node persistence failed for node "${nodeConfig.id}": ${err.message}`
+    );
+    const persistenceErr = new Error(`Node "${nodeConfig.id}" persistence failed: ${err.message}`);
+    persistenceErr.code = "PERSISTENCE_FAILED";
+    persistenceErr.category = "SERVER_FAULT";
+    persistenceErr.nodeId = nodeConfig.id;
+    persistenceErr.retryable = err.retryable ?? true;
+    persistenceErr.cause = err;
+    throw persistenceErr;
   }
 }
 

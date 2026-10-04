@@ -53,8 +53,20 @@ function parseJSONResponse(rawText) {
  * Sets aliases so downstream bindings like ${llm_enrich.output.json.description} and
  * ${llm_enrich.output.json.prompt} work seamlessly.
  */
-function normalizeStructuredJSON(parsed, userPrompt = "") {
-  if (!parsed || typeof parsed !== "object") {
+/**
+ * Ensures returned JSON conforms to the Structured Generation Payload contract.
+ * Sets aliases so downstream bindings like ${llm_enrich.output.json.description} and
+ * ${llm_enrich.output.json.prompt} work seamlessly.
+ */
+function normalizeStructuredJSON(parsed, userPrompt = "", { isSafetyActive = false } = {}) {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    if (isSafetyActive) {
+      const err = new Error("LLM output contract violation: Expected JSON object payload for safety evaluation.");
+      err.code = "OUTPUT_CONTRACT_VIOLATION";
+      err.category = "UPSTREAM_FAULT";
+      err.is_safe = false;
+      throw err;
+    }
     return {
       is_safe: true,
       safety_reason: null,
@@ -67,6 +79,17 @@ function normalizeStructuredJSON(parsed, userPrompt = "") {
     };
   }
 
+  // Strict Schema Validation for Content Moderation
+  if (isSafetyActive) {
+    if (typeof parsed.is_safe !== "boolean") {
+      const err = new Error("LLM output contract violation: Missing or invalid boolean 'is_safe' field in safety moderation response.");
+      err.code = "OUTPUT_CONTRACT_VIOLATION";
+      err.category = "UPSTREAM_FAULT";
+      err.is_safe = false;
+      throw err;
+    }
+  }
+
   const isSafe = parsed.is_safe !== false && parsed.safe !== false && parsed.safety !== false;
   const safetyReason = parsed.safety_reason || parsed.reason || (isSafe ? null : "Safety Violation: Prompt contains prohibited sexual or nudity content.");
 
@@ -74,7 +97,15 @@ function normalizeStructuredJSON(parsed, userPrompt = "") {
     ? parsed.description.trim()
     : (typeof parsed.prompt === "string" && parsed.prompt.trim()
         ? parsed.prompt.trim()
-        : (userPrompt || ""));
+        : (isSafetyActive ? "" : (userPrompt || "")));
+
+  if (isSafetyActive && isSafe && !promptText) {
+    const err = new Error("LLM output contract violation: Safe prompt returned empty description/prompt text.");
+    err.code = "OUTPUT_CONTRACT_VIOLATION";
+    err.category = "UPSTREAM_FAULT";
+    err.is_safe = false;
+    throw err;
+  }
 
   return {
     ...parsed,
@@ -115,6 +146,8 @@ export async function executeLLMNode(resolvedInputs, ctx = {}) {
     model = undefined,
   } = safe;
 
+  const isSafetyActive = skillIds.includes("llm/system-safety");
+
   // ── 2. Skill Loader & System Prompt Composition ───────────────────────────
   let systemPrompt = "";
   let skillsUsed = [];
@@ -150,23 +183,29 @@ export async function executeLLMNode(resolvedInputs, ctx = {}) {
       ...(model ? { model } : {}),
     });
   } catch (llmErr) {
-    console.warn(`[LLMNode] LLM call failed (${llmErr.message}). Falling back to passthrough user prompt.`);
-    return {
-      text: userPrompt,
-      json: {
-        is_safe: true,
-        safety_reason: null,
-        title: userPrompt.slice(0, 40),
-        description: userPrompt,
-        prompt: userPrompt,
-        keywords: [],
-        references: [],
-        generationConfig: {},
-      },
-      is_safe: true,
-      safety_reason: null,
-      modelUsed: "fallback-passthrough",
-    };
+    const isPolicyViolation =
+      llmErr.code === "CONTENT_SAFETY_VIOLATION" ||
+      llmErr.code === "PROVIDER_CONTENT_POLICY_ERROR" ||
+      /safety|nsfw|sexual|explicit|prohibited content/i.test(llmErr.message || "");
+
+    if (isPolicyViolation) {
+      console.warn(`🛑 [LLMNode] Content safety policy violation: ${llmErr.message}`);
+      const safetyErr = new Error(llmErr.message || "Safety Violation: Prompt contains prohibited content.");
+      safetyErr.code = "CONTENT_SAFETY_VIOLATION";
+      safetyErr.category = "USER_FAULT";
+      safetyErr.statusCode = 422;
+      safetyErr.is_safe = false;
+      throw safetyErr;
+    }
+
+    // FAIL-CLOSED: LLM execution failures must never fall back to unmoderated raw prompts
+    console.error(`❌ [LLMNode] LLM call failed (${llmErr.message}). Failing closed.`);
+    const failErr = new Error(`Content safety verification failed: ${llmErr.message}`);
+    failErr.code = llmErr.code && llmErr.code !== "Error" ? llmErr.code : "SAFETY_CHECK_FAILED";
+    failErr.category = "UPSTREAM_FAULT";
+    failErr.is_safe = false;
+    failErr.cause = llmErr;
+    throw failErr;
   }
 
   let jsonOutput = null;
@@ -174,37 +213,55 @@ export async function executeLLMNode(resolvedInputs, ctx = {}) {
   if (jsonMode) {
     try {
       const rawJson = result.json ?? parseJSONResponse(result.raw);
-      jsonOutput = normalizeStructuredJSON(rawJson, userPrompt);
+      jsonOutput = normalizeStructuredJSON(rawJson, userPrompt, { isSafetyActive });
     } catch (firstErr) {
       console.warn(`[LLMNode] Malformed JSON response from ${result.model}: ${firstErr.message}. Executing 1 retry with reinforced instructions...`);
 
       const reinforcedInstruction = `${systemPrompt}\n\nCRITICAL ERROR REINFORCEMENT: Your previous output failed JSON parsing. You MUST output ONLY valid JSON without markdown formatting or introductory text.`;
 
-      result = await llmService.generate({
-        prompt: userPrompt,
-        systemInstruction: reinforcedInstruction,
-        images,
-        jsonMode: true,
-        userId: effectiveUserId,
-      });
+      let retryResult;
+      try {
+        retryResult = await llmService.generate({
+          prompt: userPrompt,
+          systemInstruction: reinforcedInstruction,
+          images,
+          jsonMode: true,
+          userId: effectiveUserId,
+        });
+      } catch (retryLlmErr) {
+        console.error(`❌ [LLMNode] LLM retry call failed (${retryLlmErr.message}). Failing closed.`);
+        const retryFailErr = new Error(`Content safety verification failed: ${retryLlmErr.message}`);
+        retryFailErr.code = "SAFETY_CHECK_FAILED";
+        retryFailErr.category = "UPSTREAM_FAULT";
+        retryFailErr.is_safe = false;
+        retryFailErr.cause = retryLlmErr;
+        throw retryFailErr;
+      }
 
       try {
-        const rawJson = result.json ?? parseJSONResponse(result.raw);
-        jsonOutput = normalizeStructuredJSON(rawJson, userPrompt);
+        const rawJson = retryResult.json ?? parseJSONResponse(retryResult.raw);
+        jsonOutput = normalizeStructuredJSON(rawJson, userPrompt, { isSafetyActive });
       } catch (retryErr) {
-        console.warn(`[LLMNode] Retry failed to parse JSON. Falling back to default structured wrapper.`);
-        jsonOutput = normalizeStructuredJSON(null, userPrompt);
+        console.error(`❌ [LLMNode] Retry failed to parse structured JSON: ${retryErr.message}. Failing closed.`);
+        const schemaErr = new Error(`LLM output contract violation: Free text or malformed JSON received when structured safety output was required.`);
+        schemaErr.code = isSafetyActive ? "SAFETY_CHECK_FAILED" : "OUTPUT_CONTRACT_VIOLATION";
+        schemaErr.category = "UPSTREAM_FAULT";
+        schemaErr.is_safe = false;
+        schemaErr.cause = retryErr;
+        throw schemaErr;
       }
     }
   }
 
   // ── 4. Content Safety Enforcement ──────────────────────────────────────────
-  // If the LLM detected sexual or nudity violation, halt execution and flag media immediately
+  // If the LLM detected safety violation, halt execution and flag error immediately
   if (jsonOutput && jsonOutput.is_safe === false) {
-    const errorMsg = jsonOutput.safety_reason || "Safety Violation: Prompt contains prohibited nudity or sexual content.";
+    const errorMsg = jsonOutput.safety_reason || "Safety Violation: Prompt contains prohibited content.";
     console.warn(`🛑 [LLMNode] Content safety violation: ${errorMsg}`);
     const safetyErr = new Error(errorMsg);
     safetyErr.code = "CONTENT_SAFETY_VIOLATION";
+    safetyErr.category = "USER_FAULT";
+    safetyErr.statusCode = 422;
     safetyErr.is_safe = false;
     throw safetyErr;
   }

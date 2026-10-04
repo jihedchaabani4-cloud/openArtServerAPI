@@ -19,11 +19,11 @@ export const ERROR_POLICY = Object.freeze({
     userMessage: "The service is temporarily unavailable. Please try again shortly.",
   },
   PROVIDER_QUOTA_EXCEEDED: {
-    category: "SERVER_FAULT", // don't leak "it's the provider's fault" to the user
+    category: "UPSTREAM_FAULT",
     retryable: false,
     billingAction: "RELEASE",
-    statusCode: 500,
-    userMessage: "Please try again in a few moments.",
+    statusCode: 503,
+    userMessage: "This model is temporarily unavailable due to upstream provider maintenance. Please select a different model.",
   },
   CONTENT_SAFETY_VIOLATION: {
     category: "USER_FAULT",
@@ -31,6 +31,13 @@ export const ERROR_POLICY = Object.freeze({
     billingAction: "RELEASE",
     statusCode: 422,
     userMessage: "Your prompt violates our content policy. Please modify it and try again.",
+  },
+  SAFETY_CHECK_FAILED: {
+    category: "UPSTREAM_FAULT",
+    retryable: false,
+    billingAction: "ROLLBACK",
+    statusCode: 502,
+    userMessage: "Content safety verification could not be completed. Please try again shortly.",
   },
   INSUFFICIENT_CREDITS: {
     category: "BILLING_FAULT",

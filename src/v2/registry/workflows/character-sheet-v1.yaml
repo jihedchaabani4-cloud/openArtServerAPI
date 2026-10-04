@@ -31,8 +31,8 @@ nodes:
       context: "${build_prompt.output.context}"
       images: "${build_prompt.output.context.references}"
     config:
-      model: gemini-3-flash
-      skills: [llm/translation, llm/character-description, llm/json-output]
+      model: gemini-3.1-flash-lite
+      skills: [llm/system-safety, llm/translation, llm/character-description, llm/json-output]
       jsonMode: true
     persist:
       target: character

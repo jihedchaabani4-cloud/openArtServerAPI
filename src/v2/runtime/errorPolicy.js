@@ -52,6 +52,7 @@ export const RUNTIME_ERROR_CODES = Object.freeze({
   PROVIDER_REQUEST_ERROR: "PROVIDER_REQUEST_ERROR",
   PROVIDER_QUOTA_EXCEEDED: "PROVIDER_QUOTA_EXCEEDED",
   PROVIDER_MALFORMED_RESPONSE: "PROVIDER_MALFORMED_RESPONSE",
+  SAFETY_CHECK_FAILED: "SAFETY_CHECK_FAILED",
 
   // Server / Internal Faults
   CREDENTIAL_ERROR: "CREDENTIAL_ERROR",
@@ -164,11 +165,11 @@ const DEFAULT_DECISIONS = Object.freeze({
     severity: "warning",
   },
   [RUNTIME_ERROR_CODES.PROVIDER_QUOTA_EXCEEDED]: {
-    category: ERROR_CATEGORIES.SERVER_FAULT,
+    category: ERROR_CATEGORIES.UPSTREAM_FAULT,
     retryable: false,
     workflowAction: "stop",
     billingAction: "rollback",
-    userMessage: DEFAULT_APOLOGY_MESSAGE,
+    userMessage: "This model is temporarily unavailable due to upstream provider maintenance. Please select a different model.",
     severity: "error",
   },
   [RUNTIME_ERROR_CODES.PROVIDER_MALFORMED_RESPONSE]: {
@@ -178,6 +179,14 @@ const DEFAULT_DECISIONS = Object.freeze({
     billingAction: "rollback",
     userMessage: DEFAULT_APOLOGY_MESSAGE,
     severity: "error",
+  },
+  [RUNTIME_ERROR_CODES.SAFETY_CHECK_FAILED]: {
+    category: ERROR_CATEGORIES.UPSTREAM_FAULT,
+    retryable: false,
+    workflowAction: "stop",
+    billingAction: "rollback",
+    userMessage: "Content safety verification could not be completed. " + DEFAULT_APOLOGY_MESSAGE,
+    severity: "warning",
   },
 
   // ── SERVER & INTERNAL FAULTS (Apology to user, zero leak of secrets) ──────
@@ -301,6 +310,9 @@ export function normalizeCode(errorOrCode) {
   if (code && DEFAULT_DECISIONS[code]) {
     return code;
   }
+  if (code === "INVALID_INPUT_REJECTED_BY_PROVIDER") {
+    return RUNTIME_ERROR_CODES.INVALID_INPUT;
+  }
 
   // 2. Semantic inspection of message
   const msg = (
@@ -317,7 +329,16 @@ export function normalizeCode(errorOrCode) {
     return RUNTIME_ERROR_CODES.CONTENT_SAFETY_VIOLATION;
   }
 
-  // Credit / balance detection
+  // Upstream Provider Balance / Quota Exhaustion (Admin/Platform issue, NOT end-user wallet)
+  if (
+    code === RUNTIME_ERROR_CODES.PROVIDER_QUOTA_EXCEEDED ||
+    code === "PROVIDER_QUOTA_EXCEEDED" ||
+    /top up your account|provider.*quota|provider.*credit|wavespeed.*credit|upstream.*credit|balance.*exhausted|insufficient_quota/i.test(msg)
+  ) {
+    return RUNTIME_ERROR_CODES.PROVIDER_QUOTA_EXCEEDED;
+  }
+
+  // Credit / balance detection (End-user wallet)
   if (/insufficient.*credits?|not enough credits?|credit limit/i.test(msg) || code === "INSUFFICIENT_FUNDS") {
     return RUNTIME_ERROR_CODES.INSUFFICIENT_CREDITS;
   }
@@ -333,7 +354,7 @@ export function normalizeCode(errorOrCode) {
   }
 
   // Auth / Credential
-  if (/unauthorized|401|api key|credentials|quota exceeded/i.test(msg)) {
+  if (/unauthorized|401|api key|credentials/i.test(msg)) {
     return RUNTIME_ERROR_CODES.CREDENTIAL_ERROR;
   }
 
@@ -377,11 +398,15 @@ export function getErrorDecision(errorOrCode) {
       : errorOrCode?.message || errorOrCode?.safeMessage || code;
 
   // Strict Rule: If it's NOT a USER_FAULT and NOT a BILLING_FAULT, force apology message
+  // EXCEPT for explicit actionable messages like PROVIDER_QUOTA_EXCEEDED
   const isUserOrBilling =
     decision.category === ERROR_CATEGORIES.USER_FAULT ||
     decision.category === ERROR_CATEGORIES.BILLING_FAULT;
 
-  const finalUserMessage = isUserOrBilling
+  const isExplicitSafeUpstream =
+    decision.code === RUNTIME_ERROR_CODES.PROVIDER_QUOTA_EXCEEDED;
+
+  const finalUserMessage = (isUserOrBilling || isExplicitSafeUpstream)
     ? decision.userMessage
     : DEFAULT_APOLOGY_MESSAGE;
 
@@ -529,6 +554,17 @@ export function processSystemError(rawError, context = {}) {
 
 export function logErrorReport(report) {
   if (!report) return;
+  if (report.user?.code === RUNTIME_ERROR_CODES.PROVIDER_QUOTA_EXCEEDED) {
+    errorLogger.error(
+      {
+        errorCode: report.user?.code,
+        nodeId: report.system?.nodeId,
+        traceId: report.system?.traceId,
+        alert: "ADMIN_ACTION_REQUIRED",
+      },
+      `🚨 [PROVIDER_OUT_OF_CREDITS] Upstream provider account balance exhausted. Admin top-up required!`
+    );
+  }
   const level = report.system?.severity === "FATAL" || report.user?.category === "SERVER_FAULT" ? "error" : "warn";
   errorLogger[level](
     {

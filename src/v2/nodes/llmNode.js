@@ -180,10 +180,15 @@ export async function executeLLMNode(resolvedInputs, ctx = {}) {
       images,
       jsonMode,
       userId: effectiveUserId,
-      options: effectiveUserId ? {} : { isInternal: true, reason: "internal-platform-llm" },
+      options: resolvedInputs.options || ctx.options || {},
       ...(model ? { model } : {}),
     });
   } catch (llmErr) {
+    if (llmErr.code === "BILLING_CONTEXT_MISSING") {
+      console.error(`❌ [LLMNode] Billing context missing for node "${nodeId}" in run "${runId}". Failing node.`);
+      throw llmErr;
+    }
+
     const isPolicyViolation =
       llmErr.code === "CONTENT_SAFETY_VIOLATION" ||
       llmErr.code === "PROVIDER_CONTENT_POLICY_ERROR" ||
@@ -228,9 +233,12 @@ export async function executeLLMNode(resolvedInputs, ctx = {}) {
           images,
           jsonMode: true,
           userId: effectiveUserId,
-          options: effectiveUserId ? {} : { isInternal: true, reason: "internal-platform-llm" },
+          options: resolvedInputs.options || ctx.options || {},
         });
       } catch (retryLlmErr) {
+        if (retryLlmErr.code === "BILLING_CONTEXT_MISSING") {
+          throw retryLlmErr;
+        }
         console.error(`❌ [LLMNode] LLM retry call failed (${retryLlmErr.message}). Failing closed.`);
         const retryFailErr = new Error(`Content safety verification failed: ${retryLlmErr.message}`);
         retryFailErr.code = "SAFETY_CHECK_FAILED";

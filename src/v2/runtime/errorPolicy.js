@@ -67,6 +67,7 @@ export const RUNTIME_ERROR_CODES = Object.freeze({
   PERSISTENCE_FAILED: "PERSISTENCE_FAILED",
   NODE_FAILED: "NODE_FAILED",
   ORCHESTRATION_DEADLOCK: "ORCHESTRATION_DEADLOCK",
+  BILLING_CONTEXT_MISSING: "BILLING_CONTEXT_MISSING",
   INTERNAL_ERROR: "INTERNAL_ERROR",
 });
 
@@ -287,6 +288,14 @@ const DEFAULT_DECISIONS = Object.freeze({
     severity: "critical",
   },
   [RUNTIME_ERROR_CODES.INTERNAL_ERROR]: {
+    category: ERROR_CATEGORIES.SERVER_FAULT,
+    retryable: false,
+    workflowAction: "stop",
+    billingAction: "rollback",
+    userMessage: DEFAULT_APOLOGY_MESSAGE,
+    severity: "error",
+  },
+  [RUNTIME_ERROR_CODES.BILLING_CONTEXT_MISSING]: {
     category: ERROR_CATEGORIES.SERVER_FAULT,
     retryable: false,
     workflowAction: "stop",

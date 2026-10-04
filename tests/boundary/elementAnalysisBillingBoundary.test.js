@@ -2,12 +2,13 @@
  * Boundary Tests: F1 — Element Analysis Billing Context & LLMService Callers
  *
  * Verifies:
- * 1. LLMService throws BILLING_CONTEXT_MISSING (code, statusCode 400) when userId is missing
- * 2. Error message to client is clean (no internal reasons/leaks)
+ * 1. LLMService throws BILLING_CONTEXT_MISSING (code, statusCode 500, category SERVER_FAULT) when userId is missing
+ * 2. Error message to client is clean and generic (no internal reasons/leaks)
  * 3. ElementAnalysisService forwards userId to LLMService
  * 4. POST /api/v2/elements works end-to-end with mocked LLM for an authenticated user
- * 5. POST /api/v2/elements/analyze returns clean 400 error if billing context is missing
+ * 5. POST /api/v2/elements/analyze returns clean 500 SERVER_FAULT error if billing context is missing
  * 6. CharacterGenerationService forwards userId to LLMService
+ * 7. llmNode fails with BILLING_CONTEXT_MISSING when run has no userId (no free execution)
  */
 
 import { describe, it, before, beforeEach, afterEach, after } from "node:test";
@@ -16,9 +17,14 @@ import { llmService, LLMService } from "../../src/platform/ai/LLMService.js";
 import { ElementAnalysisService } from "../../src/domain/element/ElementAnalysisService.js";
 import { createElement, analyzeElement } from "../../controllers/elementController.js";
 import { elementService, characterService, db } from "../../src/container.js";
+import { executeLLMNode } from "../../src/v2/nodes/llmNode.js";
+import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
 
-after(() => {
-  setTimeout(() => process.exit(0), 100).unref();
+after(async () => {
+  try {
+    await redisConnection.quit().catch(() => redisConnection.disconnect());
+    await workerRedisConnection.quit().catch(() => workerRedisConnection.disconnect());
+  } catch {}
 });
 
 describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", () => {
@@ -35,8 +41,8 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
     llmService.generate = originalGenerate;
   });
 
-  // ── TEST 1: Missing userId throws BILLING_CONTEXT_MISSING with statusCode 400 ──
-  it("TEST 1: LLMService throws BILLING_CONTEXT_MISSING with code, statusCode 400, and clean message", async () => {
+  // ── TEST 1: Missing userId throws BILLING_CONTEXT_MISSING with statusCode 500 SERVER_FAULT ──
+  it("TEST 1: LLMService throws BILLING_CONTEXT_MISSING with code, statusCode 500, category SERVER_FAULT, and clean message", async () => {
     try {
       await llmService.generate({
         prompt: "Describe this object",
@@ -45,10 +51,11 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
       assert.fail("Should have thrown BILLING_CONTEXT_MISSING");
     } catch (err) {
       assert.strictEqual(err.code, "BILLING_CONTEXT_MISSING", "Error code must be BILLING_CONTEXT_MISSING");
-      assert.strictEqual(err.statusCode, 400, "Error statusCode must be 400 (Bad Request), not 500");
+      assert.strictEqual(err.statusCode, 500, "Error statusCode must be 500 (SERVER_FAULT), not 400 or generic");
+      assert.strictEqual(err.category, "SERVER_FAULT", "Category must be SERVER_FAULT");
       // Message must be clean: should NOT leak internal reasons list
       assert.doesNotMatch(err.message, /internal-platform-llm/i, "Must not leak internal platform reasons to client");
-      assert.match(err.message, /billing context|userId/i, "Message must clearly state billing context is required");
+      assert.match(err.message, /userId is required/i, "Message must state userId is required");
     }
   });
 
@@ -64,7 +71,8 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
       assert.fail("Should have thrown BILLING_CONTEXT_MISSING");
     } catch (err) {
       assert.strictEqual(err.code, "BILLING_CONTEXT_MISSING");
-      assert.strictEqual(err.statusCode, 400);
+      assert.strictEqual(err.statusCode, 500);
+      assert.strictEqual(err.category, "SERVER_FAULT");
     }
   });
 
@@ -73,6 +81,12 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
     let capturedAnalysisUserId = null;
     llmService.analyzeVision = async (params) => {
       capturedAnalysisUserId = params.userId;
+      if (!params.userId) {
+        const err = new Error("User billing context required");
+        err.code = "BILLING_CONTEXT_MISSING";
+        err.statusCode = 500;
+        throw err;
+      }
       return {
         raw: JSON.stringify({ description: "Futuristic neon chair", keywords: ["neon", "cyberpunk"] }),
         content: "Futuristic neon chair",
@@ -108,6 +122,7 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
         storageUrls: ["https://cdn.example.com/elem1.png"],
       }),
     };
+
     const originalFindByUser = db.projects?.findByUser;
     db.projects = {
       ...db.projects,
@@ -154,10 +169,10 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
     }
   });
 
-  // ── TEST 4: POST /api/v2/elements/analyze returns clean 400 error if billing context is missing ──
-  it("TEST 4: POST /api/v2/elements/analyze returns 400 with clean error code when userId is missing", async () => {
+  // ── TEST 4: POST /api/v2/elements/analyze returns clean 500 SERVER_FAULT error if billing context is missing ──
+  it("TEST 4: POST /api/v2/elements/analyze returns 500 with clean error code when userId is missing", async () => {
     const mockReq = {
-      user: null, // Unauthenticated / missing billing context
+      user: null, // Missing billing context
       body: {
         projectId: "proj-1",
         workflowId: "wf-1",
@@ -182,10 +197,11 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
 
     await analyzeElement(mockReq, mockRes);
 
-    assert.strictEqual(responseStatusCode, 400, "Must return HTTP 400 Bad Request, NOT 500");
+    assert.strictEqual(responseStatusCode, 500, "Must return HTTP 500 (SERVER_FAULT) for server billing invariant failure");
     assert.strictEqual(responseBody?.error, true);
     assert.strictEqual(responseBody?.code, "BILLING_CONTEXT_MISSING", "Response must contain BILLING_CONTEXT_MISSING code");
-    assert.doesNotMatch(responseBody?.message || "", /internal-platform-llm/i, "Message must not leak internals");
+    assert.strictEqual(responseBody?.category, "SERVER_FAULT");
+    assert.strictEqual(responseBody?.message, "An unexpected error occurred. Please try again later.", "Must return generic apology message to client");
   });
 
   // ── TEST 5: CharacterGenerationService forwards userId to LLMService ──
@@ -208,5 +224,24 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
 
     assert.ok(result);
     assert.strictEqual(capturedUserId, "user-char-auth-777", "generateDescription must forward userId to llmService");
+  });
+
+  // ── TEST 6: Workflow run with llmNode without userId fails with BILLING_CONTEXT_MISSING (no LLM call, no free execution) ──
+  it("TEST 6: llmNode without userId fails with BILLING_CONTEXT_MISSING, never free execution", async () => {
+    // Node invoked with null userId (e.g. ad-hoc or unauthenticated run)
+    await assert.rejects(
+      async () => {
+        await executeLLMNode(
+          { userPrompt: "A beautiful landscape", systemPromptOverride: "You are a prompt engineer." },
+          { runId: "run-no-user", userId: null }
+        );
+      },
+      (err) => {
+        assert.strictEqual(err.code, "BILLING_CONTEXT_MISSING", "Must throw BILLING_CONTEXT_MISSING");
+        assert.strictEqual(err.statusCode, 500, "Status code must be 500");
+        assert.strictEqual(err.category, "SERVER_FAULT", "Category must be SERVER_FAULT");
+        return true;
+      }
+    );
   });
 });

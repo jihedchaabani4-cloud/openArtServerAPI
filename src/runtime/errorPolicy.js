@@ -60,6 +60,13 @@ export const ERROR_POLICY = Object.freeze({
     statusCode: 500,
     userMessage: "Please try again in a few moments.",
   },
+  BILLING_CONTEXT_MISSING: {
+    category: "SERVER_FAULT",
+    retryable: false,
+    billingAction: "ROLLBACK",
+    statusCode: 500,
+    userMessage: "Please try again in a few moments.",
+  },
   PROVIDER_RATE_LIMIT: {
     category: "UPSTREAM_FAULT",
     retryable: true,

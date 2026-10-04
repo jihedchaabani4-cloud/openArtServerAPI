@@ -87,7 +87,16 @@ export async function generateCharacterDescription(req, res) {
     } catch (err) {
         controllerLogger.error({ err }, `generateCharacterDescription error: ${err.message}`);
         const statusCode = err.statusCode || 500;
-        return res.status(statusCode).json({ ok: false, code: err.code || "REQUEST_ERROR", message: err.message });
+        const clientMessage = statusCode >= 500
+            ? "An unexpected error occurred. Please try again later."
+            : err.message;
+        return res.status(statusCode).json({
+            ok: false,
+            error: true,
+            code: err.code || "REQUEST_ERROR",
+            category: err.category || (statusCode >= 500 ? "SERVER_FAULT" : "USER_FAULT"),
+            message: clientMessage,
+        });
     }
 }
 

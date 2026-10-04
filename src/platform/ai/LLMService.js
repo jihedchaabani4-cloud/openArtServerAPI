@@ -24,7 +24,8 @@ export class BillingContextMissingError extends Error {
     super(message);
     this.name = "BillingContextMissingError";
     this.code = "BILLING_CONTEXT_MISSING";
-    this.statusCode = 400;
+    this.category = "SERVER_FAULT";
+    this.statusCode = 500;
   }
 }
 
@@ -67,9 +68,16 @@ export class LLMService {
     // Enforce billing identity: require userId unless caller provides an explicit, approved internal platform flag
     if (!resolvedUserId) {
       if (!isInternal || !ALLOWED_INTERNAL_REASONS.includes(internalReason)) {
-        logger.warn(
-          { isInternal, internalReason, event: "billing.context_missing" },
-          `LLMService: userId is required for charged LLM calls (internalReason="${internalReason}")`
+        logger.error(
+          {
+            event: "billing.context_missing",
+            isInternal,
+            internalReason,
+            runId: options.runId || null,
+            route: options.route || null,
+            caller: options.caller || null,
+          },
+          `[LLMService] BILLING_CONTEXT_MISSING: userId is required for charged LLM calls (caller="${options.caller || 'unknown'}", runId="${options.runId || 'none'}", route="${options.route || 'none'}")`
         );
         throw new BillingContextMissingError();
       }

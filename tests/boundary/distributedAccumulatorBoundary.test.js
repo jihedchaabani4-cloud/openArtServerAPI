@@ -221,9 +221,5 @@ describe("BUG-09 — distributed accumulator persistence", () => {
     assert.ok(breakdown.some((e) => e.nodeId === "nodeX"), "nodeX must be in breakdown");
     assert.ok(breakdown.some((e) => e.nodeId === "nodeZ"), "nodeZ must be in breakdown");
   });
-
-  after(() => {
-    setTimeout(() => process.exit(0), 100).unref();
-  });
 });
 

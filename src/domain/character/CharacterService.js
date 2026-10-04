@@ -1,82 +1,89 @@
 /**
  * CharacterService
- * Canonical owner of all character CRUD and character media orchestration.
- * Controllers become thin HTTP adapters; all character business logic lives here.
+ * Canonical owner of all Character entity operations, lifecycle, and domain orchestration.
  *
  * Clean Architecture Boundary:
- *   - CharacterService manages Character entity operations (`characters` table)
- *     via CharacterRepository (db.characters).
- *   - Workflow/media reads delegate to WorkflowRepository (db.workflows) and
- *     MediaRepository (db.media).
- *   - Project lookups delegate to ProjectRepository (db.projects).
- *   - Storage uploads delegate to StorageService.
- *   - Workflow deletion and media resource cleanup delegate to WorkflowService.
- *   - LLM description generation delegates to LLMService.
- *
- * NO direct supabase / supabaseAdmin calls in this service.
+ *   - CharacterMediaService handles storage uploads, Supabase buckets, and media rows.
+ *   - CharacterGenerationService handles AI UseCase job dispatching and LLM descriptions.
+ *   - WorkflowService handles workflow lifecycle and low-level workflow deletion.
+ *   - CharacterRepository (db.characters) & WorkflowRepository (db.workflows) handle data persistence.
  */
 
 import { randomUUID } from "node:crypto";
-import { llmService } from "#platform/ai/LLMService.js";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
-
-// ── LLM prompt ─────────────────────────────────────────────────────────────
-
-const CHARACTER_GENERATOR_SYSTEM_PROMPT = `
-You are an elite haute-couture AI Art Director and Master Character Designer for high-budget cinematic films and editorial fashion houses.
-Your task: Given a character concept, archetype, or brief description (such as "The Eccentric", "The Botanical Visionary", "The Wicked", or a custom user prompt), generate an ultra-rich, highly descriptive, editorial character description.
-
-Focus heavily on:
-1. Facial geometry, anatomical features, skin texture, and unique biological/sub-dermal details.
-2. Architectural hair/headpiece design and editorial posture.
-3. Outfit materials, structural tailoring, fabrics (waxy leaves, felted wool, translucent fibers, wet-look surfaces).
-4. Cinematic lighting, color mood, and authoritative visual presence.
-
-CRITICAL OUTPUT REQUIREMENT:
-You MUST return your response as a valid JSON object with this schema:
-{
-  "title": "A short 2-4 word evocative character name/title",
-  "description": "A 3-5 sentence ultra-detailed, editorial character description ready for high-end AI generation.",
-  "keywords": ["5-10 concise factual visual identity keywords"]
-}
-Do NOT include any markdown code blocks or extra text outside the JSON object.
-`;
-
-// ─────────────────────────────────────────────────────────────────────────────
+import { CharacterMediaService } from "./CharacterMediaService.js";
+import { CharacterGenerationService } from "./CharacterGenerationService.js";
+import { assertOwns } from "../../platform/security/ownership.js";
 
 export class CharacterService {
     /**
      * @param {Object} deps
-     * @param {Object} deps.db               - Repository map from container
-     *                                         (db.characters, db.workflows, db.media, db.projects)
-     * @param {Object} deps.storageService   - StorageService instance
-     * @param {Object} deps.workflowService  - WorkflowService instance
+     * @param {Object} deps.db                   - Repository map (db.characters, db.workflows, db.media, db.projects)
+     * @param {Object} deps.storageService       - StorageService instance
+     * @param {Object} deps.workflowService      - WorkflowLifecycleService instance
+     * @param {Object} [deps.useCaseService]     - UseCaseService instance
+     * @param {Object} [deps.mediaService]       - Optional pre-configured CharacterMediaService
+     * @param {Object} [deps.generationService]  - Optional pre-configured CharacterGenerationService
      */
-    constructor({ db, storageService, workflowService }) {
-        this.db              = db;
-        this.storageService  = storageService;
+    constructor({ db, storageService, workflowService, useCaseService, mediaIngestionService, mediaService, generationService }) {
+        this.db = db;
+        this.storageService = storageService;
         this.workflowService = workflowService;
+        this.mediaIngestionService = mediaIngestionService;
+
+        this.mediaService = mediaService || new CharacterMediaService({ db, storageService, mediaIngestionService });
+        this.generationService = generationService || new CharacterGenerationService({ db, useCaseService });
+    }
+
+    /**
+     * Allows setting/updating useCaseService after container initialization
+     */
+    setUseCaseService(useCaseService) {
+        this.generationService.useCaseService = useCaseService;
     }
 
     // ── createCharacter ──────────────────────────────────────────────────────
 
-    async createCharacter({ projectId, userId, workflowId, name, description }) {
+    /**
+     * Creates a new Character workflow container and character DB row.
+     * If an uploaded file or imageUrl is provided, stores the sheet media directly without AI generation.
+     * Otherwise, enqueues the AI turnaround sheet generation job via Redis.
+     */
+    async createCharacter({
+        projectId,
+        userId,
+        workflowId,
+        name,
+        prompt = "",
+        description = "",
+        file = null,
+        imageUrl = null,
+        references = [],
+    }) {
         const traceId = randomUUID();
-        const start   = Date.now();
+        const start = Date.now();
 
         crudOperationLog({ traceId, operation: "createCharacter", projectId });
 
         try {
             if (!projectId) {
                 throw new CrudServiceError("project_id is required", {
-                    statusCode: 400, errorCode: "VALIDATION_ERROR", traceId, operation: "createCharacter",
+                    statusCode: 400,
+                    errorCode: "VALIDATION_ERROR",
+                    traceId,
+                    operation: "createCharacter",
                 });
             }
 
-            const characterId = workflowId || randomUUID();
-            const charName    = name || "Untitled Character";
+            if (userId) {
+                await assertOwns("project", projectId, userId);
+            }
 
-            // Resolve userId — fall back to project owner if userId is not a valid UUID
+            const characterId = workflowId || randomUUID();
+            const charName = name?.trim() || prompt?.slice(0, 40) || "Untitled Character";
+            const charPrompt = (prompt || description)?.trim() || charName;
+
+            // Resolve userId — fallback to project owner if not provided or anonymous
             const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
             let safeUserId = userId;
             if (!safeUserId || !UUID_REGEX.test(safeUserId)) {
@@ -84,75 +91,115 @@ export class CharacterService {
                 if (proj?.user_id) safeUserId = proj.user_id;
             }
 
-            // 1. Create workflow container row FIRST to satisfy Foreign Key constraint (characters.workflow_id -> workflow.id)
-            if (characterId) {
-                await this.db.workflows.createWorkflow({
-                    id: characterId,
-                    project_id: projectId,
-                    user_id: safeUserId,
-                    workflow_type: "CHARACTER_SHEET",
+            // 1. Create workflow container row FIRST to satisfy Foreign Key constraint
+            await this.db.workflows.createWorkflow({
+                id: characterId,
+                project_id: projectId,
+                user_id: safeUserId,
+                workflow_type: "CHARACTER_SHEET",
+                display_name: charName,
+            }).catch(async (wfErr) => {
+                console.warn(`⚠️ [CharacterService] createWorkflow container notice:`, wfErr.message);
+                await this.db.workflows.updateFields(characterId, {
                     display_name: charName,
-                }).catch(async (wfErr) => {
-                    console.warn(`⚠️ [CharacterService] createWorkflow container notice:`, wfErr.message);
-                    await this.db.workflows.updateFields(characterId, {
-                        display_name: charName,
-                        project_id: projectId,
-                        workflow_type: "CHARACTER_SHEET",
-                    }).catch(() => null);
-                });
-            }
+                    project_id: projectId,
+                    workflow_type: "CHARACTER_SHEET",
+                }).catch(() => null);
+            });
 
+            // 2. Upsert character row in characters table
             const upsertPayload = {
-                id:             characterId,
-                workflow_id:    characterId,
-                project_id:     projectId,
-                user_id:        safeUserId,
-                name:           charName,
-                title:          charName,
-                description:    description || "",
-                character_info: description || "",
-                updated_at:     new Date().toISOString(),
+                id: characterId,
+                workflow_id: characterId,
+                project_id: projectId,
+                user_id: safeUserId,
+                name: charName,
+                title: charName,
+                description: charPrompt,
+                character_info: charPrompt,
+                updated_at: new Date().toISOString(),
             };
 
-            // 2. Upsert character row via repository (bypasses RLS via admin client)
-            let char = await this.db.characters.upsert(upsertPayload).catch(async (err) => {
+            const char = await this.db.characters.upsert(upsertPayload).catch(async (err) => {
                 console.error(`❌ [CharacterService] createCharacter upsert error:`, err.message);
-                // Fallback: re-try with confirmed project owner's user_id
                 const proj = await this.db.projects.findById(projectId).catch(() => null);
                 if (proj?.user_id && proj.user_id !== safeUserId) {
                     upsertPayload.user_id = proj.user_id;
-                    return this.db.characters.upsert(upsertPayload).catch((retryErr) => {
-                        console.error(`❌ [CharacterService] createCharacter fallback failed:`, retryErr.message);
-                        return null;
-                    });
+                    return this.db.characters.upsert(upsertPayload).catch(() => null);
                 }
                 return null;
             });
 
-            // 3. Create initial processing media placeholder (so UI shows spinner immediately)
-            let media = await this.db.media.createMedia({
-                workflow_id: characterId,
-                project_id:  projectId,
-                step_id:     "character_sheet",
-                status:      "processing",
-                url:         null,
-                width:       1344,
-                height:      768,
-            }).catch((mediaErr) => {
-                console.warn(`⚠️ [CharacterService] createMedia placeholder notice:`, mediaErr.message);
-                return null;
+            // 3. Case A: User uploaded an image directly (file or imageUrl)
+            if (file || imageUrl) {
+                const sheetRes = await this.mediaService.uploadSheetMedia({
+                    characterId,
+                    file,
+                    imageUrl,
+                    projectId,
+                    userId: safeUserId,
+                });
+
+                crudOperationLog({
+                    traceId,
+                    operation: "createCharacter",
+                    status: "ok",
+                    durationMs: Date.now() - start,
+                    characterId,
+                    mode: "upload",
+                });
+
+                return {
+                    characterId,
+                    workflowId: characterId,
+                    status: "completed",
+                    message: "Character created with uploaded image.",
+                    project_id: projectId,
+                    character: char || upsertPayload,
+                    workflow: { id: characterId, workflow_type: "CHARACTER_SHEET", status: "completed" },
+                    media: sheetRes.media,
+                };
+            }
+
+            // 4. Case B: AI Visual Sheet Generation
+            const genResult = await this.generationService.enqueueSheetGeneration({
+                characterId,
+                prompt: charPrompt,
+                references,
+                projectId,
+                userId: safeUserId,
+                name: charName,
             });
 
             crudOperationLog({
-                traceId, operation: "createCharacter", status: "ok",
-                durationMs: Date.now() - start, characterId,
+                traceId,
+                operation: "createCharacter",
+                status: "ok",
+                durationMs: Date.now() - start,
+                characterId,
+                mode: "ai-generation",
             });
 
-            return { characterId, workflowId: characterId, mediaId: media?.id, character: char, media };
+            return {
+                characterId,
+                workflowId: characterId,
+                taskId: genResult.taskId,
+                status: genResult.status,
+                needsCredits: genResult.needsCredits,
+                message: genResult.message,
+                project_id: projectId,
+                character: char || upsertPayload,
+                workflow: { id: characterId, workflow_type: "CHARACTER_SHEET" },
+                media: genResult.placeholderMedia,
+            };
         } catch (err) {
             crudOperationLog({
-                traceId, operation: "createCharacter", status: "error",
-                durationMs: Date.now() - start, errorCode: err.errorCode || 500, message: err.message,
+                traceId,
+                operation: "createCharacter",
+                status: "error",
+                durationMs: Date.now() - start,
+                errorCode: err.errorCode || 500,
+                message: err.message,
             });
             throw err;
         }
@@ -160,33 +207,44 @@ export class CharacterService {
 
     // ── updateCharacter ──────────────────────────────────────────────────────
 
-    async updateCharacter({ characterId, updates, userId }) {
+    /**
+     * Updates character attributes (name, title, description, character_info, traits, etc.)
+     * and synchronizes workflow display_name.
+     */
+    async updateCharacter({ characterId, updates = {}, userId }) {
         const traceId = randomUUID();
-        const start   = Date.now();
+        const start = Date.now();
 
         crudOperationLog({ traceId, operation: "updateCharacter", characterId });
 
         try {
             if (!characterId) {
                 throw new CrudServiceError("characterId is required", {
-                    statusCode: 400, errorCode: "VALIDATION_ERROR", traceId, operation: "updateCharacter",
+                    statusCode: 400,
+                    errorCode: "VALIDATION_ERROR",
+                    traceId,
+                    operation: "updateCharacter",
                 });
             }
 
+            if (userId) {
+                await assertOwns("character", characterId, userId);
+            }
+
             const charUpdates = { updated_at: new Date().toISOString() };
-            const wfUpdates   = {};
+            const wfUpdates = {};
 
             const nameVal = updates.name || updates.title || updates.display_name;
             if (nameVal !== undefined) {
                 const cleanName = String(nameVal || "").replace(/^@+/, "").trim();
                 if (cleanName.length > 0) {
-                    charUpdates.name  = cleanName;
+                    charUpdates.name = cleanName;
                     charUpdates.title = cleanName;
                     wfUpdates.display_name = cleanName;
                 } else {
                     const existingChar = await this.db.characters.findByCharacterId(characterId).catch(() => null);
                     const fallbackName = existingChar?.name || existingChar?.title || "Untitled Character";
-                    charUpdates.name  = fallbackName;
+                    charUpdates.name = fallbackName;
                     charUpdates.title = fallbackName;
                     wfUpdates.display_name = fallbackName;
                 }
@@ -195,28 +253,22 @@ export class CharacterService {
             const descVal = updates.description !== undefined ? updates.description : updates.character_info;
             if (descVal !== undefined) {
                 const cleanDesc = String(descVal || "").trim();
-                charUpdates.description    = cleanDesc;
+                charUpdates.description = cleanDesc;
                 charUpdates.character_info = cleanDesc;
             }
 
-            const turnaroundVal = updates.turnaround_url || updates.body_sheet_url;
-            if (turnaroundVal !== undefined) charUpdates.turnaround_url = turnaroundVal;
-
-            if (updates.avatar_url !== undefined)  charUpdates.avatar_url  = updates.avatar_url;
-            if (updates.archetype  !== undefined)  charUpdates.archetype   = updates.archetype;
-            if (updates.gender     !== undefined)  charUpdates.gender      = updates.gender;
-            if (updates.style      !== undefined)  charUpdates.style       = updates.style;
-
-            if (updates.traits     !== undefined)  charUpdates.traits      = updates.traits;
-            if (updates.keywords   !== undefined)  charUpdates.keywords    = updates.keywords;
-            if (updates.guidelines !== undefined)  charUpdates.guidelines  = updates.guidelines;
+            if (updates.archetype !== undefined) charUpdates.archetype = updates.archetype;
+            if (updates.gender !== undefined) charUpdates.gender = updates.gender;
+            if (updates.style !== undefined) charUpdates.style = updates.style;
+            if (updates.traits !== undefined) charUpdates.traits = updates.traits;
+            if (updates.keywords !== undefined) charUpdates.keywords = updates.keywords;
+            if (updates.guidelines !== undefined) charUpdates.guidelines = updates.guidelines;
             if (updates.more_details !== undefined) {
                 charUpdates.traits = { ...(charUpdates.traits || {}), more_details: updates.more_details };
             }
-
-            if (updates.status       !== undefined) charUpdates.status       = updates.status;
-            if (updates.is_favorited !== undefined) charUpdates.is_favorited = !!updates.is_favorited;
-            if (updates.favorited    !== undefined) charUpdates.is_favorited = !!updates.favorited;
+            if (updates.status !== undefined) charUpdates.status = updates.status;
+            if (updates.is_favorited !== undefined) charUpdates.is_favorited = Boolean(updates.is_favorited);
+            if (updates.favorited !== undefined) charUpdates.is_favorited = Boolean(updates.favorited);
 
             let updatedChar = await this.db.characters.updateCharacterFields(characterId, charUpdates).catch((err) => {
                 console.warn(`⚠️ [CharacterService] updateCharacter notice:`, err.message);
@@ -225,23 +277,18 @@ export class CharacterService {
 
             if (!updatedChar) {
                 const wfRow = await this.db.workflows.getWorkflow(characterId).catch(() => null);
-
                 const insertPayload = {
-                    id:             characterId,
-                    workflow_id:    characterId,
-                    project_id:     wfRow?.project_id || null,
-                    user_id:        userId || wfRow?.user_id || null,
-                    name:           charUpdates.name  || "Untitled Character",
-                    title:          charUpdates.title || "Untitled Character",
-                    description:    charUpdates.description    || "",
+                    id: characterId,
+                    workflow_id: characterId,
+                    project_id: wfRow?.project_id || null,
+                    user_id: userId || wfRow?.user_id || null,
+                    name: charUpdates.name || "Untitled Character",
+                    title: charUpdates.title || "Untitled Character",
+                    description: charUpdates.description || "",
                     character_info: charUpdates.character_info || "",
                     ...charUpdates,
                 };
-
-                updatedChar = await this.db.characters.upsert(insertPayload).catch((insertErr) => {
-                    console.warn(`⚠️ [CharacterService] upsert notice:`, insertErr.message);
-                    return null;
-                });
+                updatedChar = await this.db.characters.upsert(insertPayload).catch(() => null);
             }
 
             let updatedWf = null;
@@ -250,121 +297,25 @@ export class CharacterService {
             }
 
             crudOperationLog({
-                traceId, operation: "updateCharacter", status: "ok",
-                durationMs: Date.now() - start, characterId,
+                traceId,
+                operation: "updateCharacter",
+                status: "ok",
+                durationMs: Date.now() - start,
+                characterId,
             });
 
             return {
                 character: updatedChar || { id: characterId, ...charUpdates },
-                workflow:  updatedWf,
+                workflow: updatedWf,
             };
         } catch (err) {
             crudOperationLog({
-                traceId, operation: "updateCharacter", status: "error",
-                durationMs: Date.now() - start, errorCode: err.errorCode || 500, message: err.message,
-            });
-            throw err;
-        }
-    }
-
-    // ── addMediaToCharacter ──────────────────────────────────────────────────
-
-    async addMediaToCharacter({ characterId, mediaId, imageUrl, projectId, userId }) {
-        const traceId = randomUUID();
-        const start   = Date.now();
-
-        crudOperationLog({ traceId, operation: "addMediaToCharacter", characterId });
-
-        try {
-            if (!characterId) {
-                throw new CrudServiceError("characterId is required", {
-                    statusCode: 400, errorCode: "VALIDATION_ERROR", traceId, operation: "addMediaToCharacter",
-                });
-            }
-            if (!mediaId && !imageUrl) {
-                throw new CrudServiceError("Either mediaId or imageUrl is required", {
-                    statusCode: 400, errorCode: "VALIDATION_ERROR", traceId, operation: "addMediaToCharacter",
-                });
-            }
-
-            const wf = await this.db.workflows.getWorkflow(characterId).catch(() => null);
-            if (!wf) {
-                throw new CrudServiceError("Character workflow not found", {
-                    statusCode: 404, errorCode: "NOT_FOUND", traceId, operation: "addMediaToCharacter",
-                });
-            }
-
-            let resolvedUrl    = imageUrl;
-            let resolvedWidth  = 1024;
-            let resolvedHeight = 1024;
-
-            if (mediaId) {
-                const sourceMedia = await this.db.media.findById(mediaId).catch(() => null);
-                if (!sourceMedia) {
-                    throw new CrudServiceError(`Media with ID ${mediaId} not found`, {
-                        statusCode: 404, errorCode: "NOT_FOUND", traceId, operation: "addMediaToCharacter",
-                    });
-                }
-                resolvedUrl    = sourceMedia.url;
-                resolvedWidth  = sourceMedia.width  || 1024;
-                resolvedHeight = sourceMedia.height || 1024;
-            } else if (imageUrl && imageUrl.startsWith("data:")) {
-                const newMediaId = randomUUID();
-                const ext = imageUrl.startsWith("data:image/png")
-                    ? "png"
-                    : imageUrl.startsWith("data:image/webp")
-                    ? "webp"
-                    : "jpg";
-                const storagePath = `character-details/${userId}/${characterId}/${newMediaId}.${ext}`;
-                resolvedUrl = await this.storageService.upload(storagePath, imageUrl);
-            }
-
-            const mediaRow = await this.db.media.createMedia({
-                workflow_id: wf.id,
-                project_id:  wf.project_id || projectId,
-                url:         resolvedUrl,
-                step_id:     "character_detail",
-                width:       resolvedWidth,
-                height:      resolvedHeight,
-                status:      "success",
-            });
-
-            crudOperationLog({
-                traceId, operation: "addMediaToCharacter", status: "ok",
-                durationMs: Date.now() - start, characterId, newMediaId: mediaRow.id,
-            });
-
-            return { media: { ...mediaRow, url: resolvedUrl } };
-        } catch (err) {
-            crudOperationLog({
-                traceId, operation: "addMediaToCharacter", status: "error",
-                durationMs: Date.now() - start, errorCode: err.errorCode || 500, message: err.message,
-            });
-            throw err;
-        }
-    }
-
-    // ── removeMediaFromCharacter ─────────────────────────────────────────────
-
-    async removeMediaFromCharacter({ characterId, mediaId, userId }) {
-        const traceId = randomUUID();
-        const start   = Date.now();
-
-        crudOperationLog({ traceId, operation: "removeMediaFromCharacter", characterId, mediaId });
-
-        try {
-            await this.db.media.deleteByIdAndWorkflow(mediaId, characterId);
-
-            crudOperationLog({
-                traceId, operation: "removeMediaFromCharacter", status: "ok",
-                durationMs: Date.now() - start, characterId, mediaId,
-            });
-
-            return { ok: true };
-        } catch (err) {
-            crudOperationLog({
-                traceId, operation: "removeMediaFromCharacter", status: "error",
-                durationMs: Date.now() - start, errorCode: err.errorCode || 500, message: err.message,
+                traceId,
+                operation: "updateCharacter",
+                status: "error",
+                durationMs: Date.now() - start,
+                errorCode: err.errorCode || 500,
+                message: err.message,
             });
             throw err;
         }
@@ -372,78 +323,133 @@ export class CharacterService {
 
     // ── deleteCharacter ──────────────────────────────────────────────────────
 
+    /**
+     * Deletes a character, including workflows, characters table entry, and associated media.
+     */
     async deleteCharacter({ characterId, userId, req = null }) {
         const traceId = randomUUID();
-        const start   = Date.now();
+        const start = Date.now();
 
         crudOperationLog({ traceId, operation: "deleteCharacter", characterId });
 
         try {
             if (!characterId) {
                 throw new CrudServiceError("characterId is required", {
-                    statusCode: 400, errorCode: "VALIDATION_ERROR", traceId, operation: "deleteCharacter",
+                    statusCode: 400,
+                    errorCode: "VALIDATION_ERROR",
+                    traceId,
+                    operation: "deleteCharacter",
                 });
             }
 
+            if (userId) {
+                await assertOwns("character", characterId, userId);
+            }
+
             await this.db.characters.deleteById(characterId).catch((charDeleteErr) => {
-                console.warn(`⚠️ [CharacterService] deleteCharacter characters row notice:`, charDeleteErr.message);
+                console.warn(`⚠️ [CharacterService] deleteCharacter row notice:`, charDeleteErr.message);
             });
 
             const result = await this.workflowService.deleteWorkflow({ workflowId: characterId, userId, req });
 
             crudOperationLog({
-                traceId, operation: "deleteCharacter", status: "ok",
-                durationMs: Date.now() - start, characterId,
+                traceId,
+                operation: "deleteCharacter",
+                status: "ok",
+                durationMs: Date.now() - start,
+                characterId,
             });
 
             return result;
         } catch (err) {
             crudOperationLog({
-                traceId, operation: "deleteCharacter", status: "error",
-                durationMs: Date.now() - start, errorCode: err.errorCode || 500, message: err.message,
+                traceId,
+                operation: "deleteCharacter",
+                status: "error",
+                durationMs: Date.now() - start,
+                errorCode: err.errorCode || 500,
+                message: err.message,
             });
             throw err;
         }
     }
 
-    // ── generateDescription ──────────────────────────────────────────────────
+    // ── Media Delegations ────────────────────────────────────────────────────
 
-    async generateDescription({ concept, archetype, style } = {}) {
-        const traceId = randomUUID();
-        const start   = Date.now();
-
-        crudOperationLog({ traceId, operation: "generateDescription" });
-
-        try {
-            const inputConcept = concept || archetype || "The Eccentric";
-            const promptText = `Generate a masterwork character description for the concept: "${inputConcept}". ${
-                style ? `Incorporate style influences: ${style}.` : ""
-            }`;
-
-            const result = await llmService.generate({
-                prompt: promptText,
-                systemInstruction: CHARACTER_GENERATOR_SYSTEM_PROMPT,
-                jsonMode: true,
-            });
-
-            const parsed      = result.json || {};
-            const description = parsed.description || result.raw || "A visionary character with striking anatomical features and high-fashion editorial presence.";
-            const title       = parsed.title || inputConcept;
-            const keywords    = Array.isArray(parsed.keywords) ? parsed.keywords : [];
-
-            crudOperationLog({
-                traceId, operation: "generateDescription", status: "ok",
-                durationMs: Date.now() - start,
-            });
-
-            return { title, description, keywords, model: result.model };
-        } catch (err) {
-            crudOperationLog({
-                traceId, operation: "generateDescription", status: "error",
-                durationMs: Date.now() - start, message: err.message,
-            });
-            throw err;
+    /**
+     * Set or upload turnaround body sheet media
+     */
+    async setCharacterSheetMedia(params) {
+        if (params?.userId && params?.characterId) {
+            await assertOwns("character", params.characterId, params.userId);
         }
+        return await this.mediaService.uploadSheetMedia(params);
+    }
+
+    /**
+     * Add a detail reference image to character
+     */
+    async addMediaToCharacter(params) {
+        if (params?.userId && params?.characterId) {
+            await assertOwns("character", params.characterId, params.userId);
+        }
+        return await this.mediaService.uploadDetailMedia(params);
+    }
+
+    /**
+     * Remove a detail reference image from character
+     */
+    async removeMediaFromCharacter(params) {
+        if (params?.userId && params?.characterId) {
+            await assertOwns("character", params.characterId, params.userId);
+        }
+        return await this.mediaService.removeDetailMedia(params);
+    }
+
+    // ── AI Generation Delegations ────────────────────────────────────────────
+
+    /**
+     * Generate or regenerate turnaround sheet
+     */
+    async generateCharacterSheet({ characterId, prompt, references, projectId, userId }) {
+        if (userId) {
+            await assertOwns("character", characterId, userId);
+            if (projectId) {
+                await assertOwns("project", projectId, userId);
+            }
+        }
+
+        const wf = await this.db.workflows.getWorkflow(characterId).catch(() => null);
+        const existingChar = await this.db.characters.findByCharacterId(characterId).catch(() => null);
+
+        const targetProjectId = projectId || wf?.project_id || existingChar?.project_id;
+        const charName = existingChar?.name || wf?.display_name || "Untitled Character";
+        const effectivePrompt = (prompt && prompt.trim()) || existingChar?.description || existingChar?.character_info || charName;
+
+        // If prompt was updated, synchronize character entity
+        if (prompt && prompt.trim() && prompt.trim() !== existingChar?.description) {
+            await this.updateCharacter({
+                characterId,
+                updates: { description: prompt.trim(), character_info: prompt.trim() },
+                userId,
+            }).catch(() => null);
+        }
+
+        return await this.generationService.enqueueSheetGeneration({
+            characterId,
+            prompt: effectivePrompt,
+            references: Array.isArray(references) ? references : [],
+            projectId: targetProjectId,
+            userId,
+            name: charName,
+        });
+    }
+
+    /**
+     * Generate an evocative character prompt using the AI Art Director
+     */
+    async generateDescription(params) {
+        return await this.generationService.generateDescription(params);
     }
 }
 

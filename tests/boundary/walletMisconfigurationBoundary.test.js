@@ -240,4 +240,95 @@ describe("F2.4-a — Wallet Misconfiguration & Zero Price Invariants", () => {
     });
     assert.strictEqual(zeroPlan.totalCredits, 0, "Explicit 0 cost must return 0 totalCredits");
   });
+
+  it("TEST 8: pricing failure at prepare time through real controller -> placeholders failed, no hold, clean 500 with INTERNAL_ERROR + traceId", async () => {
+    const { generateImage } = await import("../../controllers/imageController.js");
+    const { db, useCaseService } = await import("../../src/container.js");
+    const { InMemoryWalletService } = await import("../../src/services/walletService.js");
+
+    const wallet = new InMemoryWalletService();
+    await wallet.setBalance("user-pricing-fail", 100);
+    useCaseService.walletService = wallet;
+
+    const mediaRows = new Map();
+    const origDbMedia = db.media;
+    const origDbProjects = db.projects;
+    const origDbWorkflows = db.workflows;
+    const origPrepareAndEnqueue = useCaseService.prepareAndEnqueue;
+
+    db.media = {
+      createMedia: async (data) => {
+        const row = { ...data, status: data.status || "processing" };
+        mediaRows.set(data.id, row);
+        return row;
+      },
+      findByWorkflow: async (wfId) => Array.from(mediaRows.values()).filter((m) => m.workflow_id === wfId),
+      updateMedia: async (id, data) => {
+        const existing = mediaRows.get(id) || { id };
+        const updated = { ...existing, ...data };
+        mediaRows.set(id, updated);
+        return updated;
+      },
+    };
+
+    db.projects = {
+      findById: async (id) => ({ id, user_id: "user-pricing-fail" }),
+    };
+
+    db.workflows = {
+      createWorkflow: async (data) => data,
+    };
+
+    // Simulate pricing failure at prepare time (PRICING_CONFIG_ERROR)
+    useCaseService.prepareAndEnqueue = async () => {
+      const pricingErr = new Error("Pricing engine failed to resolve valid cost: NaN");
+      pricingErr.code = "PRICING_CONFIG_ERROR";
+      pricingErr.category = "SERVER_FAULT";
+      pricingErr.statusCode = 500;
+      throw pricingErr;
+    };
+
+    try {
+      let statusCode = 200;
+      let responseData = null;
+      const req = {
+        user: { id: "user-pricing-fail" },
+        body: { prompt: "Test prompt", model: "nanobana_2", project_id: "proj-pricing-fail" },
+      };
+      const res = {
+        status: (code) => {
+          statusCode = code;
+          return res;
+        },
+        json: (data) => {
+          responseData = data;
+          return res;
+        },
+      };
+
+      await generateImage(req, res);
+
+      // 1. Clean 500 response with INTERNAL_ERROR + traceId
+      assert.strictEqual(statusCode, 500);
+      assert.strictEqual(responseData.ok, false);
+      assert.strictEqual(responseData.code, "INTERNAL_ERROR");
+      assert.ok(responseData.traceId, "Response must include traceId");
+      assert.match(responseData.message, /failed to generate image/i);
+
+      // 2. Placeholders marked failed
+      assert.ok(mediaRows.size > 0, "Placeholders must have been created");
+      for (const [id, row] of mediaRows) {
+        assert.strictEqual(row.status, "failed");
+        assert.match(row.error_message, /Pricing engine failed/i);
+      }
+
+      // 3. No hold was reserved in wallet
+      assert.strictEqual(wallet.reservations.size, 0, "No hold must be reserved in wallet on pricing failure");
+    } finally {
+      db.media = origDbMedia;
+      db.projects = origDbProjects;
+      db.workflows = origDbWorkflows;
+      useCaseService.prepareAndEnqueue = origPrepareAndEnqueue;
+    }
+  });
 });

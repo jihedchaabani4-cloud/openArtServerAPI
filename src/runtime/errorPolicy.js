@@ -95,6 +95,13 @@ export const ERROR_POLICY = Object.freeze({
     statusCode: 500,
     userMessage: "Please try again in a few moments.",
   },
+  PRICING_CONFIG_ERROR: {
+    category: "SERVER_FAULT",
+    retryable: false,
+    billingAction: "ROLLBACK",
+    statusCode: 500,
+    userMessage: "Please try again in a few moments.",
+  },
   INTERNAL_ERROR: {
     category: "SERVER_FAULT",
     retryable: false,

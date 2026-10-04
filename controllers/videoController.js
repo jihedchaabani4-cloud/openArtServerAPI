@@ -267,9 +267,12 @@ export async function generateVideo(req, res) {
         }).catch(() => {});
       }
     }
+    const traceId = workflowId || randomUUID();
     return res.status(statusCode).json({
       ok: false,
+      code: statusCode >= 500 ? "INTERNAL_ERROR" : (err.code || "REQUEST_FAILED"),
       message: err.isOperational ? err.message : "Failed to generate video",
+      traceId,
     });
   }
 }

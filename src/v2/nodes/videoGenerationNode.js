@@ -115,9 +115,7 @@ export async function executeVideoGeneration(inputs, ctx) {
   const canonicalInput = { prompt, ...resolvedParams };
 
   // ── 4. Execute via Models Management System ───────────────────────────────
-  // ctx._runFn is a test-only seam that replaces models.run() (ESM modules are read-only).
-  const _runFn = ctx?._runFn || run;
-  const runResult = await _runFn(modelFamily, canonicalInput, {
+  const runResult = await run(modelFamily, canonicalInput, {
     idempotencyKey: `node:${runId}:${nodeId}`,
     userId,
   });
@@ -139,6 +137,10 @@ export async function executeVideoGeneration(inputs, ctx) {
 
   return {
     assets,
-    metadata: { model: modelFamily, latencyMs: Date.now() - started },
+    metadata: {
+      model: modelFamily,
+      provider: runResult._internal?.provider || null,
+      latencyMs: Date.now() - started,
+    },
   };
 }

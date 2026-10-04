@@ -125,9 +125,9 @@ export function getSchema(modelFamily, operation = null) {
       modelId: model.id,
       operation,
       domain: model.domain,
-      inputs: opDef.canonicalInputs || {},
-      parameters: opDef.canonicalInputs || {},
-      retailPricing: opDef.retailPricing || null,
+      inputs: opDef.canonicalInputs || model.canonicalInputs || {},
+      parameters: opDef.canonicalInputs || model.canonicalInputs || {},
+      retailPricing: opDef.retailPricing || model.retailPricing || null,
     };
   }
 
@@ -281,3 +281,6 @@ export {
   ConfigIntegrityError,
   NoEligibleBindingError,
 } from "./errors/index.js";
+
+export { registerProviderRunner, unregisterProviderRunner } from "./runtime/providerRuntimeRegistry.js";
+

@@ -120,11 +120,15 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
         // SURPLUS: provider returned more assets than pre-allocated placeholders.
         // Safe to truncate — user requested N; we fulfill exactly N, drop the rest.
         // Log a structured warning so ops can detect anomalies.
+        const model = output?.metadata?.model || resolvedInputs?.model || run?.input?.model || "unknown";
+        const provider = output?.metadata?.provider || output?._internal?.provider || "unknown";
         nodeLogger.warn(
           {
             runId: run?.run_id,
             nodeId: nodeConfig.id,
             workflowId,
+            model,
+            provider,
             assetsReturned: assets.length,
             expected: activePlaceholders.length,
             event: "output.asset.surplus",

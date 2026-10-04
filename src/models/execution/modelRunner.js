@@ -156,6 +156,19 @@ export async function run(modelId, rawInput = {}, options = {}) {
     } catch (err) {
       circuitBreakerRegistry.recordFailure(circuitKey);
       const normalized = normalizeError(err, { binding: route, provider });
+      if (normalized.code === "PROVIDER_QUOTA_EXCEEDED") {
+        logger.error(
+          {
+            event: "models.provider.quota_exhausted",
+            modelId,
+            providerId: provider.id,
+            routeId,
+            error: normalized.message,
+            alert: "ADMIN_ACTION_REQUIRED",
+          },
+          `🚨 [PROVIDER_OUT_OF_CREDITS] Provider "${provider.id}" account balance is exhausted. Admin top-up required!`
+        );
+      }
       logger.error(
         {
           event: "models.execution.failed",
@@ -220,6 +233,7 @@ export async function run(modelId, rawInput = {}, options = {}) {
         durationMs,
       },
       _internal: {
+        provider: provider.id,
         providerId: provider.id,
         bindingId: route.id || bindingId,
         providerModelId: route.providerModelId,

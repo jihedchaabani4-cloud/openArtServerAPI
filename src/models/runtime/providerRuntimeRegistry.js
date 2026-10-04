@@ -114,6 +114,23 @@ export async function getRunner(providerId) {
 }
 
 /**
+ * Register a custom provider runner (e.g. for testing with real modelRunner pipelines).
+ * @param {string} providerId
+ * @param {Function} runnerFn
+ */
+export function registerProviderRunner(providerId, runnerFn) {
+  cachedRunners.set(providerId, runnerFn);
+}
+
+/**
+ * Unregister a custom provider runner.
+ * @param {string} providerId
+ */
+export function unregisterProviderRunner(providerId) {
+  cachedRunners.delete(providerId);
+}
+
+/**
  * Execute a model operation through the registered provider runner.
  * @param {object} args
  * @returns {Promise<any>} rawResponse
@@ -126,3 +143,4 @@ export async function executeProvider({ provider, binding, payload, credential, 
   const runnerFn = await getRunner(provider.id);
   return runnerFn({ provider, binding, payload, credential, timeoutMs, options });
 }
+

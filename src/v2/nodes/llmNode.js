@@ -131,7 +131,7 @@ function normalizeStructuredJSON(parsed, userPrompt = "", { isSafetyActive = fal
  */
 export async function executeLLMNode(resolvedInputs, ctx = {}) {
   const { nodeId = "llm", runId = "run-1" } = ctx;
-  const effectiveUserId = ctx.userId || resolvedInputs.userId || null;
+  const effectiveUserId = ctx.userId || null;
 
   // ── 1. Safety & Boundary Check ─────────────────────────────────────────────
   const safe = NodeSafetyService.assertLLMInputs(resolvedInputs, nodeId);

@@ -10,33 +10,25 @@ export class PromptService {
 
     async complete({ systemPrompt, userPrompt, temperature = 0.7, userId = null, options = {} }) {
         const resolvedUserId = userId || options.userId || null;
-        const callOptions = {
-            ...(resolvedUserId ? {} : { isInternal: true, reason: options.reason || "internal-prompt-optimization" }),
-            ...options,
-        };
         return llmService.generateText({
             prompt: userPrompt,
             systemInstruction: systemPrompt,
             temperature,
             model: this.modelFamily,
             userId: resolvedUserId,
-            options: callOptions,
+            options,
         });
     }
 
     async completeJSON({ systemPrompt, userPrompt, temperature = 0.7, userId = null, options = {} }) {
         const resolvedUserId = userId || options.userId || null;
-        const callOptions = {
-            ...(resolvedUserId ? {} : { isInternal: true, reason: options.reason || "internal-prompt-optimization" }),
-            ...options,
-        };
         return llmService.generateJSON({
             prompt: userPrompt,
             systemInstruction: systemPrompt,
             temperature,
             model: this.modelFamily,
             userId: resolvedUserId,
-            options: callOptions,
+            options,
         });
     }
 

@@ -87,15 +87,19 @@ export async function generateCharacterDescription(req, res) {
     } catch (err) {
         controllerLogger.error({ err }, `generateCharacterDescription error: ${err.message}`);
         const statusCode = err.statusCode || 500;
-        const clientMessage = statusCode >= 500
+        const isServerFault = statusCode >= 500 || err.category === "SERVER_FAULT";
+        const clientCode = isServerFault ? "INTERNAL_ERROR" : (err.code || "REQUEST_ERROR");
+        const clientMessage = isServerFault
             ? "An unexpected error occurred. Please try again later."
             : err.message;
+        const traceId = req.headers["x-trace-id"] || req.headers["traceparent"] || undefined;
         return res.status(statusCode).json({
             ok: false,
             error: true,
-            code: err.code || "REQUEST_ERROR",
-            category: err.category || (statusCode >= 500 ? "SERVER_FAULT" : "USER_FAULT"),
+            code: clientCode,
+            category: err.category || (isServerFault ? "SERVER_FAULT" : "USER_FAULT"),
             message: clientMessage,
+            ...(traceId ? { traceId } : {}),
         });
     }
 }

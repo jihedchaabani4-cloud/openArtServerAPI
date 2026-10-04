@@ -57,14 +57,17 @@ export async function createElement(req, res) {
         logOk(traceId, op, start);
         return res.status(201).json({ status: "created", ...result });
     } catch (err) {
-        const clientMessage = (err.statusCode >= 500)
+        const isServerFault = (err.statusCode >= 500) || (err.category === "SERVER_FAULT");
+        const clientCode = isServerFault ? "INTERNAL_ERROR" : (err.code || "REQUEST_ERROR");
+        const clientMessage = isServerFault
             ? "An unexpected error occurred. Please try again later."
             : err.message;
         return res.status(logErr(traceId, op, start, err)).json({
             error: true,
-            code: err.code || "REQUEST_ERROR",
-            category: err.category || (err.statusCode >= 500 ? "SERVER_FAULT" : "USER_FAULT"),
+            code: clientCode,
+            category: err.category || (isServerFault ? "SERVER_FAULT" : "USER_FAULT"),
             message: clientMessage,
+            traceId,
         });
     }
 }
@@ -253,14 +256,17 @@ export async function analyzeElement(req, res) {
         logOk(traceId, op, start);
         return res.json({ status: "success", ...result });
     } catch (err) {
-        const clientMessage = (err.statusCode >= 500)
+        const isServerFault = (err.statusCode >= 500) || (err.category === "SERVER_FAULT");
+        const clientCode = isServerFault ? "INTERNAL_ERROR" : (err.code || "REQUEST_ERROR");
+        const clientMessage = isServerFault
             ? "An unexpected error occurred. Please try again later."
             : err.message;
         return res.status(logErr(traceId, op, start, err)).json({
             error: true,
-            code: err.code || "REQUEST_ERROR",
-            category: err.category || (err.statusCode >= 500 ? "SERVER_FAULT" : "USER_FAULT"),
+            code: clientCode,
+            category: err.category || (isServerFault ? "SERVER_FAULT" : "USER_FAULT"),
             message: clientMessage,
+            traceId,
         });
     }
 }

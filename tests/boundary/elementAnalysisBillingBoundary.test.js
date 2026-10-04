@@ -19,6 +19,7 @@ import { createElement, analyzeElement } from "../../controllers/elementControll
 import { elementService, characterService, db } from "../../src/container.js";
 import { executeLLMNode } from "../../src/v2/nodes/llmNode.js";
 import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+import { PromptService } from "../../src/platform/ai/PromptService.js";
 
 after(async () => {
   try {
@@ -199,7 +200,8 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
 
     assert.strictEqual(responseStatusCode, 500, "Must return HTTP 500 (SERVER_FAULT) for server billing invariant failure");
     assert.strictEqual(responseBody?.error, true);
-    assert.strictEqual(responseBody?.code, "BILLING_CONTEXT_MISSING", "Response must contain BILLING_CONTEXT_MISSING code");
+    assert.strictEqual(responseBody?.code, "INTERNAL_ERROR", "Response must contain generic INTERNAL_ERROR code for client");
+    assert.ok(responseBody?.traceId, "Response must include traceId for debugging");
     assert.strictEqual(responseBody?.category, "SERVER_FAULT");
     assert.strictEqual(responseBody?.message, "An unexpected error occurred. Please try again later.", "Must return generic apology message to client");
   });
@@ -244,4 +246,92 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
       }
     );
   });
+
+  // ── TEST 7: PromptService complete/completeJSON without userId throws BILLING_CONTEXT_MISSING ──
+  it("TEST 7: PromptService complete and completeJSON reject without userId (no fallback)", async () => {
+    const ps = new PromptService();
+    await assert.rejects(
+      async () => {
+        await ps.complete({ systemPrompt: "Sys", userPrompt: "User" });
+      },
+      (err) => {
+        assert.strictEqual(err.code, "BILLING_CONTEXT_MISSING");
+        assert.strictEqual(err.statusCode, 500);
+        assert.strictEqual(err.category, "SERVER_FAULT");
+        return true;
+      }
+    );
+    await assert.rejects(
+      async () => {
+        await ps.completeJSON({ systemPrompt: "Sys", userPrompt: "User" });
+      },
+      (err) => {
+        assert.strictEqual(err.code, "BILLING_CONTEXT_MISSING");
+        assert.strictEqual(err.statusCode, 500);
+        assert.strictEqual(err.category, "SERVER_FAULT");
+        return true;
+      }
+    );
+  });
+
+  // ── TEST 8: llmNode uses ONLY ctx.userId and ignores spoofed resolvedInputs.userId ──
+  it("TEST 8: llmNode derives userId ONLY from ctx.userId, ignoring spoofed input.userId", async () => {
+    let capturedUserId = null;
+    llmService.generate = async (params) => {
+      capturedUserId = params.userId;
+      if (!params.userId) {
+        const err = new Error("Billing context missing");
+        err.code = "BILLING_CONTEXT_MISSING";
+        err.statusCode = 500;
+        throw err;
+      }
+      return {
+        raw: JSON.stringify({ is_safe: true, prompt: "clean" }),
+        content: JSON.stringify({ is_safe: true, prompt: "clean" }),
+        json: { is_safe: true, prompt: "clean" },
+        model: "gemini-3.1-flash-lite",
+      };
+    };
+
+    await executeLLMNode(
+      {
+        userPrompt: "A landscape",
+        systemPromptOverride: "You are an assistant.",
+        userId: "victim-attacker-spoofed-id", // Malicious spoof in input
+      },
+      {
+        runId: "run-spoof-test",
+        userId: "server-authenticated-user-123", // Server-side context
+      }
+    );
+
+    assert.strictEqual(
+      capturedUserId,
+      "server-authenticated-user-123",
+      "Attributed userId must come strictly from ctx.userId, never resolvedInputs.userId"
+    );
+
+    // Subcase 8B: Context has NO userId (ctx.userId: null), but input carries a victim's userId
+    // Must reject with BILLING_CONTEXT_MISSING rather than charging the spoofed victim!
+    await assert.rejects(
+      async () => {
+        await executeLLMNode(
+          {
+            userPrompt: "A landscape",
+            systemPromptOverride: "You are an assistant.",
+            userId: "victim-attacker-spoofed-id",
+          },
+          {
+            runId: "run-spoof-no-context-user",
+            userId: null,
+          }
+        );
+      },
+      (err) => {
+        assert.strictEqual(err.code, "BILLING_CONTEXT_MISSING");
+        return true;
+      }
+    );
+  });
 });
+

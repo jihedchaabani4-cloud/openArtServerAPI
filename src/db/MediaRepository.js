@@ -206,5 +206,28 @@ export class MediaRepository extends BaseRepository {
         if (error) throw error;
         return data || [];
     }
+
+    /**
+     * Atomically marks all pending and processing media records for a given workflow as failed.
+     * Guaranteed to NEVER overwrite records in terminal statuses ('completed', 'failed', 'success').
+     * @param {string} workflow_id
+     * @param {string} [errorMessage]
+     * @returns {Promise<Array>}
+     */
+    async failPendingMediaByWorkflow(workflow_id, errorMessage = null) {
+        if (!workflow_id) return [];
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .update({
+                status: "failed",
+                error_message: errorMessage || "Generation failed",
+            })
+            .eq("workflow_id", workflow_id)
+            .in("status", ["processing", "pending"])
+            .select();
+        if (error) throw error;
+        return data || [];
+    }
 }
+
 

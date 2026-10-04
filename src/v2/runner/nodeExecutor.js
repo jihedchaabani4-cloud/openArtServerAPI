@@ -16,6 +16,7 @@ import { nodeFailure, nodeSuccess } from "../runtime/nodeEnvelope.js";
 import { formatWorkflowError } from "../runtime/errorPolicy.js";
 import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";
 import { resolveMediaMetadata } from "../../platform/media/mediaMetadataResolver.js";
+import { failWorkflowPendingMedia } from "../../platform/media/MediaLifecycleService.js";
 
 const nodeLogger = createLogger("node");
 
@@ -343,10 +344,7 @@ export async function executeNodeJob(runId, nodeId) {
     const workflowId = run?.input?.workflow_id || run?.input?.characterId;
     if (workflowId) {
       const sanitized = formatWorkflowError(error);
-      await db.media.findByWorkflow(workflowId).then((list) => {
-        const p = list?.find((m) => m.status === "processing" || m.status === "pending");
-        if (p?.id) return db.media.updateMedia(p.id, { status: "failed", error_message: sanitized.message }).catch(() => {});
-      }).catch(() => {});
+      await failWorkflowPendingMedia(db, workflowId, sanitized.message);
     }
 
     const { eventRecorder } = getGateways();

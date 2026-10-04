@@ -7,6 +7,7 @@ import { calculateWorkflowBillingPlan } from "../use-cases/workflowBillingPlan.j
 import { ErrorSystem } from "../runtime/ErrorSystem.js";
 import { jobQueueService as defaultJobQueueService, QueueDispatchError } from "./jobQueueService.js";
 import { createLogger, LogEvents } from "../infrastructure/logging/index.js";
+import { failWorkflowPendingMedia } from "../platform/media/MediaLifecycleService.js";
 
 
 const useCaseLogger = createLogger("usecase");
@@ -262,15 +263,7 @@ export class UseCaseService {
 
       // ── Failure cleanup: mark any processing/pending media as failed ──────────
       if (input?.workflow_id && this.db?.media) {
-        await this.db.media.findByWorkflow(input.workflow_id).then(async (list) => {
-          const pendings = list?.filter((m) => m.status === "processing" || m.status === "pending") || [];
-          for (const p of pendings) {
-            await this.db.media.updateMedia(p.id, {
-              status: "failed",
-              error_message: report.user.message || err.message,
-            }).catch(() => {});
-          }
-        }).catch(() => {});
+        await failWorkflowPendingMedia(this.db, input.workflow_id, report.user.message || err.message);
       }
 
       useCaseLogger.error({

@@ -7,6 +7,8 @@ import { calculateCost } from "../../models/index.js";
 import { BillingAccumulator } from "../runtime/billingAccumulator.js";
 import { formatWorkflowError } from "../runtime/errorPolicy.js";
 import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";
+import { db } from "../../container.js";
+import { failWorkflowPendingMedia } from "../../platform/media/MediaLifecycleService.js";
 
 const workflowLogger = createLogger("workflow");
 
@@ -264,6 +266,10 @@ export async function startWorkflowRun(plan, runtimeInput, runId = null) {
       error: normalizedErr,
       completed_at: new Date().toISOString(),
     }).catch(() => {});
+    const workflowId = runtimeInput?.workflow_id || runtimeInput?.characterId;
+    if (workflowId) {
+      await failWorkflowPendingMedia(db, workflowId, normalizedErr.message).catch(() => {});
+    }
     activeAccumulators.delete(finalRunId);
     throw err;
   }
@@ -328,6 +334,11 @@ export async function executeOrchestration(runId) {
       error: formattedError,
       completed_at: new Date().toISOString()
     });
+
+    const workflowId = run?.input?.workflow_id || run?.input?.characterId;
+    if (workflowId) {
+      await failWorkflowPendingMedia(db, workflowId, formattedError.message).catch(() => {});
+    }
 
     if (eventRecorder) {
       eventRecorder.record({
@@ -438,11 +449,17 @@ export async function executeOrchestration(runId) {
   const anyRunning = nodeRuns.some((n) => n.status === "running");
   if (!anyRunning && !enqueuedAny) {
     // Deadlock: no node is running and no pending node has dependencies satisfied
+    const deadlockError = { code: "ORCHESTRATION_DEADLOCK", message: "Workflow stuck: no nodes running or ready" };
     await runRepo.updateRun(runId, {
       status: "failed",
-      error: { code: "ORCHESTRATION_DEADLOCK", message: "Workflow stuck: no nodes running or ready" },
+      error: deadlockError,
       completed_at: new Date().toISOString()
     });
+
+    const workflowId = run?.input?.workflow_id || run?.input?.characterId;
+    if (workflowId) {
+      await failWorkflowPendingMedia(db, workflowId, deadlockError.message).catch(() => {});
+    }
 
     workflowLogger.error({
       runId,

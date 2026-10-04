@@ -9,12 +9,51 @@ export const MEDIA_WORKFLOW_STATUS = {
 
 const PROVIDER_BACKED_NODE_TYPES = new Set([
   "image-generation",
+  "video-generation",
 ]);
 
 function normalizeError(error, fallback = "Generation failed") {
   if (!error) return fallback;
   if (typeof error === "string") return error;
   return error.message || fallback;
+}
+
+/**
+ * Atomically marks all pending and processing media records for a given workflow as failed.
+ * Guaranteed to NEVER overwrite records in terminal statuses ('completed', 'failed', 'success').
+ * Supports direct repository atomic query as well as fallback iteration.
+ *
+ * @param {Object} db - Database container or { media: ... }
+ * @param {string} workflowId - Target workflow ID
+ * @param {string|Error} error - Error message or object
+ * @returns {Promise<Array>}
+ */
+export async function failWorkflowPendingMedia(db, workflowId, error) {
+  if (!workflowId || !db?.media) return [];
+  const message = normalizeError(error);
+
+  if (typeof db.media.failPendingMediaByWorkflow === "function") {
+    try {
+      return await db.media.failPendingMediaByWorkflow(workflowId, message);
+    } catch {
+      // Fallback below
+    }
+  }
+
+  try {
+    const list = await db.media.findByWorkflow(workflowId);
+    const pendings = list?.filter((m) => m.status === "processing" || m.status === "pending") || [];
+    const updated = [];
+    for (const p of pendings) {
+      await db.media.updateMedia(p.id, {
+        status: "failed",
+        error_message: message,
+      }).then((r) => updated.push(r)).catch(() => {});
+    }
+    return updated;
+  } catch {
+    return [];
+  }
 }
 
 function inferStepId(nodeType, input = {}, stepIdOverride = null) {
@@ -371,6 +410,45 @@ export class MediaWorkflowLifecycleService {
     return this.completePlaceholders(placeholders, assets);
   }
 
+  /**
+   * Domain recovery: reconcile and mark media associated with an expired billing hold as failed.
+   * Centralizes media status transition for worker crashes / unhandled execution drops.
+   *
+   * @param {Object} params
+   * @param {string} params.holdId
+   * @param {string} [params.workflowId]
+   * @param {string} [params.mediaId]
+   * @param {string} [params.reason]
+   * @returns {Promise<boolean>}
+   */
+  async failForExpiredHold({
+    holdId,
+    workflowId,
+    mediaId = null,
+    reason = "Generation execution timed out. Your credits have been refunded.",
+  } = {}) {
+    if (!this.bridge) return false;
+
+    try {
+      if (mediaId) {
+        return await this.failPlaceholder(mediaId, reason);
+      }
+
+      if (workflowId && this.bridge.db?.media) {
+        const list = await this.bridge.db.media.findByWorkflow(workflowId).catch(() => []);
+        const pending = list?.find((m) => m.status === "processing" || m.status === "pending");
+        if (pending?.id) {
+          return await this.failPlaceholder(pending.id, reason);
+        }
+      }
+
+      return false;
+    } catch (err) {
+      console.error(`[MediaWorkflowLifecycle] failForExpiredHold failed for hold=${holdId}:`, err);
+      return false;
+    }
+  }
+
   extractAsset(output, nodeType) {
     return this.bridge?.extractAsset(output, nodeType) ?? null;
   }
@@ -379,5 +457,6 @@ export class MediaWorkflowLifecycleService {
     return this.bridge?.getAspectRatio(width, height) ?? "SQUARE";
   }
 }
+
 
 export default MediaWorkflowLifecycleService;

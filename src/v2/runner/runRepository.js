@@ -25,6 +25,18 @@ export class RunRepository {
    * @returns {Promise<Object>} The created run
    */
   async createRun(run) {
+    const targetWorkflowId = run.targetWorkflowId !== undefined
+      ? run.targetWorkflowId
+      : (run.target_workflow_id || run.execution_plan?.targetWorkflowId || run.input?.serverWorkflowId || run.input?.workflow_id || null);
+    const targetMediaIds = run.targetMediaIds !== undefined
+      ? run.targetMediaIds
+      : (run.target_media_ids || run.execution_plan?.targetMediaIds || (run.input?.media_id ? [run.input.media_id] : (run.input?.mediaIds || [])));
+    const executionPlan = {
+      ...(run.execution_plan || {}),
+      targetWorkflowId,
+      targetMediaIds,
+    };
+
     if (RunRepository.useMemoryFallback || !supabaseAdmin) {
       const data = {
         run_id: run.run_id || randomUUID(),
@@ -33,7 +45,9 @@ export class RunRepository {
         user_id: run.user_id || null,
         status: run.status || "pending",
         input: run.input,
-        execution_plan: run.execution_plan,
+        execution_plan: executionPlan,
+        targetWorkflowId,
+        targetMediaIds,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
@@ -51,7 +65,7 @@ export class RunRepository {
           user_id: run.user_id || null,
           status: run.status || "pending",
           input: run.input,
-          execution_plan: run.execution_plan,
+          execution_plan: executionPlan,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         })
@@ -65,6 +79,10 @@ export class RunRepository {
           return this.createRun(run);
         }
         throw error;
+      }
+      if (data) {
+        data.targetWorkflowId = data.execution_plan?.targetWorkflowId || null;
+        data.targetMediaIds = data.execution_plan?.targetMediaIds || [];
       }
       return data;
     } catch (err) {
@@ -94,6 +112,10 @@ export class RunRepository {
       .maybeSingle();
 
     if (error) throw error;
+    if (data) {
+      data.targetWorkflowId = data.execution_plan?.targetWorkflowId || null;
+      data.targetMediaIds = data.execution_plan?.targetMediaIds || [];
+    }
     return data;
   }
 
@@ -112,6 +134,10 @@ export class RunRepository {
         ...patch,
         updated_at: new Date().toISOString()
       };
+      if (updated.execution_plan) {
+        updated.targetWorkflowId = updated.execution_plan.targetWorkflowId || updated.targetWorkflowId || null;
+        updated.targetMediaIds = updated.execution_plan.targetMediaIds || updated.targetMediaIds || [];
+      }
       memoryRuns.set(runId, updated);
       return updated;
     }
@@ -127,6 +153,10 @@ export class RunRepository {
       .single();
 
     if (error) throw error;
+    if (data) {
+      data.targetWorkflowId = data.execution_plan?.targetWorkflowId || null;
+      data.targetMediaIds = data.execution_plan?.targetMediaIds || [];
+    }
     return data;
   }
 

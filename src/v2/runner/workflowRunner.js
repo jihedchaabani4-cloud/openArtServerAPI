@@ -334,16 +334,20 @@ export async function rollbackNodeBilling({ runId, nodeId, nodeConfig, attempt =
  * @param {import('../contracts/executionGraph.js').ExecutionGraph} plan
  * @param {Object} runtimeInput
  * @param {string} [runId] Optional pre-generated run ID
+ * @param {Object} [serverContext] Server-assigned verified IDs (workflowId, mediaIds, projectId)
  * @returns {Promise<{ run_id: string, status: string, error?: Object, outputs?: Object }>}
  */
-export async function startWorkflowRun(plan, runtimeInput, runId = null) {
+export async function startWorkflowRun(plan, runtimeInput, runId = null, serverContext = {}) {
   const finalRunId = runId || randomUUID();
   const billing = new PersistedBillingAccumulator(finalRunId, runRepo);
   activeAccumulators.set(finalRunId, billing);
 
+  const serverWorkflowId = serverContext?.workflowId || runtimeInput?.serverWorkflowId || null;
+  const serverMediaIds = serverContext?.mediaIds || runtimeInput?.serverMediaIds || (runtimeInput?.media_id ? [runtimeInput.media_id] : []);
+  const serverProjectId = serverContext?.projectId || runtimeInput?.serverProjectId || runtimeInput?.project_id || null;
 
   try {
-    // Create workflow run entry in DB
+    // Create workflow run entry in DB with server-verified target identifiers
     await runRepo.createRun({
       run_id: finalRunId,
       workflow_id: plan.workflow_id,
@@ -351,7 +355,15 @@ export async function startWorkflowRun(plan, runtimeInput, runId = null) {
       user_id: runtimeInput.userId || null,
       status: "pending",
       input: runtimeInput,
-      execution_plan: plan
+      execution_plan: {
+        ...plan,
+        targetWorkflowId: serverWorkflowId,
+        targetMediaIds: serverMediaIds,
+        targetProjectId: serverProjectId,
+      },
+      targetWorkflowId: serverWorkflowId,
+      targetMediaIds: serverMediaIds,
+      targetProjectId: serverProjectId,
     });
 
     // Initialize node run entries in DB
@@ -397,10 +409,25 @@ export async function startWorkflowRun(plan, runtimeInput, runId = null) {
       status: "failed",
       error: normalizedErr,
       completed_at: new Date().toISOString(),
-    }).catch(() => {});
-    const workflowId = runtimeInput?.workflow_id || runtimeInput?.characterId;
-    if (workflowId) {
-      await failWorkflowPendingMedia(db, workflowId, normalizedErr.message).catch(() => {});
+    }).catch((repoErr) => {
+      workflowLogger.error({
+        runId: finalRunId,
+        err: repoErr,
+      }, `[WorkflowRunner] Failed to update run status to failed for run ${finalRunId}: ${repoErr.message}`);
+    });
+
+    // F2a & F2c: Fail pending media using the real server-verified workflowId, with error-level logging
+    const targetWfId = serverWorkflowId;
+    if (targetWfId) {
+      try {
+        await failWorkflowPendingMedia(db, targetWfId, normalizedErr.message);
+      } catch (mediaFailErr) {
+        workflowLogger.error({
+          runId: finalRunId,
+          workflowId: targetWfId,
+          err: mediaFailErr,
+        }, `[WorkflowRunner] Failed to mark pending media as failed for workflow ${targetWfId}: ${mediaFailErr.message}`);
+      }
     }
     activeAccumulators.delete(finalRunId);
     throw err;
@@ -465,11 +492,24 @@ export async function executeOrchestration(runId) {
       status: "failed",
       error: formattedError,
       completed_at: new Date().toISOString()
+    }).catch((repoErr) => {
+      workflowLogger.error({
+        runId,
+        err: repoErr,
+      }, `[WorkflowRunner] Failed to update run status to failed for run ${runId}: ${repoErr.message}`);
     });
 
-    const workflowId = run?.input?.workflow_id || run?.input?.characterId;
-    if (workflowId) {
-      await failWorkflowPendingMedia(db, workflowId, formattedError.message).catch(() => {});
+    const targetWfId = run?.targetWorkflowId || run?.execution_plan?.targetWorkflowId || null;
+    if (targetWfId) {
+      try {
+        await failWorkflowPendingMedia(db, targetWfId, formattedError.message);
+      } catch (mediaFailErr) {
+        workflowLogger.error({
+          runId,
+          workflowId: targetWfId,
+          err: mediaFailErr,
+        }, `[WorkflowRunner] Failed to mark pending media as failed for workflow ${targetWfId}: ${mediaFailErr.message}`);
+      }
     }
 
     if (eventRecorder) {
@@ -586,11 +626,24 @@ export async function executeOrchestration(runId) {
       status: "failed",
       error: deadlockError,
       completed_at: new Date().toISOString()
+    }).catch((repoErr) => {
+      workflowLogger.error({
+        runId,
+        err: repoErr,
+      }, `[WorkflowRunner] Failed to update run status to failed on deadlock for run ${runId}: ${repoErr.message}`);
     });
 
-    const workflowId = run?.input?.workflow_id || run?.input?.characterId;
-    if (workflowId) {
-      await failWorkflowPendingMedia(db, workflowId, deadlockError.message).catch(() => {});
+    const targetWfId = run?.targetWorkflowId || run?.execution_plan?.targetWorkflowId || null;
+    if (targetWfId) {
+      try {
+        await failWorkflowPendingMedia(db, targetWfId, deadlockError.message);
+      } catch (mediaFailErr) {
+        workflowLogger.error({
+          runId,
+          workflowId: targetWfId,
+          err: mediaFailErr,
+        }, `[WorkflowRunner] Failed to mark pending media as failed on deadlock for workflow ${targetWfId}: ${mediaFailErr.message}`);
+      }
     }
 
     workflowLogger.error({

@@ -29,8 +29,10 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
   if (!nodeConfig?.persist) return;
 
   const { target, step_id, field, value, status = "completed" } = nodeConfig.persist;
-  const workflowId = run.input?.workflow_id || run.input?.characterId;
-  const projectId = run.input?.project_id || run.input?.projectId;
+  // F2a: Derive workflowId strictly from server-side targetWorkflowId on the run record.
+  // Never read user-controlled run.input.workflow_id or run.input.characterId.
+  const workflowId = run.targetWorkflowId || run.execution_plan?.targetWorkflowId || null;
+  const projectId = run.targetProjectId || run.execution_plan?.targetProjectId || run.input?.project_id || run.input?.projectId;
 
   const resolvedValue = typeof value === "string" && value.startsWith("$output")
     ? getValueAtPath(output, value.replace(/^\$outputs?\./, ""))
@@ -38,7 +40,7 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
 
   try {
     if ((target === "character" || target === "media") && !workflowId) {
-      throw new Error(`Persistence target "${target}" requires workflow_id in run input`);
+      throw new Error(`Persistence target "${target}" requires server-verified targetWorkflowId on run record`);
     }
 
     if (target === "character" && workflowId && field) {
@@ -54,7 +56,11 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
       nodeLogger.info({ workflowId, stepId: targetStepId }, `Updating media for workflow ${workflowId} (step_id: ${targetStepId}) to completed`);
 
       // Find existing processing media placeholder created by controller
-      const existingList = await db.media.findByWorkflow(workflowId);
+      let existingList = await db.media.findByWorkflow(workflowId);
+      const allowedMediaIds = run.targetMediaIds || run.execution_plan?.targetMediaIds;
+      if (Array.isArray(allowedMediaIds) && allowedMediaIds.length > 0) {
+        existingList = existingList.filter((m) => allowedMediaIds.includes(m.id));
+      }
       const mediaMeta = resolveMediaMetadata({
         ...(output?.assets?.[0] || {}),
         ...resolvedInputs,

@@ -63,9 +63,17 @@ export async function run({
   }
 
   // 5. Start workflow run (creates DB records + enqueues nodes)
-  const runtimeInput = { ...input, userId };
+  const serverWorkflowId = input.serverWorkflowId || input.workflow_id || input.characterId || null;
+  const serverMediaIds = input.serverMediaIds || (input.media_id ? [input.media_id] : (input.mediaIds || []));
+  const serverProjectId = input.serverProjectId || input.project_id || input.projectId || null;
+  const serverContext = {
+    workflowId: serverWorkflowId,
+    mediaIds: serverMediaIds,
+    projectId: serverProjectId,
+  };
+  const runtimeInput = { ...input, userId, serverWorkflowId, serverMediaIds, serverProjectId };
   useCaseLogger.debug({ workflowRef: useCase.workflowRef }, "Dispatching to V2 Engine...");
-  const runResult = await startWorkflowRun(plan, runtimeInput);
+  const runResult = await startWorkflowRun(plan, runtimeInput, null, serverContext);
 
   if (runResult.status !== "completed") {
     useCaseLogger.error({ runId: runResult.run_id, err: runResult.error, status: runResult.status }, `Workflow Run ${runResult.run_id} failed with status "${runResult.status}": ${runResult.error?.message || "Incomplete execution"}`);

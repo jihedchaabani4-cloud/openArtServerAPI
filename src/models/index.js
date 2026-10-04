@@ -282,5 +282,4 @@ export {
   NoEligibleBindingError,
 } from "./errors/index.js";
 
-export { registerProviderRunner, unregisterProviderRunner } from "./runtime/providerRuntimeRegistry.js";
 

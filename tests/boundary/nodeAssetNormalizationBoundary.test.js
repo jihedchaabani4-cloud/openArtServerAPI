@@ -19,12 +19,15 @@
  *   - Shortage (0 assets / fewer than placeholders) => fails closed with OUTPUT_CONTRACT_VIOLATION.
  */
 
+process.env.NODE_ENV = "test";
+
 import { describe, it, beforeEach, afterEach, after } from "node:test";
+
 import assert from "node:assert/strict";
 import { executeImageGeneration } from "../../src/v2/nodes/imageGenerationNode.js";
 import { executeVideoGeneration } from "../../src/v2/nodes/videoGenerationNode.js";
 import { executeNodePersistence } from "../../src/v2/runner/nodeExecutor.js";
-import { registerProviderRunner, unregisterProviderRunner } from "../../src/models/index.js";
+import { registerProviderRunner, unregisterProviderRunner, getRunner } from "../../src/models/runtime/providerRuntimeRegistry.js";
 import { getModelBindings } from "../../src/models/registry/modelRegistry.js";
 import { db } from "../../src/container.js";
 import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
@@ -303,5 +306,30 @@ describe("F2.4-b5 — Real ModelRunner & OutputMap Pipeline Boundary Tests", () 
     );
 
     assert.strictEqual(mediaRows.get(ph1).status, "failed");
+  });
+
+  // ── 9. Non-test NODE_ENV guard ────────────────────────────────────────────
+  it("TEST 9: in a non-test NODE_ENV (e.g. production), registerProviderRunner throws and real runner is used", async () => {
+    const origEnv = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = "production";
+      assert.throws(
+        () => registerProviderRunner("wavespeed", async () => ({ outputs: [] })),
+        /only allowed when NODE_ENV === "test"/
+      );
+      assert.throws(
+        () => unregisterProviderRunner("wavespeed"),
+        /only allowed when NODE_ENV === "test"/
+      );
+    } finally {
+      process.env.NODE_ENV = origEnv;
+    }
+
+    // In NODE_ENV === "test", unregister ensures real runner is returned
+    unregisterProviderRunner("wavespeed");
+    const runner = await getRunner("wavespeed");
+    assert.strictEqual(typeof runner, "function");
+    // Verify it is not our mock
+    assert.notStrictEqual(runner.name, "mockRunner");
   });
 });

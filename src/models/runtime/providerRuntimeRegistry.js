@@ -114,19 +114,29 @@ export async function getRunner(providerId) {
 }
 
 /**
- * Register a custom provider runner (e.g. for testing with real modelRunner pipelines).
+ * Register a custom provider runner (testing only; throws outside NODE_ENV === "test").
  * @param {string} providerId
  * @param {Function} runnerFn
  */
 export function registerProviderRunner(providerId, runnerFn) {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error(
+      `registerProviderRunner is only allowed when NODE_ENV === "test" (current: "${process.env.NODE_ENV}")`
+    );
+  }
   cachedRunners.set(providerId, runnerFn);
 }
 
 /**
- * Unregister a custom provider runner.
+ * Unregister a custom provider runner (testing only; throws outside NODE_ENV === "test").
  * @param {string} providerId
  */
 export function unregisterProviderRunner(providerId) {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error(
+      `unregisterProviderRunner is only allowed when NODE_ENV === "test" (current: "${process.env.NODE_ENV}")`
+    );
+  }
   cachedRunners.delete(providerId);
 }
 

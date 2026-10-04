@@ -88,21 +88,19 @@ export async function executeImageGeneration(inputs, ctx) {
   });
 
   // ── 5. Normalize outputs → V2 image asset shape ───────────────────────────
-  const imageUrl =
-    runResult.images?.[0]?.url ||
-    (typeof runResult.images?.[0] === "string" ? runResult.images[0] : null) ||
-    runResult.data?.images?.[0]?.url ||
-    runResult.data?.images?.[0] ||
-    "";
+  const rawImages = Array.isArray(runResult.images) ? runResult.images
+    : Array.isArray(runResult.data?.images) ? runResult.data.images
+    : (runResult.images ? [runResult.images]
+    : (runResult.url ? [runResult.url]
+    : (runResult.imageUrl ? [runResult.imageUrl]
+    : [])));
 
-  const assets = [
-    {
-      id:       `img-${Date.now()}`,
-      type:     "image",
-      url:      imageUrl,
-      metadata: { model: modelFamily },
-    },
-  ];
+  const assets = rawImages.map((img, idx) => ({
+    id:       `img-${Date.now()}-${idx}`,
+    type:     "image",
+    url:      typeof img === "string" ? img : (img?.url || ""),
+    metadata: { model: modelFamily, ...(typeof img === "object" ? img : {}) },
+  }));
 
   return {
     assets,

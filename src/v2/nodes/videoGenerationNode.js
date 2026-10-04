@@ -121,21 +121,19 @@ export async function executeVideoGeneration(inputs, ctx) {
   });
 
   // ── 5. Normalize outputs → V2 Video Asset Shape ───────────────────────────
-  const videoUrl =
-    runResult.videos?.[0]?.url ||
-    (typeof runResult.videos?.[0] === "string" ? runResult.videos[0] : null) ||
-    runResult.data?.videos?.[0]?.url ||
-    runResult.data?.videos?.[0] ||
-    "";
+  const rawVideos = Array.isArray(runResult.videos) ? runResult.videos
+    : Array.isArray(runResult.data?.videos) ? runResult.data.videos
+    : (runResult.videos ? [runResult.videos]
+    : (runResult.url ? [runResult.url]
+    : (runResult.videoUrl ? [runResult.videoUrl]
+    : [])));
 
-  const assets = [
-    {
-      id:       `vid-${Date.now()}`,
-      type:     "video",
-      url:      videoUrl,
-      metadata: { model: modelFamily },
-    },
-  ];
+  const assets = rawVideos.map((vid, idx) => ({
+    id:       `vid-${Date.now()}-${idx}`,
+    type:     "video",
+    url:      typeof vid === "string" ? vid : (vid?.url || ""),
+    metadata: { model: modelFamily, ...(typeof vid === "object" ? vid : {}) },
+  }));
 
   return {
     assets,

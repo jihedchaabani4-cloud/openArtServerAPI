@@ -34,8 +34,9 @@ import { assertOwns, assertOwnsAny } from "../src/platform/security/ownership.js
  *   4. Return { workflowId, mediaId, taskId, status: "processing" }.
  */
 export async function generateImage(req, res) {
-  let workflowId = null;
-  let mediaId    = null;
+  let workflowId     = null;
+  let mediaId        = null;
+  let serverMediaIds = [];
   try {
     const { prompt, model, references = [], parameters = {} } = req.body;
     const projectId = req.body.project_id || req.body.projectId || null;
@@ -116,8 +117,14 @@ export async function generateImage(req, res) {
       }
     }
 
+    // ── Server decides output count ──────────────────────────────────────────
+    // Clamped to 1 unless the endpoint explicitly supports more (max from model schema).
+    const requestedCount = Number(req.body.count || parameters?.count || 1);
+    const endpointSupportsMulti = false; // image endpoint does not currently enable multi-output
+    const maxFromSchema = 1; // image models do not declare count in parameters schema
+    const outputCount = endpointSupportsMulti ? Math.min(Math.max(1, requestedCount), maxFromSchema) : 1;
+
     workflowId   = randomUUID();
-    mediaId      = randomUUID();
 
     // ── 1. Create Workflow container ─────────────────────────────────────────
     await db.workflows.createWorkflow({
@@ -128,23 +135,29 @@ export async function generateImage(req, res) {
       workflow_type: "GENERATION",
     });
 
-    controllerLogger.info({ workflowId, projectId }, `Workflow created: ${workflowId}`);
+    controllerLogger.info({ workflowId, projectId, outputCount }, `Workflow created: ${workflowId}`);
 
-    // ── 2. Create Media placeholder ──────────────────────────────────────────
+    // ── 2. Create Media placeholder(s) ───────────────────────────────────────
     const mediaMeta = resolveMediaMetadata({ parameters, ...req.body });
+    serverMediaIds = [];
 
-    await db.media.createMedia({
-      id:          mediaId,
-      workflow_id: workflowId,
-      project_id:  projectId,
-      step_id:     "image_generation",
-      url:         null,
-      width:       mediaMeta.width,
-      height:      mediaMeta.height,
-      status:      "processing",
-    });
+    for (let i = 0; i < outputCount; i++) {
+      const id = randomUUID();
+      await db.media.createMedia({
+        id,
+        workflow_id: workflowId,
+        project_id:  projectId,
+        step_id:     "image_generation",
+        url:         null,
+        width:       mediaMeta.width,
+        height:      mediaMeta.height,
+        status:      "processing",
+      });
+      serverMediaIds.push(id);
+    }
+    mediaId = serverMediaIds[0];
 
-    controllerLogger.info({ mediaId, workflowId }, `Media placeholder created: ${mediaId}`);
+    controllerLogger.info({ mediaId, serverMediaIds, workflowId }, `Media placeholder(s) created`);
 
     // ── 3. Prepare UseCase runtime input ─────────────────────────────────────
     // Only workflow-level fields at root. All model-specific params are in `parameters`.
@@ -157,7 +170,7 @@ export async function generateImage(req, res) {
       workflow_id:      workflowId,
       media_id:         mediaId,
       serverWorkflowId: workflowId,
-      serverMediaIds:   [mediaId],
+      serverMediaIds,
       serverProjectId:  projectId,
     };
 
@@ -179,7 +192,7 @@ export async function generateImage(req, res) {
         serverContext: {
           workflowId,
           v1_workflow_id: workflowId,
-          mediaIds: [mediaId],
+          mediaIds: serverMediaIds,
           projectId,
         },
       });
@@ -196,11 +209,13 @@ export async function generateImage(req, res) {
       } else if (serviceErr.code === "QUEUE_DISPATCH_FAILED") {
         // Infrastructure error: queue unavailable after all retries + credits already rolled back by UseCaseService
         controllerLogger.error({ workflowId, code: serviceErr.code }, `Queue dispatch failed: ${serviceErr.message}`);
-        if (mediaId && db?.media) {
-          await db.media.updateMedia(mediaId, {
-            status: "failed",
-            error_message: serviceErr.message,
-          }).catch(() => {});
+        if (serverMediaIds.length > 0 && db?.media) {
+          for (const mId of serverMediaIds) {
+            await db.media.updateMedia(mId, {
+              status: "failed",
+              error_message: serviceErr.message,
+            }).catch(() => {});
+          }
         }
         return res.status(503).json({
           ok:         false,
@@ -209,6 +224,7 @@ export async function generateImage(req, res) {
           message:    serviceErr.message,
           workflowId,
           mediaId,
+          mediaIds:   serverMediaIds,
         });
       } else {
         // Unknown service error — propagate to outer catch → HTTP 500
@@ -216,11 +232,13 @@ export async function generateImage(req, res) {
       }
     }
 
-    if (!hasSufficientCredits && mediaId && db?.media) {
-      await db.media.updateMedia(mediaId, {
-        status: "saved",
-        error_message: creditErrorMsg || "Insufficient credits",
-      }).catch(() => {});
+    if (!hasSufficientCredits && serverMediaIds.length > 0 && db?.media) {
+      for (const mId of serverMediaIds) {
+        await db.media.updateMedia(mId, {
+          status: "saved",
+          error_message: creditErrorMsg || "Insufficient credits",
+        }).catch(() => {});
+      }
     }
 
     // ── 5. Return response ────────────────────────────────────────────────────
@@ -234,20 +252,23 @@ export async function generateImage(req, res) {
       cost:         calculatedCost,
       workflowId,
       mediaId,
+      mediaIds:     serverMediaIds,
       taskId,
       project_id:  projectId,
       session_id:  sessionId,
-      workflow:    { id: workflowId, primary_media_id: mediaId, workflow_type: "GENERATION" },
+      workflow:    { id: workflowId, primary_media_id: mediaId, media_ids: serverMediaIds, workflow_type: "GENERATION" },
     });
 
   } catch (err) {
     const statusCode = err.statusCode || 500;
     controllerLogger.error({ err, statusCode }, `generateImage error: ${err.message}`);
-    if (mediaId && db?.media) {
-      await db.media.updateMedia(mediaId, {
-        status: "failed",
-        error_message: err.message || "Failed to prepare generation request",
-      }).catch(() => {});
+    if (serverMediaIds?.length > 0 && db?.media) {
+      for (const mId of serverMediaIds) {
+        await db.media.updateMedia(mId, {
+          status: "failed",
+          error_message: err.message || "Failed to prepare generation request",
+        }).catch(() => {});
+      }
     }
     return res.status(statusCode).json({
       ok: false,

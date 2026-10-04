@@ -52,56 +52,103 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
         throw new Error(`Persistence target "media" requires server-verified targetMediaIds on run record`);
       }
 
-      const mediaUrl = typeof resolvedValue === "string" ? resolvedValue : (resolvedValue?.url || output?.assets?.[0]?.url || output?.media?.url);
-      if (!mediaUrl) {
-        throw new Error(`Resolved mediaUrl is empty or missing from node output`);
-      }
-
       const targetStepId = step_id || "character_sheet";
       nodeLogger.info({ workflowId, stepId: targetStepId }, `Updating media for workflow ${workflowId} (step_id: ${targetStepId}) to completed`);
 
-      // Find existing processing media placeholder created by controller
-      let existingList = await db.media.findByWorkflow(workflowId);
-      if (Array.isArray(allowedMediaIds) && allowedMediaIds.length > 0) {
-        existingList = existingList.filter((m) => allowedMediaIds.includes(m.id));
+      // Find existing placeholders created by controller for this workflow
+      const existingList = await db.media.findByWorkflow(workflowId);
+
+      // Map allowedMediaIds in exact order
+      const placeholders = allowedMediaIds.map((id) => existingList?.find((m) => m.id === id)).filter(Boolean);
+
+      // Guard against resurrecting reaped or cancelled placeholders (prevent free media leakage)
+      const terminalPlaceholder = placeholders.find((m) => m.status === "failed" || m.status === "cancelled");
+      if (terminalPlaceholder) {
+        const holdErr = new Error(`Cannot persist completed media for workflow "${workflowId}": placeholder "${terminalPlaceholder.id}" is in terminal status "${terminalPlaceholder.status}" (hold expired or execution was cancelled)`);
+        holdErr.code = "HOLD_EXPIRED";
+        holdErr.category = "UPSTREAM_FAULT";
+        holdErr.statusCode = 409;
+        throw holdErr;
       }
-      const mediaMeta = resolveMediaMetadata({
-        ...(output?.assets?.[0] || {}),
-        ...resolvedInputs,
-        parameters: resolvedInputs?.parameters,
-      });
-      const width = mediaMeta.width;
-      const height = mediaMeta.height;
 
-      // Find existing non-terminal (processing/pending) media placeholder created for this step
-      const placeholder = existingList?.find((m) => m.step_id === targetStepId && (m.status === "processing" || m.status === "pending"))
-        || (existingList?.length === 1 && (existingList[0].status === "processing" || existingList[0].status === "pending") ? existingList[0] : null);
-
-      if (!placeholder) {
-        // Guard against resurrecting a reaped or cancelled placeholder (prevent free media leakage)
-        const terminalPlaceholder = existingList?.find((m) => (m.step_id === targetStepId || existingList?.length === 1) && (m.status === "failed" || m.status === "cancelled"));
-        if (terminalPlaceholder) {
-          const holdErr = new Error(`Cannot persist completed media for workflow "${workflowId}": placeholder "${terminalPlaceholder.id}" is in terminal status "${terminalPlaceholder.status}" (hold expired or execution was cancelled)`);
-          holdErr.code = "HOLD_EXPIRED";
-          holdErr.category = "UPSTREAM_FAULT";
-          holdErr.statusCode = 409;
-          throw holdErr;
-        }
-
-        // F2.1-b: Fallback disallowed - fail-closed rejection when no authorized placeholder exists
-        const notFoundErr = new Error(`Cannot persist completed media for workflow "${workflowId}": no authorized active media placeholder found for step "${targetStepId}"`);
+      // Filter active (processing/pending) placeholders
+      const activePlaceholders = placeholders.filter((m) => m.status === "processing" || m.status === "pending");
+      if (activePlaceholders.length !== allowedMediaIds.length) {
+        const notFoundErr = new Error(`Cannot persist completed media for workflow "${workflowId}": no authorized active media placeholder found (found ${activePlaceholders.length} of ${allowedMediaIds.length})`);
         notFoundErr.code = "TARGET_MEDIA_NOT_FOUND";
         notFoundErr.category = "SERVER_FAULT";
         notFoundErr.statusCode = 422;
         throw notFoundErr;
       }
 
-      await db.media.updateMedia(placeholder.id, {
-        url: mediaUrl,
-        status: status || "completed",
-        width,
-        height,
-      });
+      // Extract assets from output
+      let assets = [];
+      if (Array.isArray(output?.assets)) {
+        assets = output.assets;
+      } else if (output?.assets) {
+        assets = [output.assets];
+      } else if (Array.isArray(output?.images)) {
+        assets = output.images;
+      } else if (Array.isArray(output?.videos)) {
+        assets = output.videos;
+      } else if (typeof resolvedValue === "string" && resolvedValue) {
+        assets = [{ url: resolvedValue }];
+      } else if (typeof resolvedValue === "object" && resolvedValue?.url) {
+        assets = [resolvedValue];
+      } else if (output?.media?.url) {
+        assets = [{ url: output.media.url }];
+      }
+
+      // Decision F2.3-d: If assets.length !== placeholders.length: fail closed (OUTPUT_CONTRACT_VIOLATION)
+      if (assets.length !== activePlaceholders.length) {
+        for (const placeholder of activePlaceholders) {
+          await db.media.updateMedia(placeholder.id, {
+            status: "failed",
+            error_message: `Output contract violation: expected ${activePlaceholders.length} assets, received ${assets.length}`,
+          }).catch(() => {});
+        }
+        const contractErr = new Error(`Output contract violation: expected ${activePlaceholders.length} assets, received ${assets.length}`);
+        contractErr.code = "OUTPUT_CONTRACT_VIOLATION";
+        contractErr.category = "SERVER_FAULT";
+        contractErr.retryable = false;
+        contractErr.statusCode = 422;
+        throw contractErr;
+      }
+
+      // Map assets[i] -> activePlaceholders[i]
+      for (let i = 0; i < assets.length; i++) {
+        const asset = assets[i];
+        const placeholder = activePlaceholders[i];
+        const assetUrl = typeof asset === "string" ? asset : (asset?.url || "");
+
+        if (!assetUrl) {
+          for (const p of activePlaceholders) {
+            await db.media.updateMedia(p.id, {
+              status: "failed",
+              error_message: `Output contract violation: asset at index ${i} has empty or missing url`,
+            }).catch(() => {});
+          }
+          const emptyUrlErr = new Error(`Output contract violation: asset at index ${i} has empty or missing url`);
+          emptyUrlErr.code = "OUTPUT_CONTRACT_VIOLATION";
+          emptyUrlErr.category = "SERVER_FAULT";
+          emptyUrlErr.retryable = false;
+          emptyUrlErr.statusCode = 422;
+          throw emptyUrlErr;
+        }
+
+        const mediaMeta = resolveMediaMetadata({
+          ...(typeof asset === "object" ? asset : {}),
+          ...resolvedInputs,
+          parameters: resolvedInputs?.parameters,
+        });
+
+        await db.media.updateMedia(placeholder.id, {
+          url: assetUrl,
+          status: status || "completed",
+          width: mediaMeta.width,
+          height: mediaMeta.height,
+        });
+      }
     }
   } catch (err) {
     nodeLogger.error(
@@ -112,7 +159,7 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
     persistenceErr.code = err.code || "PERSISTENCE_FAILED";
     persistenceErr.category = err.category || "SERVER_FAULT";
     persistenceErr.nodeId = nodeConfig.id;
-    persistenceErr.retryable = err.retryable ?? true;
+    persistenceErr.retryable = err.retryable !== undefined ? err.retryable : true;
     persistenceErr.cause = err;
     throw persistenceErr;
   }
@@ -359,7 +406,7 @@ export async function executeNodeJob(runId, nodeId) {
       await storageGateway.failPlaceholders(placeholders, error).catch(() => {});
     }
 
-    const workflowId = run?.input?.workflow_id || run?.input?.characterId;
+    const workflowId = run.targetWorkflowId || run.v1_workflow_id || run.execution_plan?.targetWorkflowId || run?.input?.workflow_id || run?.input?.characterId || null;
     if (workflowId) {
       const sanitized = formatWorkflowError(error);
       await failWorkflowPendingMedia(db, workflowId, sanitized.message);

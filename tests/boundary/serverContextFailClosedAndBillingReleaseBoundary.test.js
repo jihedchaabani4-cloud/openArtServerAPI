@@ -147,7 +147,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
   // ───────────────────────────────────────────────────────────────────────────
   // F2.3-d: Multi-asset outputs behavior with count=4 and 1 placeholder
   // ───────────────────────────────────────────────────────────────────────────
-  it("TEST 2 (F2.3-d): imageGenerationNode with count=4 assets and 1 target placeholder updates single placeholder and drops surplus assets", async () => {
+  it("TEST 2 (F2.4-b): imageGenerationNode with count=4 assets and 1 target placeholder fails closed with OUTPUT_CONTRACT_VIOLATION, releases hold, and marks media failed", async () => {
     const multiAssets = [
       { url: "https://mock-storage.example.com/asset-1.png", width: 1024, height: 1024 },
       { url: "https://mock-storage.example.com/asset-2.png", width: 1024, height: 1024 },
@@ -208,20 +208,26 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
       billingHoldId: "hold-multi-test",
     };
 
-    const result = await ucService.executeQueuedUseCase(multiPayload);
-    assert.strictEqual(result.status, "completed");
+    await assert.rejects(
+      async () => {
+        await ucService.executeQueuedUseCase(multiPayload);
+      },
+      (err) => {
+        assert.strictEqual(err.code, "OUTPUT_CONTRACT_VIOLATION");
+        return true;
+      }
+    );
 
-    // Behavior observation:
-    // 1. Placeholder was updated with asset[0]
-    assert.strictEqual(updatedMediaRows.length, 1, "Only 1 placeholder media row was updated");
-    assert.strictEqual(updatedMediaRows[0].id, "media-placeholder-1");
-    assert.strictEqual(updatedMediaRows[0].url, multiAssets[0].url);
+    // Decision F2.3-d (Option 1 + 3):
+    // 1. Placeholder was marked failed
+    assert.strictEqual(updatedMediaRows.some((m) => m.status === "failed"), true, "Placeholder media row was marked failed");
 
     // 2. Extra media rows created in DB? Zero.
-    assert.strictEqual(createdMediaRows.length, 0, "No extra media rows created for surplus assets");
+    assert.strictEqual(createdMediaRows.length, 0, "No extra media rows created");
 
-    // 3. Did it error? No, execution completed successfully.
-    // Surplus assets [1], [2], [3] are silently dropped from persistence!
+    // 3. Hold was rolled back
+    const holdRecord = wallet.reservations.get("hold-multi-test");
+    assert.ok(holdRecord.status === "released" || holdRecord.status === "rolled_back", "Hold must be released/rolled back");
   });
 
   // ───────────────────────────────────────────────────────────────────────────

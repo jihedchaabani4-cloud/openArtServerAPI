@@ -99,8 +99,10 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
         assets = [{ url: output.media.url }];
       }
 
-      // Decision F2.3-d: If assets.length !== placeholders.length: fail closed (OUTPUT_CONTRACT_VIOLATION)
-      if (assets.length !== activePlaceholders.length) {
+      // F2.4-b1 Decision: shortage → fail closed; surplus → map first N, log warning, succeed.
+      if (assets.length < activePlaceholders.length) {
+        // SHORTAGE: provider returned fewer assets than pre-allocated placeholders.
+        // This is a genuine contract violation — we paid for N outputs and got fewer.
         for (const placeholder of activePlaceholders) {
           await db.media.updateMedia(placeholder.id, {
             status: "failed",
@@ -114,6 +116,24 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
         contractErr.statusCode = 422;
         throw contractErr;
       }
+      if (assets.length > activePlaceholders.length) {
+        // SURPLUS: provider returned more assets than pre-allocated placeholders.
+        // Safe to truncate — user requested N; we fulfill exactly N, drop the rest.
+        // Log a structured warning so ops can detect anomalies.
+        nodeLogger.warn(
+          {
+            runId: run?.run_id,
+            nodeId: nodeConfig.id,
+            workflowId,
+            assetsReturned: assets.length,
+            expected: activePlaceholders.length,
+            event: "output.asset.surplus",
+          },
+          `[OUTPUT_SURPLUS] Provider returned ${assets.length} assets, expected ${activePlaceholders.length}. Mapping first ${activePlaceholders.length}, dropping surplus.`
+        );
+        assets = assets.slice(0, activePlaceholders.length);
+      }
+
 
       // Map assets[i] -> activePlaceholders[i]
       for (let i = 0; i < assets.length; i++) {

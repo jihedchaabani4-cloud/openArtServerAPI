@@ -41,7 +41,7 @@ describe("Multi-Asset Outputs & Count Boundary (F2.4-b)", () => {
     };
   });
 
-  it("TEST 1: executeNodePersistence fails closed with OUTPUT_CONTRACT_VIOLATION when asset count exceeds placeholders", async () => {
+  it("TEST 1: executeNodePersistence with SURPLUS assets (2 returned, 1 placeholder) — maps FIRST asset, succeeds (F2.4-b1 approved)", async () => {
     const workflowId = "wf-multi-1";
     const placeholder1 = "placeholder-1";
 
@@ -63,7 +63,8 @@ describe("Multi-Asset Outputs & Count Boundary (F2.4-b)", () => {
       },
     };
 
-    // Provider returns 2 assets, but only 1 placeholder was pre-allocated
+    // Provider returns 2 assets, but only 1 placeholder was pre-allocated.
+    // Per F2.4-b1 decision: surplus → map first N, drop surplus, log warning, SUCCEED.
     const output = {
       assets: [
         { url: "https://storage.example.com/asset-1.png" },
@@ -81,24 +82,16 @@ describe("Multi-Asset Outputs & Count Boundary (F2.4-b)", () => {
       },
     };
 
-    await assert.rejects(
-      async () => {
-        await executeNodePersistence({ nodeConfig, output, run });
-      },
-      (err) => {
-        assert.strictEqual(err.code, "OUTPUT_CONTRACT_VIOLATION", "Error code must be OUTPUT_CONTRACT_VIOLATION");
-        assert.strictEqual(err.category, "SERVER_FAULT", "Error category must be SERVER_FAULT");
-        assert.strictEqual(err.retryable, false, "Must not be retryable");
-        return true;
-      },
-      "executeNodePersistence must throw OUTPUT_CONTRACT_VIOLATION when output assets length exceeds placeholders"
-    );
+    // Must NOT throw — surplus is mapped, run succeeds
+    await executeNodePersistence({ nodeConfig, output, run });
 
-    // Assert the placeholder was marked failed
+    // The placeholder must be completed with the FIRST asset URL
     const finalPlaceholder = mediaRows.get(placeholder1);
-    assert.strictEqual(finalPlaceholder.status, "failed", "Placeholder must be marked failed");
-    assert.match(finalPlaceholder.error_message, /output contract violation/i);
+    assert.strictEqual(finalPlaceholder.status, "completed", "Placeholder must be completed (surplus is safe)");
+    assert.strictEqual(finalPlaceholder.url, "https://storage.example.com/asset-1.png",
+      "First asset URL must be used; second (surplus) is dropped");
   });
+
 
   it("TEST 2: executeNodePersistence fails closed with OUTPUT_CONTRACT_VIOLATION and marks ALL N media failed when assets < placeholders", async () => {
     const workflowId = "wf-multi-2";

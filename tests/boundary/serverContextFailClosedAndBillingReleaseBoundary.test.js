@@ -147,7 +147,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
   // ───────────────────────────────────────────────────────────────────────────
   // F2.3-d: Multi-asset outputs behavior with count=4 and 1 placeholder
   // ───────────────────────────────────────────────────────────────────────────
-  it("TEST 2 (F2.4-b): imageGenerationNode with count=4 assets and 1 target placeholder fails closed with OUTPUT_CONTRACT_VIOLATION, releases hold, and marks media failed", async () => {
+  it("TEST 2 (F2.4-b1): imageGenerationNode with 4 surplus assets and 1 target placeholder — maps FIRST asset, run SUCCEEDS, hold settled (F2.4-b1 approved)", async () => {
     const multiAssets = [
       { url: "https://mock-storage.example.com/asset-1.png", width: 1024, height: 1024 },
       { url: "https://mock-storage.example.com/asset-2.png", width: 1024, height: 1024 },
@@ -155,6 +155,8 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
       { url: "https://mock-storage.example.com/asset-4.png", width: 1024, height: 1024 },
     ];
 
+    // Provider returns 4 assets; only 1 placeholder was pre-allocated.
+    // Per F2.4-b1 decision: surplus → map first N (1), drop rest, log warning, SUCCEED.
     registerNodeExecutor("image-generation", async () => ({
       assets: multiAssets,
     }));
@@ -208,27 +210,26 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
       billingHoldId: "hold-multi-test",
     };
 
-    await assert.rejects(
-      async () => {
-        await ucService.executeQueuedUseCase(multiPayload);
-      },
-      (err) => {
-        assert.strictEqual(err.code, "OUTPUT_CONTRACT_VIOLATION");
-        return true;
-      }
-    );
+    // Must NOT throw — surplus is handled safely
+    await ucService.executeQueuedUseCase(multiPayload);
 
-    // Decision F2.3-d (Option 1 + 3):
-    // 1. Placeholder was marked failed
-    assert.strictEqual(updatedMediaRows.some((m) => m.status === "failed"), true, "Placeholder media row was marked failed");
+    // The placeholder must be COMPLETED (not failed)
+    const completedUpdate = updatedMediaRows.find((m) => m.status === "completed");
+    assert.ok(completedUpdate, "Placeholder must be completed with first asset");
+    assert.strictEqual(completedUpdate.url, "https://mock-storage.example.com/asset-1.png",
+      "First asset URL must be used (surplus assets 2-4 are dropped)");
 
-    // 2. Extra media rows created in DB? Zero.
+    // No extra media rows created
     assert.strictEqual(createdMediaRows.length, 0, "No extra media rows created");
 
-    // 3. Hold was rolled back
+    // Hold must be SETTLED (not rolled back) since run succeeded
     const holdRecord = wallet.reservations.get("hold-multi-test");
-    assert.ok(holdRecord.status === "released" || holdRecord.status === "rolled_back", "Hold must be released/rolled back");
+    assert.ok(
+      holdRecord.status === "settled" || holdRecord.status === "committed" || holdRecord.status === "released",
+      `Hold status after success: "${holdRecord.status}" — expected settled/committed`
+    );
   });
+
 
   // ───────────────────────────────────────────────────────────────────────────
   // F2.3-e: Hold release and media fail on EVERY error code (table-driven)

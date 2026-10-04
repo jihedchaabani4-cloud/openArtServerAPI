@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { db, useCaseService } from "../src/container.js";
 import { createLogger } from "../src/infrastructure/logging/index.js";
 import { resolveMediaMetadata } from "../src/platform/media/mediaMetadataResolver.js";
-import { assertOwns } from "../src/platform/security/ownership.js";
+import { assertOwns, assertOwnsAny } from "../src/platform/security/ownership.js";
 
 const controllerLogger = createLogger("video-controller");
 
@@ -94,6 +94,29 @@ export async function generateVideo(req, res) {
 
     // ── 0. Enforce Project Ownership ─────────────────────────────────────────
     await assertOwns("project", projectId, userId);
+
+    // ── 0b. Enforce Reference Ownership ──────────────────────────────────────
+    for (const refId of sanitizedReferences) {
+      await assertOwnsAny(["workflow", "character", "element", "media"], refId, userId);
+    }
+
+    // ── 0c. Enforce Input Media Ownership ────────────────────────────────────
+    if (parameters && typeof parameters === "object") {
+      for (const field of ["input_image", "last_frame", "input_video"]) {
+        const val = parameters[field];
+        if (typeof val === "string" && val.trim() && !val.trim().startsWith("http")) {
+          await assertOwnsAny(["workflow", "media"], val.trim(), userId);
+        }
+      }
+      if (Array.isArray(parameters.images)) {
+        for (const img of parameters.images) {
+          const imgId = typeof img === "string" ? img : (img?.workflow_id || img?.id);
+          if (typeof imgId === "string" && !imgId.trim().startsWith("http")) {
+            await assertOwnsAny(["workflow", "media"], imgId.trim(), userId);
+          }
+        }
+      }
+    }
 
     workflowId   = randomUUID();
     mediaId      = randomUUID();

@@ -11,6 +11,7 @@
 import { db } from "../../container.js";
 import { elementRepository } from "../../db/ElementRepository.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
+import { assertOwns, assertOwnsAny } from "../../platform/security/ownership.js";
 
 const dbLogger = createLogger("database");
 
@@ -19,6 +20,7 @@ const WORKFLOW_TYPES = Object.freeze({
   CHARACTER_SHEET: "CHARACTER_SHEET",
   ELEMENT_SHEET:   "ELEMENT_SHEET",
   GENERATION:      "GENERATION",
+  UPLOAD:          "UPLOAD",
 });
 
 // ── Trait and Name Sanitizers ─────────────────────────────────────────────────
@@ -78,28 +80,23 @@ function extractTraits(entity, specificKeys = []) {
 
 // ── Entity Resolvers ──────────────────────────────────────────────────────────
 
-export async function resolveAsCharacter(workflowId) {
+export async function resolveAsCharacter(workflowId, userId = null) {
   try {
+    if (userId) {
+      try {
+        await assertOwns("character", workflowId, userId);
+      } catch {
+        return null;
+      }
+    }
+
     const char = await db.characters.findByCharacterId(workflowId);
     if (!char) return null;
 
     const sheetUrls = new Set();
     const detailUrls = new Set();
 
-    // Priority-ordered direct fields — take the FIRST valid one only to avoid redundant sheet images.
-    // The media table (below) is the canonical source for all actual turnaround/detail images.
-    const prioritySheetFields = [
-      "turnaround_url", "body_sheet_url", "sheet_url",
-      "avatar_url", "primary_image_url", "image_url", "cover_url"
-    ];
-    for (const f of prioritySheetFields) {
-      if (char[f] && typeof char[f] === "string" && char[f].startsWith("http")) {
-        sheetUrls.add(char[f].trim());
-        break; // ← first valid field wins; media table fills the rest
-      }
-    }
-
-    // Resolve linked media rows from MediaRepository
+    // Resolve linked media rows from MediaRepository (canonical source of truth)
     const charWfId = char.workflow_id || char.id || workflowId;
     if (charWfId) {
       const mediaList = await db.media.findByWorkflow(charWfId).catch(() => []);
@@ -140,8 +137,16 @@ export async function resolveAsCharacter(workflowId) {
   }
 }
 
-export async function resolveAsElement(workflowId) {
+export async function resolveAsElement(workflowId, userId = null) {
   try {
+    if (userId) {
+      try {
+        await assertOwns("element", workflowId, userId);
+      } catch {
+        return null;
+      }
+    }
+
     const elem = await elementRepository.resolveRecord(workflowId);
     if (!elem) return null;
 
@@ -208,8 +213,16 @@ export async function resolveAsElement(workflowId) {
   }
 }
 
-export async function resolveAsMedia(workflowId) {
+export async function resolveAsMedia(workflowId, userId = null) {
   try {
+    if (userId) {
+      try {
+        await assertOwnsAny(["workflow", "media"], workflowId, userId);
+      } catch {
+        return null;
+      }
+    }
+
     const media = await db.media.findMediaByIdOrWorkflow(workflowId);
     if (!media) return null;
 
@@ -217,11 +230,11 @@ export async function resolveAsMedia(workflowId) {
     if (media.workflow_id && media.workflow_id !== media.id) {
       const parentWf = await db.workflows.findById(media.workflow_id).catch(() => null);
       if (parentWf?.workflow_type === WORKFLOW_TYPES.CHARACTER_SHEET) {
-        const char = await resolveAsCharacter(parentWf.id);
+        const char = await resolveAsCharacter(parentWf.id, userId);
         if (char) return char;
       }
       if (parentWf?.workflow_type === WORKFLOW_TYPES.ELEMENT_SHEET) {
-        const elem = await resolveAsElement(parentWf.id);
+        const elem = await resolveAsElement(parentWf.id, userId);
         if (elem) return elem;
       }
     }
@@ -252,35 +265,35 @@ export async function resolveAsMedia(workflowId) {
  *   2. Primary path: Lookup workflow_type in workflow repository.
  *   3. Secondary path: Entity repository fallbacks (character -> element -> media).
  */
-export async function resolveWorkflowReference(workflowId) {
+export async function resolveWorkflowReference(workflowId, userId = null) {
   if (!workflowId || typeof workflowId !== "string") return null;
   const id = workflowId.trim();
 
-  // 1. Direct HTTP URL
+  // 1. Direct HTTP URLs are rejected — caller must pass workflow IDs only
   if (id.startsWith("http://") || id.startsWith("https://")) {
-    return {
-      workflowId:   id,
-      entityType:   "media",
-      entityId:     id,
-      name:         "Image Reference",
-      description:  null,
-      visualTraits: [],
-      imageUrls:    [id],
-      referenceTags: [],
-    };
+    console.warn(`[WorkflowReferenceResolver] Direct URL "${id.slice(0, 60)}" rejected. Callers must pass workflow IDs.`);
+    return null;
   }
 
   // 2. Primary Path: Query workflow table via repository
   try {
     const wf = await db.workflows.findById(id).catch(() => null);
     if (wf?.workflow_type) {
+      if (userId) {
+        try {
+          await assertOwns("workflow", id, userId);
+        } catch {
+          return null;
+        }
+      }
       switch (wf.workflow_type) {
         case WORKFLOW_TYPES.CHARACTER_SHEET:
-          return resolveAsCharacter(id);
+          return resolveAsCharacter(id, userId);
         case WORKFLOW_TYPES.ELEMENT_SHEET:
-          return resolveAsElement(id);
+          return resolveAsElement(id, userId);
         case WORKFLOW_TYPES.GENERATION:
-          return resolveAsMedia(id);
+        case WORKFLOW_TYPES.UPLOAD:
+          return resolveAsMedia(id, userId);
         default:
           console.warn(`[WorkflowReferenceResolver] unsupported workflow_type "${wf.workflow_type}" for ${id}`);
           return null;
@@ -294,9 +307,9 @@ export async function resolveWorkflowReference(workflowId) {
   console.warn(`[WorkflowReferenceResolver] "${id}" not in workflow table — trying entity tables`);
 
   const [charResult, elemResult, mediaResult] = await Promise.allSettled([
-    resolveAsCharacter(id),
-    resolveAsElement(id),
-    resolveAsMedia(id),
+    resolveAsCharacter(id, userId),
+    resolveAsElement(id, userId),
+    resolveAsMedia(id, userId),
   ]);
 
   if (charResult.status === "fulfilled" && charResult.value) return charResult.value;
@@ -310,9 +323,9 @@ export async function resolveWorkflowReference(workflowId) {
 /**
  * Resolves multiple workflow_ids in parallel.
  */
-export async function resolveWorkflowReferences(workflowIds = []) {
+export async function resolveWorkflowReferences(workflowIds = [], userId = null) {
   const unique = [...new Set(workflowIds.filter(id => id && typeof id === "string"))];
-  const results = await Promise.all(unique.map(id => resolveWorkflowReference(id)));
+  const results = await Promise.all(unique.map(id => resolveWorkflowReference(id, userId)));
   return results.filter(Boolean);
 }
 
@@ -330,16 +343,34 @@ export async function resolveWorkflowReferences(workflowIds = []) {
  * instead of the one the user selected.
  *
  * @param {string} workflowId
+ * @param {string} [userId]
  * @returns {Promise<string|null>} the resolved image URL or null
  */
-export async function resolvePrimaryMediaUrl(workflowId) {
+export async function resolvePrimaryMediaUrl(workflowId, userId = null) {
   if (!workflowId || typeof workflowId !== "string") return null;
+
+  if (userId) {
+    try {
+      await assertOwnsAny(["workflow", "media"], workflowId, userId);
+    } catch (err) {
+      dbLogger.warn({ workflowId, userId }, `resolvePrimaryMediaUrl: ownership check failed: ${err.message}`);
+      return null;
+    }
+  }
 
   try {
     const url = await db.workflows.getPrimaryMediaUrl(workflowId);
     if (url) {
       dbLogger.debug({ workflowId, url }, `resolvePrimaryMediaUrl "${workflowId}" resolved`);
       return url;
+    }
+    // Fallback: if workflowId is a direct media ID, check db.media
+    if (db.media?.findMediaByIdOrWorkflow) {
+      const media = await db.media.findMediaByIdOrWorkflow(workflowId).catch(() => null);
+      if (media?.url) {
+        dbLogger.debug({ workflowId, url: media.url }, `resolvePrimaryMediaUrl "${workflowId}" resolved via media table`);
+        return media.url;
+      }
     }
     dbLogger.warn({ workflowId }, `resolvePrimaryMediaUrl "${workflowId}": no URL found on primary media`);
     return null;

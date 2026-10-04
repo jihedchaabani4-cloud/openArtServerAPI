@@ -122,6 +122,74 @@ export async function assertOwns(resourceType, id, userId) {
       break;
     }
 
+    case "workflow": {
+      let wfRecord = null;
+      if (db.workflows?.findById) {
+        wfRecord = await db.workflows.findById(id).catch(() => null);
+      }
+      if (!wfRecord && db.workflows?.getWorkflow) {
+        wfRecord = await db.workflows.getWorkflow(id).catch(() => null);
+      }
+
+      if (wfRecord) {
+        // Direct user_id check
+        if (wfRecord.user_id && wfRecord.user_id === userId) {
+          resource = wfRecord;
+          break;
+        }
+
+        // Project ownership check via wfRecord.project_id
+        if (wfRecord.project_id && db.projects?.findByUser) {
+          const matches = await db.projects.findByUser(userId, wfRecord.project_id).catch(() => []);
+          if (matches?.length) {
+            resource = wfRecord;
+            break;
+          }
+        }
+      }
+      break;
+    }
+
+    case "media": {
+      let mediaRecord = null;
+      if (db.media?.findMediaByIdOrWorkflow) {
+        mediaRecord = await db.media.findMediaByIdOrWorkflow(id).catch(() => null);
+      }
+      if (!mediaRecord && db.media?.findById) {
+        mediaRecord = await db.media.findById(id).catch(() => null);
+      }
+
+      if (mediaRecord) {
+        // Direct user_id check
+        if (mediaRecord.user_id && mediaRecord.user_id === userId) {
+          resource = mediaRecord;
+          break;
+        }
+
+        // Project ownership check via mediaRecord.project_id
+        if (mediaRecord.project_id && db.projects?.findByUser) {
+          const matches = await db.projects.findByUser(userId, mediaRecord.project_id).catch(() => []);
+          if (matches?.length) {
+            resource = mediaRecord;
+            break;
+          }
+        }
+
+        // Fallback: check workflow's project ownership if media.workflow_id is present
+        if (mediaRecord.workflow_id && db.workflows?.findById) {
+          const parentWf = await db.workflows.findById(mediaRecord.workflow_id).catch(() => null);
+          if (parentWf?.project_id && db.projects?.findByUser) {
+            const matches = await db.projects.findByUser(userId, parentWf.project_id).catch(() => []);
+            if (matches?.length) {
+              resource = mediaRecord;
+              break;
+            }
+          }
+        }
+      }
+      break;
+    }
+
     default:
       throw new AppError(`Unsupported resource type for ownership check: ${resourceType}`, 500);
   }
@@ -136,3 +204,30 @@ export async function assertOwns(resourceType, id, userId) {
 
   return resource;
 }
+
+/**
+ * Asserts that the authenticated user owns the resource, checking across multiple possible resource types.
+ * Used for polymorphic reference IDs (which may be a workflow, character, element, or media).
+ * Throws AppError 404 if not found or not owned under any allowed type.
+ *
+ * @param {Array<string>} resourceTypes - e.g. ["workflow", "character", "element", "media"]
+ * @param {string} id - Resource ID
+ * @param {string} userId - Authenticated user ID
+ * @returns {Promise<Object>} The resolved resource record
+ */
+export async function assertOwnsAny(resourceTypes, id, userId) {
+  for (const type of resourceTypes) {
+    try {
+      const res = await assertOwns(type, id, userId);
+      if (res) return res;
+    } catch {
+      // Try next resource type
+    }
+  }
+  securityLogger.warn(
+    { event: "ownership.denied", resourceTypes, resourceId: id, userId },
+    `Ownership check failed for any of [${resourceTypes.join(", ")}] with ID "${id}" for user "${userId}"`
+  );
+  throw new AppError("Reference not found", 404);
+}
+

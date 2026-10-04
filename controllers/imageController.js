@@ -5,7 +5,7 @@ import { createLogger } from "../src/infrastructure/logging/index.js";
 const controllerLogger = createLogger("controller");
 
 import { resolveMediaMetadata } from "../src/platform/media/mediaMetadataResolver.js";
-import { assertOwns } from "../src/platform/security/ownership.js";
+import { assertOwns, assertOwnsAny } from "../src/platform/security/ownership.js";
 
 /**
  * POST /api/images/generated
@@ -95,6 +95,26 @@ export async function generateImage(req, res) {
 
     // ── 0. Enforce Project Ownership ─────────────────────────────────────────
     await assertOwns("project", projectId, userId);
+
+    // ── 0b. Enforce Reference Ownership ──────────────────────────────────────
+    for (const refId of sanitizedReferences) {
+      await assertOwnsAny(["workflow", "character", "element", "media"], refId, userId);
+    }
+
+    // ── 0c. Enforce Input Media Ownership ────────────────────────────────────
+    if (parameters && typeof parameters === "object") {
+      if (parameters.input_image && typeof parameters.input_image === "string" && !parameters.input_image.startsWith("http")) {
+        await assertOwnsAny(["workflow", "media"], parameters.input_image.trim(), userId);
+      }
+      if (Array.isArray(parameters.images)) {
+        for (const img of parameters.images) {
+          const imgId = typeof img === "string" ? img : (img?.workflow_id || img?.id);
+          if (typeof imgId === "string" && !imgId.startsWith("http")) {
+            await assertOwnsAny(["workflow", "media"], imgId.trim(), userId);
+          }
+        }
+      }
+    }
 
     workflowId   = randomUUID();
     mediaId      = randomUUID();

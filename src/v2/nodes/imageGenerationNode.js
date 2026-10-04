@@ -1,128 +1,111 @@
 import { run } from "../../models/index.js";
 import { NodeSafetyService } from "./safety/NodeSafetyService.js";
+import { resolvePrimaryMediaUrl } from "../resolvers/WorkflowReferenceResolver.js";
 
 /**
- * Executes image generation node via the Model-First Models Management System.
+ * Image Generation Node — Pure Pass-Through
+ * ─────────────────────────────────────────────────────────────────────────────
  *
- * @param {object} inputs - { prompt, width, height, count, seed, style, model, quality, image_url }
- * @param {object} ctx    - { runId, nodeId, userId, traceId, gateways }
+ * Architecture contract:
+ *   - Model Management is the ONLY source of truth for parameter definitions,
+ *     allowed values, validation, provider mapping, and execution.
+ *   - This node does NOT know model-specific fields (quality, resolution,
+ *     aspect_ratio, prompt_optimization_mode, etc.).
+ *   - It receives { model, prompt, parameters } and passes them directly to
+ *     models.run(). Nothing more.
+ *
+ * The only responsibility of this node:
+ *   1. Validate prompt (non-empty string).
+ *   2. Resolve parameters.input_image workflow ID → URL if present.
+ *   3. Call models.run(model, { prompt, ...parameters }).
+ *   4. Normalize result to V2 asset shape.
+ *
+ * @param {object} inputs - { model, prompt, parameters }
+ * @param {object} ctx    - { runId, nodeId, userId }
  */
 export async function executeImageGeneration(inputs, ctx) {
   const { runId, nodeId, userId } = ctx;
 
-  // ── Safety: validate & sanitise all inputs before any model work ────────
-  const safe = NodeSafetyService.assertImageInputs(inputs, nodeId);
+  // ── 1. Validate prompt only — Model Management validates everything else ────
+  NodeSafetyService.assertImageInputs(inputs, nodeId);
   const started = Date.now();
 
-  const modelFamily = safe.model;
+  const modelFamily = inputs.model;
   if (!modelFamily) {
     throw new Error(`[Node:${nodeId}] Missing required "model" input`);
   }
 
-  // ── Translate workflow inputs → canonical Models System inputs ─────────────
-  // The Models Management System resolves the provider route internally from semantic
-  // parameters: if input_image is present → provider edit route; otherwise → provider generation route.
-  const canonicalInput = buildCanonicalInput(safe);
+  const prompt = (inputs.prompt || "").trim();
+  if (!prompt) {
+    throw new Error(`[Node:${nodeId}] Missing required "prompt" input`);
+  }
 
-  // ── Model-First Execution via Models Management System ─────────────────────
-  // Caller supplies ONLY model, canonical input, and context.
-  // Models Management resolves configured provider and execution topology internally.
+  // ── 2. Resolve input_image: workflow/media ID → URL ───────────────────────
+  // The frontend sends a workflow ID for input_image (not a raw URL).
+  // Resolve it to the actual CDN URL before passing to the model.
+  const rawParams = (inputs.parameters && typeof inputs.parameters === "object")
+    ? inputs.parameters
+    : {};
+  let resolvedParams = { ...rawParams };
+
+  if (
+    resolvedParams.input_image &&
+    typeof resolvedParams.input_image === "string" &&
+    !resolvedParams.input_image.startsWith("http")
+  ) {
+    const resolvedUrl = await resolvePrimaryMediaUrl(resolvedParams.input_image, userId);
+    if (!resolvedUrl) {
+      throw new Error(
+        `[Node:${nodeId}] Could not resolve input_image "${resolvedParams.input_image}" to a URL. ` +
+        "Ensure the workflow ID exists and has a completed media record."
+      );
+    }
+    resolvedParams.input_image = resolvedUrl;
+  }
+
+  if (Array.isArray(resolvedParams.images)) {
+    resolvedParams.images = await Promise.all(
+      resolvedParams.images.map(async (item) => {
+        const idOrUrl = typeof item === "string" ? item : (item?.workflow_id || item?.id || item?.url);
+        if (typeof idOrUrl === "string" && !idOrUrl.startsWith("http")) {
+          const resolved = await resolvePrimaryMediaUrl(idOrUrl, userId);
+          return resolved || idOrUrl;
+        }
+        return idOrUrl;
+      })
+    );
+  }
+
+  // ── 3. Build canonical input: prompt + model params (pass-through) ─────────
+  // Model Management validates canonicalInput against the model's canonicalInputs,
+  // rejects unknown params, maps to provider fields, and executes.
+  const canonicalInput = { prompt, ...resolvedParams };
+
+  // ── 4. Execute via Models Management System ───────────────────────────────
   const runResult = await run(modelFamily, canonicalInput, {
     idempotencyKey: `node:${runId}:${nodeId}`,
     userId,
   });
 
-  // ── Normalize outputs → V2 asset shape ──────────────────────────────────
-  // External code consumes only canonical result.images — no raw provider fields.
-  const imageUrl = runResult.images?.[0]?.url ?? "";
+  // ── 5. Normalize outputs → V2 image asset shape ───────────────────────────
+  const imageUrl =
+    runResult.images?.[0]?.url ||
+    (typeof runResult.images?.[0] === "string" ? runResult.images[0] : null) ||
+    runResult.data?.images?.[0]?.url ||
+    runResult.data?.images?.[0] ||
+    "";
 
   const assets = [
     {
-      id: `img-${Date.now()}`,
-      type: "image",
-      url: imageUrl,
-      width: safe.width ?? null,
-      height: safe.height ?? null,
-      metadata: {
-        model: modelFamily,
-      },
+      id:       `img-${Date.now()}`,
+      type:     "image",
+      url:      imageUrl,
+      metadata: { model: modelFamily },
     },
   ];
 
-  const durationMs = Date.now() - started;
-
   return {
     assets,
-    metadata: { model: modelFamily, latencyMs: durationMs },
+    metadata: { model: modelFamily, latencyMs: Date.now() - started },
   };
-}
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
-/**
- * Converts raw workflow node inputs into the canonical parameter vocabulary
- * expected by the Models Management System.
- *
- * Workflow field       → Canonical field
- * ───────────────────────────────────────────────────────────────────────────
- * ratio                → aspect_ratio   (direct rename)
- * width + height       → resolution     (derived tier: "1k" | "2k" | "4k")
- * quality              → quality        (pass-through, already canonical)
- * seed                 → seed           (pass-through)
- * prompt               → prompt         (pass-through, required)
- * image_url / image    → input_image    (semantic source image)
- * ─── Stripped (not in any model's canonicalInputs): ────────────────────────
- * model, count, references, width, height, ratio, style
- */
-function buildCanonicalInput(safe) {
-  const canonical = {};
-
-  // Required
-  if (safe.prompt !== undefined) canonical.prompt = safe.prompt;
-
-  // Optional canonical fields
-  if (safe.negative_prompt !== undefined) canonical.negative_prompt = safe.negative_prompt;
-  if (safe.seed !== undefined && safe.seed !== null) canonical.seed = safe.seed;
-
-  // quality → already canonical (standard | hd)
-  if (safe.quality !== undefined && safe.quality !== null) canonical.quality = safe.quality;
-
-  // ratio → aspect_ratio
-  if (safe.ratio !== undefined && safe.ratio !== null) {
-    canonical.aspect_ratio = safe.ratio;
-  } else if (safe.aspect_ratio !== undefined && safe.aspect_ratio !== null) {
-    canonical.aspect_ratio = safe.aspect_ratio;
-  }
-
-  // width + height → resolution tier
-  const resolution = deriveResolution(safe.width, safe.height);
-  if (resolution) canonical.resolution = resolution;
-
-  // image_url / image → input_image (semantic source image)
-  const imageSource = safe.image_url ?? safe.image ?? safe.input_image ?? null;
-  if (imageSource) canonical.input_image = imageSource;
-
-  return canonical;
-}
-
-/**
- * Derives a canonical resolution tier string from pixel dimensions.
- *
- * Tier boundaries (based on the longest dimension):
- *   ≥ 3840px → "4k"
- *   ≥ 1920px → "2k"
- *   else     → "1k"
- *
- * Returns null when no dimension is provided (model default applies).
- *
- * @param {number|null|undefined} width
- * @param {number|null|undefined} height
- * @returns {"1k"|"2k"|"4k"|null}
- */
-function deriveResolution(width, height) {
-  const maxDim = Math.max(Number(width) || 0, Number(height) || 0);
-  if (maxDim <= 0) return null;
-  if (maxDim >= 3840) return "4k";
-  if (maxDim >= 1920) return "2k";
-  return "1k";
 }

@@ -233,7 +233,7 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
 
   let resolvedList = [];
   try {
-    resolvedList = await resolveWorkflowReferences([...new Set(refIds)]);
+    resolvedList = await resolveWorkflowReferences([...new Set(refIds)], userId);
   } catch (err) {
     nodeLogger.warn({ err }, `resolveWorkflowReferences error: ${err.message}`);
   }

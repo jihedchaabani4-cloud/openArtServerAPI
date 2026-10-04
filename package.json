@@ -11,6 +11,7 @@
         "#platform/storage/*.js": "./src/platform/storage/*.js",
         "#platform/workflow/*.js": "./src/platform/workflow/*.js",
         "#platform/media/*.js": "./src/platform/media/*.js",
+        "#platform/media-ingestion/*.js": "./src/platform/media-ingestion/*.js",
         "#platform/ai/*.js": "./src/platform/ai/*.js",
         "#platform/billing/*.js": "./src/platform/billing/*.js",
         "#platform/security/*.js": "./src/platform/security/*.js",
@@ -23,7 +24,7 @@
         "#container.js": "./src/container.js"
     },
     "scripts": {
-        "test": "node --test tests/boundary/modelsBoundary.test.js",
+        "test": "node --test tests/boundary/modelsBoundary.test.js tests/boundary/apiRoutingBoundary.test.js tests/boundary/rateLimitBoundary.test.js tests/boundary/reaperReconciliationBoundary.test.js tests/boundary/promptOptimizationBoundary.test.js",
         "models:validate": "node scripts/validate-all-configs.js",
         "start": "node index.js",
         "start:worker": "node src/workers/worker.js",
@@ -33,7 +34,8 @@
         "dev:v2-worker": "nodemon --delay 1500 src/v2/queue/v2WorkflowWorker.js",
         "start:wallet-worker": "node src/workers/walletWorker.js",
         "dev:wallet-worker": "nodemon --delay 1500 src/workers/walletWorker.js",
-        "dev": "concurrently \"npm run dev:api\" \"npm run dev:worker\""
+        "dev": "npm run dev:api",
+        "dev:full": "concurrently \"npm run dev:api\" \"npm run dev:worker\""
     },
     "dependencies": {
         "@fal-ai/client": "^1.9.4",
@@ -56,6 +58,7 @@
         "node-fetch": "^3.3.2",
         "openai": "^6.25.0",
         "pino": "^10.3.1",
+        "rate-limiter-flexible": "^11.2.1",
         "sharp": "^0.34.5",
         "socket.io": "^4.8.3",
         "uuid": "^9.0.1",

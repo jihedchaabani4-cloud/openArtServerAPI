@@ -5,7 +5,7 @@ const aiLogger = createLogger("ai");
 
 export class PromptService {
     constructor() {
-        this.modelFamily = "gemini-3-flash";
+        this.modelFamily = "gemini-3.1-flash-lite";
     }
 
     async complete({ systemPrompt, userPrompt, temperature = 0.7, options = {} }) {
@@ -74,7 +74,7 @@ export class PromptService {
      *  4. Enriches the prompt with cinematic/visual details for AI generation
      *  5. Returns the improved prompt + metadata
      */
-    async optimizePrompt(prompt, { mode = "image", style = "cinematic" } = {}) {
+    async optimizePrompt(prompt, { mode = "image", style = "cinematic", userId = null } = {}) {
         if (!prompt?.trim()) return {
             optimized: prompt,
             originalLanguage: "en",
@@ -133,7 +133,8 @@ RULES:
 Translate the semantic meaning and enhance it as a professional AI generation prompt.`;
 
         try {
-            const result = await this.completeJSON({ systemPrompt, userPrompt, temperature: 0.4 });
+            const options = userId ? { userId } : {};
+            const result = await this.completeJSON({ systemPrompt, userPrompt, temperature: 0.4, options });
             const optimized = result.optimized_prompt || prompt;
 
             aiLogger.debug(

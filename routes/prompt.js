@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { promptService } from "../src/container.js";
+import { requireAuth } from "../src/middleware/auth.js";
+import { rateLimit } from "../src/middleware/rateLimit.js";
 
 const router = Router();
 
@@ -11,7 +13,7 @@ const router = Router();
  * Returns:
  *   { ok: true, optimized, originalLanguage, wasTranslated, wasEnhanced, changesSummary }
  */
-router.post("/optimize", async (req, res) => {
+router.post("/optimize", requireAuth, rateLimit("promptOptimization"), async (req, res) => {
     const { prompt, mode = "image" } = req.body;
 
     if (!prompt?.trim()) {
@@ -19,11 +21,14 @@ router.post("/optimize", async (req, res) => {
     }
 
     try {
-        const result = await promptService.optimizePrompt(prompt.trim(), { mode });
+        const result = await promptService.optimizePrompt(prompt.trim(), {
+            mode,
+            userId: req.user?.id,
+        });
         return res.json({ ok: true, ...result });
     } catch (err) {
         console.error("[PromptRoute] optimize error:", err);
-        return res.status(500).json({ ok: false, message: err.message });
+        return res.status(500).json({ ok: false, message: "Failed to optimize prompt" });
     }
 });
 

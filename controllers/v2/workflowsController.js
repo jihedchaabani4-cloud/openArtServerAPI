@@ -116,6 +116,21 @@ export async function submitWorkflowRun(req, res) {
   const started = Date.now();
   const traceId = req.headers["x-trace-id"] || "v2-run-submit";
 
+  // Feature flag guard: disabled by default in production (Option a)
+  if (process.env.ENABLE_V2_WORKFLOW_RUN_ENDPOINT !== "true") {
+    controllerLogger.warn({
+      traceId,
+      operation: "v2.workflows.submit",
+      durationMs: Date.now() - started,
+      errorCode: "ENDPOINT_DISABLED",
+      userId: req.user?.id,
+    }, "Direct V2 workflow run endpoint is disabled");
+    return res.status(404).json({
+      code: "ENDPOINT_DISABLED",
+      message: "The direct workflow run endpoint is disabled.",
+    });
+  }
+
   // 1. Zod request shape validation
   const parsedBody = postRunRequestSchema.safeParse(req.body);
   if (!parsedBody.success) {

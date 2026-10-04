@@ -1,12 +1,18 @@
 import { executePromptBuilder }   from "./promptBuilderNode.js";
 import { executeImageGeneration } from "./imageGenerationNode.js";
+import { executeVideoGeneration } from "./videoGenerationNode.js";
 import { executeLLM }             from "./llmNode.js";
 
-const registry = {
+export const registry = {
   "prompt-builder":   executePromptBuilder,
   "image-generation": executeImageGeneration,
+  "video-generation": executeVideoGeneration,
   "llm":              executeLLM,
 };
+
+export function registerNodeExecutor(type, fn) {
+  registry[type] = fn;
+}
 
 /**
  * Dispatch node execution to the corresponding implementation.

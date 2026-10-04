@@ -56,7 +56,9 @@ describe("Media Persistence Failure Boundary Tests (Task T7 / BUG-02)", () => {
     const output = { assets: [{ url: "https://storage.example.com/asset.png" }] };
     const run = {
       run_id: "run-test-persist-1",
-      input: { workflow_id: "wf-persist-1" },
+      targetWorkflowId: "wf-persist-1",
+      targetMediaIds: ["media-placeholder-1"],
+      input: { workflow_id: "wf-persist-1", media_id: "media-placeholder-1" },
     };
 
     // On unpatched code, executeNodePersistence catches and swallows the error (returns void without throwing)
@@ -104,7 +106,7 @@ describe("Media Persistence Failure Boundary Tests (Task T7 / BUG-02)", () => {
       run_id: runId,
       workflow_id: "wf-test-persist",
       status: "running",
-      input: { workflow_id: "wf-test-persist", prompt: "A cinematic portrait" },
+      input: { workflow_id: "wf-test-persist", media_id: "placeholder-999", prompt: "A cinematic portrait" },
       execution_plan: plan,
     });
 
@@ -203,7 +205,7 @@ describe("Media Persistence Failure Boundary Tests (Task T7 / BUG-02)", () => {
       run_id: runId,
       workflow_id: "wf-test-persist-retry",
       status: "running",
-      input: { workflow_id: "wf-test-persist-retry", prompt: "Retry test prompt" },
+      input: { workflow_id: "wf-test-persist-retry", media_id: "placeholder-retry", prompt: "Retry test prompt" },
       execution_plan: plan,
     });
 

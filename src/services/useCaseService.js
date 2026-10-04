@@ -182,7 +182,7 @@ export class UseCaseService {
   assertPaidJobHasHold({ useCaseId, input = {}, billingHoldId = null } = {}) {
     const reservedCredits = Number(input.reserved_credits || input.reservedCredits || 0);
     const holdId = billingHoldId || input.billing_hold_id || input.billingHoldId || null;
-    const isPaid = reservedCredits > 0 || input.billing_status === "reserved";
+    const isPaid = Boolean(holdId) || reservedCredits > 0 || input.billing_status === "reserved";
 
     if (isPaid && !holdId) {
       const err = new Error(`Paid UseCase "${useCaseId}" is missing billing hold.`);
@@ -263,7 +263,11 @@ export class UseCaseService {
       : { stop: () => {} };
 
     try {
-      const result = await this.runUseCase({ useCaseId, input, userId });
+      const effectiveInput = {
+        ...input,
+        ...(guard.billingHoldId ? { billing_hold_id: guard.billingHoldId } : {}),
+      };
+      const result = await this.runUseCase({ useCaseId, input: effectiveInput, userId });
       if (!result || result.status !== "completed") {
         const err = new Error(`UseCase "${useCaseId}" did not complete successfully (status: ${result?.status || "unknown"})`);
         err.code = "WORKFLOW_INCOMPLETE";

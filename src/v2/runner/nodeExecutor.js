@@ -47,6 +47,11 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
       nodeLogger.info({ workflowId, field }, `Updating character ${workflowId} field "${field}"`);
       await db.characters.updateCharacter(workflowId, { [field]: resolvedValue });
     } else if (target === "media" && workflowId) {
+      const allowedMediaIds = run.targetMediaIds || run.execution_plan?.targetMediaIds;
+      if (!Array.isArray(allowedMediaIds) || allowedMediaIds.length === 0) {
+        throw new Error(`Persistence target "media" requires server-verified targetMediaIds on run record`);
+      }
+
       const mediaUrl = typeof resolvedValue === "string" ? resolvedValue : (resolvedValue?.url || output?.assets?.[0]?.url || output?.media?.url);
       if (!mediaUrl) {
         throw new Error(`Resolved mediaUrl is empty or missing from node output`);
@@ -57,7 +62,6 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
 
       // Find existing processing media placeholder created by controller
       let existingList = await db.media.findByWorkflow(workflowId);
-      const allowedMediaIds = run.targetMediaIds || run.execution_plan?.targetMediaIds;
       if (Array.isArray(allowedMediaIds) && allowedMediaIds.length > 0) {
         existingList = existingList.filter((m) => allowedMediaIds.includes(m.id));
       }
@@ -83,26 +87,21 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
           holdErr.statusCode = 409;
           throw holdErr;
         }
+
+        // F2.1-b: Fallback disallowed - fail-closed rejection when no authorized placeholder exists
+        const notFoundErr = new Error(`Cannot persist completed media for workflow "${workflowId}": no authorized active media placeholder found for step "${targetStepId}"`);
+        notFoundErr.code = "TARGET_MEDIA_NOT_FOUND";
+        notFoundErr.category = "SERVER_FAULT";
+        notFoundErr.statusCode = 422;
+        throw notFoundErr;
       }
 
-      if (placeholder?.id) {
-        await db.media.updateMedia(placeholder.id, {
-          url: mediaUrl,
-          status: status || "completed",
-          width,
-          height,
-        });
-      } else {
-        await db.media.createMedia({
-          workflow_id: workflowId,
-          project_id: projectId,
-          step_id: targetStepId,
-          url: mediaUrl,
-          status: status || "completed",
-          width,
-          height,
-        });
-      }
+      await db.media.updateMedia(placeholder.id, {
+        url: mediaUrl,
+        status: status || "completed",
+        width,
+        height,
+      });
     }
   } catch (err) {
     nodeLogger.error(
@@ -110,8 +109,8 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
       `Node persistence failed for node "${nodeConfig.id}": ${err.message}`
     );
     const persistenceErr = new Error(`Node "${nodeConfig.id}" persistence failed: ${err.message}`);
-    persistenceErr.code = "PERSISTENCE_FAILED";
-    persistenceErr.category = "SERVER_FAULT";
+    persistenceErr.code = err.code || "PERSISTENCE_FAILED";
+    persistenceErr.category = err.category || "SERVER_FAULT";
     persistenceErr.nodeId = nodeConfig.id;
     persistenceErr.retryable = err.retryable ?? true;
     persistenceErr.cause = err;

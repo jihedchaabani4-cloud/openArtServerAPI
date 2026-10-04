@@ -221,5 +221,14 @@ describe("BUG-09 — distributed accumulator persistence", () => {
     assert.ok(breakdown.some((e) => e.nodeId === "nodeX"), "nodeX must be in breakdown");
     assert.ok(breakdown.some((e) => e.nodeId === "nodeZ"), "nodeZ must be in breakdown");
   });
+
+  after(async () => {
+    try {
+      const { redisConnection, workerRedisConnection } = await import("../../src/queue/redis.js");
+      await redisConnection?.quit().catch(() => redisConnection?.disconnect());
+      await workerRedisConnection?.quit().catch(() => workerRedisConnection?.disconnect());
+    } catch {}
+  });
 });
+
 

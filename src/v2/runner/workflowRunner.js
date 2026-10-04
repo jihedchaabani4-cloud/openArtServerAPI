@@ -47,7 +47,7 @@ const PROVIDER_BACKED_NODE_TYPES = new Set([
  * so intra-process reads are still O(1) without a DB round-trip.
  * ─────────────────────────────────────────────────────────────────────────────
  */
-class PersistedBillingAccumulator {
+export class PersistedBillingAccumulator {
   /**
    * @param {string} runId
    * @param {import('./runRepository.js').RunRepository} repo
@@ -57,6 +57,18 @@ class PersistedBillingAccumulator {
     this._runId = runId;
     this._repo = repo;
     this._entries = [...initialEntries];
+    this._hasPersistenceFailure = false;
+    this._lastPersistenceError = null;
+  }
+
+  /** Whether DB persistence failed for any billing entry. */
+  hasPersistenceFailure() {
+    return this._hasPersistenceFailure;
+  }
+
+  /** Returns the last DB persistence error, if any. */
+  getLastPersistenceError() {
+    return this._lastPersistenceError;
   }
 
   /**
@@ -109,11 +121,11 @@ class PersistedBillingAccumulator {
         },
       });
     } catch (persistErr) {
-      // Non-fatal: in-memory entry is still available for single-process settlement.
-      // Log but do not throw — the workflow must not fail due to a metadata write error.
-      workflowLogger.warn(
+      this._hasPersistenceFailure = true;
+      this._lastPersistenceError = persistErr;
+      workflowLogger.error(
         { runId: this._runId, nodeId, err: persistErr },
-        `[BillingAccumulator] Failed to persist billing entry for node ${nodeId} — in-memory entry retained`
+        `[BillingAccumulator] Failed to persist billing entry for node ${nodeId} to DB — in-memory entry retained: ${persistErr.message}`
       );
     }
   }
@@ -436,6 +448,8 @@ export async function startWorkflowRun(plan, runtimeInput, runId = null, serverC
   const finalRun = await runRepo.getRun(finalRunId);
   const billingBreakdown = billing.getBreakdown();
   const totalCost = billing.getTotalCost();
+  const billingPersistenceFailed = billing.hasPersistenceFailure();
+  const billingPersistenceError = billing.getLastPersistenceError()?.message || null;
   activeAccumulators.delete(finalRunId);
 
   return {
@@ -445,6 +459,8 @@ export async function startWorkflowRun(plan, runtimeInput, runId = null, serverC
     outputs: finalRun?.outputs || null,
     billingBreakdown,
     totalCost,
+    billingPersistenceFailed,
+    billingPersistenceError,
   };
 }
 

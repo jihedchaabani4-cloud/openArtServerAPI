@@ -101,6 +101,10 @@ class InMemoryWalletService {
     return reservation;
   }
 
+  async rollback(reservationId, metadata = {}) {
+    return this.release(reservationId, metadata);
+  }
+
   async reapExpiredHolds() {
     const now = Date.now();
     const expired = [];

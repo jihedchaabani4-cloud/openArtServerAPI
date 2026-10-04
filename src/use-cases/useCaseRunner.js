@@ -63,9 +63,10 @@ export async function run({
   }
 
   // 5. Start workflow run (creates DB records + enqueues nodes)
-  const serverWorkflowId = input.serverWorkflowId || input.workflow_id || null;
-  const serverMediaIds = input.serverMediaIds || (input.media_id ? [input.media_id] : (input.mediaIds || []));
-  const serverProjectId = input.serverProjectId || input.project_id || input.projectId || null;
+  // F2.3-a: Strictly use server-created fields. Never fall back to client input.workflow_id / input.media_id / input.characterId.
+  const serverWorkflowId = input.serverWorkflowId || null;
+  const serverMediaIds = Array.isArray(input.serverMediaIds) ? input.serverMediaIds : [];
+  const serverProjectId = input.serverProjectId || null;
   const serverContext = {
     workflowId: serverWorkflowId,
     v1_workflow_id: serverWorkflowId,

@@ -12,7 +12,16 @@ export class UseCaseBillingRuntime {
     return `usecase:${useCaseId}:${userId}:${stableKey}`;
   }
 
-  async reserveUseCase({ userId, useCaseId, workflowRunId = null, totalCredits = 0, costBreakdown = null, idempotencyKey = null } = {}) {
+  async reserveUseCase({
+    userId,
+    useCaseId,
+    workflowRunId = null,
+    workflowId = null,
+    mediaId = null,
+    totalCredits = 0,
+    costBreakdown = null,
+    idempotencyKey = null,
+  } = {}) {
     const amount = Math.max(0, Math.ceil(Number(totalCredits) || 0));
     const referenceId = this.buildReferenceId({ workflowRunId, useCaseId, userId, idempotencyKey });
 
@@ -30,9 +39,12 @@ export class UseCaseBillingRuntime {
       userId,
       useCaseId,
       workflowRunId,
+      workflowId: workflowId || workflowRunId,
+      mediaId,
       totalCredits: amount,
       costBreakdown,
     };
+
 
     const gateway = this.billingGateway;
     const result = gateway
@@ -76,10 +88,12 @@ export class UseCaseBillingRuntime {
     let result;
     if (this.billingGateway) {
       result = await this.billingGateway.rollback(reservationOrRef);
-    } else if (typeof reservationOrRef === "object" && typeof this.walletService?.release === "function") {
-      result = await this.walletService.release(reservationOrRef, extraMetadata);
+    } else if (typeof this.walletService?.rollback === "function") {
+      result = await this.walletService.rollback(referenceId, extraMetadata);
+    } else if (typeof this.walletService?.release === "function") {
+      result = await this.walletService.release(referenceId, extraMetadata);
     } else {
-      result = await this.walletService?.rollback?.(referenceId, extraMetadata);
+      result = await this.walletService?.rollbackTransaction?.(referenceId, extraMetadata);
     }
 
     return { billingStatus: BILLING_STATUS.REFUNDED, referenceId, transaction: result };

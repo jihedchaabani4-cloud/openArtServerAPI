@@ -100,23 +100,24 @@ export class UseCaseService {
     });
 
 
+    const effectiveServerWorkflowId = serverContext?.workflowId || serverContext?.v1_workflow_id || input.serverWorkflowId || null;
+    const effectiveServerMediaIds = Array.isArray(serverContext?.mediaIds)
+      ? serverContext.mediaIds
+      : (Array.isArray(input.serverMediaIds) ? input.serverMediaIds : []);
+    const effectiveServerProjectId = serverContext?.projectId || input.serverProjectId || null;
+
     const reserve = await this.billingRuntime.reserveUseCase({
       userId,
       useCaseId,
       workflowRunId: finalExecutionId,
-      workflowId: input.workflow_id || executionId || null,
-      mediaId: input.media_id || input.mediaId || null,
+      workflowId: effectiveServerWorkflowId || finalExecutionId || null,
+      mediaId: effectiveServerMediaIds[0] || null,
       totalCredits: billingPlan.totalCredits,
       costBreakdown: billingPlan,
       idempotencyKey: finalIdempotencyKey,
     });
 
-
     const queue = jobQueueService || this.jobQueueService;
-
-    const effectiveServerWorkflowId = serverContext?.workflowId || serverContext?.v1_workflow_id || input.serverWorkflowId || input.workflow_id || null;
-    const effectiveServerMediaIds = serverContext?.mediaIds || input.serverMediaIds || (input.media_id ? [input.media_id] : []);
-    const effectiveServerProjectId = serverContext?.projectId || input.serverProjectId || input.project_id || null;
 
     let job;
     try {
@@ -132,7 +133,7 @@ export class UseCaseService {
           reserved_credits: reserve.reservedCredits,
         },
         userId,
-        serverContext: serverContext || {
+        serverContext: {
           workflowId: effectiveServerWorkflowId,
           v1_workflow_id: effectiveServerWorkflowId,
           mediaIds: effectiveServerMediaIds,
@@ -315,19 +316,24 @@ export class UseCaseService {
       });
       err.errorReport = report;
 
-      if (guard.paid && (report.actions.billingAction === "ROLLBACK" || report.actions.billingAction === "RELEASE")) {
+      // F2.3-e: ANY failure during queued use case execution where a hold was reserved (guard.paid)
+      // MUST release/rollback the hold. Never leave a dangling hold regardless of error category or billingAction.
+      if (guard.paid && guard.billingHoldId) {
         await this.rollbackPreparedBilling(guard.billingHoldId, {
           node_breakdown: err?.billingBreakdown || [],
-          failedMessage: report.system.rawMessage,
-          errorCategory: report.user.category,
-          errorCode: report.user.code,
-          userMessage: report.user.message,
-        }).catch(() => {});
+          failedMessage: report.system?.rawMessage || err.message,
+          errorCategory: report.user?.category || "SERVER_FAULT",
+          errorCode: report.user?.code || "INTERNAL_ERROR",
+          userMessage: report.user?.message || "Execution failed",
+        }).catch((rbErr) => {
+          useCaseLogger.warn({ billingHoldId: guard.billingHoldId, err: rbErr.message }, "Rollback on error failed");
+        });
       }
 
       // ── Failure cleanup: mark any processing/pending media as failed ──────────
-      if (input?.workflow_id && this.db?.media) {
-        await failWorkflowPendingMedia(this.db, input.workflow_id, report.user.message || err.message);
+      const targetWorkflowId = input?.serverWorkflowId || input?.workflow_id || null;
+      if (targetWorkflowId && this.db?.media) {
+        await failWorkflowPendingMedia(this.db, targetWorkflowId, report.user?.message || err.message);
       }
 
       useCaseLogger.error({
@@ -339,6 +345,8 @@ export class UseCaseService {
         err,
       }, `UseCase "${useCaseId}" failed [${report.user.category}]: ${report.user.message}`);
       throw err;
+    } finally {
+      heartbeat.stop();
     }
   }
 

@@ -4,14 +4,18 @@ export class WorkflowBillingGateway {
   }
 
   async reserve({ userId, amount = 0, referenceId, metadata = {} }) {
-    if (!this.walletService) {
+    if (amount <= 0) {
       return { kind: "NO_CHARGE", status: "ACTIVE", referenceId, amount: 0 };
+    }
+    if (!this.walletService) {
+      const err = new Error(`Cannot reserve ${amount} credits: WalletService is not configured.`);
+      err.code = "WALLET_NOT_CONFIGURED";
+      err.category = "SERVER_FAULT";
+      err.statusCode = 500;
+      throw err;
     }
     if (typeof this.walletService.reserve === "function") {
       return this.walletService.reserve({ userId, amount, referenceId, metadata });
-    }
-    if (amount <= 0) {
-      return { kind: "NO_CHARGE", status: "ACTIVE", referenceId, amount: 0 };
     }
     const result = await this.walletService.hold({ userId, amount, referenceId, metadata });
     return { kind: "CHARGEABLE", status: "HELD", referenceId, amount, transaction: result };

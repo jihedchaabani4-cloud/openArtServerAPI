@@ -47,6 +47,13 @@ export class UseCaseBillingRuntime {
 
 
     const gateway = this.billingGateway;
+    if (!gateway && !this.walletService) {
+      const err = new Error(`Cannot reserve ${amount} credits for UseCase "${useCaseId}": WalletService is not configured.`);
+      err.code = "WALLET_NOT_CONFIGURED";
+      err.category = "SERVER_FAULT";
+      err.statusCode = 500;
+      throw err;
+    }
     const result = gateway
       ? await gateway.reserve({ userId, amount, referenceId, metadata })
       : (this.walletService?.reserve

@@ -19,13 +19,19 @@ import { MediaRepository }            from "#db/MediaRepository.js";
 import { GenerationConfigRepository } from "#db/GenerationConfigRepository.js";
 import { DnaRepository }              from "#db/DnaRepository.js";
 import { CharacterRepository }        from "#db/CharacterRepository.js";
+import { ElementRepository }          from "#db/ElementRepository.js";
 
 // ─── Infrastructure ───────────────────────────────────────────────────────────
 import { WorkflowEventRecorder } from "./infrastructure/events/workflowEventRecorder.js";
 import { WorkflowBillingGateway } from "./infrastructure/billing/workflowBillingGateway.js";
 import { MediaWorkflowLifecycleService } from "#platform/media/MediaLifecycleService.js";
 import { WorkflowLifecycleService } from "#platform/workflow/WorkflowService.js";
+import { MediaService } from "#platform/media/MediaService.js";
+import { MediaIngestionService } from "#platform/media-ingestion/MediaIngestionService.js";
 import { CharacterService } from "#domain/character/CharacterService.js";
+import { ElementService } from "#domain/element/ElementService.js";
+import { ElementMediaService } from "#domain/element/ElementMediaService.js";
+import { ElementAnalysisService } from "#domain/element/ElementAnalysisService.js";
 import { ProjectReadService } from "#domain/project/ProjectReadService.js";
 import { GenerationService } from "#domain/generation/GenerationService.js";
 import { WorkflowStorageGateway } from "./infrastructure/storage/workflowStorageGateway.js";
@@ -36,6 +42,25 @@ import { UsageEventRepository } from "#platform/billing/UsageEventRepository.js"
 export const promptService  = new PromptService();
 export const storageService = new StorageService();
 const walletServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || null;
+
+/**
+ * Enforce that production environments must never boot without wallet configuration.
+ */
+export function assertWalletConfiguredForEnvironment() {
+    const isProd = process.env.NODE_ENV === "production";
+    const hasUrl = Boolean(process.env.SUPABASE_URL);
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
+    const hasKey = Boolean(key);
+
+    if (isProd && (!hasUrl || !hasKey)) {
+        const missing = [!hasUrl ? "SUPABASE_URL" : null, !hasKey ? "SUPABASE_SERVICE_ROLE_KEY/SUPABASE_KEY" : null]
+            .filter(Boolean)
+            .join(", ");
+        throw new Error(`Fatal: WalletService is required in production (NODE_ENV=production). Missing: ${missing}`);
+    }
+}
+
+assertWalletConfiguredForEnvironment();
 
 const _supabaseForUsageEvents = process.env.SUPABASE_URL && walletServiceKey
     ? createClient(process.env.SUPABASE_URL, walletServiceKey)
@@ -89,6 +114,7 @@ export const db = {
     configs:   new GenerationConfigRepository(), // tables: generation_config + generation_config_reference
     dna:        new DnaRepository(),       // table: dna
     characters: new CharacterRepository(), // Dedicated Character Domain Repository
+    elements:   new ElementRepository(),   // Dedicated Element Domain Repository
 };
 
 // ─── Workflow Architecture (feature 008) ─────────────────────────────────────
@@ -96,26 +122,56 @@ export const workflowEventRecorder = new WorkflowEventRecorder();
 export const workflowBillingGateway = new WorkflowBillingGateway({ walletService });
 
 const _lifecycleService = new MediaWorkflowLifecycleService({ db });
+export const mediaWorkflowLifecycleService = _lifecycleService;
 export const workflowStorageGateway = new WorkflowStorageGateway({
     storageService,
     v1Db: db,
     lifecycleService: _lifecycleService,
 });
 
-// ─── Domain Services ──────────────────────────────────────────────────────────
-export const workflowService = new WorkflowLifecycleService({ db, storageService });
-
-export const characterService = new CharacterService({
-    db,
-    storageService,
-    workflowService,
-});
-
-export const projectReadService = new ProjectReadService({ db });
-export const generationService = new GenerationService({ db });
 
 // ─── UseCase & Job Queue Services ─────────────────────────────────────────────
 import { UseCaseService } from "./services/useCaseService.js";
 import { jobQueueService } from "./services/jobQueueService.js";
 export { jobQueueService };
-export const useCaseService = new UseCaseService({ walletService, pricingService, jobQueueService });
+export const useCaseService = new UseCaseService({ walletService, pricingService, jobQueueService, db });
+
+// ─── Domain & Platform Services ──────────────────────────────────────────────
+export const workflowService = new WorkflowLifecycleService({ db, storageService });
+export const workflowMediaService = workflowService.mediaService;
+export const mediaService = new MediaService({ db });
+
+export const mediaIngestionService = new MediaIngestionService({
+    db,
+    storageService,
+    workflowAuthService: workflowService.authService,
+    mediaService,
+});
+
+export const characterService = new CharacterService({
+    db,
+    storageService,
+    workflowService,
+    useCaseService,
+    mediaIngestionService,
+});
+
+export const elementMediaService = new ElementMediaService({
+    db,
+    storageService,
+    mediaIngestionService,
+    workflowService,
+});
+
+export const elementService = new ElementService({
+    db,
+    storageService,
+    workflowService,
+    mediaIngestionService,
+    mediaService: elementMediaService,
+    analysisService: new ElementAnalysisService(),
+});
+
+export const projectReadService = new ProjectReadService({ db });
+export const generationService = new GenerationService({ db });
+

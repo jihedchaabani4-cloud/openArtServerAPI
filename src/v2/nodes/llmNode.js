@@ -180,6 +180,7 @@ export async function executeLLMNode(resolvedInputs, ctx = {}) {
       images,
       jsonMode,
       userId: effectiveUserId,
+      options: effectiveUserId ? {} : { isInternal: true, reason: "internal-platform-llm" },
       ...(model ? { model } : {}),
     });
   } catch (llmErr) {
@@ -227,6 +228,7 @@ export async function executeLLMNode(resolvedInputs, ctx = {}) {
           images,
           jsonMode: true,
           userId: effectiveUserId,
+          options: effectiveUserId ? {} : { isInternal: true, reason: "internal-platform-llm" },
         });
       } catch (retryLlmErr) {
         console.error(`❌ [LLMNode] LLM retry call failed (${retryLlmErr.message}). Failing closed.`);

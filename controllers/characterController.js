@@ -81,12 +81,13 @@ export async function generateCharacterSheet(req, res) {
 export async function generateCharacterDescription(req, res) {
     try {
         const { concept, archetype, style } = req.body;
-        const result = await characterService.generateDescription({ concept, archetype, style });
+        const userId = req.user?.id;
+        const result = await characterService.generateDescription({ concept, archetype, style, userId });
         return res.json({ ok: true, ...result });
     } catch (err) {
         controllerLogger.error({ err }, `generateCharacterDescription error: ${err.message}`);
         const statusCode = err.statusCode || 500;
-        return res.status(statusCode).json({ ok: false, message: err.message });
+        return res.status(statusCode).json({ ok: false, code: err.code || "REQUEST_ERROR", message: err.message });
     }
 }
 

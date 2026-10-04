@@ -19,6 +19,15 @@ export const ALLOWED_INTERNAL_REASONS = Object.freeze([
   "internal-system-test",
 ]);
 
+export class BillingContextMissingError extends Error {
+  constructor(message = "LLMService: userId is required for charged operations unless authorized with an approved internal platform reason.") {
+    super(message);
+    this.name = "BillingContextMissingError";
+    this.code = "BILLING_CONTEXT_MISSING";
+    this.statusCode = 400;
+  }
+}
+
 export class LLMService {
   constructor({ defaultModel = "gemini-3.1-flash-lite" } = {}) {
     this.defaultModel = defaultModel;
@@ -58,9 +67,11 @@ export class LLMService {
     // Enforce billing identity: require userId unless caller provides an explicit, approved internal platform flag
     if (!resolvedUserId) {
       if (!isInternal || !ALLOWED_INTERNAL_REASONS.includes(internalReason)) {
-        throw new Error(
-          `LLMService: userId is required for charged LLM calls unless explicitly authorized with an approved internal platform reason (allowed reasons: ${ALLOWED_INTERNAL_REASONS.join(", ")}).`
+        logger.warn(
+          { isInternal, internalReason, event: "billing.context_missing" },
+          `LLMService: userId is required for charged LLM calls (internalReason="${internalReason}")`
         );
+        throw new BillingContextMissingError();
       }
     }
 

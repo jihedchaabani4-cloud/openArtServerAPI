@@ -101,11 +101,12 @@ export class ElementAnalysisService {
   /**
    * Legacy wrapper for backward compatibility
    */
-  async generateDescription({ elementName, elementType = "object", references = [] }) {
+  async generateDescription({ elementName, elementType = "object", references = [], userId = null }) {
     const res = await this.analyzeElement({
       imageUrls: references,
       elementName,
       elementType,
+      userId,
     });
     return res.description;
   }

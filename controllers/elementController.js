@@ -57,7 +57,7 @@ export async function createElement(req, res) {
         logOk(traceId, op, start);
         return res.status(201).json({ status: "created", ...result });
     } catch (err) {
-        return res.status(logErr(traceId, op, start, err)).json({ error: true, message: err.message });
+        return res.status(logErr(traceId, op, start, err)).json({ error: true, code: err.code || "REQUEST_ERROR", message: err.message });
     }
 }
 
@@ -245,7 +245,7 @@ export async function analyzeElement(req, res) {
         logOk(traceId, op, start);
         return res.json({ status: "success", ...result });
     } catch (err) {
-        return res.status(logErr(traceId, op, start, err)).json({ error: true, message: err.message });
+        return res.status(logErr(traceId, op, start, err)).json({ error: true, code: err.code || "REQUEST_ERROR", message: err.message });
     }
 }
 

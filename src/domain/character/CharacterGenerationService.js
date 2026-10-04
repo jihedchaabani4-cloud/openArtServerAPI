@@ -50,6 +50,7 @@ export class CharacterGenerationService {
 
         crudOperationLog({ traceId, operation: "enqueueSheetGeneration", characterId });
 
+        let placeholderMedia = null;
         try {
             if (!characterId) {
                 throw new CrudServiceError("characterId is required", {
@@ -64,7 +65,6 @@ export class CharacterGenerationService {
             const charPrompt = prompt?.trim() || charName;
 
             // 1. Create placeholder media record so UI shows loading state immediately
-            let placeholderMedia = null;
             try {
                 placeholderMedia = await this.db.media.createMedia({
                     workflow_id: characterId,
@@ -116,10 +116,27 @@ export class CharacterGenerationService {
                         },
                     });
                     taskId = prepared.executionId || prepared.workflowRunId || characterId;
-                } catch (creditErr) {
-                    console.warn(`⚠️ [CharacterGenerationService] Credit/enqueue notice: ${creditErr.message}`);
-                    hasSufficientCredits = false;
-                    creditErrorMsg = creditErr.message;
+                } catch (serviceErr) {
+                    if (serviceErr.code === "INSUFFICIENT_CREDITS" || serviceErr.code === "BILLING_HOLD_REQUIRED") {
+                        console.warn(`⚠️ [CharacterGenerationService] Credit notice: ${serviceErr.message}`);
+                        hasSufficientCredits = false;
+                        creditErrorMsg = serviceErr.message;
+                        if (placeholderMedia?.id && this.db?.media) {
+                            await this.db.media.updateMedia(placeholderMedia.id, {
+                                status: "saved",
+                                error_message: creditErrorMsg,
+                            }).catch(() => {});
+                        }
+                    } else {
+                        // Queue dispatch failure or unexpected prepare error: fail closed
+                        if (placeholderMedia?.id && this.db?.media) {
+                            await this.db.media.updateMedia(placeholderMedia.id, {
+                                status: "failed",
+                                error_message: serviceErr.message,
+                            }).catch(() => {});
+                        }
+                        throw serviceErr;
+                    }
                 }
             }
 
@@ -142,12 +159,18 @@ export class CharacterGenerationService {
                 placeholderMedia,
             };
         } catch (err) {
+            if (placeholderMedia?.id && this.db?.media) {
+                await this.db.media.updateMedia(placeholderMedia.id, {
+                    status: "failed",
+                    error_message: err.message || "Failed to prepare character sheet generation",
+                }).catch(() => {});
+            }
             crudOperationLog({
                 traceId,
                 operation: "enqueueSheetGeneration",
                 status: "error",
                 durationMs: Date.now() - start,
-                errorCode: err.errorCode || 500,
+                errorCode: err.errorCode || err.statusCode || 500,
                 message: err.message,
             });
             throw err;

@@ -1,16 +1,22 @@
 /**
- * F2.4-b2 — Controller Error-Path Boundary Tests
+ * F2.4-b2 / F2.5-c — Controller Error-Path Boundary Tests
  *
- * Covers BOTH imageController and videoController for:
- *   (a) Error after placeholders are created but before enqueue:
+ * Covers ALL generation entry points:
+ *   1. imageController.generateImage
+ *   2. videoController.generateVideo
+ *   3. characterController.generateCharacterSheet (generate-sheet)
+ *   4. characterController.createCharacter (AI visual sheet creation)
+ *
+ * Each entry point tests two failure boundaries using the REAL prepareAndEnqueue and billing runtime:
+ *   (a) Error after placeholders are created but before enqueue (e.g. wallet DB failure on reserve):
  *       - All placeholders marked "failed"
- *       - No hold reserved (or hold released)
- *       - Clean client error response
+ *       - Hold released exactly 0 times (never reserved)
+ *       - Clean client error (HTTP 500)
  *       - Zero stuck "processing" rows
  *   (b) Enqueue dispatch failure (QUEUE_DISPATCH_FAILED):
  *       - All placeholders marked "failed"
- *       - Hold released exactly once by UseCaseService
- *       - Clean HTTP 503 client response
+ *       - Hold released EXACTLY ONCE (verified via wallet call counter)
+ *       - Clean client error (HTTP 503)
  *       - Zero stuck "processing" rows
  */
 
@@ -19,7 +25,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import * as imageController from "../../controllers/imageController.js";
 import * as videoController from "../../controllers/videoController.js";
-import { db, useCaseService } from "../../src/container.js";
+import * as characterController from "../../controllers/characterController.js";
+import { db, useCaseService, characterService } from "../../src/container.js";
 import { InMemoryWalletService } from "../../src/services/walletService.js";
 import { UseCaseBillingRuntime } from "../../src/v2/runtime/useCaseBillingRuntime.js";
 import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
@@ -34,41 +41,71 @@ after(async () => {
   } catch {}
 });
 
+/**
+ * Test wallet that counts reserve and release/rollback calls to prove "released exactly once"
+ */
+class TrackingWalletService extends InMemoryWalletService {
+  constructor() {
+    super();
+    this.reserveCalls = 0;
+    this.rollbackCalls = 0;
+    this.releaseCalls = 0;
+  }
 
-describe("F2.4-b2 — Controller Error-Path Boundary Tests (Image & Video)", () => {
+  async reserve(args) {
+    this.reserveCalls++;
+    return super.reserve(args);
+  }
+
+  async rollback(refId, opts) {
+    this.rollbackCalls++;
+    return super.release(refId, opts);
+  }
+
+  async release(refId, opts) {
+    this.releaseCalls++;
+    return super.release(refId, opts);
+  }
+
+  get totalRollbacksAndReleases() {
+    return this.rollbackCalls + this.releaseCalls;
+  }
+}
+
+describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Character)", () => {
   let mediaRows;
-  let updateCalls;
+  let characterRows;
   let origDbMedia;
   let origDbWorkflows;
   let origDbProjects;
-  let origPrepareAndEnqueue;
+  let origDbCharacters;
   let origWalletService;
   let origBillingRuntime;
   let origJobQueueService;
 
   beforeEach(() => {
     mediaRows = new Map();
-    updateCalls = [];
+    characterRows = new Map();
 
     origDbMedia = db.media;
     origDbWorkflows = db.workflows;
     origDbProjects = db.projects;
-    origPrepareAndEnqueue = useCaseService.prepareAndEnqueue;
+    origDbCharacters = db.characters;
     origWalletService = useCaseService.walletService;
     origBillingRuntime = useCaseService.billingRuntime;
     origJobQueueService = useCaseService.jobQueueService;
 
     db.media = {
       createMedia: async (data) => {
-        const row = { ...data, status: data.status || "processing" };
-        mediaRows.set(data.id, row);
+        const id = data.id || randomUUID();
+        const row = { ...data, id, status: data.status || "processing" };
+        mediaRows.set(id, row);
         return row;
       },
       findByWorkflow: async (workflowId) => {
         return Array.from(mediaRows.values()).filter((m) => m.workflow_id === workflowId);
       },
       updateMedia: async (id, data) => {
-        updateCalls.push({ id, ...data });
         const existing = mediaRows.get(id) || { id };
         const updated = { ...existing, ...data };
         mediaRows.set(id, updated);
@@ -78,10 +115,34 @@ describe("F2.4-b2 — Controller Error-Path Boundary Tests (Image & Video)", () 
 
     db.workflows = {
       createWorkflow: async (data) => data,
+      getWorkflow: async (id) => null,
     };
 
     db.projects = {
       findById: async (id) => ({ id, user_id: "user-ctrl-test" }),
+    };
+
+    db.characters = {
+      findByCharacterId: async (id) => characterRows.get(id) || {
+        character_id: id,
+        id,
+        user_id: "user-ctrl-test",
+        project_id: "proj-ctrl-1",
+        name: "Test Character",
+        description: "Test Description",
+      },
+      upsert: async (payload) => {
+        const id = payload.character_id || payload.id || randomUUID();
+        const row = { ...payload, character_id: id, id, user_id: "user-ctrl-test" };
+        characterRows.set(id, row);
+        return row;
+      },
+      updateCharacterFields: async (id, updates) => {
+        const existing = characterRows.get(id) || { character_id: id, id };
+        const updated = { ...existing, ...updates };
+        characterRows.set(id, updated);
+        return updated;
+      },
     };
   });
 
@@ -89,7 +150,7 @@ describe("F2.4-b2 — Controller Error-Path Boundary Tests (Image & Video)", () 
     db.media = origDbMedia;
     db.workflows = origDbWorkflows;
     db.projects = origDbProjects;
-    useCaseService.prepareAndEnqueue = origPrepareAndEnqueue;
+    db.characters = origDbCharacters;
     useCaseService.walletService = origWalletService;
     useCaseService.billingRuntime = origBillingRuntime;
     useCaseService.jobQueueService = origJobQueueService;
@@ -114,56 +175,60 @@ describe("F2.4-b2 — Controller Error-Path Boundary Tests (Image & Video)", () 
   }
 
   // ───────────────────────────────────────────────────────────────────────────
-  // IMAGE CONTROLLER TESTS
+  // 1. IMAGE CONTROLLER
   // ───────────────────────────────────────────────────────────────────────────
 
-  describe("imageController error paths", () => {
-    it("TEST 1: error after placeholders created but before enqueue -> all placeholders failed, no hold reserved, clean 500, no stuck processing rows", async () => {
-      // Simulate crash in prepareAndEnqueue before any hold is reserved
-      useCaseService.prepareAndEnqueue = async () => {
-        const err = new Error("Database deadlock before credit reservation");
+  describe("imageController", () => {
+    it("TEST 1 (Image path a): error before enqueue (wallet DB fails on reserve) -> all placeholders failed, 0 releases, clean 500, no stuck processing rows", async () => {
+      const wallet = new TrackingWalletService();
+      await wallet.setBalance("user-ctrl-test", 100);
+      // Simulate database crash during reserve
+      wallet.reserve = async () => {
+        const err = new Error("Wallet DB connection timeout during reserve");
         err.statusCode = 500;
         throw err;
       };
 
+      const billingRuntime = new UseCaseBillingRuntime({ walletService: wallet });
+      useCaseService.walletService = wallet;
+      useCaseService.billingRuntime = billingRuntime;
+
       const req = {
         user: { id: "user-ctrl-test" },
-        body: {
-          prompt: "A beautiful mountain lake",
-          model: "nanobana_2",
-          project_id: "proj-ctrl-1",
-        },
+        body: { prompt: "A beautiful mountain lake", model: "nanobana_2", project_id: "proj-ctrl-1" },
       };
       const res = makeMockRes();
 
       await imageController.generateImage(req, res);
 
-      // 1. Client receives clean error response
+      // Clean 500 response
       assert.strictEqual(res.getStatusCode(), 500);
       const data = res.getResponseData();
       assert.strictEqual(data.ok, false);
-      assert.match(data.message, /failed to generate image/i);
+      assert.strictEqual(data.code, "INTERNAL_ERROR");
 
-      // 2. Placeholders were created and then marked failed
+      // All placeholders marked failed
       assert.ok(mediaRows.size > 0, "Placeholders must have been created");
       for (const [id, row] of mediaRows) {
-        assert.strictEqual(row.status, "failed", `Media placeholder "${id}" must be marked failed`);
-        assert.match(row.error_message, /Database deadlock/i);
+        assert.strictEqual(row.status, "failed");
+        assert.match(row.error_message, /Wallet DB connection timeout/i);
       }
 
-      // 3. ZERO stuck processing rows
+      // No hold was reserved, so 0 release/rollback calls
+      assert.strictEqual(wallet.totalRollbacksAndReleases, 0, "0 releases when reserve fails");
+
+      // ZERO stuck processing rows
       const stuckRows = Array.from(mediaRows.values()).filter((m) => m.status === "processing");
-      assert.strictEqual(stuckRows.length, 0, "Must be zero stuck processing rows");
+      assert.strictEqual(stuckRows.length, 0, "Zero stuck processing rows");
     });
 
-    it("TEST 2: enqueue dispatch fails (QUEUE_DISPATCH_FAILED) -> all placeholders failed, hold released exactly once, clean 503, no stuck processing rows", async () => {
-      const wallet = new InMemoryWalletService();
+    it("TEST 2 (Image path b): enqueue dispatch fails (QUEUE_DISPATCH_FAILED) -> all placeholders failed, hold released exactly once, clean 503, no stuck processing rows", async () => {
+      const wallet = new TrackingWalletService();
       await wallet.setBalance("user-ctrl-test", 100);
       const billingRuntime = new UseCaseBillingRuntime({ walletService: wallet });
 
       useCaseService.walletService = wallet;
       useCaseService.billingRuntime = billingRuntime;
-      // Fail the job queue dispatch
       useCaseService.jobQueueService = {
         addUseCaseJob: async () => {
           throw new Error("Redis cluster failover in progress");
@@ -172,133 +237,271 @@ describe("F2.4-b2 — Controller Error-Path Boundary Tests (Image & Video)", () 
 
       const req = {
         user: { id: "user-ctrl-test" },
-        body: {
-          prompt: "A futuristic skyline",
-          model: "nanobana_2",
-          project_id: "proj-ctrl-2",
-        },
+        body: { prompt: "A futuristic skyline", model: "nanobana_2", project_id: "proj-ctrl-1" },
       };
       const res = makeMockRes();
 
       await imageController.generateImage(req, res);
 
-      // 1. Client receives HTTP 503 with QUEUE_DISPATCH_FAILED
       assert.strictEqual(res.getStatusCode(), 503);
       const data = res.getResponseData();
       assert.strictEqual(data.ok, false);
       assert.strictEqual(data.code, "QUEUE_DISPATCH_FAILED");
 
-      // 2. All media placeholders marked failed
-      assert.ok(mediaRows.size > 0, "Placeholders must have been created");
+      assert.ok(mediaRows.size > 0);
       for (const [id, row] of mediaRows) {
-        assert.strictEqual(row.status, "failed", `Media "${id}" must be marked failed`);
+        assert.strictEqual(row.status, "failed");
       }
 
-      // 3. Billing hold was released exactly once (not stuck held)
-      const reservations = Array.from(wallet.reservations.values());
-      assert.strictEqual(reservations.length, 1, "Exactly one reservation created");
-      assert.ok(
-        reservations[0].status === "released" || reservations[0].status === "rolled_back",
-        `Reservation must be released/rolled_back, got: ${reservations[0].status}`
-      );
+      // Proves released EXACTLY ONCE
+      assert.strictEqual(wallet.reserveCalls, 1, "Reserved exactly once");
+      assert.strictEqual(wallet.totalRollbacksAndReleases, 1, "Hold must be released/rolled back EXACTLY ONCE");
 
-      // 4. ZERO stuck processing rows
       const stuckRows = Array.from(mediaRows.values()).filter((m) => m.status === "processing");
-      assert.strictEqual(stuckRows.length, 0, "Must be zero stuck processing rows");
+      assert.strictEqual(stuckRows.length, 0, "Zero stuck processing rows");
     });
   });
 
   // ───────────────────────────────────────────────────────────────────────────
-  // VIDEO CONTROLLER TESTS
+  // 2. VIDEO CONTROLLER
   // ───────────────────────────────────────────────────────────────────────────
 
-  describe("videoController error paths", () => {
-    it("TEST 3: error after placeholders created but before enqueue -> all placeholders failed, no hold reserved, clean 500, no stuck processing rows", async () => {
-      useCaseService.prepareAndEnqueue = async () => {
-        const err = new Error("Downstream connection timeout before enqueue");
+  describe("videoController", () => {
+    it("TEST 3 (Video path a): error before enqueue (wallet DB fails on reserve) -> all placeholders failed, 0 releases, clean 500, no stuck processing rows", async () => {
+      const wallet = new TrackingWalletService();
+      await wallet.setBalance("user-ctrl-test", 100);
+      wallet.reserve = async () => {
+        const err = new Error("Wallet DB deadlocked during video reserve");
         err.statusCode = 500;
         throw err;
       };
 
+      const billingRuntime = new UseCaseBillingRuntime({ walletService: wallet });
+      useCaseService.walletService = wallet;
+      useCaseService.billingRuntime = billingRuntime;
+
       const req = {
         user: { id: "user-ctrl-test" },
-        body: {
-          prompt: "Waves crashing on the shore",
-          model: "wan_3_0",
-          project_id: "proj-ctrl-3",
-        },
+        body: { prompt: "Waves crashing on the shore", model: "wan_3_0", project_id: "proj-ctrl-1" },
       };
       const res = makeMockRes();
 
       await videoController.generateVideo(req, res);
 
-      // 1. Client receives clean error response
       assert.strictEqual(res.getStatusCode(), 500);
       const data = res.getResponseData();
       assert.strictEqual(data.ok, false);
-      assert.match(data.message, /failed to generate video/i);
+      assert.strictEqual(data.code, "INTERNAL_ERROR");
 
-      // 2. Placeholders were created and then marked failed
-      assert.ok(mediaRows.size > 0, "Placeholders must have been created");
+      assert.ok(mediaRows.size > 0);
       for (const [id, row] of mediaRows) {
-        assert.strictEqual(row.status, "failed", `Video placeholder "${id}" must be marked failed`);
-        assert.match(row.error_message, /Downstream connection timeout/i);
+        assert.strictEqual(row.status, "failed");
+        assert.match(row.error_message, /deadlocked/i);
       }
 
-      // 3. ZERO stuck processing rows
+      assert.strictEqual(wallet.totalRollbacksAndReleases, 0);
+
       const stuckRows = Array.from(mediaRows.values()).filter((m) => m.status === "processing");
-      assert.strictEqual(stuckRows.length, 0, "Must be zero stuck processing rows");
+      assert.strictEqual(stuckRows.length, 0);
     });
 
-    it("TEST 4: enqueue dispatch fails (QUEUE_DISPATCH_FAILED) -> all placeholders failed, hold released exactly once, clean 503, no stuck processing rows", async () => {
-      const wallet = new InMemoryWalletService();
+    it("TEST 4 (Video path b): enqueue dispatch fails (QUEUE_DISPATCH_FAILED) -> all placeholders failed, hold released exactly once, clean 503, no stuck processing rows", async () => {
+      const wallet = new TrackingWalletService();
       await wallet.setBalance("user-ctrl-test", 100);
       const billingRuntime = new UseCaseBillingRuntime({ walletService: wallet });
 
       useCaseService.walletService = wallet;
       useCaseService.billingRuntime = billingRuntime;
-      // Fail the job queue dispatch
       useCaseService.jobQueueService = {
         addUseCaseJob: async () => {
-          throw new Error("Redis OOM or unreachable");
+          throw new Error("Redis OOM or unreachable for video job");
         },
       };
 
       const req = {
         user: { id: "user-ctrl-test" },
-        body: {
-          prompt: "Drone flyover of snowy mountains",
-          model: "seedance_2_5",
-          project_id: "proj-ctrl-4",
-        },
+        body: { prompt: "Drone flyover of snowy mountains", model: "wan_3_0", project_id: "proj-ctrl-1" },
       };
       const res = makeMockRes();
 
       await videoController.generateVideo(req, res);
 
-      // 1. Client receives HTTP 503 with QUEUE_DISPATCH_FAILED
       assert.strictEqual(res.getStatusCode(), 503);
       const data = res.getResponseData();
       assert.strictEqual(data.ok, false);
       assert.strictEqual(data.code, "QUEUE_DISPATCH_FAILED");
 
-      // 2. All media placeholders marked failed
-      assert.ok(mediaRows.size > 0, "Placeholders must have been created");
+      assert.ok(mediaRows.size > 0);
       for (const [id, row] of mediaRows) {
-        assert.strictEqual(row.status, "failed", `Video media "${id}" must be marked failed`);
+        assert.strictEqual(row.status, "failed");
       }
 
-      // 3. Billing hold was released exactly once (not stuck held)
-      const reservations = Array.from(wallet.reservations.values());
-      assert.strictEqual(reservations.length, 1, "Exactly one reservation created");
-      assert.ok(
-        reservations[0].status === "released" || reservations[0].status === "rolled_back",
-        `Reservation must be released/rolled_back, got: ${reservations[0].status}`
-      );
+      assert.strictEqual(wallet.reserveCalls, 1);
+      assert.strictEqual(wallet.totalRollbacksAndReleases, 1, "Hold must be released/rolled back EXACTLY ONCE");
 
-      // 4. ZERO stuck processing rows
       const stuckRows = Array.from(mediaRows.values()).filter((m) => m.status === "processing");
-      assert.strictEqual(stuckRows.length, 0, "Must be zero stuck processing rows");
+      assert.strictEqual(stuckRows.length, 0);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 3. CHARACTER CONTROLLER — generateCharacterSheet (generate-sheet)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  describe("characterController — generateCharacterSheet", () => {
+    it("TEST 5 (generate-sheet path a): error before enqueue -> placeholder failed, 0 releases, clean 500, no stuck processing rows", async () => {
+      const wallet = new TrackingWalletService();
+      await wallet.setBalance("user-ctrl-test", 100);
+      wallet.reserve = async () => {
+        const err = new Error("Wallet DB error on character sheet reserve");
+        err.statusCode = 500;
+        throw err;
+      };
+
+      const billingRuntime = new UseCaseBillingRuntime({ walletService: wallet });
+      useCaseService.walletService = wallet;
+      useCaseService.billingRuntime = billingRuntime;
+
+      const req = {
+        user: { id: "user-ctrl-test" },
+        params: { characterId: "char-sheet-1" },
+        body: { prompt: "Three view turnaround of a cyber warrior", project_id: "proj-ctrl-1" },
+      };
+      const res = makeMockRes();
+
+      await characterController.generateCharacterSheet(req, res);
+
+      assert.strictEqual(res.getStatusCode(), 500);
+      const data = res.getResponseData();
+      assert.strictEqual(data.ok, false);
+
+      // Placeholder media row created for characterId must be marked failed
+      assert.ok(mediaRows.size > 0);
+      for (const [id, row] of mediaRows) {
+        assert.strictEqual(row.status, "failed");
+      }
+
+      assert.strictEqual(wallet.totalRollbacksAndReleases, 0);
+
+      const stuckRows = Array.from(mediaRows.values()).filter((m) => m.status === "processing");
+      assert.strictEqual(stuckRows.length, 0);
+    });
+
+    it("TEST 6 (generate-sheet path b): enqueue dispatch fails (QUEUE_DISPATCH_FAILED) -> placeholder failed, hold released exactly once, clean 503, no stuck processing rows", async () => {
+      const wallet = new TrackingWalletService();
+      await wallet.setBalance("user-ctrl-test", 100);
+      const billingRuntime = new UseCaseBillingRuntime({ walletService: wallet });
+
+      useCaseService.walletService = wallet;
+      useCaseService.billingRuntime = billingRuntime;
+      useCaseService.jobQueueService = {
+        addUseCaseJob: async () => {
+          throw new Error("Redis down during character sheet enqueue");
+        },
+      };
+
+      const req = {
+        user: { id: "user-ctrl-test" },
+        params: { characterId: "char-sheet-2" },
+        body: { prompt: "Three view turnaround of a cyber warrior", project_id: "proj-ctrl-1" },
+      };
+      const res = makeMockRes();
+
+      await characterController.generateCharacterSheet(req, res);
+
+      assert.strictEqual(res.getStatusCode(), 503);
+      const data = res.getResponseData();
+      assert.strictEqual(data.ok, false);
+
+      assert.ok(mediaRows.size > 0);
+      for (const [id, row] of mediaRows) {
+        assert.strictEqual(row.status, "failed");
+      }
+
+      assert.strictEqual(wallet.reserveCalls, 1);
+      assert.strictEqual(wallet.totalRollbacksAndReleases, 1, "Hold must be released/rolled back EXACTLY ONCE");
+
+      const stuckRows = Array.from(mediaRows.values()).filter((m) => m.status === "processing");
+      assert.strictEqual(stuckRows.length, 0);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 4. CHARACTER CONTROLLER — createCharacter (AI sheet creation path)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  describe("characterController — createCharacter (AI sheet path)", () => {
+    it("TEST 7 (createCharacter path a): error before enqueue -> placeholder failed, 0 releases, clean 500, no stuck processing rows", async () => {
+      const wallet = new TrackingWalletService();
+      await wallet.setBalance("user-ctrl-test", 100);
+      wallet.reserve = async () => {
+        const err = new Error("Wallet DB error on character creation reserve");
+        err.statusCode = 500;
+        throw err;
+      };
+
+      const billingRuntime = new UseCaseBillingRuntime({ walletService: wallet });
+      useCaseService.walletService = wallet;
+      useCaseService.billingRuntime = billingRuntime;
+
+      const req = {
+        user: { id: "user-ctrl-test" },
+        body: { name: "Aria", prompt: "A futuristic archer", project_id: "proj-ctrl-1" },
+      };
+      const res = makeMockRes();
+
+      await characterController.createCharacter(req, res);
+
+      assert.strictEqual(res.getStatusCode(), 500);
+      const data = res.getResponseData();
+      assert.strictEqual(data.ok, false);
+
+      assert.ok(mediaRows.size > 0);
+      for (const [id, row] of mediaRows) {
+        assert.strictEqual(row.status, "failed");
+      }
+
+      assert.strictEqual(wallet.totalRollbacksAndReleases, 0);
+
+      const stuckRows = Array.from(mediaRows.values()).filter((m) => m.status === "processing");
+      assert.strictEqual(stuckRows.length, 0);
+    });
+
+    it("TEST 8 (createCharacter path b): enqueue dispatch fails (QUEUE_DISPATCH_FAILED) -> placeholder failed, hold released exactly once, clean 503, no stuck processing rows", async () => {
+      const wallet = new TrackingWalletService();
+      await wallet.setBalance("user-ctrl-test", 100);
+      const billingRuntime = new UseCaseBillingRuntime({ walletService: wallet });
+
+      useCaseService.walletService = wallet;
+      useCaseService.billingRuntime = billingRuntime;
+      useCaseService.jobQueueService = {
+        addUseCaseJob: async () => {
+          throw new Error("Redis queue down during character create");
+        },
+      };
+
+      const req = {
+        user: { id: "user-ctrl-test" },
+        body: { name: "Zephyr", prompt: "A wind elemental mage", project_id: "proj-ctrl-1" },
+      };
+      const res = makeMockRes();
+
+      await characterController.createCharacter(req, res);
+
+      assert.strictEqual(res.getStatusCode(), 503);
+      const data = res.getResponseData();
+      assert.strictEqual(data.ok, false);
+
+      assert.ok(mediaRows.size > 0);
+      for (const [id, row] of mediaRows) {
+        assert.strictEqual(row.status, "failed");
+      }
+
+      assert.strictEqual(wallet.reserveCalls, 1);
+      assert.strictEqual(wallet.totalRollbacksAndReleases, 1, "Hold must be released/rolled back EXACTLY ONCE");
+
+      const stuckRows = Array.from(mediaRows.values()).filter((m) => m.status === "processing");
+      assert.strictEqual(stuckRows.length, 0);
     });
   });
 });

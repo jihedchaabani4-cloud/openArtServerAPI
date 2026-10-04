@@ -5,8 +5,9 @@ import { loadRegistries } from "../v2/registry/registryLoader.js";
 import { UseCaseBillingRuntime } from "../v2/runtime/useCaseBillingRuntime.js";
 import { calculateWorkflowBillingPlan } from "../use-cases/workflowBillingPlan.js";
 import { ErrorSystem } from "../runtime/ErrorSystem.js";
-import { jobQueueService as defaultJobQueueService } from "./jobQueueService.js";
+import { jobQueueService as defaultJobQueueService, QueueDispatchError } from "./jobQueueService.js";
 import { createLogger, LogEvents } from "../infrastructure/logging/index.js";
+
 
 const useCaseLogger = createLogger("usecase");
 
@@ -49,11 +50,16 @@ export class UseCaseService {
     pricingService = null,
     jobQueueService = null,
     billingRuntime = null,
+    // db is injected for workflow-level failure cleanup ONLY.
+    // Node-level failures are owned by nodeExecutor.js which imports db directly.
+    // UseCaseService must NOT own db for general business logic — only cleanup.
+    db = null,
   } = {}) {
     this.walletService = walletService;
     this.pricingService = pricingService;
     this.jobQueueService = jobQueueService || defaultJobQueueService;
     this.billingRuntime = billingRuntime || new UseCaseBillingRuntime({ walletService });
+    this.db = db;
   }
 
   /**
@@ -96,27 +102,53 @@ export class UseCaseService {
       userId,
       useCaseId,
       workflowRunId: finalExecutionId,
+      workflowId: input.workflow_id || executionId || null,
+      mediaId: input.media_id || input.mediaId || null,
       totalCredits: billingPlan.totalCredits,
       costBreakdown: billingPlan,
       idempotencyKey: finalIdempotencyKey,
     });
 
+
     const queue = jobQueueService || this.jobQueueService;
-    const job = await queue.addUseCaseJob({
-      useCaseId,
-      input: {
-        ...input,
-        billing_hold_id: reserve.billingHoldId,
-        billing_status: reserve.billingStatus,
-        reserved_credits: reserve.reservedCredits,
-      },
-      userId,
-      executionId: finalExecutionId,
-      workflowRunId: finalExecutionId,
-      billingHoldId: reserve.billingHoldId,
-      idempotencyKey: finalIdempotencyKey,
-      traceId: finalTraceId,
-    });
+
+    let job;
+    try {
+      job = await queue.addUseCaseJob({
+        useCaseId,
+        input: {
+          ...input,
+          billing_hold_id: reserve.billingHoldId,
+          billing_status: reserve.billingStatus,
+          reserved_credits: reserve.reservedCredits,
+        },
+        userId,
+        executionId: finalExecutionId,
+        workflowRunId: finalExecutionId,
+        billingHoldId: reserve.billingHoldId,
+        idempotencyKey: finalIdempotencyKey,
+        traceId: finalTraceId,
+      });
+    } catch (dispatchErr) {
+      // JobQueueService exhausted all its retries — this is now a business concern.
+      // Roll back the billing hold so the user doesn't lose credits.
+      useCaseLogger.error(
+        { event: "QUEUE_DISPATCH_FAILED", useCaseId, billingHoldId: reserve.billingHoldId, err: dispatchErr.message },
+        `UseCase "${useCaseId}" queue dispatch failed. Rolling back billing hold ${reserve.billingHoldId}.`
+      );
+      await this.billingRuntime.rollbackUseCase(reserve.billingHoldId, {
+        failedMessage: dispatchErr.message,
+        errorCategory: "QUEUE_DISPATCH_FAILED",
+      }).catch(() => {}); // best-effort — never block the error propagation
+
+      // Re-throw as a clean service-level error (Controller will return HTTP 503)
+      const err = new Error("Generation service temporarily unavailable. Please try again.");
+      err.statusCode = 503;
+      err.code = "QUEUE_DISPATCH_FAILED";
+      throw err;
+    }
+
+
 
     useCaseLogger.info(
       {
@@ -185,6 +217,14 @@ export class UseCaseService {
 
     try {
       const result = await this.runUseCase({ useCaseId, input, userId });
+      if (!result || result.status !== "completed") {
+        const err = new Error(`UseCase "${useCaseId}" did not complete successfully (status: ${result?.status || "unknown"})`);
+        err.code = "WORKFLOW_INCOMPLETE";
+        err.category = "SERVER_FAULT";
+        err.billingBreakdown = result?.billingBreakdown || [];
+        throw err;
+      }
+
       if (guard.paid) {
         await this.settlePreparedBilling(guard.billingHoldId, {
           node_breakdown: result?.billingBreakdown || [],
@@ -220,17 +260,19 @@ export class UseCaseService {
         }).catch(() => {});
       }
 
+      // ── Failure cleanup: mark any processing/pending media as failed ──────────
       if (input?.workflow_id && this.db?.media) {
-        await this.db.media.findByWorkflow(input.workflow_id).then((list) => {
-          const p = list?.find((m) => m.status === "processing" || m.status === "pending");
-          if (p?.id) {
-            return this.db.media.updateMedia(p.id, {
+        await this.db.media.findByWorkflow(input.workflow_id).then(async (list) => {
+          const pendings = list?.filter((m) => m.status === "processing" || m.status === "pending") || [];
+          for (const p of pendings) {
+            await this.db.media.updateMedia(p.id, {
               status: "failed",
-              error_message: report.user.message,
+              error_message: report.user.message || err.message,
             }).catch(() => {});
           }
         }).catch(() => {});
       }
+
       useCaseLogger.error({
         event: LogEvents.USECASE_FAILED,
         useCaseId,

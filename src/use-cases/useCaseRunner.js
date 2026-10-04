@@ -67,12 +67,12 @@ export async function run({
   useCaseLogger.debug({ workflowRef: useCase.workflowRef }, "Dispatching to V2 Engine...");
   const runResult = await startWorkflowRun(plan, runtimeInput);
 
-  if (runResult.status === "failed") {
-    useCaseLogger.error({ runId: runResult.run_id, err: runResult.error }, `Workflow Run ${runResult.run_id} failed: ${runResult.error?.message || "Unknown error"}`);
-    const err = new Error(runResult.error?.message || `Workflow "${useCase.workflowRef}" failed during execution`);
-    err.code = runResult.error?.code || "WORKFLOW_FAILED";
+  if (runResult.status !== "completed") {
+    useCaseLogger.error({ runId: runResult.run_id, err: runResult.error, status: runResult.status }, `Workflow Run ${runResult.run_id} failed with status "${runResult.status}": ${runResult.error?.message || "Incomplete execution"}`);
+    const err = new Error(runResult.error?.message || `Workflow "${useCase.workflowRef}" failed with status: ${runResult.status}`);
+    err.code = runResult.error?.code || (runResult.status === "failed" ? "WORKFLOW_FAILED" : "WORKFLOW_INCOMPLETE");
     err.category = runResult.error?.category || "SERVER_FAULT";
-    err.userMessage = runResult.error?.message;
+    err.userMessage = runResult.error?.message || `Execution did not complete (status: ${runResult.status})`;
     err.nodeId = runResult.error?.nodeId || null;
     err.retryable = runResult.error?.retryable ?? false;
     err.executionId = runResult.run_id;

@@ -13,6 +13,7 @@ const workflowLogger = createLogger("workflow");
 const runRepo = new RunRepository();
 const PROVIDER_BACKED_NODE_TYPES = new Set([
   "image-generation",
+  "video-generation",
   "llm",
 ]);
 
@@ -102,10 +103,27 @@ export function estimateNodeBillingAmount(nodeConfig, resolvedInputs = {}) {
     throw new Error(`[Billing] Missing required model for node "${nodeConfig?.id || nodeType}"`);
   }
 
-  const inputsForBilling = { ...resolvedInputs, model };
-  if (isLLM && !inputsForBilling.messages) {
+  let inputsForBilling;
+  if (isLLM) {
     const textPrompt = resolvedInputs.userPrompt || resolvedInputs.prompt || "Default prompt";
-    inputsForBilling.messages = [{ role: "user", content: textPrompt }];
+    inputsForBilling = {
+      model,
+      modelKey: model,
+      messages: resolvedInputs.messages || [{ role: "user", content: textPrompt }],
+      prompt: textPrompt,
+      ...(resolvedInputs.temperature !== undefined ? { temperature: resolvedInputs.temperature } : {}),
+      ...(resolvedInputs.system_prompt || resolvedInputs.systemPromptOverride ? { system_prompt: resolvedInputs.system_prompt || resolvedInputs.systemPromptOverride } : {}),
+    };
+  } else {
+    const params = (resolvedInputs.parameters && typeof resolvedInputs.parameters === "object")
+      ? resolvedInputs.parameters
+      : {};
+    inputsForBilling = {
+      ...params,
+      model,
+      modelKey: model,
+      ...(resolvedInputs.prompt !== undefined ? { prompt: resolvedInputs.prompt } : {}),
+    };
   }
 
   // Model-First: pass (model, semanticInput) — no explicit operation.
@@ -190,51 +208,64 @@ export async function startWorkflowRun(plan, runtimeInput, runId = null) {
   const billing = new BillingAccumulator();
   activeAccumulators.set(finalRunId, billing);
 
-  // Create workflow run entry in DB
-  await runRepo.createRun({
-    run_id: finalRunId,
-    workflow_id: plan.workflow_id,
-    workflow_version: plan.workflow_version,
-    user_id: runtimeInput.userId || null,
-    status: "pending",
-    input: runtimeInput,
-    execution_plan: plan
-  });
-
-  // Initialize node run entries in DB
-  for (const node of plan.nodes) {
-    await runRepo.createNodeRun({
-      run_id: finalRunId,
-      node_id: node.id,
-      node_type: node.type,
-      status: "pending",
-      attempt: 1
-    });
-  }
-
-  // Record start event
-  if (eventRecorder) {
-    eventRecorder.record({
-      executionId: finalRunId,
-      traceId: finalRunId,
-      operation: "workflow.start",
-      status: "success",
-      metadata: { workflowId: plan.workflow_id }
-    });
-  }
-
-  workflowLogger.info({
-    runId: finalRunId,
-    workflowId: plan.workflow_id,
-    durationMs: 0,
-    event: LogEvents.WORKFLOW_STARTED,
-  }, `Initialized workflow run ${finalRunId} for ${plan.workflow_id}`);
-
-  // Execute workflow orchestration across nodes
   try {
+    // Create workflow run entry in DB
+    await runRepo.createRun({
+      run_id: finalRunId,
+      workflow_id: plan.workflow_id,
+      workflow_version: plan.workflow_version,
+      user_id: runtimeInput.userId || null,
+      status: "pending",
+      input: runtimeInput,
+      execution_plan: plan
+    });
+
+    // Initialize node run entries in DB
+    for (const node of plan.nodes || []) {
+      await runRepo.createNodeRun({
+        run_id: finalRunId,
+        node_id: node.id,
+        node_type: node.type,
+        status: "pending",
+        attempt: 1
+      });
+    }
+
+    // Record start event
+    if (eventRecorder) {
+      eventRecorder.record({
+        executionId: finalRunId,
+        traceId: finalRunId,
+        operation: "workflow.start",
+        status: "success",
+        metadata: { workflowId: plan.workflow_id }
+      });
+    }
+
+    workflowLogger.info({
+      runId: finalRunId,
+      workflowId: plan.workflow_id,
+      durationMs: 0,
+      event: LogEvents.WORKFLOW_STARTED,
+    }, `Initialized workflow run ${finalRunId} for ${plan.workflow_id}`);
+
+    // Execute workflow orchestration across nodes
     await executeOrchestration(finalRunId);
   } catch (err) {
     workflowLogger.error({ runId: finalRunId, err, event: LogEvents.WORKFLOW_FAILED }, `Execution error for run ${finalRunId}: ${err.message}`);
+    const normalizedErr = {
+      message: err.message || "Workflow orchestration failed",
+      code: err.code || "ORCHESTRATION_ERROR",
+      category: err.category || "SERVER_FAULT",
+      retryable: err.retryable ?? false,
+    };
+    await runRepo.updateRun(finalRunId, {
+      status: "failed",
+      error: normalizedErr,
+      completed_at: new Date().toISOString(),
+    }).catch(() => {});
+    activeAccumulators.delete(finalRunId);
+    throw err;
   }
 
   const finalRun = await runRepo.getRun(finalRunId);

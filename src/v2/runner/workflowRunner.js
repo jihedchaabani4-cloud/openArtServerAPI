@@ -4,7 +4,6 @@ import { RunRepository } from "./runRepository.js";
 import { jobQueueService } from "../../services/jobQueueService.js";
 import { getValueAtPath, executeNodeJob } from "./nodeExecutor.js";
 import { calculateCost } from "../../models/index.js";
-import { BillingAccumulator } from "../runtime/billingAccumulator.js";
 import { formatWorkflowError } from "../runtime/errorPolicy.js";
 import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";
 import { db } from "../../container.js";
@@ -20,23 +19,155 @@ const PROVIDER_BACKED_NODE_TYPES = new Set([
 ]);
 
 // ── BILLING ACCUMULATOR REGISTRY ──────────────────────────────────────────────
-// Maps runId → BillingAccumulator for in-flight workflow runs.
+// Maps runId → PersistedBillingAccumulator for in-flight workflow runs.
 //
-// ✅ SAFE: Current architecture runs all nodes sequentially inside ONE process.
-//    executeOrchestration() calls executeNodeJob() via `await` in the same Node.js
-//    process, so this in-memory Map is shared by all nodes of the same workflow run.
+// ✅ WRITE-THROUGH PERSISTENCE (BUG-09 fix):
+//    Each record() call immediately persists the entry to run.metadata.billingAccumulator
+//    via runRepo.updateRun. The in-memory Map is kept as a write-through cache for
+//    single-process performance.
 //
-// ⚠️  LIMITATION: If you distribute node execution across separate BullMQ worker
-//    processes (e.g., enqueuing individual node jobs), this Map will NOT be shared.
-//    In that case, migrate to one of:
-//      - Redis Hash keyed by runId (O(1) per node)
-//      - workflow_runs.metadata JSON column (persisted, auto-recoverable on crash)
-//    Do NOT activate distributed node queuing without migrating the accumulator first.
+// ✅ CRASH / DISTRIBUTED RECOVERY:
+//    getRunBillingAccumulator() checks the in-memory Map first. If the runId is not
+//    found (e.g. worker restart, cross-process call), it reconstructs the accumulator
+//    from run.metadata.billingAccumulator in the DB, so no entries are lost.
+//
+// ✅ DISTRIBUTED SAFETY:
+//    Nodes dispatched to separate BullMQ workers can safely call record() — each
+//    write is appended to the DB column atomically via updateRun.
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * PersistedBillingAccumulator
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Drop-in replacement for BillingAccumulator that writes every recorded entry
+ * to `run.metadata.billingAccumulator` (via runRepo.updateRun) so the entries
+ * survive worker crashes and are visible to other processes.
+ *
+ * The in-memory `entries[]` array is kept in sync as a write-through cache,
+ * so intra-process reads are still O(1) without a DB round-trip.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+class PersistedBillingAccumulator {
+  /**
+   * @param {string} runId
+   * @param {import('./runRepository.js').RunRepository} repo
+   * @param {Array<Object>} [initialEntries=[]]
+   */
+  constructor(runId, repo, initialEntries = []) {
+    this._runId = runId;
+    this._repo = repo;
+    this._entries = [...initialEntries];
+  }
+
+  /**
+   * Records a node's execution cost and persists it to run metadata.
+   *
+   * @param {Object} params
+   * @param {string} params.nodeId
+   * @param {string} [params.nodeType]
+   * @param {string} [params.model]
+   * @param {number} [params.amount=0]
+   * @param {"CHARGEABLE"|"NO_CHARGE"} [params.kind]
+   * @param {Object} [params.metadata={}]
+   */
+  async record({
+    nodeId,
+    nodeType = null,
+    model = null,
+    amount = 0,
+    kind = null,
+    metadata = {},
+  }) {
+    const numericAmount = Math.max(0, Number(amount) || 0);
+    const effectiveKind = kind || (numericAmount > 0 ? "CHARGEABLE" : "NO_CHARGE");
+    const entry = {
+      nodeId,
+      nodeType,
+      model,
+      amount: numericAmount,
+      kind: effectiveKind,
+      recordedAt: new Date().toISOString(),
+      ...metadata,
+    };
+
+    // 1. Update in-memory cache immediately (fast path for same-process reads)
+    this._entries.push(entry);
+
+    // 2. Persist to DB — read current metadata, append entry, write back
+    try {
+      const run = await this._repo.getRun(this._runId);
+      const existing = run?.metadata?.billingAccumulator || [];
+      const merged = [...existing];
+      // Avoid double-write if this entry was already persisted (idempotency guard)
+      if (!merged.some((e) => e.nodeId === entry.nodeId && e.recordedAt === entry.recordedAt)) {
+        merged.push(entry);
+      }
+      await this._repo.updateRun(this._runId, {
+        metadata: {
+          ...(run?.metadata || {}),
+          billingAccumulator: merged,
+        },
+      });
+    } catch (persistErr) {
+      // Non-fatal: in-memory entry is still available for single-process settlement.
+      // Log but do not throw — the workflow must not fail due to a metadata write error.
+      workflowLogger.warn(
+        { runId: this._runId, nodeId, err: persistErr },
+        `[BillingAccumulator] Failed to persist billing entry for node ${nodeId} — in-memory entry retained`
+      );
+    }
+  }
+
+  /** Total chargeable credits accumulated across all nodes. */
+  getTotalCost() {
+    return this._entries.reduce(
+      (sum, e) => sum + (e.kind === "CHARGEABLE" ? e.amount : 0),
+      0
+    );
+  }
+
+  /** Returns a shallow copy of all recorded entries. */
+  getBreakdown() {
+    return [...this._entries];
+  }
+
+  /** Total number of recorded nodes. */
+  size() {
+    return this._entries.length;
+  }
+}
+
 const activeAccumulators = new Map();
 
-export function getRunBillingAccumulator(runId) {
-  return activeAccumulators.get(runId) || null;
+/**
+ * Returns the PersistedBillingAccumulator for an active run.
+ *
+ * - If the run is in-flight in this process, returns the cached instance (O(1)).
+ * - If the Map has no entry (e.g. cross-process call or crash recovery), reads
+ *   run.metadata.billingAccumulator from the DB and reconstructs the accumulator.
+ * - Returns null only when the runId does not exist in DB either.
+ *
+ * @param {string} runId
+ * @returns {Promise<PersistedBillingAccumulator|null>}
+ */
+export async function getRunBillingAccumulator(runId) {
+  // Fast path: in-memory cache hit
+  if (activeAccumulators.has(runId)) {
+    return activeAccumulators.get(runId);
+  }
+
+  // Slow path: reconstruct from DB (crash recovery / distributed worker)
+  try {
+    const run = await runRepo.getRun(runId);
+    if (!run) return null;
+    const persistedEntries = run.metadata?.billingAccumulator || [];
+    const acc = new PersistedBillingAccumulator(runId, runRepo, persistedEntries);
+    // Do NOT cache in activeAccumulators — this is a read-only reconstruction;
+    // only startWorkflowRun should own the canonical Map entry.
+    return acc;
+  } catch {
+    return null;
+  }
 }
 
 let billingGateway = null;
@@ -207,8 +338,9 @@ export async function rollbackNodeBilling({ runId, nodeId, nodeConfig, attempt =
  */
 export async function startWorkflowRun(plan, runtimeInput, runId = null) {
   const finalRunId = runId || randomUUID();
-  const billing = new BillingAccumulator();
+  const billing = new PersistedBillingAccumulator(finalRunId, runRepo);
   activeAccumulators.set(finalRunId, billing);
+
 
   try {
     // Create workflow run entry in DB

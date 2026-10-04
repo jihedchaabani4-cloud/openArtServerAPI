@@ -232,7 +232,7 @@ export async function executeNodeJob(runId, nodeId) {
     }
 
     // 5. Invoke node execution
-    const billing = getRunBillingAccumulator(runId);
+    const billing = await getRunBillingAccumulator(runId);
     const ctx = {
       runId,
       nodeId,
@@ -243,15 +243,16 @@ export async function executeNodeJob(runId, nodeId) {
     };
 
     if (isCoveredByUseCase) {
-      // 🚀 IN-MEMORY BILLING ACCUMULATOR: Zero wallet touches during UseCase execution
+      // 🚀 PERSISTED BILLING ACCUMULATOR: Zero wallet touches during UseCase execution
       if (isProviderBackedNodeType(nodeConfig?.type)) {
         const nodeCost = estimateNodeBillingAmount(nodeConfig, resolvedInputs);
-        ctx.billing?.record({
+        await ctx.billing?.record({
           nodeId,
           nodeType: nodeConfig.type,
           model: resolvedInputs.model,
           amount: nodeCost,
         });
+
       }
     } else {
       nodeLogger.debug({ nodeId }, `Reserving billing & preparing placeholders for Node "${nodeId}"`);

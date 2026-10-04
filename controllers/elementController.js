@@ -225,7 +225,22 @@ export async function analyzeElement(req, res) {
 
     try {
         const { projectId, workflowId, imageUrls = [], elementName, elementType } = req.body;
-        const result = await elementService.analyzeElement({ projectId, workflowId, imageUrls, elementName, elementType });
+        const userId = req.user?.id;
+        if (userId && projectId) {
+            await assertOwns("project", projectId, userId);
+        }
+        if (userId && workflowId) {
+            await assertOwns("workflow", workflowId, userId);
+        }
+
+        const result = await elementService.analyzeElement({
+            projectId,
+            workflowId,
+            imageUrls,
+            elementName,
+            elementType,
+            userId,
+        });
 
         logOk(traceId, op, start);
         return res.json({ status: "success", ...result });

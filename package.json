@@ -24,7 +24,7 @@
         "#container.js": "./src/container.js"
     },
     "scripts": {
-        "test": "node --test tests/boundary/modelsBoundary.test.js tests/boundary/apiRoutingBoundary.test.js tests/boundary/rateLimitBoundary.test.js tests/boundary/reaperReconciliationBoundary.test.js tests/boundary/promptOptimizationBoundary.test.js tests/boundary/projectOwnershipBoundary.test.js tests/boundary/characterAndElementOwnershipBoundary.test.js tests/boundary/referenceAndMediaOwnershipBoundary.test.js tests/boundary/v2WorkflowRunBoundary.test.js tests/boundary/ssrfSourcePolicyBoundary.test.js",
+        "test": "node --test tests/boundary/modelsBoundary.test.js tests/boundary/apiRoutingBoundary.test.js tests/boundary/rateLimitBoundary.test.js tests/boundary/reaperReconciliationBoundary.test.js tests/boundary/promptOptimizationBoundary.test.js tests/boundary/projectOwnershipBoundary.test.js tests/boundary/characterAndElementOwnershipBoundary.test.js tests/boundary/referenceAndMediaOwnershipBoundary.test.js tests/boundary/v2WorkflowRunBoundary.test.js tests/boundary/ssrfSourcePolicyBoundary.test.js tests/boundary/llmServiceNoChargeBoundary.test.js",
         "models:validate": "node scripts/validate-all-configs.js",
         "start": "node index.js",
         "start:worker": "node src/workers/worker.js",

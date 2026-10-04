@@ -100,6 +100,7 @@ function normalizeStructuredJSON(parsed, userPrompt = "") {
  */
 export async function executeLLMNode(resolvedInputs, ctx = {}) {
   const { nodeId = "llm", runId = "run-1" } = ctx;
+  const effectiveUserId = ctx.userId || resolvedInputs.userId || null;
 
   // ── 1. Safety & Boundary Check ─────────────────────────────────────────────
   const safe = NodeSafetyService.assertLLMInputs(resolvedInputs, nodeId);
@@ -145,6 +146,7 @@ export async function executeLLMNode(resolvedInputs, ctx = {}) {
       systemInstruction: systemPrompt,
       images,
       jsonMode,
+      userId: effectiveUserId,
       ...(model ? { model } : {}),
     });
   } catch (llmErr) {
@@ -183,6 +185,7 @@ export async function executeLLMNode(resolvedInputs, ctx = {}) {
         systemInstruction: reinforcedInstruction,
         images,
         jsonMode: true,
+        userId: effectiveUserId,
       });
 
       try {

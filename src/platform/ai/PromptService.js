@@ -8,27 +8,39 @@ export class PromptService {
         this.modelFamily = "gemini-3.1-flash-lite";
     }
 
-    async complete({ systemPrompt, userPrompt, temperature = 0.7, options = {} }) {
+    async complete({ systemPrompt, userPrompt, temperature = 0.7, userId = null, options = {} }) {
+        const resolvedUserId = userId || options.userId || null;
+        const callOptions = {
+            ...(resolvedUserId ? {} : { isInternal: true, reason: options.reason || "internal-prompt-optimization" }),
+            ...options,
+        };
         return llmService.generateText({
             prompt: userPrompt,
             systemInstruction: systemPrompt,
             temperature,
             model: this.modelFamily,
-            options,
+            userId: resolvedUserId,
+            options: callOptions,
         });
     }
 
-    async completeJSON({ systemPrompt, userPrompt, temperature = 0.7, options = {} }) {
+    async completeJSON({ systemPrompt, userPrompt, temperature = 0.7, userId = null, options = {} }) {
+        const resolvedUserId = userId || options.userId || null;
+        const callOptions = {
+            ...(resolvedUserId ? {} : { isInternal: true, reason: options.reason || "internal-prompt-optimization" }),
+            ...options,
+        };
         return llmService.generateJSON({
             prompt: userPrompt,
             systemInstruction: systemPrompt,
             temperature,
             model: this.modelFamily,
-            options,
+            userId: resolvedUserId,
+            options: callOptions,
         });
     }
 
-    async checkPrompt(prompt) {
+    async checkPrompt(prompt, options = {}) {
         const systemPrompt = `
             You are a Professional Image Prompt Moderator and Translator.
             
@@ -51,7 +63,17 @@ export class PromptService {
         const userPrompt = `Analyze and translate this prompt: "${prompt}"`;
 
         try {
-            const result = await this.completeJSON({ systemPrompt, userPrompt });
+            const checkOptions = {
+                isInternal: true,
+                reason: "internal-platform-moderation",
+                ...(options.options || options),
+            };
+            const result = await this.completeJSON({
+                systemPrompt,
+                userPrompt,
+                userId: options.userId || null,
+                options: checkOptions,
+            });
             return {
                 safe: result.is_safe,
                 reason: result.rejection_reason,
@@ -75,6 +97,10 @@ export class PromptService {
      *  5. Returns the improved prompt + metadata
      */
     async optimizePrompt(prompt, { mode = "image", style = "cinematic", userId = null } = {}) {
+        if (!userId) {
+            throw new Error("PromptService: authenticated userId is required for prompt optimization");
+        }
+
         if (!prompt?.trim()) return {
             optimized: prompt,
             originalLanguage: "en",
@@ -133,8 +159,8 @@ RULES:
 Translate the semantic meaning and enhance it as a professional AI generation prompt.`;
 
         try {
-            const options = userId ? { userId } : {};
-            const result = await this.completeJSON({ systemPrompt, userPrompt, temperature: 0.4, options });
+            const options = { userId };
+            const result = await this.completeJSON({ systemPrompt, userPrompt, temperature: 0.4, userId, options });
             const optimized = result.optimized_prompt || prompt;
 
             aiLogger.debug(

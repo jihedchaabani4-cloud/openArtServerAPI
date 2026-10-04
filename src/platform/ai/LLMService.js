@@ -12,8 +12,15 @@ import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";
 
 const logger = createLogger("llm");
 
+export const ALLOWED_INTERNAL_REASONS = Object.freeze([
+  "internal-platform-llm",
+  "internal-platform-moderation",
+  "internal-prompt-optimization",
+  "internal-system-test",
+]);
+
 export class LLMService {
-  constructor({ defaultModel = "gemini-3-flash" } = {}) {
+  constructor({ defaultModel = "gemini-3.1-flash-lite" } = {}) {
     this.defaultModel = defaultModel;
     logger.debug({ defaultModel: this.defaultModel }, `[LLMService] Initialized with default model "${this.defaultModel}"`);
   }
@@ -28,6 +35,7 @@ export class LLMService {
    * @param {boolean} [params.jsonMode=false] - Whether output should be parsed as JSON
    * @param {string} [params.model] - Model override (defaults to this.defaultModel)
    * @param {number} [params.temperature=0.4] - Sampling temperature
+   * @param {string} [params.userId] - Authenticated user identifier (mandatory unless explicit internal reason)
    * @param {Object} [params.options={}] - Extra runner options (e.g. sdkClient for testing)
    * @returns {Promise<{ raw: string, content: string, json?: object, model: string, durationMs: number }>}
    */
@@ -38,9 +46,23 @@ export class LLMService {
     jsonMode = false,
     model = this.defaultModel,
     temperature = 0.4,
+    userId = null,
     options = {},
   }) {
     const startTime = performance.now();
+
+    const resolvedUserId = userId || options.userId || null;
+    const isInternal = Boolean(options.internal || options.isInternal);
+    const internalReason = options.reason || null;
+
+    // Enforce billing identity: require userId unless caller provides an explicit, approved internal platform flag
+    if (!resolvedUserId) {
+      if (!isInternal || !ALLOWED_INTERNAL_REASONS.includes(internalReason)) {
+        throw new Error(
+          `LLMService: userId is required for charged LLM calls unless explicitly authorized with an approved internal platform reason (allowed reasons: ${ALLOWED_INTERNAL_REASONS.join(", ")}).`
+        );
+      }
+    }
 
     const fullPrompt = systemInstruction
       ? `${systemInstruction}\n\n${prompt}`
@@ -63,10 +85,26 @@ export class LLMService {
 
     let result;
     try {
-      const runOptions = {
-        ...(options.userId ? { userId: options.userId } : { noCharge: true, reason: options.reason || "internal-platform-llm" }),
-        ...options,
-      };
+      // Strip request-controlled and caller-supplied financial flags to prevent tampering
+      const {
+        noCharge: _ignoredNoCharge,
+        internal: _ignoredInternal,
+        isInternal: _ignoredIsInternal,
+        reason: _ignoredReason,
+        ...cleanOptions
+      } = options;
+
+      const runOptions = resolvedUserId
+        ? {
+            ...cleanOptions,
+            userId: resolvedUserId,
+            noCharge: false,
+          }
+        : {
+            ...cleanOptions,
+            noCharge: true,
+            reason: internalReason,
+          };
 
       result = await run(
         model,
@@ -124,13 +162,14 @@ export class LLMService {
   /**
    * Helper: Text generation
    */
-  async generateText({ prompt, systemInstruction = "", temperature = 0.7, model = this.defaultModel, options = {} }) {
+  async generateText({ prompt, systemInstruction = "", temperature = 0.7, model = this.defaultModel, userId = null, options = {} }) {
     logger.debug({ model, promptSnippet: prompt?.slice(0, 80) }, `[LLMService] generateText called`);
     const res = await this.generate({
       prompt,
       systemInstruction,
       temperature,
       model,
+      userId: userId || options.userId,
       options,
     });
     return res.content;
@@ -139,7 +178,7 @@ export class LLMService {
   /**
    * Helper: Structured JSON generation
    */
-  async generateJSON({ prompt, systemInstruction = "", temperature = 0.4, model = this.defaultModel, options = {} }) {
+  async generateJSON({ prompt, systemInstruction = "", temperature = 0.4, model = this.defaultModel, userId = null, options = {} }) {
     logger.debug({ model, promptSnippet: prompt?.slice(0, 80) }, `[LLMService] generateJSON called`);
     const res = await this.generate({
       prompt,
@@ -147,6 +186,7 @@ export class LLMService {
       jsonMode: true,
       temperature,
       model,
+      userId: userId || options.userId,
       options,
     });
     return res.json || this.parseJSON(res.raw);
@@ -155,7 +195,7 @@ export class LLMService {
   /**
    * Helper: Multimodal Vision analysis
    */
-  async analyzeVision({ images = [], prompt, systemInstruction = "", jsonMode = true, model = this.defaultModel, options = {} }) {
+  async analyzeVision({ images = [], prompt, systemInstruction = "", jsonMode = true, model = this.defaultModel, userId = null, options = {} }) {
     logger.info(
       { model, imagesCount: images.length, promptSnippet: prompt?.slice(0, 80) },
       `[LLMService] analyzeVision called for ${images.length} image(s)`
@@ -166,6 +206,7 @@ export class LLMService {
       images: images.slice(0, 6),
       jsonMode,
       model,
+      userId: userId || options.userId,
       options,
     });
   }

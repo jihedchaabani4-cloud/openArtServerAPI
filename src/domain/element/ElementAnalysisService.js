@@ -50,10 +50,10 @@ export class ElementAnalysisService {
    * Main entry point: Analyzes reference images using Vision AI (via LLMService),
    * updates element description and keywords in Supabase DB, and returns metadata.
    */
-  async analyzeElement({ projectId, workflowId, imageUrls = [], elementName, elementType }) {
+  async analyzeElement({ projectId, workflowId, imageUrls = [], elementName, elementType, userId = null }) {
     const startTime = Date.now();
 
-    console.log("[ElementAnalysisService] Starting vision analysis via LLMService for:", { projectId, workflowId, elementType });
+    console.log("[ElementAnalysisService] Starting vision analysis via LLMService for:", { projectId, workflowId, elementType, userId });
 
     // 1. Fetch images from DB if not provided in payload
     let resolvedUrls = Array.isArray(imageUrls) && imageUrls.length > 0 ? imageUrls : [];
@@ -72,7 +72,7 @@ export class ElementAnalysisService {
     }
 
     // 2. Perform Multimodal AI Vision LLM Analysis via LLMService
-    const { description, keywords } = await this.runVisionLLMAnalysis(resolvedUrls, resolvedMode);
+    const { description, keywords } = await this.runVisionLLMAnalysis(resolvedUrls, resolvedMode, userId);
 
     // 3. Directly update Supabase DB (workflow and element tables)
     if (workflowId) {
@@ -213,7 +213,7 @@ export class ElementAnalysisService {
   /**
    * Delegates Vision LLM analysis to general LLMService
    */
-  async runVisionLLMAnalysis(imageUrls, mode) {
+  async runVisionLLMAnalysis(imageUrls, mode, userId = null) {
     const systemInstructions = ELEMENT_TYPE_PROMPTS[mode] || DEFAULT_TYPE_PROMPT;
     const promptText = "Analyze the attached reference images and return the requested JSON object matching the schema.";
 
@@ -222,6 +222,7 @@ export class ElementAnalysisService {
       prompt: promptText,
       systemInstruction: systemInstructions,
       jsonMode: true,
+      userId,
     });
 
     const parsed = result.json || {};
@@ -234,7 +235,7 @@ export class ElementAnalysisService {
   /**
    * Directly updates Supabase DB workflow & element table metadata
    */
-  async persistElementMetadata(workflowId, { description, keywords }) {
+  async persistElementMetadata(workflowId, { description }) {
     try {
       console.log(`[ElementAnalysisService] Persisting metadata for workflowId="${workflowId}"...`);
 
@@ -253,7 +254,6 @@ export class ElementAnalysisService {
         const updatedMeta = {
           ...(wf.metadata || {}),
           description,
-          keywords,
         };
         const { error: updateWfErr } = await supabase
           .from("workflow")
@@ -269,7 +269,7 @@ export class ElementAnalysisService {
 
       // 2. Update element table
       if (elementRepository?.update) {
-        const updatedElement = await elementRepository.update(workflowId, { description, keywords });
+        const updatedElement = await elementRepository.update(workflowId, { description });
         console.log(`[ElementAnalysisService] ✅ Updated element table for id="${workflowId}":`, updatedElement?.id || "Done");
       }
     } catch (err) {

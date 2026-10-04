@@ -3,8 +3,15 @@ export class WorkflowBillingGateway {
     this.walletService = walletService;
   }
 
-  async reserve({ userId, amount = 0, referenceId, metadata = {} }) {
-    if (amount <= 0) {
+  async reserve({ userId, amount, referenceId, metadata = {} } = {}) {
+    if (typeof amount !== "number" || Number.isNaN(amount) || !Number.isFinite(amount) || amount < 0) {
+      const err = new Error(`Invalid billing amount: ${amount}. Amount must be a finite, non-negative number.`);
+      err.code = "PRICING_CONFIG_ERROR";
+      err.category = "SERVER_FAULT";
+      err.statusCode = 500;
+      throw err;
+    }
+    if (amount === 0) {
       return { kind: "NO_CHARGE", status: "ACTIVE", referenceId, amount: 0 };
     }
     if (!this.walletService) {

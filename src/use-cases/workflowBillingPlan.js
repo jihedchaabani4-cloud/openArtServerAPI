@@ -4,6 +4,7 @@ import {
 
 const BILLABLE_NODE_TYPES = new Set([
   "image-generation",
+  "video-generation",
   "llm",
 ]);
 
@@ -21,41 +22,62 @@ function resolveField(node, field, inputs = {}) {
 /**
  * Assembles the canonical semantic input for a billable node.
  *
- * The Models Management System infers the operation internally from the
- * semantic parameters present (e.g. input_image → edit, else → text_to_image).
- * No operation resolution is done here.
+ * Model-specific params (resolution, quality, etc.) now live in
+ * inputs.parameters (pass-through architecture). We look there first,
+ * then fall back to root-level inputs for backward compatibility.
  */
 function inputForNode(node, inputs = {}) {
-  const nodeModel = resolveField(node, "model", inputs);
+  const nodeModel    = resolveField(node, "model", inputs);
   const resolvedModel = nodeModel || inputs.model;
 
-  const isLLMNode = node.type === "llm";
-  const rawPrompt = inputs.prompt ?? resolveField(node, "prompt", inputs) ?? resolveField(node, "userPrompt", inputs);
-  const messages = isLLMNode
+  // Model-specific params live in inputs.parameters (new architecture)
+  const params = (inputs.parameters && typeof inputs.parameters === "object")
+    ? inputs.parameters
+    : {};
+
+  const isLLMNode  = node.type === "llm";
+  const rawPrompt  = inputs.prompt
+    ?? resolveField(node, "prompt",      inputs)
+    ?? resolveField(node, "userPrompt",  inputs);
+  const messages   = isLLMNode
     ? (inputs.messages || (rawPrompt ? [{ role: "user", content: rawPrompt }] : undefined))
     : inputs.messages;
 
-  const rawQuality = inputs.quality ?? resolveField(node, "quality", inputs);
-  const rawResolution = inputs.resolution ?? resolveField(node, "resolution", inputs);
-  const rawCount = inputs.count ?? resolveField(node, "count", inputs);
-  const rawImageUrl = inputs.image_url ?? inputs.source_url ?? inputs.image ?? resolveField(node, "image_url", inputs) ?? resolveField(node, "image", inputs);
+  if (isLLMNode) {
+    const llmInput = {
+      model: resolvedModel,
+      modelKey: resolvedModel,
+    };
+    if (messages !== undefined) llmInput.messages = messages;
+    if (rawPrompt !== undefined) llmInput.prompt = rawPrompt;
+    const sysPrompt = inputs.system_prompt ?? resolveField(node, "system_prompt", inputs);
+    if (sysPrompt !== undefined) llmInput.system_prompt = sysPrompt;
+    return llmInput;
+  }
 
+  // Pass-through architecture: model + caller parameters + prompt
   const nodeInput = {
-    ...inputs,
-    model: resolvedModel,
+    ...params,
+    model:    resolvedModel,
     modelKey: resolvedModel,
   };
 
-  if (messages !== undefined) nodeInput.messages = messages;
   if (rawPrompt !== undefined) nodeInput.prompt = rawPrompt;
-  if (rawQuality !== undefined) nodeInput.quality = rawQuality;
-  if (rawResolution !== undefined) nodeInput.resolution = rawResolution;
-  if (rawCount !== undefined) nodeInput.count = Number(rawCount);
-  // Pass image source through as input_image for provider route resolution
-  if (rawImageUrl !== undefined) nodeInput.input_image = rawImageUrl;
+
+  // Backward compatibility: only adopt root-level inputs if explicitly provided by caller
+  if (nodeInput.quality === undefined && inputs.quality !== undefined) nodeInput.quality = inputs.quality;
+  if (nodeInput.resolution === undefined && inputs.resolution !== undefined) nodeInput.resolution = inputs.resolution;
+  if (nodeInput.count === undefined && inputs.count !== undefined) nodeInput.count = Number(inputs.count);
+  if (nodeInput.input_image === undefined && (inputs.image_url || inputs.source_url || inputs.image)) {
+    nodeInput.input_image = inputs.image_url || inputs.source_url || inputs.image;
+  }
 
   return nodeInput;
 }
+
+
+
+
 
 export function getBillableNodes(plan, inputs = {}) {
   if (!plan || !Array.isArray(plan.nodes)) return [];
@@ -93,9 +115,18 @@ export async function calculateWorkflowBillingPlan({
         });
 
     const rawCost = typeof costResult === "object" && costResult !== null
-      ? (costResult.amount ?? costResult.totalCredits ?? 0)
+      ? (costResult.amount ?? costResult.totalCredits)
       : costResult;
-    const credits = Math.max(0, Math.ceil(Number(rawCost) || 0));
+
+    if (typeof rawCost !== "number" || Number.isNaN(rawCost) || !Number.isFinite(rawCost) || rawCost < 0) {
+      const err = new Error(`[Billing] Pricing failure for node "${billable.nodeId}" (${billable.nodeType}): cost result is invalid (${rawCost}). Pricing failure cannot default to 0.`);
+      err.code = "PRICING_CONFIG_ERROR";
+      err.category = "SERVER_FAULT";
+      err.statusCode = 500;
+      throw err;
+    }
+
+    const credits = Math.ceil(rawCost);
     totalCredits += credits;
     breakdowns.push({
       ...billable,

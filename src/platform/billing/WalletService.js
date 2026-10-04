@@ -91,7 +91,15 @@ export class WalletService {
    *   { kind: "NO_CHARGE"|"CHARGEABLE", status: "ACTIVE"|"HELD", referenceId, amount, ... }
    */
   async reserve({ userId, amount, referenceId, metadata = {} }) {
-    if (!amount || amount <= 0) {
+    if (typeof amount !== "number" || Number.isNaN(amount) || !Number.isFinite(amount) || amount < 0) {
+      const err = new Error(`Invalid billing amount: ${amount}. Amount must be a finite, non-negative number.`);
+      err.code = "PRICING_CONFIG_ERROR";
+      err.category = "SERVER_FAULT";
+      err.statusCode = 500;
+      throw err;
+    }
+
+    if (amount === 0) {
       // ── Free usage path ───────────────────────────────────────────────────
       // DESIGN DECISION: usage_events is a Best-Effort audit trail.
       //
@@ -234,6 +242,13 @@ export class WalletService {
   }
 
   async hold({ userId, amount, referenceId, metadata = {} }) {
+    if (typeof amount !== "number" || Number.isNaN(amount) || !Number.isFinite(amount) || amount <= 0) {
+      const err = new Error(`Invalid hold amount: ${amount}. Hold amount must be a positive finite number.`);
+      err.code = "PRICING_CONFIG_ERROR";
+      err.category = "SERVER_FAULT";
+      err.statusCode = 500;
+      throw err;
+    }
     this.validateMetadata(metadata); // FIX: validate قبل أي شيء
 
     const wallet = await this.getWalletOrThrow(userId);

@@ -112,10 +112,10 @@ describe("F2.4-a — Wallet Misconfiguration & Zero Price Invariants", () => {
     );
   });
 
-  it("TEST 3: NO_CHARGE is allowed ONLY for explicit zero price (amount <= 0)", async () => {
+  it("TEST 3: NO_CHARGE is allowed ONLY for explicit finite zero (amount === 0)", async () => {
     const unconfiguredGateway = new WorkflowBillingGateway({ walletService: null });
 
-    // Explicit amount 0 must return NO_CHARGE
+    // Explicit finite amount 0 must return NO_CHARGE
     const zeroResult = await unconfiguredGateway.reserve({
       userId: "user-free",
       amount: 0,
@@ -124,14 +124,120 @@ describe("F2.4-a — Wallet Misconfiguration & Zero Price Invariants", () => {
 
     assert.strictEqual(zeroResult.kind, "NO_CHARGE", "Explicit zero amount must yield NO_CHARGE");
     assert.strictEqual(zeroResult.amount, 0);
+  });
 
-    const negativeResult = await unconfiguredGateway.reserve({
-      userId: "user-free",
-      amount: -5,
-      referenceId: "ref-negative-explicit",
+  it("TEST 4: workflowBillingGateway throws PRICING_CONFIG_ERROR for invalid amounts (undefined, null, NaN, -1, 'abc')", async () => {
+    const gateway = new WorkflowBillingGateway({ walletService: null });
+    const invalidAmounts = [undefined, null, NaN, -1, -5, "abc", "0", {}, []];
+
+    for (const invalidAmount of invalidAmounts) {
+      await assert.rejects(
+        async () => {
+          await gateway.reserve({
+            userId: "user-test",
+            amount: invalidAmount,
+            referenceId: `ref-invalid-${String(invalidAmount)}`,
+          });
+        },
+        (err) => {
+          assert.strictEqual(err.code, "PRICING_CONFIG_ERROR", `Amount "${invalidAmount}" must throw PRICING_CONFIG_ERROR`);
+          assert.strictEqual(err.category, "SERVER_FAULT");
+          return true;
+        },
+        `Expected gateway.reserve to throw PRICING_CONFIG_ERROR for amount: ${invalidAmount}`
+      );
+    }
+  });
+
+  it("TEST 5: useCaseBillingRuntime throws PRICING_CONFIG_ERROR for invalid totalCredits (undefined, null, NaN, -1, 'abc')", async () => {
+    const runtime = new UseCaseBillingRuntime({ walletService: null });
+    const invalidAmounts = [undefined, null, NaN, -1, -10, "abc", "0", {}, []];
+
+    for (const invalidAmount of invalidAmounts) {
+      await assert.rejects(
+        async () => {
+          await runtime.reserveUseCase({
+            userId: "user-test",
+            useCaseId: "image-generation-v1",
+            totalCredits: invalidAmount,
+          });
+        },
+        (err) => {
+          assert.strictEqual(err.code, "PRICING_CONFIG_ERROR", `totalCredits "${invalidAmount}" must throw PRICING_CONFIG_ERROR`);
+          assert.strictEqual(err.category, "SERVER_FAULT");
+          return true;
+        },
+        `Expected reserveUseCase to throw PRICING_CONFIG_ERROR for totalCredits: ${invalidAmount}`
+      );
+    }
+  });
+
+  it("TEST 6: WalletService.reserve throws PRICING_CONFIG_ERROR for invalid amounts (undefined, null, NaN, -1, 'abc')", async () => {
+    const { WalletService } = await import("../../src/platform/billing/WalletService.js");
+    const wallet = new WalletService("https://mock.supabase.co", "mock-key");
+    const invalidAmounts = [undefined, null, NaN, -1, -5, "abc", "0", {}, []];
+
+    for (const invalidAmount of invalidAmounts) {
+      await assert.rejects(
+        async () => {
+          await wallet.reserve({
+            userId: "user-test",
+            amount: invalidAmount,
+            referenceId: `ref-ws-${String(invalidAmount)}`,
+          });
+        },
+        (err) => {
+          assert.strictEqual(err.code, "PRICING_CONFIG_ERROR", `WalletService.reserve amount "${invalidAmount}" must throw PRICING_CONFIG_ERROR`);
+          assert.strictEqual(err.category, "SERVER_FAULT");
+          return true;
+        },
+        `Expected WalletService.reserve to throw PRICING_CONFIG_ERROR for amount: ${invalidAmount}`
+      );
+    }
+  });
+
+  it("TEST 7: calculateWorkflowBillingPlan throws PRICING_CONFIG_ERROR if pricing calculation returns invalid cost and NEVER defaults to 0", async () => {
+    const { calculateWorkflowBillingPlan } = await import("../../src/use-cases/workflowBillingPlan.js");
+
+    const plan = {
+      nodes: [
+        {
+          id: "generate",
+          type: "image-generation",
+          bindings: {
+            prompt: "${input.prompt}",
+            model: "${input.model}",
+          },
+        },
+      ],
+    };
+
+    const invalidCostResults = [undefined, null, NaN, -1, "abc", "free", {}];
+
+    for (const invalidCost of invalidCostResults) {
+      await assert.rejects(
+        async () => {
+          await calculateWorkflowBillingPlan({
+            plan,
+            inputs: { prompt: "test", model: "nanobana_2" },
+            calculateCostFn: () => invalidCost,
+          });
+        },
+        (err) => {
+          assert.strictEqual(err.code, "PRICING_CONFIG_ERROR", `Cost failure (${invalidCost}) must throw PRICING_CONFIG_ERROR`);
+          assert.strictEqual(err.category, "SERVER_FAULT");
+          return true;
+        },
+        `calculateWorkflowBillingPlan must never turn pricing failure (${invalidCost}) into 0`
+      );
+    }
+
+    // Explicit 0 cost MUST succeed and return 0
+    const zeroPlan = await calculateWorkflowBillingPlan({
+      plan,
+      inputs: { prompt: "test", model: "nanobana_2" },
+      calculateCostFn: () => 0,
     });
-
-    assert.strictEqual(negativeResult.kind, "NO_CHARGE", "Negative amount must clamp to NO_CHARGE");
-    assert.strictEqual(negativeResult.amount, 0);
+    assert.strictEqual(zeroPlan.totalCredits, 0, "Explicit 0 cost must return 0 totalCredits");
   });
 });

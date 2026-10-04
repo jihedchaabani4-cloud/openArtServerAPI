@@ -18,14 +18,21 @@ export class UseCaseBillingRuntime {
     workflowRunId = null,
     workflowId = null,
     mediaId = null,
-    totalCredits = 0,
+    totalCredits,
     costBreakdown = null,
     idempotencyKey = null,
   } = {}) {
-    const amount = Math.max(0, Math.ceil(Number(totalCredits) || 0));
+    if (typeof totalCredits !== "number" || Number.isNaN(totalCredits) || !Number.isFinite(totalCredits) || totalCredits < 0) {
+      const err = new Error(`Invalid billing amount for UseCase "${useCaseId}": ${totalCredits}. Amount must be a finite, non-negative number.`);
+      err.code = "PRICING_CONFIG_ERROR";
+      err.category = "SERVER_FAULT";
+      err.statusCode = 500;
+      throw err;
+    }
+    const amount = Math.ceil(totalCredits);
     const referenceId = this.buildReferenceId({ workflowRunId, useCaseId, userId, idempotencyKey });
 
-    if (amount <= 0) {
+    if (amount === 0) {
       return {
         billingStatus: BILLING_STATUS.NOT_REQUIRED,
         billingHoldId: null,

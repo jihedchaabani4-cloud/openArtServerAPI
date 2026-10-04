@@ -21,7 +21,7 @@ class InMemoryWalletService {
     return this.balances.get(userId) || 0;
   }
 
-  async reserve({ userId, amount, model, operation, pricingVersion, referenceId }) {
+  async reserve({ userId, amount, model, operation, pricingVersion, referenceId, metadata = {} }) {
     const currentBalance = await this.getBalance(userId);
     if (currentBalance < amount) {
       throw new InsufficientCreditsError(amount, currentBalance);
@@ -36,6 +36,9 @@ class InMemoryWalletService {
       model,
       operation,
       pricingVersion,
+      metadata,
+      workflowId: metadata?.workflowId || null,
+      mediaId: metadata?.mediaId || null,
       status: "held",
       createdAt: new Date(now).toISOString(),
       expiresAt: new Date(now + this.HOLD_TTL_MS).toISOString(),
@@ -45,6 +48,21 @@ class InMemoryWalletService {
     this.balances.set(userId, currentBalance - amount);
     this.reservations.set(reservationId, reservation);
 
+    return reservation;
+  }
+
+  async extendHold(reservationId, additionalSeconds = 300) {
+    const reservation = this.reservations.get(reservationId);
+    if (!reservation) {
+      throw new ReservationExpiredError(reservationId);
+    }
+    if (reservation.status !== "held") {
+      throw new Error(`Cannot extend hold in status "${reservation.status}"`);
+    }
+    const additionalMs = (Number(additionalSeconds) || 300) * 1000;
+    const newExpiresAtMs = Math.max(Date.now(), reservation.expiresAtMs) + additionalMs;
+    reservation.expiresAtMs = newExpiresAtMs;
+    reservation.expiresAt = new Date(newExpiresAtMs).toISOString();
     return reservation;
   }
 
@@ -85,16 +103,25 @@ class InMemoryWalletService {
 
   async reapExpiredHolds() {
     const now = Date.now();
-    let reapedCount = 0;
+    const expired = [];
     for (const [id, res] of this.reservations) {
       if (res.status === "held" && res.expiresAtMs <= now) {
         await this.release(id, { reason: "ttl_expired" });
-        reapedCount++;
+        expired.push({
+          id,
+          holdId: id,
+          referenceId: id,
+          workflowId: res.metadata?.workflowId || res.workflowId || null,
+          mediaId: res.metadata?.mediaId || res.mediaId || null,
+          amount: res.amount,
+          userId: res.userId,
+        });
       }
     }
-    return reapedCount;
+    return expired;
   }
 }
+
 
 export const walletService = new InMemoryWalletService();
 export { InMemoryWalletService };

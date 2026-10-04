@@ -308,6 +308,63 @@ export class WalletService {
     return this.resolveTransaction(referenceId, "FAILED", extraMetadata);
   }
 
+  /**
+   * Extends the TTL of an active PENDING reservation (heartbeat).
+   *
+   * @param {string} referenceId - The hold reference ID
+   * @param {number} [additionalSeconds=300] - Seconds to extend the hold
+   * @returns {Promise<Object>}
+   */
+  async extendHold(referenceId, additionalSeconds = 300) {
+    if (!referenceId) return null;
+    const seconds = Number(additionalSeconds) || 300;
+
+    const { data: tx, error } = await this.supabase.rpc("extend_hold", {
+      p_reference_id: referenceId,
+      p_additional_seconds: seconds,
+    });
+
+    if (error) {
+      if (this.isMissingRpcError(error)) {
+        walletLogger.warn({ rpc: "extend_hold" }, "RPC extend_hold not found, using table fallback");
+        return this.extendHoldFallback(referenceId, seconds);
+      }
+      throw new WalletError(error.message, "DB_ERROR");
+    }
+
+    return tx;
+  }
+
+  async extendHoldFallback(referenceId, additionalSeconds = 300) {
+    const { data: currentTx, error: fetchErr } = await this.supabase
+      .from("transactions")
+      .select("*")
+      .eq("reference_id", referenceId)
+      .maybeSingle();
+
+    if (fetchErr) throw new WalletError(fetchErr.message, "DB_ERROR");
+    if (!currentTx) {
+      throw new WalletError(`Transaction not found for reference ${referenceId}`, "TRANSACTION_NOT_FOUND");
+    }
+    if (currentTx.status !== "PENDING") {
+      throw new WalletError(`Cannot extend transaction with status ${currentTx.status}`, "INVALID_STATUS");
+    }
+
+    const currentExpiresMs = currentTx.expires_at ? new Date(currentTx.expires_at).getTime() : Date.now();
+    const newExpiresAt = new Date(Math.max(Date.now(), currentExpiresMs) + additionalSeconds * 1000).toISOString();
+
+    const { data: updatedTx, error: updateErr } = await this.supabase
+      .from("transactions")
+      .update({ expires_at: newExpiresAt })
+      .eq("reference_id", referenceId)
+      .eq("status", "PENDING")
+      .select()
+      .maybeSingle();
+
+    if (updateErr) throw new WalletError(updateErr.message, "DB_ERROR");
+    return updatedTx;
+  }
+
   // ─────────────────────────────────────────────
   // CREDIT
   // ─────────────────────────────────────────────
@@ -430,6 +487,27 @@ export class WalletService {
 
     return data ?? 0;
   }
+
+  /**
+   * Sweeps expired holds, refunds balances, and returns the list of expired hold records
+   * with their workflowId and mediaId for domain reconciliation.
+   *
+   * @returns {Promise<Array<{ holdId: string, referenceId: string, workflowId: string|null, mediaId: string|null, amount: number }>>}
+   */
+  async reapExpiredHolds() {
+    // Uses the atomic fallback query to ensure we get the full transaction rows with metadata
+    const expiredTxs = await this.expireStaleHoldsFallback({ returnRows: true });
+    return (expiredTxs || []).map((tx) => ({
+      holdId: tx.reference_id || tx.id,
+      referenceId: tx.reference_id,
+      workflowId: tx.metadata?.workflowId || null,
+      mediaId: tx.metadata?.mediaId || null,
+      amount: tx.amount,
+      walletId: tx.wallet_id,
+      transactionId: tx.id,
+    }));
+  }
+
 
   // ─────────────────────────────────────────────
   // INTERNAL HELPERS
@@ -754,7 +832,8 @@ export class WalletService {
    * - Update status لـ FAILED أولاً في query واحد (atomic claim)
    * - يمنع أي instance ثاني من يشغّل نفس الـ holds
    */
-  async expireStaleHoldsFallback() {
+  async expireStaleHoldsFallback(options = {}) {
+    const returnRows = options?.returnRows === true;
     const now = new Date().toISOString();
 
     // ① atomic claim: غيّر الـ status مباشرة بشرط PENDING
@@ -776,7 +855,7 @@ export class WalletService {
         .eq("id", wallet.id);
     }
 
-    return expired?.length ?? 0;
+    return returnRows ? (expired || []) : (expired?.length ?? 0);
   }
 }
 

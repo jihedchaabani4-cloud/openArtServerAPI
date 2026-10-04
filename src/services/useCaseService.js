@@ -194,7 +194,49 @@ export class UseCaseService {
     return { paid: isPaid, billingHoldId: holdId, reservedCredits };
   }
 
+  getHoldTTLForUseCase(useCaseId) {
+    if (!useCaseId || typeof useCaseId !== "string") return 600;
+    const lower = useCaseId.toLowerCase();
+    if (lower.includes("video") || lower.includes("ltx") || lower.includes("wan")) {
+      return 1800; // 30 minutes for slow video generation jobs
+    }
+    return 600; // 10 minutes default
+  }
+
+  startHoldHeartbeat(billingHoldId, { intervalMs = 120_000, extensionSeconds = 300 } = {}) {
+    if (!billingHoldId) return { stop: () => {} };
+    const timer = setInterval(async () => {
+      try {
+        await this.extendHoldHeartbeat(billingHoldId, extensionSeconds);
+      } catch (err) {
+        useCaseLogger.warn({ billingHoldId, err: err.message }, `Hold heartbeat extension failed: ${err.message}`);
+      }
+    }, intervalMs);
+    timer.unref?.();
+    return {
+      stop: () => clearInterval(timer),
+    };
+  }
+
+  async extendHoldHeartbeat(billingHoldId, extensionSeconds = 300) {
+    if (!billingHoldId) return;
+    if (this.walletService && typeof this.walletService.extendHold === "function") {
+      return this.walletService.extendHold(billingHoldId, extensionSeconds);
+    }
+    if (this.billingRuntime && typeof this.billingRuntime.extendHold === "function") {
+      return this.billingRuntime.extendHold(billingHoldId, extensionSeconds);
+    }
+  }
+
   async settlePreparedBilling(referenceId, extraMetadata = null) {
+    if (this.walletService?.reservations) {
+      const res = this.walletService.reservations.get(referenceId);
+      if (res && res.status !== "held") {
+        const err = new Error(`Cannot settle hold "${referenceId}": hold status is "${res.status}" (expired or rolled back)`);
+        err.code = "RESERVATION_EXPIRED";
+        throw err;
+      }
+    }
     return this.billingRuntime.settleUseCase(referenceId, extraMetadata);
   }
 
@@ -215,6 +257,10 @@ export class UseCaseService {
       },
       `Starting execution of UseCase "${useCaseId}"`
     );
+
+    const heartbeat = guard.paid && guard.billingHoldId
+      ? this.startHoldHeartbeat(guard.billingHoldId, { intervalMs: 120_000, extensionSeconds: 300 })
+      : { stop: () => {} };
 
     try {
       const result = await this.runUseCase({ useCaseId, input, userId });

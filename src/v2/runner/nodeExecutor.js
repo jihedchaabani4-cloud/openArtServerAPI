@@ -63,9 +63,21 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
       const width = mediaMeta.width;
       const height = mediaMeta.height;
 
+      // Find existing non-terminal (processing/pending) media placeholder created for this step
       const placeholder = existingList?.find((m) => m.step_id === targetStepId && (m.status === "processing" || m.status === "pending"))
-        || existingList?.find((m) => m.step_id === targetStepId)
-        || existingList?.[0];
+        || (existingList?.length === 1 && (existingList[0].status === "processing" || existingList[0].status === "pending") ? existingList[0] : null);
+
+      if (!placeholder) {
+        // Guard against resurrecting a reaped or cancelled placeholder (prevent free media leakage)
+        const terminalPlaceholder = existingList?.find((m) => (m.step_id === targetStepId || existingList?.length === 1) && (m.status === "failed" || m.status === "cancelled"));
+        if (terminalPlaceholder) {
+          const holdErr = new Error(`Cannot persist completed media for workflow "${workflowId}": placeholder "${terminalPlaceholder.id}" is in terminal status "${terminalPlaceholder.status}" (hold expired or execution was cancelled)`);
+          holdErr.code = "HOLD_EXPIRED";
+          holdErr.category = "UPSTREAM_FAULT";
+          holdErr.statusCode = 409;
+          throw holdErr;
+        }
+      }
 
       if (placeholder?.id) {
         await db.media.updateMedia(placeholder.id, {

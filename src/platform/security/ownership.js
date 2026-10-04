@@ -1,4 +1,5 @@
 import { db } from "../../container.js";
+import { supabase } from "../../../lib/supabase.js";
 import { AppError } from "../../utils/AppError.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
 
@@ -6,7 +7,7 @@ const securityLogger = createLogger("security");
 
 function capitalize(str) {
   if (!str) return "";
-  return str.charAt(0).toUpperCase() + str.slice(1);
+  return str.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 }
 
 /**
@@ -185,6 +186,61 @@ export async function assertOwns(resourceType, id, userId) {
               break;
             }
           }
+        }
+      }
+      break;
+    }
+
+    case "collection_item": {
+      let item = null;
+      if (db.collection_items?.findById) {
+        item = await db.collection_items.findById(id).catch(() => null);
+      } else if (db.collection_items?.findByIdAndUser) {
+        item = await db.collection_items.findByIdAndUser(id, userId).catch(() => null);
+      } else if (supabase) {
+        const { data, error } = await supabase
+          .from("collection_items")
+          .select("id, user_id, project_id, collection_id, media_id, media:media_id(id, project:project!project_id(user_id))")
+          .eq("id", id)
+          .maybeSingle()
+          .catch(() => ({ data: null, error: null }));
+        if (!error && data) {
+          item = data;
+        }
+      }
+
+      if (item) {
+        // 1. Direct user_id check
+        if (item.user_id && item.user_id === userId) {
+          resource = item;
+          break;
+        }
+
+        // 2. Project ownership via item.project_id
+        const projectId = item.project_id;
+        if (projectId && db.projects?.findByUser) {
+          const matches = await db.projects.findByUser(userId, projectId).catch(() => []);
+          if (matches?.length) {
+            resource = item;
+            break;
+          }
+        }
+
+        // 3. Media ownership via joined media project
+        if (item.media?.project?.user_id && item.media.project.user_id === userId) {
+          resource = item;
+          break;
+        }
+
+        // 4. Media ownership via media_id lookup
+        if (item.media_id) {
+          try {
+            const ownedMedia = await assertOwns("media", item.media_id, userId);
+            if (ownedMedia) {
+              resource = item;
+              break;
+            }
+          } catch {}
         }
       }
       break;

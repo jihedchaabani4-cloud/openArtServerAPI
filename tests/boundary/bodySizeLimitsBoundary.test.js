@@ -84,9 +84,9 @@ describe("RC1.4-D2 — Body Size & Multer Limits Boundary Tests", () => {
     assert.notEqual(res.status, 413, "2.5MB payload to scoped route must not return 413");
   });
 
-  it("TEST D2-4: Scoped route (POST /api/v2/elements) rejects JSON body > 15MB with 413", async () => {
-    // ~16MB payload
-    const base64Data = "data:image/jpeg;base64," + "a".repeat(16 * 1024 * 1024);
+  it("TEST D2-4: Scoped route (POST /api/v2/elements) rejects JSON body > 30MB with 413", async () => {
+    // ~31MB payload
+    const base64Data = "data:image/jpeg;base64," + "a".repeat(31 * 1024 * 1024);
     const res = await fetch(`${baseUrl}/api/v2/elements`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -96,7 +96,7 @@ describe("RC1.4-D2 — Body Size & Multer Limits Boundary Tests", () => {
       }),
     });
 
-    assert.equal(res.status, 413, "Body > 15MB to scoped route must return 413");
+    assert.equal(res.status, 413, "Body > 30MB to scoped route must return 413");
     const body = await res.json();
     assert.equal(body.ok, false);
     assert.equal(body.code, "PAYLOAD_TOO_LARGE");
@@ -162,5 +162,57 @@ describe("RC1.4-D2 — Body Size & Multer Limits Boundary Tests", () => {
     });
 
     assert.notEqual(res.status, 413, "Image <= 20MB must not return 413");
+  });
+
+  it("TEST D2.1-1: Realistic multi-photo payload (~22MB) is accepted by scoped routes (under 30MB)", async () => {
+    // 5 photos of ~3MB each = 15MB binary -> ~20.5MB base64
+    const photoBase64 = "data:image/jpeg;base64," + "a".repeat(4.1 * 1024 * 1024);
+    const sourceImages = [photoBase64, photoBase64, photoBase64, photoBase64, photoBase64];
+    const res = await fetch(`${baseUrl}/api/v2/elements`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "test-element-realistic",
+        sourceImages,
+      }),
+    });
+
+    assert.notEqual(res.status, 413, "Realistic 5-photo payload (~21MB) must not be rejected with 413 when 30MB limit is enabled");
+  });
+
+  it("TEST D2.1-2: Image-only character route rejects non-image MIME types (e.g. video/mp4)", async () => {
+    const formData = new FormData();
+    const videoBuffer = Buffer.alloc(1024, 0x61);
+    const blob = new Blob([videoBuffer], { type: "video/mp4" });
+    formData.append("file", blob, "test-video.mp4");
+
+    const res = await fetch(`${baseUrl}/api/characters/create`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer test-user-id",
+      },
+      body: formData,
+    });
+
+    assert.equal(res.status, 415, "Non-image upload to image-only route should return 415");
+  });
+
+  it("TEST D2.1-3: Image-only character route rejects file > 20MB directly via multer limits", async () => {
+    const formData = new FormData();
+    const largeBuffer = Buffer.alloc(22 * 1024 * 1024, 0x61);
+    const blob = new Blob([largeBuffer], { type: "image/jpeg" });
+    formData.append("file", blob, "large-photo.jpg");
+
+    const res = await fetch(`${baseUrl}/api/characters/create`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer test-user-id",
+      },
+      body: formData,
+    });
+
+    assert.equal(res.status, 413, "File > 20MB on character route must return 413 directly");
+    const body = await res.json();
+    assert.equal(body.code, "PAYLOAD_TOO_LARGE");
   });
 });

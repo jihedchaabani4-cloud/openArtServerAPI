@@ -70,9 +70,9 @@ app.use(
 // Payments webhook raw body parser MUST be mounted before any JSON parser
 app.use("/api/payments/webhook", express.raw({ type: "application/json" }));
 
-// ── Body Size Parsers: Scoped 15MB for base64/media ingestion, Global 1MB for all others ──
-const scopedJsonParser = express.json({ limit: "15mb" });
-const scopedUrlencodedParser = express.urlencoded({ extended: true, limit: "15mb" });
+// ── Body Size Parsers: Scoped 30MB for base64/media ingestion, Global 1MB for all others ──
+const scopedJsonParser = express.json({ limit: "30mb" });
+const scopedUrlencodedParser = express.urlencoded({ extended: true, limit: "30mb" });
 const globalJsonParser = express.json({ limit: "1mb" });
 const globalUrlencodedParser = express.urlencoded({ extended: true, limit: "1mb" });
 

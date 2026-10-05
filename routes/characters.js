@@ -6,12 +6,15 @@ import { rateLimit } from "../src/middleware/rateLimit.js";
 
 const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 100 * 1024 * 1024 }, // 100MB max (video)
+    limits: { fileSize: 20 * 1024 * 1024 }, // 20MB max (images only)
     fileFilter: (req, file, cb) => {
-        if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) {
+        if (file.mimetype.startsWith("image/")) {
             cb(null, true);
         } else {
-            cb(new Error(`Unsupported file type: ${file.mimetype}`));
+            const err = new Error(`Unsupported file type: ${file.mimetype}`);
+            err.statusCode = 415;
+            err.code = "UNSUPPORTED_MEDIA_TYPE";
+            cb(err);
         }
     },
 });

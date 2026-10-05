@@ -35,7 +35,10 @@ const upload = multer({
         if (file.mimetype.startsWith("image/")) {
             cb(null, true);
         } else {
-            cb(new Error(`Unsupported file type: ${file.mimetype}`));
+            const err = new Error(`Unsupported file type: ${file.mimetype}`);
+            err.statusCode = 415;
+            err.code = "UNSUPPORTED_MEDIA_TYPE";
+            cb(err);
         }
     },
 });

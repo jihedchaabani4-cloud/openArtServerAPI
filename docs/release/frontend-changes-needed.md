@@ -180,47 +180,50 @@ headers: {
 
 ---
 
-## (g) Request Body Size Limits & Multer Upload Limits (RC1.4-D2)
+## (g) Request Body Size Limits & Multer Upload Limits (RC1.4-D2 & D2.1)
 
 ### Overview
 To protect the server from memory exhaustion and denial-of-service, strict request body limits are enforced at the HTTP gateway and upload handlers:
 - **Global JSON & URL-encoded limit**: **1MB** for all standard API endpoints.
-- **Scoped JSON & URL-encoded limit**: **15MB** exclusively for endpoints that accept Base64 Data URIs or image payload arrays.
+- **Scoped JSON & URL-encoded limit**: **30MB** (capped at 30MB) exclusively for endpoints that accept Base64 Data URIs or image payload arrays.
 - **Multer multipart file uploads**:
-  - Image files: maximum **20MB**.
-  - Video files: maximum **100MB**.
+  - Image-only routes (`/api/characters/*`, `/api/v2/elements/:id/images`): strictly **20MB** directly via multer `limits.fileSize`, with `fileFilter` rejecting non-image MIME types (HTTP 415) before buffering into memory.
+  - Media routes with video support (`/api/assets/upload`, `/api/media/ingest`): **100MB** for video, validated to **20MB** for images.
 
-### Scoped 15MB JSON Routes (Audit Findings)
-The following routes accept up to 15MB JSON bodies to accommodate Base64 image payloads:
-1. `POST /api/v2/elements`: Element creation (`useNewElement.js:107` via `useElement.js:111`), sends up to 6 Base64 photos in `sourceImages`.
-2. `POST /api/characters/create`, `POST /api/characters`, `POST /api/characters/character`: Character creation (`useNewElement.js:107` via `useElement.js:110` or prompt bar), accepts Base64 reference images.
-3. `POST /api/characters/:characterId/media`: Attaches detail reference images via `imageUrl` Data URI (`characterService.js:165`).
-4. `POST /api/characters/:characterId/sheet-media`: Sets body turnaround sheet media via `imageUrl` Data URI (`characterService.js:143`).
-5. `POST /api/assets/upload`: Ingestion endpoint accepting raw JSON with `req.body.base64`.
-6. `POST /api/media/ingest`: Canonical ingest endpoint accepting `req.body.base64` or `req.body.source` Data URI.
+### Real-World Audit: Element Multi-Photo Payloads & Compression Requirement
+- **Maximum Photos**: `my-app` allows up to **6 photos** to be attached to an element (`useNewElement.js:260`, `ElementDetailsGallery.jsx:22`).
+- **Client-Side Compression**: Currently, `elementService.js:75` (`readFileAsDataUrl`) reads the raw `File` directly into Base64 using `FileReader.readAsDataURL` with **no client-side resizing or compression**.
+- **Payload Analysis**:
+  - **Camera Originals (Worst Case)**: 6 photos from an iPhone/modern smartphone (5-10MB each) = 30-60MB binary => **41MB - 82MB Base64 payload**. This will exceed the server's hard 30MB cap!
+  - **Realistic Phone Photos**: 5 photos @ 3-4MB each = 15-20MB binary => **20.5MB - 27.4MB Base64 payload**, which fits under the updated **30MB** scoped limit.
+- **Critical Frontend Requirement**: The frontend MUST implement client-side canvas downscaling/compression in `elementService.readFileAsDataUrl` (e.g. max 2048px dimension, 0.85 JPEG quality, ~1MB per photo) before converting to Base64 so that users uploading 6 uncompressed phone photos never trigger HTTP 413.
 
-### Global 1MB Limit
-All other routes (including `POST /api/auth/*`, `POST /api/prompt/optimize`, `POST /api/images/generated`, `POST /api/video/generated`, `PATCH /api/projects/*`, etc.) strictly enforce **1MB**. Exceeding requests are rejected immediately with HTTP 413.
-
-### Payments Webhook Invariant
-`POST /api/payments/webhook` continues to parse the body as raw bytes (`express.raw({ type: "application/json" })`) before all JSON parsers, preserving raw Buffer integrity for HMAC-SHA256 signature verification.
-
-### Standardized Error Response (HTTP 413)
-When any request exceeds the configured body or file limit, the server returns **HTTP 413 Payload Too Large**:
-```json
-{
-  "ok": false,
-  "code": "PAYLOAD_TOO_LARGE",
-  "message": "Request payload exceeds allowed limit"
-}
-```
-*(For multipart file uploads exceeding 20MB for images or 100MB for videos, message specifies the exact media limit).*
+### Final Route-to-Limit Reference Table
+| Route | Method | Parser | Limit | Media Types Accepted | Error Code on Exceed |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `/api/payments/webhook` | POST | `express.raw` | Raw buffer | `application/json` | N/A (Signature verified) |
+| `/api/v2/elements` | POST | `express.json` (scoped) | **30MB** | `application/json` (Base64 `sourceImages`) | 413 `PAYLOAD_TOO_LARGE` |
+| `/api/v2/elements/*` | POST / PATCH | `express.json` (scoped) | **30MB** | `application/json` | 413 `PAYLOAD_TOO_LARGE` |
+| `/api/characters/create`, `/api/characters`, `/api/characters/character` | POST | `express.json` (scoped) | **30MB** | `application/json` (Base64 reference images) | 413 `PAYLOAD_TOO_LARGE` |
+| `/api/characters/:characterId/media` | POST | `express.json` (scoped) | **30MB** | `application/json` (Base64 `imageUrl`) | 413 `PAYLOAD_TOO_LARGE` |
+| `/api/characters/:characterId/sheet-media` | POST | `express.json` (scoped) | **30MB** | `application/json` (Base64 `imageUrl`) | 413 `PAYLOAD_TOO_LARGE` |
+| `/api/characters/create`, `/api/characters`, `/api/characters/character` | POST | `multer` (`file`) | **20MB** | `image/*` only | 413 `PAYLOAD_TOO_LARGE` / 415 `UNSUPPORTED_MEDIA_TYPE` |
+| `/api/characters/:characterId/media` | POST | `multer` (`file`) | **20MB** | `image/*` only | 413 `PAYLOAD_TOO_LARGE` / 415 `UNSUPPORTED_MEDIA_TYPE` |
+| `/api/characters/:characterId/sheet-media` | POST | `multer` (`file`) | **20MB** | `image/*` only | 413 `PAYLOAD_TOO_LARGE` / 415 `UNSUPPORTED_MEDIA_TYPE` |
+| `/api/characters/:characterId/upload` | POST | `multer` (`file`) | **20MB** | `image/*` only | 413 `PAYLOAD_TOO_LARGE` / 415 `UNSUPPORTED_MEDIA_TYPE` |
+| `/api/v2/elements/:id/images` | POST | `multer` (`file`) | **20MB** | `image/*` only | 413 `PAYLOAD_TOO_LARGE` / 415 `UNSUPPORTED_MEDIA_TYPE` |
+| `/api/assets/upload` | POST | `express.json` (scoped) | **30MB** | `application/json` (`body.base64`) | 413 `PAYLOAD_TOO_LARGE` |
+| `/api/assets/upload` | POST | `multer` (`file`) | **100MB** (video) / **20MB** (image) | `image/jpeg,png,webp,gif,avif`, `video/mp4,webm,quicktime` | 413 `PAYLOAD_TOO_LARGE` / 415 `UNSUPPORTED_MEDIA_TYPE` |
+| `/api/media/ingest` | POST | `express.json` (scoped) | **30MB** | `application/json` (`body.base64`, `body.source`) | 413 `PAYLOAD_TOO_LARGE` |
+| `/api/media/ingest` | POST | `multer` (`file`) | **100MB** (video) / **20MB** (image) | `image/*`, `video/*` | 413 `PAYLOAD_TOO_LARGE` / 415 `UNSUPPORTED_MEDIA_TYPE` |
+| **All other routes** (`/api/auth/*`, `/api/prompt/optimize`, `/api/images/*`, `/api/video/*`, etc.) | ALL | `express.json` (global) | **1MB** | `application/json` | 413 `PAYLOAD_TOO_LARGE` |
 
 ### Required Frontend Actions
 1. **Pre-flight file size checks**: In `my-app` file pickers and drag-and-drop zones (`useNewElement.js`, `ImportMediaDialog.jsx`, `mediaApi.js`), validate `file.size` before reading or uploading:
    - If `file.type.startsWith("image/") && file.size > 20 * 1024 * 1024`: Show toast "Image exceeds maximum allowed size of 20MB".
    - If `file.type.startsWith("video/") && file.size > 100 * 1024 * 1024`: Show toast "Video exceeds maximum allowed size of 100MB".
-2. **Error handling**: Catch HTTP 413 / `code === "PAYLOAD_TOO_LARGE"` in API client error interceptor and display a user-friendly error rather than generic 500 error messages.
+2. **Client-side image compression**: Implement automatic downscaling (canvas/webp/jpeg at 0.85) in `elementService.readFileAsDataUrl` so multiple phone photos stay well below 30MB.
+3. **Error handling**: Catch HTTP 413 / `code === "PAYLOAD_TOO_LARGE"` in API client error interceptor and display a user-friendly error rather than generic 500 error messages.
 
 ---
 

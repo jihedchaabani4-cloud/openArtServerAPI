@@ -10,10 +10,11 @@ function formatModelDto(m) {
         description:    m.description || "",
         category:       m.domain,
         tier:           m.badge || "standard",
-        pricing:        m.retailPricing || {},
+        pricing:        m.retailPricing || (m.operations && Object.values(m.operations)[0]?.retailPricing) || {},
         tags:           m.badge ? [m.badge.toLowerCase()] : [],
         icon:           m.iconUrl || "",
         badge:          m.badge || null,
+        capabilities:   m.capabilities || {},
         parameters:     m.parameters || {},
     };
 }
@@ -25,7 +26,11 @@ router.get("/", (req, res) => {
     const targetDomain = category || domain;
 
     const catalog = getCatalog(targetDomain ? { domain: targetDomain } : {});
-    const models = catalog.map(formatModelDto);
+
+    // Exclude system-only models (internal LLMs etc.) from the public catalog
+    const publicModels = catalog.filter((m) => !m.systemOnly && m.visibility !== "internal");
+
+    const models = publicModels.map(formatModelDto);
 
     console.log("--- MODELS FETCHED ---", models.length);
 
@@ -82,9 +87,39 @@ router.get("/:key/schema", (req, res) => {
     }
 });
 
-// ── GET /api/models/:key/:operation/schema (Legacy Compatibility) ───────────
+// ── POST /api/models/:key/estimate-price (Model-Level Canonical) ───────────
+router.post("/:key/estimate-price", (req, res) => {
+    const { key } = req.params;
+    try {
+        const estimate = estimatePrice(key, req.body || {});
+        return res.json({
+            success: true,
+            data: {
+                credits: estimate.amount,
+                amountString: estimate.amountString,
+                currency: estimate.currency,
+                pricingVersion: estimate.pricingVersion,
+                planIdentity: estimate.planIdentity,
+                breakdown: {
+                    basePrice: estimate.basePrice,
+                    modifiers: estimate.modifiersApplied
+                }
+            }
+        });
+    } catch (err) {
+        return res.status(err.statusCode || 400).json({
+            success: false,
+            error: err.message,
+            code: err.code || "PRICING_ESTIMATION_ERROR"
+        });
+    }
+});
+
+// ── GET /api/models/:key/:operation/schema (Legacy Compatibility - Deprecated) ──
 router.get("/:key/:operation/schema", (req, res) => {
     const { key, operation } = req.params;
+    res.setHeader("Deprecation", "true");
+    res.setHeader("Warning", `299 - "GET /api/models/:key/:operation/schema is deprecated. Use GET /api/models/:key/schema instead."`);
     try {
         const schema = getSchema(key, operation);
         return res.json({
@@ -100,9 +135,11 @@ router.get("/:key/:operation/schema", (req, res) => {
     }
 });
 
-// ── POST /api/models/:key/:operation/estimate-price ─────────────────────────
+// ── POST /api/models/:key/:operation/estimate-price (Legacy Compatibility - Deprecated) ──
 router.post("/:key/:operation/estimate-price", (req, res) => {
     const { key, operation } = req.params;
+    res.setHeader("Deprecation", "true");
+    res.setHeader("Warning", `299 - "POST /api/models/:key/:operation/estimate-price is deprecated. Use POST /api/models/:key/estimate-price instead."`);
     try {
         const estimate = estimatePrice(key, req.body || {});
         return res.json({
@@ -112,6 +149,7 @@ router.post("/:key/:operation/estimate-price", (req, res) => {
                 amountString: estimate.amountString,
                 currency: estimate.currency,
                 pricingVersion: estimate.pricingVersion,
+                planIdentity: estimate.planIdentity,
                 breakdown: {
                     basePrice: estimate.basePrice,
                     modifiers: estimate.modifiersApplied

@@ -2,6 +2,7 @@ import express from 'express';
 import healthRouter      from '../../routes/health.js';
 import workflowsRouter   from '../../routes/workflows.js';
 import imagesRouter      from '../../routes/images.js';
+import videoRouter       from '../../routes/video.js';
 import charactersRouter  from '../../routes/characters.js';
 import projectsRouter    from '../../routes/projects.js';
 import sessionsRouter    from '../../routes/sessions.js';
@@ -14,13 +15,17 @@ import walletRouter      from '../../routes/wallet.js';
 import adminRouter       from '../../routes/admin.js';
 import v2WorkflowsRouter from '../../routes/v2/workflows.js';
 import elementRoutes     from '../../routes/elementRoutes.js';
+import mediaIngestRouter from '../../routes/mediaIngestRoutes.js';
 
 const router = express.Router();
+
+router.use('/media',        mediaIngestRouter);
 
 router.use('/auth',         authRouter);
 router.use('/health',       healthRouter);
 router.use('/workflows',    workflowsRouter);
 router.use('/images',       imagesRouter);
+router.use('/video',        videoRouter);
 router.use('/characters',   charactersRouter);
 router.use('/projects',     projectsRouter);
 router.use('/sessions',     sessionsRouter);

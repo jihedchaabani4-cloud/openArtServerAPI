@@ -1,56 +1,78 @@
+/**
+ * ElementRepository
+ * Low-level Supabase persistence for the `element` table.
+ *
+ * buildPatch() — strict whitelist: only explicitly provided fields are included.
+ * Reads by element.id OR element.workflow_id via resolveRecord().
+ *
+ * Feature: 018-element-reference-system
+ */
+
 import { supabase } from "../../lib/supabase.js";
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function sanitizeKeywords(keywords) {
-    if (keywords === undefined) return undefined;
-    if (!Array.isArray(keywords)) return [];
+// ─── Helpers ───────────────────────────────────────────────────────────────────
 
-    const seen = new Set();
-    return keywords
-        .map((k) => String(k).toLowerCase().trim().replace(/^#/, ""))
-        .filter((k) => k && !seen.has(k) && seen.add(k));
+/**
+ * Normalize guidelines to a plain string.
+ * Accepts: string | string[] | null | undefined.
+ */
+function normalizeGuidelines(value) {
+    if (value === undefined) return undefined;
+    if (value === null)      return "";
+    if (Array.isArray(value)) {
+        return value.map((g) => String(g).trim()).filter(Boolean).join("\n");
+    }
+    return String(value).trim();
 }
 
-function sanitizeGuidelines(guidelines) {
-    if (guidelines === undefined) return undefined;
-    if (!Array.isArray(guidelines)) return [];
-
-    return guidelines
-        .map((g) => String(g).trim())
-        .filter(Boolean);
-}
-
+/**
+ * Build a strict partial-update patch — only fields present in `updates` are included.
+ * Allowed writable fields: name, description, guidelines, workflow_id, primary_media_id, element_type, source_images.
+ */
 function buildPatch(updates = {}) {
-    const patch = { ...updates };
+    const patch = {};
 
-    if (patch.keywords !== undefined) {
-        patch.keywords = sanitizeKeywords(patch.keywords);
+    if (updates.name !== undefined) {
+        patch.name = String(updates.name || "").replace(/^@+/, "").trim();
     }
-
-    if (patch.guidelines !== undefined) {
-        patch.guidelines = sanitizeGuidelines(patch.guidelines);
+    if (updates.description !== undefined) {
+        patch.description = updates.description == null
+            ? null
+            : String(updates.description).trim() || null;
     }
-
-    if (patch.description !== undefined) {
-        patch.description = patch.description == null ? null : String(patch.description).trim() || null;
+    if (updates.guidelines !== undefined) {
+        patch.guidelines = normalizeGuidelines(updates.guidelines);
     }
-
-    if (patch.name !== undefined) {
-        patch.name = String(patch.name || "").trim();
+    if (updates.element_type !== undefined) {
+        patch.element_type = updates.element_type;
+    }
+    if (updates.source_images !== undefined) {
+        patch.source_images = updates.source_images;
+    }
+    if (updates.workflow_id !== undefined) {
+        patch.workflow_id = updates.workflow_id;
+    }
+    if (updates.primary_media_id !== undefined) {
+        patch.primary_media_id = updates.primary_media_id;
     }
 
     return patch;
 }
 
+// ─── Repository class ──────────────────────────────────────────────────────────
+
 export class ElementRepository {
+
+    // ── Reads ──────────────────────────────────────────────────────────────────
+
     async findById(id) {
         const { data, error } = await supabase
             .from("element")
             .select("*")
             .eq("id", id)
             .maybeSingle();
-
         if (error) throw error;
         return data || null;
     }
@@ -61,18 +83,16 @@ export class ElementRepository {
             .select("*")
             .eq("workflow_id", workflowId)
             .maybeSingle();
-
         if (error) throw error;
         return data || null;
     }
 
     async findByName(name, projectId) {
-        const { data: workflows, error: workflowError } = await supabase
+        const { data: workflows, error: wfErr } = await supabase
             .from("workflow")
             .select("id")
             .eq("project_id", projectId);
-
-        if (workflowError) throw workflowError;
+        if (wfErr) throw wfErr;
 
         const workflowIds = (workflows || []).map((w) => w.id);
         if (!workflowIds.length) return null;
@@ -83,7 +103,6 @@ export class ElementRepository {
             .in("workflow_id", workflowIds)
             .ilike("name", name)
             .maybeSingle();
-
         if (error) throw error;
         return data || null;
     }
@@ -91,12 +110,11 @@ export class ElementRepository {
     async list({ projectId }) {
         if (!projectId) return [];
 
-        const { data: workflows, error: workflowError } = await supabase
+        const { data: workflows, error: wfErr } = await supabase
             .from("workflow")
             .select("id")
             .eq("project_id", projectId);
-
-        if (workflowError) throw workflowError;
+        if (wfErr) throw wfErr;
 
         const workflowIds = (workflows || []).map((w) => w.id);
         if (!workflowIds.length) return [];
@@ -106,18 +124,33 @@ export class ElementRepository {
             .select("*")
             .in("workflow_id", workflowIds)
             .order("create_time", { ascending: false });
-
         if (error) throw error;
         return data || [];
     }
 
+    /**
+     * Resolve by element.id or workflow_id — tries both if the value is a UUID.
+     */
+    async resolveRecord(idOrWorkflowId) {
+        if (UUID_RE.test(String(idOrWorkflowId))) {
+            return (
+                (await this.findById(idOrWorkflowId)) ||
+                (await this.findByWorkflowId(idOrWorkflowId))
+            );
+        }
+        return this.findByWorkflowId(idOrWorkflowId);
+    }
+
+    // ── Writes ─────────────────────────────────────────────────────────────────
+
     async create(payload) {
         const insertPayload = {
-            keywords: [],
-            guidelines: [],
-            tags: [],
+            guidelines:    "",
             source_images: [],
             ...buildPatch(payload),
+            // Pass through fields not covered by buildPatch whitelist
+            ...(payload.element_type ? { element_type: payload.element_type } : {}),
+            ...(payload.source_images ? { source_images: payload.source_images } : {}),
         };
 
         const { data, error } = await supabase
@@ -125,7 +158,6 @@ export class ElementRepository {
             .insert(insertPayload)
             .select()
             .single();
-
         if (error) throw error;
         return data;
     }
@@ -138,7 +170,7 @@ export class ElementRepository {
 
         let query = supabase.from("element").update(patch);
 
-        if (UUID_REGEX.test(String(idOrWorkflowId))) {
+        if (UUID_RE.test(String(idOrWorkflowId))) {
             query = query.or(`id.eq.${idOrWorkflowId},workflow_id.eq.${idOrWorkflowId}`);
         } else {
             query = query.eq("workflow_id", idOrWorkflowId);
@@ -146,7 +178,7 @@ export class ElementRepository {
 
         const { data, error } = await query.select();
         if (error) {
-            console.error(`[ElementRepository] update error for id ${idOrWorkflowId}:`, error);
+            console.error(`[ElementRepository] update error for ${idOrWorkflowId}:`, error);
             throw error;
         }
         return data?.[0] || null;
@@ -159,22 +191,13 @@ export class ElementRepository {
             err.statusCode = 404;
             throw err;
         }
-
         return this.update(existing.id, updates);
-    }
-
-    async resolveRecord(idOrWorkflowId) {
-        if (UUID_REGEX.test(String(idOrWorkflowId))) {
-            return (await this.findById(idOrWorkflowId)) || (await this.findByWorkflowId(idOrWorkflowId));
-        }
-
-        return this.findByWorkflowId(idOrWorkflowId);
     }
 
     async deleteById(idOrWorkflowId) {
         let query = supabase.from("element").delete();
 
-        if (UUID_REGEX.test(String(idOrWorkflowId))) {
+        if (UUID_RE.test(String(idOrWorkflowId))) {
             query = query.or(`id.eq.${idOrWorkflowId},workflow_id.eq.${idOrWorkflowId}`);
         } else {
             query = query.eq("workflow_id", idOrWorkflowId);

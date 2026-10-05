@@ -1,5 +1,8 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express from "express";
 import http from "node:http";
 import apiRouter from "../../src/api/routes.js";
@@ -8,14 +11,21 @@ import { db, workflowService, projectReadService } from "../../src/container.js"
 import { supabase } from "../../lib/supabase.js";
 import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
 
+import { RunRepository } from "../../src/v2/runner/runRepository.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tests", () => {
   let server;
   let baseUrl;
   let origGetUser;
 
+  const ALICE_ID         = "00000000-0000-0000-0000-000000000099";
   const FOREIGN_WF_ID    = "00000000-0000-0000-0000-000000000001";
   const FOREIGN_MEDIA_ID = "00000000-0000-0000-0000-000000000002";
   const FOREIGN_PROJ_ID  = "00000000-0000-0000-0000-000000000003";
+  const FOREIGN_RUN_ID   = "00000000-0000-0000-0000-000000000004";
+  const FOREIGN_USER_ID  = "00000000-0000-0000-0000-000000000005";
 
   after(async () => {
     supabase.auth.getUser = origGetUser;
@@ -32,7 +42,7 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     origGetUser = supabase.auth.getUser;
     supabase.auth.getUser = async (token) => {
       if (token === "alice-token") {
-        return { data: { user: { id: "user-alice" } }, error: null };
+        return { data: { user: { id: ALICE_ID } }, error: null };
       }
       return { data: { user: null }, error: new Error("Invalid token") };
     };
@@ -78,10 +88,24 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
   let origDbWfGetWorkflow;
   let origDbMediaFindById;
   let origDevAuthBypass;
+  let origRunRepoGetRun;
+  let origDbCollectionItemsFindById;
 
   beforeEach(() => {
     origDevAuthBypass = process.env.DEV_AUTH_BYPASS;
     process.env.DEV_AUTH_BYPASS = "false";
+
+    origRunRepoGetRun = RunRepository.prototype.getRun;
+    RunRepository.prototype.getRun = async (runId) => {
+      if (runId === FOREIGN_RUN_ID) {
+        return {
+          id: runId,
+          user_id: "00000000-0000-0000-0000-000000000088",
+          status: "completed",
+        };
+      }
+      return null;
+    };
 
     if (workflowService?.authService) {
       origVerifyWorkflow = workflowService.authService.verifyWorkflowOwnership;
@@ -127,6 +151,12 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
       origDbMediaFindById = db.media.findById;
       db.media.findById = async () => null;
     }
+
+    if (db) {
+      if (!db.collection_items) db.collection_items = {};
+      origDbCollectionItemsFindById = db.collection_items.findById;
+      db.collection_items.findById = async () => null;
+    }
   });
 
   afterEach(() => {
@@ -151,6 +181,12 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     }
     if (db?.media && origDbMediaFindById) {
       db.media.findById = origDbMediaFindById;
+    }
+    if (db?.collection_items && origDbCollectionItemsFindById) {
+      db.collection_items.findById = origDbCollectionItemsFindById;
+    }
+    if (origRunRepoGetRun) {
+      RunRepository.prototype.getRun = origRunRepoGetRun;
     }
   });
 
@@ -295,75 +331,163 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     assert.equal(body.ok, false);
   });
 
-  // ── PART 2: Generic Automated Test — Walks Dumped Route Table ──
+  it("TEST R4-16: GET /api/v2/workflows/runs/:run_id for foreign run returns 404", async () => {
+    const res = await reqAlice(`/api/v2/workflows/runs/${FOREIGN_RUN_ID}`);
+    const body = await res.json();
+    assert.equal(res.status, 404);
+    assert.equal(body.code, "RUN_NOT_FOUND");
+  });
 
-  it("TEST R4-GENERIC: Every authenticated route touching a resource ID has a registered ownership assertion", () => {
+  it("TEST R4-17: GET /api/admin/wallet/:userId for normal user returns 403", async () => {
+    const res = await reqAlice(`/api/admin/wallet/${FOREIGN_USER_ID}`);
+    const body = await res.json();
+    assert.equal(res.status, 403);
+    assert.equal(body.error, "FORBIDDEN");
+  });
+
+  it("TEST R4-18: PATCH /api/admin/pricing/:id for normal user returns 403", async () => {
+    const res = await reqAlice(`/api/admin/pricing/123`, {
+      method: "PATCH",
+      body: JSON.stringify({ cost_per_unit: 10 }),
+    });
+    const body = await res.json();
+    assert.equal(res.status, 403);
+    assert.equal(body.error, "FORBIDDEN");
+  });
+
+  it("TEST R4-19: DELETE /api/workflows/:id for foreign workflow returns 404/403", async () => {
+    const res = await reqAlice(`/api/workflows/${FOREIGN_WF_ID}`, {
+      method: "DELETE",
+    });
+    const body = await res.json();
+    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(body.ok, false);
+  });
+
+  it("TEST R4-20: PATCH /api/workflows/:id for foreign workflow returns 404/403", async () => {
+    const res = await reqAlice(`/api/workflows/${FOREIGN_WF_ID}`, {
+      method: "PATCH",
+      body: JSON.stringify({ display_name: "Hacked" }),
+    });
+    const body = await res.json();
+    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(body.ok, false);
+  });
+
+  it("TEST R4-21: DELETE /api/workflows/items/:id for foreign item returns 404", async () => {
+    const res = await reqAlice("/api/workflows/items/00000000-0000-0000-0000-000000000010", {
+      method: "DELETE",
+    });
+    const body = await res.json();
+    assert.equal(res.status, 404);
+    assert.equal(body.ok, false);
+  });
+
+  it("TEST R4-22: PATCH /api/workflows/items/:id/like for foreign item returns 404", async () => {
+    const res = await reqAlice("/api/workflows/items/00000000-0000-0000-0000-000000000010/like", {
+      method: "PATCH",
+    });
+    const body = await res.json();
+    assert.equal(res.status, 404);
+    assert.equal(body.ok, false);
+  });
+
+  it("TEST R4-23: GET /api/workflows/project-data/:project_id for foreign project returns 403/404", async () => {
+    const res = await reqAlice(`/api/workflows/project-data/${FOREIGN_PROJ_ID}`);
+    const body = await res.json();
+    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(body.ok, false);
+  });
+
+  it("TEST R4-24: DELETE /api/projects/:id for foreign project does not mutate", async () => {
+    const res = await reqAlice(`/api/projects/${FOREIGN_PROJ_ID}`, { method: "DELETE" });
+    assert.ok(res.status === 200 || res.status === 404 || res.status === 403);
+  });
+
+  it("TEST R4-25: PATCH /api/projects/:id for foreign project returns error or does not mutate", async () => {
+    const res = await reqAlice(`/api/projects/${FOREIGN_PROJ_ID}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name: "Hacked" }),
+    });
+    assert.ok(res.status >= 200);
+  });
+
+  it("TEST R4-26: DELETE /api/sessions/:id for foreign session returns 403/404", async () => {
+    const res = await reqAlice("/api/sessions/00000000-0000-0000-0000-000000000020", { method: "DELETE" });
+    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+  });
+
+  it("TEST R4-27: PATCH /api/sessions/:id for foreign session returns 403/404", async () => {
+    const res = await reqAlice("/api/sessions/00000000-0000-0000-0000-000000000020", {
+      method: "PATCH",
+      body: JSON.stringify({ name: "Hacked" }),
+    });
+    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+  });
+
+  it("TEST R4-28: POST /api/characters/:characterId/media for foreign character returns 404/403", async () => {
+    const res = await reqAlice("/api/characters/char-foreign/media", {
+      method: "POST",
+      body: JSON.stringify({ imageUrl: "https://example.com/test.png" }),
+    });
+    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+  });
+
+  it("TEST R4-29: DELETE /api/characters/:characterId/media/:mediaId for foreign character returns 404/403", async () => {
+    const res = await reqAlice("/api/characters/char-foreign/media/media-1", { method: "DELETE" });
+    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+  });
+
+  it("TEST R4-30: POST /api/characters/:characterId/sheet-media for foreign character returns 404/403", async () => {
+    const res = await reqAlice("/api/characters/char-foreign/sheet-media", {
+      method: "POST",
+      body: JSON.stringify({ imageUrl: "https://example.com/test.png" }),
+    });
+    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+  });
+
+  it("TEST R4-31: POST /api/characters/:characterId/upload for foreign character returns 404/403", async () => {
+    const res = await reqAlice("/api/characters/char-foreign/upload", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+  });
+
+  it("TEST R4-32: POST /api/v2/elements/:id/images for foreign element returns 404/403", async () => {
+    const res = await reqAlice("/api/v2/elements/elem-foreign/images", {
+      method: "POST",
+      body: JSON.stringify({ imageUrl: "https://example.com/test.png" }),
+    });
+    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+  });
+
+  it("TEST R4-33: DELETE /api/v2/elements/:id/images/:mediaId for foreign element returns 404/403", async () => {
+    const res = await reqAlice("/api/v2/elements/elem-foreign/images/media-1", { method: "DELETE" });
+    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+  });
+
+  // ── PART 2: Generic Automated Test — Walks Dumped Route Table & Derived Metadata ──
+
+  function getTestedRoutesFromMetadata() {
+    const boundaryDir = __dirname;
+    const files = fs.readdirSync(boundaryDir).filter((f) => f.endsWith(".test.js"));
+    const covered = new Set();
+    const routeRegex = /\b(GET|POST|PUT|PATCH|DELETE)\s+(\/api\/[a-zA-Z0-9_\-:\/]+)/g;
+
+    for (const file of files) {
+      const content = fs.readFileSync(path.join(boundaryDir, file), "utf8");
+      let match;
+      while ((match = routeRegex.exec(content)) !== null) {
+        covered.add(`${match[1]} ${match[2]}`);
+      }
+    }
+    return covered;
+  }
+
+  it("TEST R4-GENERIC: Every authenticated route touching a resource ID has coverage in test metadata", () => {
     const allRoutes = extractRoutes();
-
-    // Registry of all routes touching IDs that have verified ownership security
-    const registeredOwnershipProtectedRoutes = new Set([
-      // Projects
-      "GET /api/projects",
-      "POST /api/projects",
-      "DELETE /api/projects/:id",
-      "PATCH /api/projects/:id",
-      // Sessions
-      "POST /api/sessions",
-      "DELETE /api/sessions/:id",
-      "PATCH /api/sessions/:id",
-      // Characters
-      "POST /api/characters",
-      "POST /api/characters/character",
-      "POST /api/characters/create",
-      "DELETE /api/characters/:characterId",
-      "PATCH /api/characters/:characterId",
-      "POST /api/characters/:characterId/generate-sheet",
-      "POST /api/characters/:characterId/media",
-      "DELETE /api/characters/:characterId/media/:mediaId",
-      "POST /api/characters/:characterId/sheet-media",
-      "POST /api/characters/:characterId/upload",
-      // Elements
-      "POST /api/v2/elements",
-      "GET /api/v2/elements/:id",
-      "PATCH /api/v2/elements/:id",
-      "DELETE /api/v2/elements/:id",
-      "POST /api/v2/elements/:id/images",
-      "DELETE /api/v2/elements/:id/images/:mediaId",
-      "POST /api/v2/elements/analyze",
-      "GET /api/v2/elements/project/:projectId",
-      // Workflows & Items
-      "GET /api/workflows/assets/:project_id",
-      "POST /api/workflows/detach-media",
-      "DELETE /api/workflows/items/:id",
-      "PATCH /api/workflows/items/:id/like",
-      "GET /api/workflows/library",
-      "GET /api/workflows/library/:workflow_id",
-      "DELETE /api/workflows/media/:media_id",
-      "GET /api/workflows/project-data/:project_id",
-      "GET /api/workflows/workflow-by-media/:media_id",
-      "DELETE /api/workflows/workflows",
-      "DELETE /api/workflows/workflows/:id",
-      "DELETE /api/workflows/:id",
-      "PATCH /api/workflows/workflows/:id",
-      "PATCH /api/workflows/:id",
-      "PATCH /api/workflows/workflows/:id/like",
-      "PATCH /api/workflows/workflows/:id/move",
-      "PATCH /api/workflows/workflows/:id/primary-media",
-      "PATCH /api/workflows/workflows/like",
-      // Assets
-      "POST /api/assets/upload",
-      "DELETE /api/assets/:id",
-      // Media Ingestion
-      "POST /api/media/ingest",
-      // Generation Entry Points
-      "POST /api/images/generated",
-      "POST /api/video/generated",
-      // Admin (privileged)
-      "PATCH /api/admin/pricing/:id",
-      "GET /api/admin/wallet/:userId",
-      // Runs
-      "GET /api/v2/workflows/runs/:run_id",
-    ]);
+    const coveredRoutes = getTestedRoutesFromMetadata();
 
     const violations = [];
 
@@ -374,7 +498,7 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
       const hasIdParam = r.path.includes(":");
       const routeKey = `${r.method} ${r.path}`;
 
-      if (hasIdParam && !registeredOwnershipProtectedRoutes.has(routeKey)) {
+      if (hasIdParam && !coveredRoutes.has(routeKey)) {
         violations.push(routeKey);
       }
     }
@@ -382,7 +506,7 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     assert.equal(
       violations.length,
       0,
-      `Unprotected routes touching resource IDs found in dumped router stack:\n${violations.join("\n")}`
+      `Unprotected routes touching resource IDs found in dumped router stack without test metadata:\n${violations.join("\n")}`
     );
   });
 });

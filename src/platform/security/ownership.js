@@ -198,15 +198,16 @@ export async function assertOwns(resourceType, id, userId) {
       } else if (db.collection_items?.findByIdAndUser) {
         item = await db.collection_items.findByIdAndUser(id, userId).catch(() => null);
       } else if (supabase) {
-        const { data, error } = await supabase
-          .from("collection_items")
-          .select("id, user_id, project_id, collection_id, media_id, media:media_id(id, project:project!project_id(user_id))")
-          .eq("id", id)
-          .maybeSingle()
-          .catch(() => ({ data: null, error: null }));
-        if (!error && data) {
-          item = data;
-        }
+        try {
+          const { data, error } = await supabase
+            .from("collection_items")
+            .select("id, user_id, project_id, collection_id, media_id, media:media_id(id, project:project!project_id(user_id))")
+            .eq("id", id)
+            .maybeSingle();
+          if (!error && data) {
+            item = data;
+          }
+        } catch {}
       }
 
       if (item) {

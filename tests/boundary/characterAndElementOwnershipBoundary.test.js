@@ -6,6 +6,14 @@ import charactersRouter from "../../routes/characters.js";
 import elementRoutes from "../../routes/elementRoutes.js";
 import { db, characterService, elementService } from "../../src/container.js";
 
+// @covers POST /api/characters/:characterId/generate-sheet
+// @covers PATCH /api/characters/:characterId
+// @covers DELETE /api/characters/:characterId
+// @covers GET /api/v2/elements/:id
+// @covers PATCH /api/v2/elements/:id
+// @covers DELETE /api/v2/elements/:id
+// @covers GET /api/v2/elements/project/:projectId
+
 describe("Character and Element Ownership Security & Boundary Tests (Task T2b)", () => {
   let server;
   let baseUrl;

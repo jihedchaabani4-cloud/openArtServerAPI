@@ -136,3 +136,44 @@ import { apiClient } from "@/shared/api/apiClient"; // ❌ Module not found! Fil
 - **Conclusion**:
   - The actual rate limit is **30 requests per 60 seconds** (not 20/min).
   - Any mention of 20/min in previous documentation was an errant draft note; the code enforces `points: 30, duration: 60`.
+
+---
+
+## (f) Frontend Hardcoded Secret Elimination (`ElementVisionService.js`)
+
+### Current State
+In `my-app/src/features/workflows/services/ElementVisionService.js` (lines 103, 107, 377, 394):
+```javascript
+const internalSecret = process.env.INTERNAL_SECRET || "openart_internal_s2s_secret_2026";
+// Sent in fetch headers:
+headers: {
+    "Content-Type": "application/json",
+    "x-internal-secret": internalSecret,
+    ...
+}
+```
+
+### Detailed Impact & Vulnerability
+1. **Header Sent**: `x-internal-secret: "openart_internal_s2s_secret_2026"`.
+2. **Backend Routes Consuming It**:
+   - `src/middleware/auth.js:14` (internal secret authentication bypass)
+   - `src/domain/project/ProjectReadService.js:374` (`_verifyMediaOwnership` bypass for `GET /api/workflows/project-data/:projectId` and `getWorkflowByMedia`)
+   - `src/platform/workflow/WorkflowAuthorizationService.js:18` (`verifyWorkflowOwnership` bypass for `PATCH /api/workflows/workflows/:id`)
+3. **What the Frontend Uses It For**:
+   - `fetchWorkflowContext`: Calls `GET /api/workflows/project-data/${projectId}` to fetch image URLs and element type.
+   - `persistElementMetadata`: Calls `PATCH /api/workflows/workflows/${workflowId}` to save AI-generated `description` and `keywords`.
+4. **What Breaks Now**:
+   - The backend removed `"openart_internal_s2s_secret_2026"` in Phase 0 Task R1 (`e76305d`).
+   - The server constant-time comparison rejects `"openart_internal_s2s_secret_2026"`.
+   - Without an authorized user JWT in `headers.authorization`, these requests will be rejected with **HTTP 401 / 403 / 404**.
+5. **Minimal Fix Required in `ElementVisionService.js`**:
+   - Delete lines 103, 107, 377, 394 (`internalSecret` variable and `x-internal-secret` header).
+   - Use the standard authenticated API client or forward the active user's Supabase JWT:
+     ```javascript
+     headers: {
+         "Content-Type": "application/json",
+         "Authorization": `Bearer ${userSessionToken}`,
+     }
+     ```
+   - The backend already enforces tenant ownership cleanly via `req.user.id` on both `GET /api/workflows/project-data/:projectId` and `PATCH /api/workflows/workflows/:id`. When the user is authenticated and owns the workflow, normal JWT authorization succeeds without any internal secret.
+

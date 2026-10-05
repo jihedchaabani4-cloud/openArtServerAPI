@@ -46,7 +46,7 @@ export class WorkflowRepository extends BaseRepository {
             .from(this.tableName)
             .select("*")
             .eq("id", id)
-            .single();
+            .maybeSingle();
         if (error) throw error;
         return data;
     }

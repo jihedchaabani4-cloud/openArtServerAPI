@@ -8,6 +8,8 @@ const redisPassword = process.env.REDIS_PASSWORD || "";
 const isTLS = redisUrl?.startsWith('rediss://') || redisUrl?.includes('upstash.io');
 
 // ── Base options for Upstash Serverless Redis & BullMQ ───────────────────────
+const MAX_RECONNECT_ATTEMPTS = 20; // Stop retrying after 20 attempts (~60s total)
+
 const BASE_OPTIONS = {
   maxRetriesPerRequest: null, // Required by BullMQ
   enableReadyCheck:     false,
@@ -17,10 +19,16 @@ const BASE_OPTIONS = {
   pingInterval:         15_000, // Heartbeat PING every 15s to keep socket warm
   connectTimeout:       10_000,
   retryStrategy(times) {
+    // Stop retrying after max attempts — prevents quota drain on Upstash plan limits
+    if (times > MAX_RECONNECT_ATTEMPTS) {
+      console.error(`[Redis] Max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Giving up.`);
+      return null; // null = stop retrying
+    }
     return Math.min(times * 200, 3000); // Smooth exponential reconnect backoff
   },
   tls: isTLS ? { rejectUnauthorized: false } : undefined,
 };
+
 
 // ── Regular connection (used by Queue + non-blocking calls) ─────────────────
 export const redisConnection = redisUrl

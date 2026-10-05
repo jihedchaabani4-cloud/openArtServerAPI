@@ -10,7 +10,7 @@ export class BaseRepository {
     }
 
     async findById(id, select = "*") {
-        const { data, error } = await supabase.from(this.tableName).select(select).eq("id", id).single();
+        const { data, error } = await supabase.from(this.tableName).select(select).eq("id", id).maybeSingle();
         if (error) throw error;
         return data;
     }
@@ -24,5 +24,9 @@ export class BaseRepository {
     async delete(id) {
         const { error } = await supabase.from(this.tableName).delete().eq("id", id);
         if (error) throw error;
+    }
+
+    async deleteById(id) {
+        return this.delete(id);
     }
 }

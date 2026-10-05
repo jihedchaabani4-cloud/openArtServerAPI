@@ -254,7 +254,6 @@ describe("Sealed Models Subsystem Architecture", () => {
         prompt: "Cyberpunk Tunis",
         aspect_ratio: "16:9",
         resolution: "2k",
-        quality: "standard",
       };
 
       // Semantic-First: NO operation, NO bindingId passed!
@@ -363,7 +362,7 @@ describe("Sealed Models Subsystem Architecture", () => {
           },
         }
       );
-      assert.strictEqual(endpointCalled, "google/nano-banana-pro/text-to-image");
+      assert.strictEqual(endpointCalled, "/api/v3/google/nano-banana-pro/text-to-image");
       assert.strictEqual(result.images[0].url, "https://cdn.example.com/city.png");
     });
 
@@ -387,59 +386,34 @@ describe("Sealed Models Subsystem Architecture", () => {
           },
         }
       );
-      assert.strictEqual(endpointCalled, "google/nano-banana-pro/edit");
+      assert.strictEqual(endpointCalled, "/api/v3/google/nano-banana-pro/edit");
       assert.strictEqual(result.images[0].url, "https://cdn.example.com/jacket.png");
     });
 
-    // Test C — Reference images
-    it("Test C — Reference images: passes reference_images to provider", async () => {
-      let passedPayload = null;
-      const result = await models.run(
-        "nanobana_pro",
-        {
+    // Test C — reference_images not supported by WaveSpeed nano-banana-pro API
+    it("Test C — reference_images: rejected as UnsupportedCapabilityError or UnknownParameterError", () => {
+      assert.throws(
+        () => models.calculateCost("nanobana_pro", {
           prompt: "combine the visual style",
           reference_images: [
             "https://example.com/a.png",
             "https://example.com/b.png",
           ],
-        },
-        {
-          userId: "user-1",
-          sdkRunner: async ({ payload }) => {
-            passedPayload = payload;
-            return { outputs: ["https://cdn.example.com/style.png"] };
-          },
-        }
+        }),
+        (err) => err.name === "UnsupportedCapabilityError" || err.name === "UnknownParameterError" || err?.code === "UNSUPPORTED_CAPABILITY"
       );
-      assert.ok(Array.isArray(passedPayload.reference_images));
-      assert.strictEqual(passedPayload.reference_images.length, 2);
-      assert.strictEqual(result.images[0].url, "https://cdn.example.com/style.png");
     });
 
-    // Test D — Input image + mask
-    it("Test D — Input image + mask: routes to provider inpaint route", async () => {
-      let endpointCalled = null;
-      let passedPayload = null;
-      const result = await models.run(
-        "nanobana_pro",
-        {
+    // Test D — mask not supported by WaveSpeed nano-banana-pro API
+    it("Test D — mask: rejected as UnsupportedCapabilityError or UnknownParameterError", () => {
+      assert.throws(
+        () => models.calculateCost("nanobana_pro", {
           prompt: "replace the selected area",
           input_image: "https://example.com/a.png",
           mask: "https://example.com/mask.png",
-        },
-        {
-          userId: "user-1",
-          sdkRunner: async ({ binding, payload }) => {
-            endpointCalled = binding.endpoint;
-            passedPayload = payload;
-            return { outputs: ["https://cdn.example.com/inpaint.png"] };
-          },
-        }
+        }),
+        (err) => err.name === "UnsupportedCapabilityError" || err.name === "UnknownParameterError" || err?.code === "UNSUPPORTED_CAPABILITY"
       );
-      assert.strictEqual(endpointCalled, "google/nano-banana-pro/edit");
-      assert.ok(Array.isArray(passedPayload.images));
-      assert.strictEqual(passedPayload.mask, "https://example.com/mask.png");
-      assert.strictEqual(result.images[0].url, "https://cdn.example.com/inpaint.png");
     });
 
     it("calculateCost resolves same route as execution deterministically", () => {
@@ -455,9 +429,9 @@ describe("Sealed Models Subsystem Architecture", () => {
     });
 
     it("rejects input with unsupported parameter for provider binding", () => {
-      // gpt_image_2 only has text_to_image — passing input_image should throw
+      // seedream_v5 only has text_to_image — passing input_image should throw
       assert.throws(
-        () => models.calculateCost("gpt_image_2", {
+        () => models.calculateCost("seedream_v5", {
           prompt: "edit this",
           input_image: "https://cdn.example.com/src.png",
         }),
@@ -480,7 +454,7 @@ describe("Sealed Models Subsystem Architecture", () => {
         sdkRunner: async ({ binding, payload }) => {
           wavespeedCalled = true;
           assert.strictEqual(binding.providerId, "wavespeed");
-          assert.strictEqual(binding.endpoint, "google/nano-banana-pro/edit");
+          assert.strictEqual(binding.endpoint, "/api/v3/google/nano-banana-pro/edit");
           assert.ok(Array.isArray(payload.images));
           return { outputs: ["https://cdn.wavespeed.ai/res.png"] };
         },
@@ -906,57 +880,31 @@ describe("Sealed Models Subsystem Architecture", () => {
           },
         }
       );
-      assert.strictEqual(routeCalled, "google/nano-banana-pro/edit");
+      assert.strictEqual(routeCalled, "/api/v3/google/nano-banana-pro/edit");
       assert.strictEqual(res.images[0].url, "https://cdn.example.com/edited.png");
     });
 
-    // TEST 3 — Input image + mask
-    it("TEST 3: Input image + mask routes through Provider inpaint route", async () => {
-      let routeCalled = null;
-      let maskPassed = null;
-      const res = await models.run(
-        "nanobana_pro",
-        {
+    // TEST 3 — mask not supported by WaveSpeed nano-banana-pro API
+    it("TEST 3: mask rejected as UnsupportedCapabilityError or UnknownParameterError", () => {
+      assert.throws(
+        () => models.calculateCost("nanobana_pro", {
           prompt: "replace selected area",
           input_image: "https://example.com/source.png",
           mask: "https://example.com/mask.png",
-        },
-        {
-          userId: "user-test",
-          sdkRunner: async ({ binding, payload }) => {
-            routeCalled = binding.endpoint;
-            maskPassed = payload.mask;
-            return { outputs: ["https://cdn.example.com/inpainted.png"] };
-          },
-        }
+        }),
+        (err) => err.name === "UnsupportedCapabilityError" || err.name === "UnknownParameterError" || err?.code === "UNSUPPORTED_CAPABILITY"
       );
-      assert.strictEqual(routeCalled, "google/nano-banana-pro/edit");
-      assert.strictEqual(maskPassed, "https://example.com/mask.png");
-      assert.strictEqual(res.images[0].url, "https://cdn.example.com/inpainted.png");
     });
 
-    // TEST 4 — Reference images
-    it("TEST 4: Reference images passes array to provider and is NOT routed to edit", async () => {
-      let endpointCalled = null;
-      let refPassed = null;
-      const res = await models.run(
-        "nanobana_pro",
-        {
+    // TEST 4 — reference_images not supported by WaveSpeed nano-banana-pro API
+    it("TEST 4: reference_images rejected as UnsupportedCapabilityError or UnknownParameterError", () => {
+      assert.throws(
+        () => models.calculateCost("nanobana_pro", {
           prompt: "combine these references",
           reference_images: ["https://example.com/ref1.png", "https://example.com/ref2.png"],
-        },
-        {
-          userId: "user-test",
-          sdkRunner: async ({ binding, payload }) => {
-            endpointCalled = binding.endpoint;
-            refPassed = payload.reference_images;
-            return { outputs: ["https://cdn.example.com/combined.png"] };
-          },
-        }
+        }),
+        (err) => err.name === "UnsupportedCapabilityError" || err.name === "UnknownParameterError" || err?.code === "UNSUPPORTED_CAPABILITY"
       );
-      assert.strictEqual(endpointCalled, "google/nano-banana-pro/text-to-image");
-      assert.deepStrictEqual(refPassed, ["https://example.com/ref1.png", "https://example.com/ref2.png"]);
-      assert.strictEqual(res.images[0].url, "https://cdn.example.com/combined.png");
     });
 
     // TEST 5 — Google topology
@@ -1006,8 +954,8 @@ describe("Sealed Models Subsystem Architecture", () => {
         },
       });
 
-      assert.strictEqual(textEndpoint, "google/nano-banana-pro/text-to-image");
-      assert.strictEqual(editEndpoint, "google/nano-banana-pro/edit");
+      assert.strictEqual(textEndpoint, "/api/v3/google/nano-banana-pro/text-to-image");
+      assert.strictEqual(editEndpoint, "/api/v3/google/nano-banana-pro/edit");
     });
 
     // TEST 7 — Provider switch
@@ -1403,65 +1351,36 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(resolvedPayload.images[0], "https://example.com/jacket.png");
     });
 
-    // TEST 9 — WaveSpeed inpaint
-    it("TEST 9: Prompt + input_image + mask resolves to most-specific WaveSpeed inpaint route", async () => {
-      let resolvedRoute = null;
-      let resolvedModelId = null;
-      let resolvedPayload = null;
-
-      await models.run(
-        "nanobana_pro",
-        {
-          prompt: "replace sunglasses with reading glasses",
-          input_image: "https://example.com/portrait.png",
-          mask: "https://example.com/mask.png",
-        },
-        {
-          userId: "u-ws-image-inpaint",
-          sdkRunner: async ({ binding, payload }) => {
-            resolvedRoute = binding.routeId || binding.id;
-            resolvedModelId = binding.providerModelId;
-            resolvedPayload = payload;
-            return { outputs: ["https://cdn.example.com/inpaint.png"] };
+    // TEST 9 — mask not supported by WaveSpeed nano-banana-pro API
+    it("TEST 9: mask rejected as UnsupportedCapabilityError or UnknownParameterError", async () => {
+      await assert.rejects(
+        () => models.run(
+          "nanobana_pro",
+          {
+            prompt: "replace sunglasses with reading glasses",
+            input_image: "https://example.com/portrait.png",
+            mask: "https://example.com/mask.png",
           },
-        }
+          { userId: "u-ws-image-inpaint" }
+        ),
+        (err) => err.name === "UnsupportedCapabilityError" || err.name === "UnknownParameterError" || err?.code === "UNSUPPORTED_CAPABILITY"
       );
-
-      assert.strictEqual(resolvedRoute, "inpaint");
-      assert.strictEqual(resolvedModelId, "google/nano-banana-pro/edit");
-      assert.strictEqual(resolvedPayload.mask, "https://example.com/mask.png");
-      assert.ok(Array.isArray(resolvedPayload.images));
-      assert.strictEqual(resolvedPayload.images[0], "https://example.com/portrait.png");
     });
 
-    // TEST 10 — WaveSpeed reference images
-    it("TEST 10: Reference images without input_image stay on generation route unless configured as edit", async () => {
-      let resolvedRoute = null;
-      let resolvedModelId = null;
-      let resolvedPayload = null;
-
-      await models.run(
-        "nanobana_pro",
-        {
-          prompt: "portrait in same lighting style",
-          reference_images: ["https://example.com/ref1.png", "https://example.com/ref2.png"],
-          resolution: "1k",
-        },
-        {
-          userId: "u-ws-ref-img",
-          sdkRunner: async ({ binding, payload }) => {
-            resolvedRoute = binding.routeId || binding.id;
-            resolvedModelId = binding.providerModelId;
-            resolvedPayload = payload;
-            return { outputs: ["https://cdn.example.com/ref-out.png"] };
+    // TEST 10 — reference_images not supported by WaveSpeed nano-banana-pro API
+    it("TEST 10: reference_images rejected as UnsupportedCapabilityError or UnknownParameterError", async () => {
+      await assert.rejects(
+        () => models.run(
+          "nanobana_pro",
+          {
+            prompt: "portrait in same lighting style",
+            reference_images: ["https://example.com/ref1.png", "https://example.com/ref2.png"],
+            resolution: "1k",
           },
-        }
+          { userId: "u-ws-ref-img" }
+        ),
+        (err) => err.name === "UnsupportedCapabilityError" || err.name === "UnknownParameterError" || err?.code === "UNSUPPORTED_CAPABILITY"
       );
-
-      assert.strictEqual(resolvedRoute, "generation", "Reference images must not trigger edit route when input_image is absent");
-      assert.strictEqual(resolvedModelId, "google/nano-banana-pro/text-to-image");
-      assert.ok(Array.isArray(resolvedPayload.reference_images));
-      assert.strictEqual(resolvedPayload.reference_images.length, 2);
     });
 
     // TEST 11 — WaveSpeed video
@@ -1507,7 +1426,7 @@ describe("Sealed Models Subsystem Architecture", () => {
       );
       assert.strictEqual(i2vRoute, "image_to_video");
       assert.strictEqual(i2vModel, "bytedance/seedance-2.5/image-to-video");
-      assert.strictEqual(i2vPayload.image_url, "https://example.com/character.png");
+      assert.strictEqual(i2vPayload.image, "https://example.com/character.png");
     });
 
     // TEST 12 — WaveSpeed upscale
@@ -1521,7 +1440,6 @@ describe("Sealed Models Subsystem Architecture", () => {
         {
           input_image: "https://example.com/lowres.png",
           scale_factor: 4,
-          face_restore: true,
         },
         {
           userId: "u-ws-upscale",
@@ -1534,11 +1452,11 @@ describe("Sealed Models Subsystem Architecture", () => {
         }
       );
 
-      assert.strictEqual(resolvedRoute, "image_upscale");
-      assert.strictEqual(resolvedModelId, "wavespeed-ai/upscaler-v1");
-      assert.strictEqual(resolvedPayload.image_url, "https://example.com/lowres.png");
-      assert.strictEqual(resolvedPayload.scale, 4);
-      assert.strictEqual(resolvedPayload.face_restore, true);
+      assert.strictEqual(resolvedModelId, "wavespeed-ai/image-upscaler");
+      assert.strictEqual(resolvedPayload.image, "https://example.com/lowres.png");
+      assert.strictEqual(resolvedPayload.target_resolution, "4k");
+      // face_restore removed: not supported by WaveSpeed API (additionalProperties: false)
+      assert.strictEqual(resolvedPayload.face_restore, undefined);
     });
 
     // TEST 13 — WaveSpeed runner purity
@@ -2081,6 +1999,1058 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.ok(true, "reference_to_video omitted per §17 No Fake Portability");
     });
 
+    // Test N — Wan 3.0 topology (T2V and I2V)
+    it("Test N: Wan 3.0 resolves text_to_video and image_to_video correctly", async () => {
+      const { resolveExecutionPlan } = await import("../../src/models/registry/bindingResolver.js");
+      
+      const planT2V = resolveExecutionPlan("wan_3_0", { prompt: "a sunset scene", duration: 5 });
+      assert.strictEqual(planT2V.route.id, "text_to_video");
+      assert.strictEqual(planT2V.route.providerModelId, "alibaba/wan-3.0/text-to-video");
+
+      const planI2V = resolveExecutionPlan("wan_3_0", {
+        prompt: "animate this sunset",
+        input_image: "https://cdn.example.com/photo.png",
+        duration: 5,
+      });
+      assert.strictEqual(planI2V.route.id, "image_to_video");
+      assert.strictEqual(planI2V.route.providerModelId, "alibaba/wan-3.0/image-to-video");
+    });
+
+    // Test O — Single-path models must not declare routes[]
+    it("Test O: Single-path models must have flat bindings without routes[] array", async () => {
+      const { getModelBindings } = await import("../../src/models/registry/modelRegistry.js");
+      const singlePathModels = [
+        "seedance_2_5_extend",
+        "wavespeed_upscale",
+        "seedream_v5",
+      ];
+
+      for (const modelId of singlePathModels) {
+        const bindings = getModelBindings(modelId);
+        assert.ok(bindings && bindings.length > 0, `Model ${modelId} must have bindings`);
+        const wsBinding = bindings.find((b) => b.providerId === "wavespeed");
+        assert.ok(wsBinding, `Model ${modelId} must have wavespeed binding`);
+        assert.strictEqual(
+          wsBinding.routes,
+          undefined,
+          `Single-path model ${modelId} must NOT have routes[] array in its binding`
+        );
+      }
+    });
+
+    // Test P — Multi-path models declare routes[]
+    it("Test P: Multi-path models declare declarative routes[] array with when conditions", async () => {
+      const { getModelBindings } = await import("../../src/models/registry/modelRegistry.js");
+      const multiPathModels = [
+        "nanobana_pro",
+        "nanobana_pro_ultra",
+        "nanobana_2",
+        "seedance_2_5",
+        "wan_3_0",
+        "gpt_image_2",
+      ];
+
+      for (const modelId of multiPathModels) {
+        const bindings = getModelBindings(modelId);
+        const wsBinding = bindings.find((b) => b.providerId === "wavespeed");
+        assert.ok(wsBinding, `Model ${modelId} must have wavespeed binding`);
+        assert.ok(
+          Array.isArray(wsBinding.routes) && wsBinding.routes.length >= 2,
+          `Multi-path model ${modelId} must have routes[] array with at least 2 routes`
+        );
+        for (const route of wsBinding.routes) {
+          assert.ok(route.id, `Route in ${modelId} must have an id`);
+          assert.ok(route.when, `Route ${route.id} in ${modelId} must have when conditions`);
+        }
+      }
+    });
+
+    // Test Q — Ambiguity Test: two routes with equal specificity and priority throw ConfigIntegrityError
+    it("Test Q: Ambiguity Test — equal specificity and equal priority throws ConfigIntegrityError", async () => {
+      const { evaluateWaveSpeedRoutes } = await import("../../src/models/runtime/wavespeed/common/routeEvaluator.js");
+      const { ConfigIntegrityError } = await import("../../src/models/errors/index.js");
+
+      const mockBinding = {
+        modelId: "test_ambiguity_model",
+        providerId: "wavespeed",
+        priority: 1,
+      };
+
+      const mockRoutes = [
+        {
+          id: "route_alpha",
+          when: { input_image: "present" },
+          priority: 1,
+          endpoint: "wavespeed/test/alpha",
+          providerModelId: "wavespeed/test/alpha",
+        },
+        {
+          id: "route_beta",
+          when: { input_image: "present" },
+          priority: 1,
+          endpoint: "wavespeed/test/beta",
+          providerModelId: "wavespeed/test/beta",
+        },
+      ];
+
+      assert.throws(
+        () => evaluateWaveSpeedRoutes(mockBinding, mockRoutes, { input_image: "https://example.com/img.png" }, "image"),
+        (err) => err instanceof ConfigIntegrityError && err.message.includes("Ambiguous WaveSpeed")
+      );
+    });
+
+    // Test R — No Match Test: semantic input matching no route throws UnsupportedCapabilityError
+    it("Test R: No Match Test — unmatched semantic input throws UnsupportedCapabilityError", async () => {
+      const { evaluateWaveSpeedRoutes } = await import("../../src/models/runtime/wavespeed/common/routeEvaluator.js");
+      const { UnsupportedCapabilityError } = await import("../../src/models/errors/index.js");
+
+      const mockBinding = {
+        modelId: "test_nomatch_model",
+        providerId: "wavespeed",
+      };
+
+      const mockRoutes = [
+        {
+          id: "route_edit_only",
+          when: { input_image: "present" },
+          endpoint: "wavespeed/test/edit",
+        },
+      ];
+
+      assert.throws(
+        () => evaluateWaveSpeedRoutes(mockBinding, mockRoutes, { prompt: "text only without input_image" }, "image"),
+        (err) => err instanceof UnsupportedCapabilityError && err.message.includes("No matching WaveSpeed")
+      );
+    });
+
+    // Test S — seedance-2-5-extend maps input_video to providerField video
+    it("Test S: seedance-2-5-extend maps semantic input_video to providerField video", async () => {
+      let executedPayload = null;
+
+      await models.run(
+        "seedance-2-5-extend",
+        {
+          input_video: "https://cdn.example.com/input.mp4",
+          prompt: "extend further into the sunset",
+          duration: 5,
+        },
+        {
+          userId: "u-extend-test",
+          sdkRunner: async ({ payload }) => {
+            executedPayload = payload;
+            return { outputs: ["https://cdn.example.com/extended.mp4"] };
+          },
+        }
+      );
+
+      assert.ok(executedPayload, "sdkRunner must be invoked");
+      assert.strictEqual(executedPayload.video, "https://cdn.example.com/input.mp4");
+      assert.strictEqual(executedPayload.video_url, undefined, "providerField must be video, not video_url");
+      assert.strictEqual(executedPayload.prompt, "extend further into the sunset");
+      assert.strictEqual(executedPayload.duration, 5);
+    });
+
+    // Test T — gpt_image_2 multi-path resolution and execution (generation vs edit)
+    it("Test T: gpt_image_2 resolves generation and edit routes correctly and wraps input_image", async () => {
+      const { resolveExecutionPlan } = await import("../../src/models/registry/bindingResolver.js");
+
+      // 1. Generation (prompt only)
+      const planGen = resolveExecutionPlan("gpt_image_2", { prompt: "a cute kitten", resolution: "1k" });
+      assert.strictEqual(planGen.route.id, "generation");
+      assert.strictEqual(planGen.route.providerModelId, "openai/gpt-image-2/text-to-image");
+
+      // 2. Edit (prompt + input_image)
+      let executedPayload = null;
+      let executedBinding = null;
+      const result = await models.run(
+        "gpt_image_2",
+        {
+          prompt: "add a party hat",
+          input_image: "https://cdn.example.com/cat.png",
+          resolution: "1k",
+        },
+        {
+          userId: "u-gpt2-edit",
+          sdkRunner: async ({ binding, payload }) => {
+            executedBinding = binding;
+            executedPayload = payload;
+            return { outputs: ["https://cdn.example.com/cat-hat.png"] };
+          },
+        }
+      );
+
+      assert.strictEqual(result.status, "success");
+      assert.strictEqual(executedBinding.providerModelId, "openai/gpt-image-2/edit");
+      assert.strictEqual(executedBinding.routeId, "edit");
+      assert.ok(Array.isArray(executedPayload.images), "input_image must be wrapped into images array for edit route");
+      assert.strictEqual(executedPayload.images[0], "https://cdn.example.com/cat.png");
+    });
+
+    // Test U — wavespeed_upscale routes to verified image-upscaler endpoint
+    it("Test U: wavespeed_upscale maps input_image to image and scale_factor to target_resolution", async () => {
+      let upscalePayload = null;
+      let upscaleBinding = null;
+
+      await models.run(
+        "wavespeed_upscale",
+        {
+          input_image: "https://example.com/lowres.png",
+          scale_factor: 2,
+        },
+        {
+          userId: "u-upscale-test",
+          sdkRunner: async ({ binding, payload }) => {
+            upscaleBinding = binding;
+            upscalePayload = payload;
+            return { outputs: ["https://cdn.example.com/highres.png"] };
+          },
+        }
+      );
+
+      assert.strictEqual(upscaleBinding.providerModelId, "wavespeed-ai/image-upscaler");
+      assert.strictEqual(upscalePayload.image, "https://example.com/lowres.png");
+      assert.strictEqual(upscalePayload.target_resolution, "2k");
+    });
+
+    // Test V — Mutating model.capabilities does NOT affect route resolution
+    it("Test V: Mutating model.capabilities does NOT affect route resolution (passive documentation)", async () => {
+      const { getRegistry } = await import("../../src/models/registry/modelRegistry.js");
+      const { resolveExecutionPlan } = await import("../../src/models/registry/bindingResolver.js");
+      const reg = getRegistry();
+      const m = reg.models.get("nanobana_pro");
+      const originalCaps = { ...m.capabilities };
+
+      try {
+        // Mutate capabilities to completely false/empty
+        m.capabilities = { prompt: false, input_image: false };
+
+        const plan = resolveExecutionPlan("nanobana_pro", {
+          prompt: "test capabilities independence",
+          input_image: "https://cdn.example.com/photo.png",
+        });
+
+        assert.strictEqual(plan.route.id, "edit");
+        assert.strictEqual(plan.route.providerModelId, "google/nano-banana-pro/edit");
+      } finally {
+        m.capabilities = originalCaps;
+      }
+    });
+
+    // Test W — HTTP router POST /:key/estimate-price canonical endpoint
+    it("Test W: HTTP router POST /:key/estimate-price calculates price without operation parameter", async () => {
+      const modelsRouter = (await import("../../routes/modelsRoute.js")).default;
+      const routeLayer = modelsRouter.stack.find(
+        (layer) => layer.route && layer.route.path === "/:key/estimate-price" && layer.route.methods.post
+      );
+      assert.ok(routeLayer, "Route POST /:key/estimate-price must be registered in router");
+
+      let sentData = null;
+      const mockReq = {
+        params: { key: "nanobana_pro" },
+        body: { prompt: "sunset over city", resolution: "1k" },
+      };
+      const mockRes = {
+        status: () => mockRes,
+        json: (data) => {
+          sentData = data;
+          return mockRes;
+        },
+      };
+
+      await routeLayer.route.stack[0].handle(mockReq, mockRes);
+      assert.strictEqual(sentData.success, true);
+      assert.ok(sentData.data.credits > 0);
+      assert.strictEqual(sentData.data.currency, "credits");
+      assert.ok(sentData.data.planIdentity.includes("nanobana_pro"));
+    });
+
+  });
+
+  // ── 12. WAVESPEED PARAMETER & ENUM VERIFICATION BOUNDARY TESTS ──────────────
+  describe("12. WaveSpeed Parameter & Enum Verification Boundary Tests", () => {
+    // 1. nanobana_pro: 10 aspect ratios, output_format png/jpeg
+    it("nanobana_pro: validates 10 verified aspect ratios, output_format, and rejects invalid aspect ratio", async () => {
+      const validRatios = ["1:1", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
+      for (const ratio of validRatios) {
+        const validated = models.validateInput("nanobana_pro", { prompt: "test", aspect_ratio: ratio });
+        assert.strictEqual(validated.aspect_ratio, ratio);
+      }
+
+      assert.throws(
+        () => models.validateInput("nanobana_pro", { prompt: "test", aspect_ratio: "100:1" }),
+        (err) => err.code === "INVALID_ENUM_VALUE"
+      );
+
+      let executedPayload = null;
+      await models.run(
+        "nanobana_pro",
+        { prompt: "photo", output_format: "jpeg" },
+        {
+          userId: "u-test-nb-pro",
+          sdkRunner: async ({ payload }) => {
+            executedPayload = payload;
+            return { outputs: ["https://cdn.example.com/out.jpeg"] };
+          },
+        }
+      );
+      assert.strictEqual(executedPayload.output_format, "jpeg");
+    });
+
+    // 2. nanobana_pro_ultra: resolution 4k/8k, default 4k, rejects 1k/2k
+    it("nanobana_pro_ultra: verifies resolution 4k/8k, default 4k, and rejects fake 1k/2k", async () => {
+      const def = models.validateInput("nanobana_pro_ultra", { prompt: "test" });
+      assert.strictEqual(def.resolution, "4k");
+
+      const val8k = models.validateInput("nanobana_pro_ultra", { prompt: "test", resolution: "8k" });
+      assert.strictEqual(val8k.resolution, "8k");
+
+      assert.throws(
+        () => models.validateInput("nanobana_pro_ultra", { prompt: "test", resolution: "1k" }),
+        (err) => err.code === "INVALID_ENUM_VALUE"
+      );
+      assert.throws(
+        () => models.validateInput("nanobana_pro_ultra", { prompt: "test", resolution: "2k" }),
+        (err) => err.code === "INVALID_ENUM_VALUE"
+      );
+    });
+
+    // 3. nanobana_2: 14 aspect ratios, search toggles, rejects removed quality/seed/negative_prompt
+    it("nanobana_2: accepts 14 aspect ratios, search toggles, and rejects removed legacy parameters", async () => {
+      const validRatios = ["1:1", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "1:4", "4:1", "1:8", "8:1"];
+      for (const ratio of validRatios) {
+        const validated = models.validateInput("nanobana_2", { prompt: "test", aspect_ratio: ratio });
+        assert.strictEqual(validated.aspect_ratio, ratio);
+      }
+
+      let executedPayload = null;
+      await models.run(
+        "nanobana_2",
+        { prompt: "test", enable_web_search: true, enable_image_search: true },
+        {
+          userId: "u-test-nb2",
+          sdkRunner: async ({ payload }) => {
+            executedPayload = payload;
+            return { outputs: ["https://cdn.example.com/nb2.png"] };
+          },
+        }
+      );
+      assert.strictEqual(executedPayload.enable_web_search, true);
+      assert.strictEqual(executedPayload.enable_image_search, true);
+
+      assert.throws(
+        () => models.validateInput("nanobana_2", { prompt: "test", quality: "hd" }),
+        (err) => err.code === "UNKNOWN_PARAMETER"
+      );
+      assert.throws(
+        () => models.validateInput("nanobana_2", { prompt: "test", negative_prompt: "bad quality" }),
+        (err) => err.code === "UNKNOWN_PARAMETER"
+      );
+    });
+
+    // 4. gpt_image_2: 15 aspect ratios, quality levels low/medium/high, output_format webp
+    it("gpt_image_2: accepts 15 aspect ratios, native quality levels (low/medium/high), and output_format", async () => {
+      const qualities = ["low", "medium", "high"];
+      for (const q of qualities) {
+        const validated = models.validateInput("gpt_image_2", { prompt: "test", quality: q });
+        assert.strictEqual(validated.quality, q);
+      }
+
+      // Rejects non-native quality values like "standard" or "hd"
+      assert.throws(
+        () => models.validateInput("gpt_image_2", { prompt: "test", quality: "standard" }),
+        (err) => err?.code === "INVALID_ENUM_VALUE" || err?.name === "InvalidEnumValueError"
+      );
+      assert.throws(
+        () => models.validateInput("gpt_image_2", { prompt: "test", quality: "hd" }),
+        (err) => err?.code === "INVALID_ENUM_VALUE" || err?.name === "InvalidEnumValueError"
+      );
+
+      let executedPayload = null;
+      await models.run(
+        "gpt_image_2",
+        { prompt: "test", quality: "high", output_format: "webp" },
+        {
+          userId: "u-test-gpt2",
+          sdkRunner: async ({ payload }) => {
+            executedPayload = payload;
+            return { outputs: ["https://cdn.example.com/gpt2.webp"] };
+          },
+        }
+      );
+      assert.strictEqual(executedPayload.quality, "high");
+      assert.strictEqual(executedPayload.output_format, "webp");
+
+      // Verify unsupported parameters (negative_prompt, seed) are strictly rejected as UnknownParameterError
+      assert.throws(
+        () => models.validateInput("gpt_image_2", { prompt: "test", negative_prompt: "blurry" }),
+        (err) => err?.code === "UNKNOWN_PARAMETER" || err?.name === "UnknownParameterError"
+      );
+      assert.throws(
+        () => models.validateInput("gpt_image_2", { prompt: "test", seed: 12345 }),
+        (err) => err?.code === "UNKNOWN_PARAMETER" || err?.name === "UnknownParameterError"
+      );
+    });
+
+    // 5. seedream_v5: 1k, 1.5k, 2k resolutions, 15 aspect ratios, prompt_optimization_mode
+    it("seedream_v5: verifies 1k/1.5k/2k resolutions and prompt_optimization_mode", async () => {
+      const resolutions = ["1k", "1.5k", "2k"];
+      for (const r of resolutions) {
+        const validated = models.validateInput("seedream_v5", { prompt: "test", resolution: r });
+        assert.strictEqual(validated.resolution, r);
+      }
+
+      let executedPayload = null;
+      await models.run(
+        "seedream_v5",
+        { prompt: "test", prompt_optimization_mode: "fast" },
+        {
+          userId: "u-test-sd5",
+          sdkRunner: async ({ payload }) => {
+            executedPayload = payload;
+            return { outputs: ["https://cdn.example.com/sd5.png"] };
+          },
+        }
+      );
+      assert.strictEqual(executedPayload.prompt_optimization_mode, "fast");
+    });
+
+    // 6. seedance_2_5: T2V and I2V parameter mappings (image, last_image, generate_audio, 4k)
+    it("seedance_2_5: verifies 4k resolution, generate_audio, and correct image/last_image payload mapping", async () => {
+      let t2vPayload = null;
+      await models.run(
+        "seedance_2_5",
+        { prompt: "ocean wave", resolution: "4k", generate_audio: true },
+        {
+          userId: "u-s25-t2v",
+          sdkRunner: async ({ payload }) => {
+            t2vPayload = payload;
+            return { outputs: ["https://cdn.example.com/s25.mp4"] };
+          },
+        }
+      );
+      assert.strictEqual(t2vPayload.resolution, "4k");
+      assert.strictEqual(t2vPayload.generate_audio, true);
+
+      let i2vPayload = null;
+      await models.run(
+        "seedance_2_5",
+        {
+          prompt: "animate character",
+          input_image: "https://example.com/start.png",
+          last_frame: "https://example.com/end.png",
+          generate_audio: false,
+        },
+        {
+          userId: "u-s25-i2v",
+          sdkRunner: async ({ payload }) => {
+            i2vPayload = payload;
+            return { outputs: ["https://cdn.example.com/s25-i2v.mp4"] };
+          },
+        }
+      );
+      assert.strictEqual(i2vPayload.image, "https://example.com/start.png");
+      assert.strictEqual(i2vPayload.last_image, "https://example.com/end.png");
+      assert.strictEqual(i2vPayload.generate_audio, false);
+      assert.strictEqual(i2vPayload.image_url, undefined, "Must NOT leak image_url field");
+    });
+
+    // 7. seedance_2_5_extend: requires prompt, maps input_video to video, resolution 4k
+    it("seedance_2_5_extend: enforces prompt required and maps input_video to video", async () => {
+      assert.throws(
+        () => models.validateInput("seedance_2_5_extend", { input_video: "https://example.com/v.mp4" }),
+        (err) => err.code === "MISSING_REQUIRED_PARAMETER" || err.message.includes("prompt")
+      );
+
+      let executedPayload = null;
+      await models.run(
+        "seedance_2_5_extend",
+        {
+          input_video: "https://example.com/clip.mp4",
+          prompt: "continue the camera movement",
+          resolution: "4k",
+          generate_audio: true,
+        },
+        {
+          userId: "u-extend-v",
+          sdkRunner: async ({ payload }) => {
+            executedPayload = payload;
+            return { outputs: ["https://cdn.example.com/ext.mp4"] };
+          },
+        }
+      );
+      assert.strictEqual(executedPayload.video, "https://example.com/clip.mp4");
+      assert.strictEqual(executedPayload.resolution, "4k");
+      assert.strictEqual(executedPayload.generate_audio, true);
+    });
+
+    // 8. wan_3_0: alibaba namespace, generate_audio, enable_prompt_expansion, seed, I2V image mapping
+    it("wan_3_0: routes to alibaba/wan-3.0 with generate_audio, prompt_expansion, and seed", async () => {
+      let t2vBinding = null;
+      let t2vPayload = null;
+      await models.run(
+        "wan_3_0",
+        {
+          prompt: "flying dragon",
+          aspect_ratio: "4:3",
+          generate_audio: true,
+          enable_prompt_expansion: true,
+          seed: 42,
+        },
+        {
+          userId: "u-wan-t2v",
+          sdkRunner: async ({ binding, payload }) => {
+            t2vBinding = binding;
+            t2vPayload = payload;
+            return { outputs: ["https://cdn.example.com/wan.mp4"] };
+          },
+        }
+      );
+      assert.strictEqual(t2vBinding.providerModelId, "alibaba/wan-3.0/text-to-video");
+      assert.strictEqual(t2vPayload.aspect_ratio, "4:3");
+      assert.strictEqual(t2vPayload.enable_audio, true);
+      assert.strictEqual(t2vPayload.enable_prompt_expansion, true);
+      assert.strictEqual(t2vPayload.seed, 42);
+
+      let i2vBinding = null;
+      let i2vPayload = null;
+      await models.run(
+        "wan_3_0",
+        {
+          prompt: "animate portrait",
+          input_image: "https://example.com/first.png",
+          last_frame: "https://example.com/last.png",
+        },
+        {
+          userId: "u-wan-i2v",
+          sdkRunner: async ({ binding, payload }) => {
+            i2vBinding = binding;
+            i2vPayload = payload;
+            return { outputs: ["https://cdn.example.com/wan-i2v.mp4"] };
+          },
+        }
+      );
+      assert.strictEqual(i2vBinding.providerModelId, "alibaba/wan-3.0/image-to-video");
+      assert.strictEqual(i2vPayload.image, "https://example.com/first.png");
+      assert.strictEqual(i2vPayload.last_image, "https://example.com/last.png");
+      assert.strictEqual(i2vPayload.image_url, undefined, "image_url must not be sent");
+    });
+
+    // 9. wavespeed_upscale: scale_factor 8 -> 8k, output_format webp, rejects invalid scale_factor
+    it("wavespeed_upscale: verifies 8x multiplier mapping to 8k and webp output format", async () => {
+      let executedPayload = null;
+      await models.run(
+        "wavespeed_upscale",
+        {
+          input_image: "https://example.com/low.png",
+          scale_factor: 8,
+          output_format: "webp",
+        },
+        {
+          userId: "u-upscale-8x",
+          sdkRunner: async ({ payload }) => {
+            executedPayload = payload;
+            return { outputs: ["https://cdn.example.com/high-8k.webp"] };
+          },
+        }
+      );
+      assert.strictEqual(executedPayload.image, "https://example.com/low.png");
+      assert.strictEqual(executedPayload.target_resolution, "8k");
+      assert.strictEqual(executedPayload.output_format, "webp");
+
+      assert.throws(
+        () => models.validateInput("wavespeed_upscale", { input_image: "https://example.com/low.png", scale_factor: 16 }),
+        (err) => err.code === "INVALID_ENUM_VALUE"
+      );
+    });
+  });
+
+  // ── 13. WAVESPEED OPERATION SIMPLIFICATION & DEDUPLICATION TESTS ───────────
+  describe("13. WaveSpeed Operation Simplification & Deduplication Tests", () => {
+    // Test 1: Common parameter definition exists once at Model + Provider level
+    it("Test 1: Common parameter definition exists once at Model + Provider level", () => {
+      const modelsToCheck = ["seedance_2_5", "wan_3_0", "nanobana_pro", "gpt_image_2"];
+      for (const mId of modelsToCheck) {
+        const bindingPath = path.join(apiRoot, "src/models/manifests", mId, "bindings/wavespeed.json");
+        const binding = JSON.parse(fs.readFileSync(bindingPath, "utf8"));
+        assert.ok(binding.parameters, `Binding for ${mId} must declare common "parameters" object at root`);
+        assert.ok(typeof binding.parameters === "object" && Object.keys(binding.parameters).length > 0);
+        assert.ok(binding.parameters.prompt, `${mId} common parameters must include "prompt"`);
+      }
+    });
+
+    // Test 2: Operations reference existing parameters through requiredInputs
+    it("Test 2: Operations reference existing parameters through requiredInputs", () => {
+      const bindingPath = path.join(apiRoot, "src/models/manifests/seedance_2_5/bindings/wavespeed.json");
+      const binding = JSON.parse(fs.readFileSync(bindingPath, "utf8"));
+      const routes = binding.routes || binding.operations;
+      assert.ok(Array.isArray(routes) && routes.length >= 3);
+
+      const t2v = routes.find((r) => r.id === "text_to_video");
+      assert.ok(t2v);
+      assert.deepStrictEqual(t2v.requiredInputs, ["prompt"]);
+
+      const i2v = routes.find((r) => r.id === "image_to_video");
+      assert.ok(i2v);
+      assert.deepStrictEqual(i2v.requiredInputs, ["prompt", "input_image"]);
+
+      const slf = routes.find((r) => r.id === "start_last_frame");
+      assert.ok(slf);
+      assert.deepStrictEqual(slf.requiredInputs, ["prompt", "input_image", "last_frame"]);
+    });
+
+    // Test 3: No duplicated full parameter definitions exist inside operations unless explicitly marked as overrides
+    it("Test 3: No duplicated full parameter definitions exist inside operations", () => {
+      const modelsToCheck = ["seedance_2_5", "wan_3_0", "nanobana_pro", "nanobana_pro_ultra", "gpt_image_2"];
+      for (const mId of modelsToCheck) {
+        const bindingPath = path.join(apiRoot, "src/models/manifests", mId, "bindings/wavespeed.json");
+        const binding = JSON.parse(fs.readFileSync(bindingPath, "utf8"));
+        const routes = binding.routes || binding.operations || [];
+        for (const route of routes) {
+          assert.strictEqual(
+            route.parameterMap,
+            undefined,
+            `Route "${route.id}" in ${mId} must NOT define redundant parameterMap; must inherit common parameters`
+          );
+        }
+      }
+    });
+
+    // Test 4: Changing a common parameter value updates every operation that uses it
+    it("Test 4: Changing a common parameter value updates every operation that uses it", async () => {
+      let t2vCaptured = null;
+      let i2vCaptured = null;
+
+      await models.run(
+        "seedance_2_5",
+        { prompt: "cinematic dawn", duration: 10, resolution: "1080p" },
+        {
+          userId: "u-t4-1",
+          sdkRunner: async ({ payload }) => {
+            t2vCaptured = payload;
+            return { outputs: ["https://cdn.example.com/t2v.mp4"] };
+          },
+        }
+      );
+
+      await models.run(
+        "seedance_2_5",
+        { prompt: "cinematic sunset", input_image: "https://example.com/in.png", duration: 10, resolution: "1080p" },
+        {
+          userId: "u-t4-2",
+          sdkRunner: async ({ payload }) => {
+            i2vCaptured = payload;
+            return { outputs: ["https://cdn.example.com/i2v.mp4"] };
+          },
+        }
+      );
+
+      assert.strictEqual(t2vCaptured.duration, 10);
+      assert.strictEqual(t2vCaptured.resolution, "1080p");
+      assert.strictEqual(i2vCaptured.duration, 10);
+      assert.strictEqual(i2vCaptured.resolution, "1080p");
+    });
+
+    // Test 5: Operation-specific override does not mutate the common definition
+    it("Test 5: Operation-specific override does not mutate the common definition", async () => {
+      const { evaluateWaveSpeedRoutes } = await import("../../src/models/runtime/wavespeed/common/routeEvaluator.js");
+      const baseBinding = {
+        id: "mock_model.wavespeed",
+        modelId: "mock_model",
+        parameters: {
+          prompt: { providerField: "prompt", type: "string" },
+          resolution: { providerField: "resolution", values: ["720p", "1080p", "4k"] },
+        },
+        operations: [
+          {
+            id: "special_op",
+            when: { mode: "special" },
+            parameterOverrides: {
+              resolution: { providerField: "resolution", values: ["4k"] },
+            },
+          },
+        ],
+      };
+
+      const resolved = evaluateWaveSpeedRoutes(baseBinding, baseBinding.operations, { mode: "special" });
+      assert.deepStrictEqual(resolved.parameters.resolution.values, ["4k"]);
+      assert.deepStrictEqual(
+        baseBinding.parameters.resolution.values,
+        ["720p", "1080p", "4k"],
+        "Parent binding parameters must remain unmutated"
+      );
+    });
+
+    // Test 6: text_to_video selects correctly
+    it("Test 6: text_to_video selects correctly", async () => {
+      let resolvedPlan = null;
+      await models.run(
+        "seedance_2_5",
+        { prompt: "waves crashing" },
+        {
+          userId: "u-t6",
+          sdkRunner: async ({ binding, payload }) => {
+            resolvedPlan = binding;
+            return { outputs: ["https://cdn.example.com/t2v.mp4"] };
+          },
+        }
+      );
+      assert.strictEqual(resolvedPlan.routeId, "text_to_video");
+      assert.strictEqual(resolvedPlan.providerModelId, "bytedance/seedance-2.5/text-to-video");
+    });
+
+    // Test 7: start_last_frame selects correctly
+    it("Test 7: start_last_frame selects correctly", async () => {
+      let resolvedPlan = null;
+      let executedPayload = null;
+      await models.run(
+        "seedance_2_5",
+        {
+          prompt: "camera zooms in",
+          input_image: "https://example.com/start.png",
+          last_frame: "https://example.com/end.png",
+        },
+        {
+          userId: "u-t7",
+          sdkRunner: async ({ binding, payload }) => {
+            resolvedPlan = binding;
+            executedPayload = payload;
+            return { outputs: ["https://cdn.example.com/morph.mp4"] };
+          },
+        }
+      );
+      assert.strictEqual(resolvedPlan.routeId, "start_last_frame");
+      assert.strictEqual(resolvedPlan.providerModelId, "bytedance/seedance-2.5/image-to-video");
+      assert.strictEqual(executedPayload.image, "https://example.com/start.png");
+      assert.strictEqual(executedPayload.last_image, "https://example.com/end.png");
+    });
+
+    // Test 8: reference_to_video selects correctly when intentionally supported
+    it("Test 8: reference_to_video selects correctly when intentionally supported", async () => {
+      const { evaluateWaveSpeedRoutes } = await import("../../src/models/runtime/wavespeed/common/routeEvaluator.js");
+      const refBinding = {
+        id: "ref_model.wavespeed",
+        modelId: "ref_model",
+        parameters: {
+          prompt: { providerField: "prompt" },
+          reference_images: { providerField: "ref_imgs" },
+        },
+        operations: [
+          {
+            id: "text_to_video",
+            when: { reference_images: "absent" },
+            requiredInputs: ["prompt"],
+          },
+          {
+            id: "reference_to_video",
+            when: { reference_images: "present" },
+            requiredInputs: ["prompt", "reference_images"],
+          },
+        ],
+      };
+
+      const plan = evaluateWaveSpeedRoutes(refBinding, refBinding.operations, {
+        prompt: "ref animation",
+        reference_images: ["https://example.com/ref.png"],
+      });
+      assert.strictEqual(plan.routeId, "reference_to_video");
+    });
+
+    // Test 9: Image generation/edit/inpaint still work
+    it("Test 9: Image generation/edit/inpaint still work", async () => {
+      let genPlan = null;
+      await models.run(
+        "nanobana_pro",
+        { prompt: "mountain landscape" },
+        {
+          userId: "u-t9-gen",
+          sdkRunner: async ({ binding }) => {
+            genPlan = binding;
+            return { outputs: ["https://cdn.example.com/gen.png"] };
+          },
+        }
+      );
+      assert.strictEqual(genPlan.routeId, "generation");
+      assert.strictEqual(genPlan.providerModelId, "google/nano-banana-pro/text-to-image");
+
+      let editPlan = null;
+      let editPayload = null;
+      await models.run(
+        "nanobana_pro",
+        { prompt: "add river", input_image: "https://example.com/mountain.png" },
+        {
+          userId: "u-t9-edit",
+          sdkRunner: async ({ binding, payload }) => {
+            editPlan = binding;
+            editPayload = payload;
+            return { outputs: ["https://cdn.example.com/edit.png"] };
+          },
+        }
+      );
+      assert.strictEqual(editPlan.routeId, "edit");
+      assert.strictEqual(editPlan.providerModelId, "google/nano-banana-pro/edit");
+      assert.deepStrictEqual(editPayload.images, ["https://example.com/mountain.png"]);
+
+      await assert.rejects(
+        () => models.run(
+          "nanobana_pro",
+          {
+            prompt: "remove rock",
+            input_image: "https://example.com/mountain.png",
+            mask: "https://example.com/mask.png",
+          },
+          { userId: "u-t9-inpaint" }
+        ),
+        (err) => err.name === "UnsupportedCapabilityError" || err.name === "UnknownParameterError" || err?.code === "UNSUPPORTED_CAPABILITY"
+      );
+    });
+
+    // Test 10: Flat single-endpoint models still work
+    it("Test 10: Flat single-endpoint models still work", async () => {
+      const singleModels = ["seedream_v5", "seedance_2_5_extend", "wavespeed_upscale"];
+      for (const mId of singleModels) {
+        const bindingPath = path.join(apiRoot, "src/models/manifests", mId, "bindings/wavespeed.json");
+        const binding = JSON.parse(fs.readFileSync(bindingPath, "utf8"));
+        assert.strictEqual(binding.routes, undefined, `${mId} must have no routes array`);
+        assert.ok(binding.endpoint, `${mId} must have root endpoint`);
+        assert.ok(binding.providerModelId, `${mId} must have root providerModelId`);
+        assert.ok(binding.parameters, `${mId} must have root parameters`);
+      }
+    });
+
+    // Static Architectural Deduplication Invariant Test (Section 22)
+    it("Static Architectural Deduplication Test: Rejects route that duplicates common parameters", () => {
+      const { ConfigIntegrityError } = models;
+      const manifestPath = path.join(apiRoot, "src/models/manifests/seedance_2_5/bindings/wavespeed.json");
+      const originalContent = fs.readFileSync(manifestPath, "utf8");
+
+      try {
+        const duplicateBinding = JSON.parse(originalContent);
+        duplicateBinding.routes[0].parameterMap = {
+          prompt: { providerField: "prompt" }, // Identical to common definition
+        };
+        fs.writeFileSync(manifestPath, JSON.stringify(duplicateBinding, null, 2), "utf8");
+
+        assert.throws(
+          () => models.initRegistry({ forceReload: true }),
+          (err) => {
+            return (
+              err.name === "ConfigIntegrityError" &&
+              err.message.includes("Architectural Duplication Invariant Violated") &&
+              err.message.includes("prompt")
+            );
+          },
+          "initRegistry must reject route declaring parameter identical to common definition"
+        );
+      } finally {
+        fs.writeFileSync(manifestPath, originalContent, "utf8");
+        models.initRegistry({ forceReload: true });
+      }
+    });
+
+    // ── CANONICAL PARAMETER MAPPING SUITE (Sections 15 & 16) ───────────────────
+    describe("Canonical Parameter Mapping Suite (Sections 15 & 16)", () => {
+      // 1. Audio Canonicalization: wan_3_0 maps generate_audio -> enable_audio
+      it("wan_3_0: maps canonical generate_audio to provider enable_audio payload", async () => {
+        let executedPayload = null;
+        await models.run(
+          "wan_3_0",
+          { prompt: "waterfall in forest", generate_audio: true },
+          {
+            userId: "u-wan-audio",
+            sdkRunner: async ({ payload }) => {
+              executedPayload = payload;
+              return { outputs: ["https://cdn.example.com/wan_audio.mp4"] };
+            },
+          }
+        );
+        assert.strictEqual(executedPayload.enable_audio, true, "Provider payload must contain enable_audio: true");
+        assert.strictEqual(executedPayload.generate_audio, undefined, "Must NOT leak canonical generate_audio field to provider");
+      });
+
+      // 2. Audio Canonicalization: seedance_2_5 maps generate_audio -> generate_audio
+      it("seedance_2_5: maps canonical generate_audio to provider generate_audio payload", async () => {
+        let executedPayload = null;
+        await models.run(
+          "seedance_2_5",
+          { prompt: "cyberpunk race", generate_audio: false },
+          {
+            userId: "u-seedance-audio",
+            sdkRunner: async ({ payload }) => {
+              executedPayload = payload;
+              return { outputs: ["https://cdn.example.com/seedance_audio.mp4"] };
+            },
+          }
+        );
+        assert.strictEqual(executedPayload.generate_audio, false, "Provider payload must contain generate_audio: false");
+      });
+
+      // 3. Video Frames: seedance_2_5 maps input_image -> image, last_frame -> last_image
+      it("seedance_2_5: maps input_image to image and last_frame to last_image", async () => {
+        let executedPayload = null;
+        await models.run(
+          "seedance_2_5",
+          {
+            prompt: "transition from sunrise to night",
+            input_image: "https://example.com/sunrise.png",
+            last_frame: "https://example.com/night.png",
+          },
+          {
+            userId: "u-frames-seedance",
+            sdkRunner: async ({ payload }) => {
+              executedPayload = payload;
+              return { outputs: ["https://cdn.example.com/frames.mp4"] };
+            },
+          }
+        );
+        assert.strictEqual(executedPayload.image, "https://example.com/sunrise.png");
+        assert.strictEqual(executedPayload.last_image, "https://example.com/night.png");
+        assert.strictEqual(executedPayload.input_image, undefined);
+        assert.strictEqual(executedPayload.last_frame, undefined);
+      });
+
+      // 4. Video Frames: wan_3_0 maps input_image -> image, last_frame -> last_image
+      it("wan_3_0: maps input_image to image and last_frame to last_image", async () => {
+        let executedPayload = null;
+        await models.run(
+          "wan_3_0",
+          {
+            prompt: "camera zooms into mountain",
+            input_image: "https://example.com/m1.png",
+            last_frame: "https://example.com/m2.png",
+          },
+          {
+            userId: "u-frames-wan",
+            sdkRunner: async ({ payload }) => {
+              executedPayload = payload;
+              return { outputs: ["https://cdn.example.com/wan_frames.mp4"] };
+            },
+          }
+        );
+        assert.strictEqual(executedPayload.image, "https://example.com/m1.png");
+        assert.strictEqual(executedPayload.last_image, "https://example.com/m2.png");
+      });
+
+      // 5. Transform: wrap_array on nanobana_pro edit input_image -> images: [url]
+      it("nanobana_pro: wraps scalar input_image into provider images array via wrap_array", async () => {
+        let executedPayload = null;
+        await models.run(
+          "nanobana_pro",
+          {
+            prompt: "turn jacket red",
+            input_image: "https://example.com/blue_jacket.png",
+          },
+          {
+            userId: "u-wrap-test",
+            sdkRunner: async ({ payload }) => {
+              executedPayload = payload;
+              return { outputs: ["https://cdn.example.com/red_jacket.png"] };
+            },
+          }
+        );
+        assert.ok(Array.isArray(executedPayload.images), "Provider images payload must be an array");
+        assert.strictEqual(executedPayload.images.length, 1);
+        assert.strictEqual(executedPayload.images[0], "https://example.com/blue_jacket.png");
+      });
+
+      // 6. ValueMap: wavespeed_upscale scale_factor 2 -> target_resolution 2k
+      it("wavespeed_upscale: translates scale_factor via valueMap and maps input_image to image", async () => {
+        let executedPayload = null;
+        await models.run(
+          "wavespeed_upscale",
+          {
+            input_image: "https://example.com/lowres.png",
+            scale_factor: 2,
+          },
+          {
+            userId: "u-upscale-vm",
+            sdkRunner: async ({ payload }) => {
+              executedPayload = payload;
+              return { outputs: ["https://cdn.example.com/highres.png"] };
+            },
+          }
+        );
+        assert.strictEqual(executedPayload.image, "https://example.com/lowres.png");
+        assert.strictEqual(executedPayload.target_resolution, "2k");
+        assert.strictEqual(executedPayload.scale_factor, undefined);
+      });
+
+      // 7. Validation: Rejects undeclared unknown canonical parameter
+      it("Validation: Rejects undeclared unknown parameter", () => {
+        assert.throws(
+          () => models.validateInput("seedance_2_5", { prompt: "test", unknown_random_prop: "invalid" }),
+          (err) => err.name === "UnknownParameterError" || err.code === "UNKNOWN_PARAMETER"
+        );
+      });
+
+      // 8. No Provider Leaks: getCatalog() returns only canonical parameters
+      it("No Provider Leaks: getCatalog() exposes canonical parameters only, never providerField", () => {
+        const catalog = models.getCatalog();
+        for (const entry of catalog) {
+          assert.strictEqual(entry.providerField, undefined, `Model ${entry.id} leaked providerField`);
+          assert.strictEqual(entry.providerModelId, undefined, `Model ${entry.id} leaked providerModelId`);
+          assert.strictEqual(entry.parameterMap, undefined, `Model ${entry.id} leaked parameterMap`);
+          assert.ok(entry.parameters, `Model ${entry.id} must have parameters`);
+
+          for (const [pName, pDef] of Object.entries(entry.parameters)) {
+            assert.strictEqual(pDef.providerField, undefined, `Parameter ${pName} in ${entry.id} leaked providerField`);
+          }
+        }
+      });
+
+      // 9. nanobana_2: edit routing with scalar input_image wrapped to images array
+      it("nanobana_2: maps input_image to provider images array and routes to edit endpoint", async () => {
+        let executedBinding = null;
+        let executedPayload = null;
+        await models.run(
+          "nanobana_2",
+          {
+            prompt: "add cool sunglasses",
+            input_image: "https://example.com/portrait.png",
+          },
+          {
+            userId: "u-nb2-edit",
+            sdkRunner: async ({ binding, payload }) => {
+              executedBinding = binding;
+              executedPayload = payload;
+              return { outputs: ["https://cdn.example.com/edited.png"] };
+            },
+          }
+        );
+        assert.strictEqual(executedBinding.endpoint, "/api/v3/google/nano-banana-2/edit");
+        assert.strictEqual(executedBinding.providerModelId, "google/nano-banana-2/edit");
+        assert.ok(Array.isArray(executedPayload.images), "Provider images payload must be an array");
+        assert.strictEqual(executedPayload.images.length, 1);
+        assert.strictEqual(executedPayload.images[0], "https://example.com/portrait.png");
+      });
+
+      // 10. nanobana_2: edit routing with multi-reference images array
+      it("nanobana_2: routes multi-reference images array to edit endpoint", async () => {
+        let executedBinding = null;
+        let executedPayload = null;
+        await models.run(
+          "nanobana_2",
+          {
+            prompt: "combine these two characters",
+            images: ["https://example.com/char1.png", "https://example.com/char2.png"],
+          },
+          {
+            userId: "u-nb2-multi",
+            sdkRunner: async ({ binding, payload }) => {
+              executedBinding = binding;
+              executedPayload = payload;
+              return { outputs: ["https://cdn.example.com/combined.png"] };
+            },
+          }
+        );
+        assert.strictEqual(executedBinding.endpoint, "/api/v3/google/nano-banana-2/edit");
+        assert.strictEqual(executedBinding.providerModelId, "google/nano-banana-2/edit");
+        assert.ok(Array.isArray(executedPayload.images), "Provider images payload must be an array");
+        assert.strictEqual(executedPayload.images.length, 2);
+        assert.strictEqual(executedPayload.images[0], "https://example.com/char1.png");
+        assert.strictEqual(executedPayload.images[1], "https://example.com/char2.png");
+      });
+    });
   });
 
 });
+

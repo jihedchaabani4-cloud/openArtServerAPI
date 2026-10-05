@@ -2,6 +2,22 @@ import { Queue } from "bullmq";
 import { randomUUID } from "node:crypto";
 import { getCleanContext, createLogger, LogEvents } from "../infrastructure/logging/index.js";
 
+/**
+ * Thrown when all dispatch attempts to Redis/BullMQ have failed.
+ * This is an infrastructure error — callers should not inspect its internals.
+ * UseCaseService catches this and handles business cleanup (rollback, status update).
+ */
+export class QueueDispatchError extends Error {
+  constructor(cause, attempts) {
+    super(`Queue dispatch failed after ${attempts} attempt(s): ${cause?.message ?? cause}`);
+    this.name = "QueueDispatchError";
+    this.code = "QUEUE_DISPATCH_FAILED";
+    this.statusCode = 503;
+    this.cause = cause;
+    this.attempts = attempts;
+  }
+}
+
 const queueLogger = createLogger("queue");
 
 export const USECASE_QUEUE_NAME = "v2-workflow-jobs";
@@ -84,26 +100,52 @@ export class JobQueueService {
       `Job ${jobId} enqueued for usecase "${useCaseId}"`
     );
 
-    return queue.add(
-      "run-usecase",
-      {
-        useCaseId,
-        input,
-        userId,
-        executionId: finalExecutionId,
-        workflowRunId: workflowRunId || finalExecutionId,
-        billingHoldId,
-        idempotencyKey,
-        traceId: traceId || finalExecutionId,
-        _context: jobContext,
-      },
-      {
-        jobId,
+    const DISPATCH_MAX_ATTEMPTS = 3;
+    const DISPATCH_BASE_BACKOFF_MS = 300;
+
+    let lastErr = null;
+    for (let attempt = 1; attempt <= DISPATCH_MAX_ATTEMPTS; attempt++) {
+      try {
+        const job = await queue.add(
+          "run-usecase",
+          {
+            useCaseId,
+            input,
+            userId,
+            executionId: finalExecutionId,
+            workflowRunId: workflowRunId || finalExecutionId,
+            billingHoldId,
+            idempotencyKey,
+            traceId: traceId || finalExecutionId,
+            _context: jobContext,
+          },
+          {
+            jobId,
+          }
+        );
+        if (attempt > 1) {
+          queueLogger.info({ jobId, attempt }, `Job ${jobId} dispatched successfully on attempt ${attempt}`);
+        }
+        return job;
+      } catch (err) {
+        lastErr = err;
+        if (attempt < DISPATCH_MAX_ATTEMPTS) {
+          const backoffMs = DISPATCH_BASE_BACKOFF_MS * Math.pow(2, attempt - 1); // 300, 600ms
+          queueLogger.warn(
+            { jobId, attempt, nextAttemptInMs: backoffMs, err: err.message },
+            `[JobQueueService] Dispatch attempt ${attempt}/${DISPATCH_MAX_ATTEMPTS} failed. Retrying in ${backoffMs}ms...`
+          );
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        }
       }
-    );
+    }
+
+    // All attempts exhausted — throw a clean infrastructure error upward
+    throw new QueueDispatchError(lastErr, DISPATCH_MAX_ATTEMPTS);
   }
 
   /**
+
    * Enqueue a single node execution job.
    * @param {string} runId
    * @param {string} nodeId

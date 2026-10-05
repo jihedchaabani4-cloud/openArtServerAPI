@@ -2,7 +2,7 @@ import "dotenv/config";
 import { Worker } from "bullmq";
 import { workerRedisConnection } from "../queue/redis.js";
 import { USECASE_QUEUE_NAME } from "../services/jobQueueService.js";
-import { useCaseService } from "../container.js";
+import { useCaseService, db } from "../container.js";
 import { executeNodeJob } from "../v2/runner/nodeExecutor.js";
 import { executeOrchestration } from "../v2/runner/workflowRunner.js";
 import { bootstrapV2 } from "../v2/bootstrap.js";
@@ -70,8 +70,61 @@ useCaseWorker.on("completed", (job) => {
   workerLogger.debug({ event: LogEvents.JOB_COMPLETED, jobId: job.id }, `Job #${job.id} marked as COMPLETED`);
 });
 
-useCaseWorker.on("failed", (job, err) => {
+useCaseWorker.on("failed", async (job, err) => {
   workerLogger.error({ event: LogEvents.JOB_FAILED, jobId: job?.id, err }, `Job #${job?.id} FAILED: ${err.message}`);
+
+  // ── Smart crash detection ─────────────────────────────────────────────────
+  // executeQueuedUseCase adds `err.errorReport` when it catches normally.
+  // If it's present → cleanup already done there → skip to avoid double-rollback.
+  // If absent → Worker crashed before catch ran → we must handle cleanup here.
+  const alreadyHandled = Boolean(err?.errorReport);
+  if (alreadyHandled) {
+    workerLogger.debug(
+      { jobId: job?.id },
+      `[Worker] Job #${job?.id} failed with errorReport — cleanup already done by executeQueuedUseCase.`
+    );
+    return;
+  }
+
+  // ── Worker crash path: manual cleanup ────────────────────────────────────
+  workerLogger.warn(
+    { jobId: job?.id },
+    `[Worker] Job #${job?.id} failed without errorReport — Worker crash detected. Running manual cleanup.`
+  );
+
+  const billingHoldId = job?.data?.billingHoldId || job?.data?.input?.billing_hold_id;
+  const workflowId    = job?.data?.input?.workflow_id;
+
+  // 1. Rollback credits
+  if (billingHoldId) {
+    await useCaseService.rollbackPreparedBilling(billingHoldId, {
+      failedMessage: err?.message || "Worker crash",
+      errorCategory: "WORKER_CRASH",
+    }).catch((rollbackErr) => {
+      workerLogger.error(
+        { jobId: job?.id, billingHoldId, err: rollbackErr.message },
+        `[Worker] Billing rollback failed for hold ${billingHoldId} — manual review required.`
+      );
+    });
+  }
+
+  // 2. Update media status → "failed"
+  if (workflowId && db?.media) {
+    await db.media.findByWorkflow(workflowId).then((list) => {
+      const pending = list?.find((m) => m.status === "processing" || m.status === "pending");
+      if (pending?.id) {
+        return db.media.updateMedia(pending.id, {
+          status: "failed",
+          error_message: "Generation failed unexpectedly. Your credits have been refunded.",
+        });
+      }
+    }).catch((dbErr) => {
+      workerLogger.error(
+        { jobId: job?.id, workflowId, err: dbErr.message },
+        `[Worker] Media status update failed for workflow ${workflowId} — manual review required.`
+      );
+    });
+  }
 });
 
 export default useCaseWorker;

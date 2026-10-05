@@ -25,7 +25,9 @@ describe("RC1.2-S4 — Lemon Squeezy Payments Webhook Boundary Tests", () => {
     process.env.LEMON_WEBHOOK_SECRET = WEBHOOK_SECRET;
 
     const app = express();
-    // Mount payments router directly; note express.raw is inside paymentsRouter for /webhook
+    // Mirror production index.js: raw body parser for webhook BEFORE global express.json
+    app.use("/api/payments/webhook", express.raw({ type: "application/json" }));
+    app.use(express.json({ limit: "50mb" }));
     app.use("/api/payments", paymentsRouter);
 
     server = http.createServer(app);
@@ -241,5 +243,54 @@ describe("RC1.2-S4 — Lemon Squeezy Payments Webhook Boundary Tests", () => {
     const body = await res.json();
     assert.equal(body.ok, true);
     assert.equal(body.message, "Already processed");
+  });
+
+  it("TEST WEBHOOK-6: Payload with whitespace, escaped slashes, unicode escapes, and custom key order signed over RAW bytes", async () => {
+    // Exact raw bytes with extra whitespace, escaped slashes, unicode escapes, different key order
+    const rawPayloadString = '{\n  "meta":   {\n    "event_name": "order_created",\n    "custom_data": {\n      "zeta_order": "first",\n      "user_id": "\\u0075ser-alice",\n      "package_id": "pkg_100"\n    }\n  },\n  "data": {\n    "id": "998822",\n    "attributes": {\n      "status": "paid",\n      "invoice_url": "https:\\/\\/example.com\\/invoices\\/123",\n      "first_order_item": {\n        "variant_id": "variant_100"\n      }\n    }\n  }\n}';
+    const rawBuffer = Buffer.from(rawPayloadString, "utf8");
+    const sig = signPayload(rawBuffer);
+
+    const res = await fetch(`${baseUrl}/api/payments/webhook`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Signature": sig,
+      },
+      body: rawBuffer,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.message, "Credits added successfully");
+    assert.equal(creditCalls.length, 1);
+    assert.equal(creditCalls[0].userId, "user-alice");
+  });
+
+  it("TEST WEBHOOK-7: Webhook rejects non-Buffer body without falling back to JSON.stringify", async () => {
+    const fakeReq = {
+      body: { meta: { event_name: "order_created" } },
+      headers: { "x-signature": "dummy" },
+    };
+    let statusCode = null;
+    let responseBody = null;
+    const fakeRes = {
+      status(code) {
+        statusCode = code;
+        return this;
+      },
+      json(data) {
+        responseBody = data;
+        return this;
+      },
+    };
+
+    const { handleWebhook } = await import("../../controllers/paymentsController.js");
+    await handleWebhook(fakeReq, fakeRes);
+
+    assert.equal(statusCode, 400);
+    assert.equal(responseBody.ok, false);
+    assert.match(responseBody.message, /buffer/i);
   });
 });

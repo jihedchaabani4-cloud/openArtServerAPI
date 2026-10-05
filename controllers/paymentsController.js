@@ -111,11 +111,14 @@ export async function getCheckoutUrl(req, res) {
  * Handles: order_created
  */
 export async function handleWebhook(req, res) {
-    const rawBody = req.body instanceof Buffer ? req.body.toString("utf8") : JSON.stringify(req.body);
+    if (!Buffer.isBuffer(req.body)) {
+        console.warn("[Payments] Webhook rejected: body is not a raw Buffer");
+        return res.status(400).json({ ok: false, message: "Raw body buffer required" });
+    }
     const signature = req.headers["x-signature"];
 
-    // ① Verify signature
-    const isValid = verifyWebhookSignature(rawBody, signature);
+    // ① Verify signature strictly over raw Buffer
+    const isValid = verifyWebhookSignature(req.body, signature);
     if (!isValid) {
         console.warn("[Payments] Webhook rejected: invalid signature");
         return res.status(401).json({ ok: false, message: "Invalid signature" });
@@ -123,7 +126,7 @@ export async function handleWebhook(req, res) {
 
     let event;
     try {
-        event = JSON.parse(rawBody);
+        event = JSON.parse(req.body.toString("utf8"));
     } catch {
         return res.status(400).json({ ok: false, message: "Invalid JSON body" });
     }

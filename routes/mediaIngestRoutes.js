@@ -8,7 +8,7 @@ router.use(requireAuth);
 
 const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 200 * 1024 * 1024 }, // 200 MB
+    limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB max (videos)
 });
 
 /**
@@ -17,6 +17,14 @@ const upload = multer({
  */
 router.post("/ingest", upload.single("file"), async (req, res) => {
     try {
+        if (req.file && req.file.mimetype.startsWith("image/") && req.file.size > 20 * 1024 * 1024) {
+            return res.status(413).json({
+                ok: false,
+                code: "PAYLOAD_TOO_LARGE",
+                message: "Image file exceeds maximum allowed size of 20MB",
+            });
+        }
+
         const userId = req.user.id;
         const sourceInput = req.file || req.body?.source || req.body?.image_url || req.body?.media_id || req.body?.base64;
 

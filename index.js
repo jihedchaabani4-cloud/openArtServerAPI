@@ -67,10 +67,42 @@ app.use(
         credentials: true,
     })
 );
-// Payments webhook raw body parser MUST be mounted before global express.json
+// Payments webhook raw body parser MUST be mounted before any JSON parser
 app.use("/api/payments/webhook", express.raw({ type: "application/json" }));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// ── Body Size Parsers: Scoped 15MB for base64/media ingestion, Global 1MB for all others ──
+const scopedJsonParser = express.json({ limit: "15mb" });
+const scopedUrlencodedParser = express.urlencoded({ extended: true, limit: "15mb" });
+const globalJsonParser = express.json({ limit: "1mb" });
+const globalUrlencodedParser = express.urlencoded({ extended: true, limit: "1mb" });
+
+function isScopedLargeBodyRoute(path) {
+    if (!path) return false;
+    // Routes identified in frontend audit that accept base64 / large photo data
+    if (path === "/api/v2/elements" || path.startsWith("/api/v2/elements/")) return true;
+    if (path === "/api/characters" || path.startsWith("/api/characters/")) return true;
+    if (path === "/api/assets/upload") return true;
+    if (path === "/api/media/ingest") return true;
+    return false;
+}
+
+app.use((req, res, next) => {
+    const path = req.originalUrl?.split("?")[0] || req.path;
+    if (path === "/api/payments/webhook") {
+        return next();
+    }
+    if (isScopedLargeBodyRoute(path)) {
+        scopedJsonParser(req, res, (err) => {
+            if (err) return next(err);
+            scopedUrlencodedParser(req, res, next);
+        });
+    } else {
+        globalJsonParser(req, res, (err) => {
+            if (err) return next(err);
+            globalUrlencodedParser(req, res, next);
+        });
+    }
+});
 app.use(cookieParser());
 app.use(requestLogger());
 
@@ -84,6 +116,15 @@ app.use((req, res) => {
 
 // ── Global error handler ─────────────────────────────────────
 app.use((err, req, res, next) => {
+    // 413 Payload Too Large / Multer LIMIT_FILE_SIZE handling
+    if (err.type === "entity.too.large" || err.statusCode === 413 || err.status === 413 || err.code === "LIMIT_FILE_SIZE") {
+        return res.status(413).json({
+            ok: false,
+            code: "PAYLOAD_TOO_LARGE",
+            message: err.code === "LIMIT_FILE_SIZE" ? "Uploaded file exceeds maximum allowed size" : "Request payload exceeds allowed limit",
+        });
+    }
+
     const statusCode = err.statusCode || 500;
     const errorCode = err.code || (statusCode >= 500 ? LogErrorCodes.INTERNAL_UNEXPECTED_ERROR : "REQUEST_ERROR");
 
@@ -111,19 +152,21 @@ app.use((err, req, res, next) => {
 });
 
 // ── Start server ─────────────────────────────────────────────
-app.listen(PORT, () => {
+if (process.env.NODE_ENV !== "test") {
+    app.listen(PORT, () => {
     const appName = process.env.APP_NAME || "Labveil";
     systemLogger.info({ port: PORT, appName }, `${appName} API running on http://localhost:${PORT}`);
 
     // ── Start Cron Jobs ──────────────────────────────────────────
-    if (walletService) {
-        setInterval(() => {
-            walletService.expireStaleHolds().catch(err => {
-                systemLogger.error({ err, event: "cron.error" }, `Failed to expire stale holds: ${err.message}`);
-            });
-        }, 10 * 60 * 1000); // Every 10 minutes
-        systemLogger.info({ intervalMinutes: 10 }, "Started Stale Holds expiration cron job (runs every 10m)");
-    }
-});
+        if (walletService) {
+            setInterval(() => {
+                walletService.expireStaleHolds().catch(err => {
+                    systemLogger.error({ err, event: "cron.error" }, `Failed to expire stale holds: ${err.message}`);
+                });
+            }, 10 * 60 * 1000); // Every 10 minutes
+            systemLogger.info({ intervalMinutes: 10 }, "Started Stale Holds expiration cron job (runs every 10m)");
+        }
+    });
+}
 
 export default app;

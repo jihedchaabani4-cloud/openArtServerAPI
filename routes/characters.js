@@ -6,7 +6,7 @@ import { rateLimit } from "../src/middleware/rateLimit.js";
 
 const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max file size
+    limits: { fileSize: 100 * 1024 * 1024 }, // 100MB max (video)
     fileFilter: (req, file, cb) => {
         if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) {
             cb(null, true);
@@ -16,6 +16,17 @@ const upload = multer({
     },
 });
 
+const validateMediaSize = (req, res, next) => {
+    if (req.file && req.file.mimetype.startsWith("image/") && req.file.size > 20 * 1024 * 1024) {
+        return res.status(413).json({
+            ok: false,
+            code: "PAYLOAD_TOO_LARGE",
+            message: "Image file exceeds maximum allowed size of 20MB",
+        });
+    }
+    next();
+};
+
 const router = express.Router();
 
 router.use(requireAuth);
@@ -24,9 +35,9 @@ router.use(requireAuth);
  * @route POST /api/characters/create
  * @route POST /api/characters
  */
-router.post("/create", upload.single("file"), characterController.createCharacter);
-router.post("/", upload.single("file"), characterController.createCharacter);
-router.post("/character", upload.single("file"), characterController.createCharacter);
+router.post("/create", upload.single("file"), validateMediaSize, characterController.createCharacter);
+router.post("/", upload.single("file"), validateMediaSize, characterController.createCharacter);
+router.post("/character", upload.single("file"), validateMediaSize, characterController.createCharacter);
 
 /**
  * @route POST /api/characters/generate-description
@@ -52,10 +63,10 @@ router.post("/:characterId/generate-sheet", characterController.generateCharacte
  * @route POST   /api/characters/:characterId/sheet-media — set or replace Body Sheet media (file upload or mediaId)
  * @route POST   /api/characters/:characterId/upload — general character media upload
  */
-router.post("/:characterId/media", upload.single("file"), characterController.addMediaToCharacter);
+router.post("/:characterId/media", upload.single("file"), validateMediaSize, characterController.addMediaToCharacter);
 router.delete("/:characterId/media/:mediaId", characterController.removeMediaFromCharacter);
-router.post("/:characterId/sheet-media", upload.single("file"), characterController.setCharacterSheetMedia);
-router.post("/:characterId/upload", upload.single("file"), characterController.uploadCharacterMedia);
+router.post("/:characterId/sheet-media", upload.single("file"), validateMediaSize, characterController.setCharacterSheetMedia);
+router.post("/:characterId/upload", upload.single("file"), validateMediaSize, characterController.uploadCharacterMedia);
 
 export default router;
 

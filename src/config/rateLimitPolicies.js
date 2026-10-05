@@ -45,4 +45,18 @@ export const RATE_LIMIT_POLICIES = {
     duration: 60,   // per 60 seconds
     keyBy:    "user",
   },
+
+  /** POST /api/characters/generate-description (configurable, default 10/min) */
+  characterDescription: {
+    points:   Number(process.env.RATE_LIMIT_CHARACTER_DESC_POINTS) || 10,
+    duration: Number(process.env.RATE_LIMIT_CHARACTER_DESC_DURATION) || 60,
+    keyBy:    "user",
+  },
+
+  /** POST /api/v2/elements/analyze (configurable, default 10/min) */
+  elementAnalysis: {
+    points:   Number(process.env.RATE_LIMIT_ELEMENT_ANALYZE_POINTS) || 10,
+    duration: Number(process.env.RATE_LIMIT_ELEMENT_ANALYZE_DURATION) || 60,
+    keyBy:    "user",
+  },
 };

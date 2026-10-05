@@ -2,6 +2,7 @@ import express from "express";
 import multer from "multer";
 import * as characterController from "../controllers/characterController.js";
 import { requireAuth } from "../src/middleware/auth.js";
+import { rateLimit } from "../src/middleware/rateLimit.js";
 
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -30,7 +31,7 @@ router.post("/character", upload.single("file"), characterController.createChara
 /**
  * @route POST /api/characters/generate-description
  */
-router.post("/generate-description", characterController.generateCharacterDescription);
+router.post("/generate-description", rateLimit("characterDescription"), characterController.generateCharacterDescription);
 
 /**
  * @route PATCH /api/characters/:characterId

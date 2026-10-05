@@ -26,6 +26,7 @@ import {
     buildPrompt,
 } from "../controllers/elementController.js";
 import { requireAuth } from "../src/middleware/auth.js";
+import { rateLimit } from "../src/middleware/rateLimit.js";
 
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -45,7 +46,7 @@ router.use(requireAuth);
 
 // ─── POST /api/v2/elements ────────────────────────────────────────────────────
 router.post("/", createElement);
-router.post("/analyze", analyzeElement);
+router.post("/analyze", rateLimit("elementAnalysis"), analyzeElement);
 
 // ─── GET /api/v2/elements/project/:projectId ──────────────────────────────────
 router.get("/project/:projectId", listProjectElements);

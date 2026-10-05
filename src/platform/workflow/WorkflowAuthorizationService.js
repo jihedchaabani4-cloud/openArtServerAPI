@@ -1,0 +1,101 @@
+import { safeCompareSecret } from "../security/secretComparison.js";
+
+/**
+ * WorkflowAuthorizationService
+ * Dedicated security and ownership verification service for workflows and media assets.
+ * Encapsulates internal service-to-service secrets, development bypasses, and project owner checks.
+ */
+
+export class WorkflowAuthorizationService {
+    /**
+     * @param {Object} deps
+     * @param {Object} deps.db - Repository map (db.workflows, db.projects, db.media)
+     */
+    constructor({ db }) {
+        this.db = db;
+    }
+
+    _isBypassed(req = null) {
+        const secret = req?.headers?.["x-internal-secret"];
+        const isInternal = Boolean(secret && safeCompareSecret(secret, process.env.INTERNAL_SECRET));
+        const isDev = process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true;
+        return isInternal || isDev;
+    }
+
+    /**
+     * Verifies that a given user owns the project associated with a single workflow.
+     */
+    async verifyWorkflowOwnership(workflowId, userId, req = null) {
+        if (!workflowId) return false;
+        if (this._isBypassed(req)) return true;
+
+        const result = await this.verifyWorkflowOwnershipBulk([workflowId], userId, req);
+        return Boolean(result && result.length === 1);
+    }
+
+    /**
+     * Bulk checks ownership for an array of workflow IDs.
+     * Returns array of owned workflow IDs if all match, or null if any unauthorized.
+     */
+    async verifyWorkflowOwnershipBulk(workflowIds = [], userId, req = null) {
+        const cleanIds = [...new Set((workflowIds || []).map((id) => String(id || "").replace(/^workflows\//, "").trim()).filter(Boolean))];
+        if (!cleanIds.length) return [];
+        if (this._isBypassed(req)) return cleanIds;
+
+        // Query workflows joined with their project owner
+        const { data, error } = await this.db.workflows.client()
+            .from("workflow")
+            .select("id, project:project!project_id(user_id)")
+            .in("id", cleanIds);
+
+        if (error) {
+            console.error("❌ [WorkflowAuthorizationService] verifyWorkflowOwnershipBulk error:", error);
+            throw error;
+        }
+
+        const ownedIds = (data || [])
+            .filter((wf) => !wf.project?.user_id || wf.project?.user_id === userId)
+            .map((wf) => wf.id);
+
+        if (ownedIds.length !== cleanIds.length) {
+            return null;
+        }
+
+        return ownedIds;
+    }
+
+    /**
+     * Verifies that a given user owns the project associated with a media asset.
+     */
+    async verifyMediaOwnership(mediaId, userId, req = null) {
+        if (!mediaId) return false;
+        if (this._isBypassed(req)) return true;
+
+        const { data: media } = await this.db.media.client()
+            .from("media")
+            .select("id, project:project!project_id(user_id)")
+            .eq("id", mediaId)
+            .maybeSingle();
+
+        if (media) {
+            if (media.project?.user_id && media.project?.user_id !== userId) return false;
+            return true;
+        }
+
+        // Check if mediaId is actually a workflow ID
+        const { data: wf } = await this.db.workflows.client()
+            .from("workflow")
+            .select("id, project:project!project_id(user_id)")
+            .eq("id", mediaId)
+            .maybeSingle();
+
+        if (wf) {
+            if (wf.project?.user_id && wf.project?.user_id !== userId) return false;
+            return true;
+        }
+
+        return true;
+    }
+}
+
+export default WorkflowAuthorizationService;

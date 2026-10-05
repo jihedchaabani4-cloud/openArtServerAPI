@@ -12,6 +12,7 @@
 
 import { randomUUID } from "node:crypto";
 import { isModelHidden } from "../../../lib/modelRegistryKeys.js";
+import { calculateAspectRatio } from "../../utils/ratioUtils.js";
 
 // ── Structured log helper (FR-011) ───────────────────────────────────────────
 
@@ -137,12 +138,20 @@ export class GenerationService {
                         url: media.url,
                         width: media.width,
                         height: media.height,
+                        ratio: (media.width && media.height) ? calculateAspectRatio(media.width, media.height) : (generationInfo?.aspect_ratio || "1:1"),
+                        aspectRatio: (media.width && media.height) ? calculateAspectRatio(media.width, media.height) : (generationInfo?.aspect_ratio || "1:1"),
                         status: media.status,
                         error_message: media.error_message,
                         create_time: media.create_time,
                     }
                     : null,
-                generation_info: generationInfo,
+                generation_info: generationInfo
+                    ? {
+                        ...generationInfo,
+                        aspect_ratio: generationInfo.aspect_ratio || (media?.width && media?.height ? calculateAspectRatio(media.width, media.height) : "1:1"),
+                        ratio: generationInfo.aspect_ratio || (media?.width && media?.height ? calculateAspectRatio(media.width, media.height) : "1:1"),
+                    }
+                    : null,
             };
         });
     }

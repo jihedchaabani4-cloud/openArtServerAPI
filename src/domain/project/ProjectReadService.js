@@ -1,6 +1,7 @@
 import { supabase, supabaseAdmin } from "../../../lib/supabase.js";
 import { getCatalog } from "../../models/index.js";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
+import { calculateAspectRatio } from "../../utils/ratioUtils.js";
 import { safeCompareSecret } from "../../platform/security/secretComparison.js";
 
 function getCatalogPricing() {
@@ -21,28 +22,6 @@ const APP_CONFIG = {
     },
 };
 
-function getModelConfig() {
-    const catalog = getCatalog();
-
-    const models = catalog.map((m) => {
-        return {
-            key:            m.modelFamily || m.id,
-            displayName:    m.displayName,
-            description:    m.description || "",
-            category:       m.domain,
-            tier:           m.badge || "standard",
-            pricing:        m.retailPricing || {},
-            tags:           m.badge ? [m.badge.toLowerCase()] : [],
-            supportedModes: m.domain ? [m.domain] : [],
-            icon:           m.iconUrl || "",
-            badge:          m.badge || null,
-            parameters:     m.parameters || {},
-        };
-    });
-
-    return { models };
-}
-
 function normalizeMediaStatus(status, url) {
     return status || (url ? "success" : "processing");
 }
@@ -55,7 +34,6 @@ export class ProjectReadService {
     async getProjectData({ projectId, userId, sessionId = null }) {
         const started = Date.now();
         const operation = "getProjectData";
-        const modelConfig = getModelConfig();
 
         if (!projectId || projectId === "null" || projectId === "undefined") {
             crudOperationLog({ operation, status: "ok", durationMs: Date.now() - started });
@@ -91,11 +69,44 @@ export class ProjectReadService {
 
         const projectName = projectData?.project_name || "Unknown Project";
 
-        const { data: sessions } = await supabase
-            .from("session")
-            .select("id, name, position, create_time")
-            .eq("project_id", projectId)
-            .order("position", { ascending: true });
+        // Fetch sessions, workflows, and media concurrently to minimize latency
+        const [sessionsResult, workflowsResult, mediaResult] = await Promise.all([
+            supabase
+                .from("session")
+                .select("id, name, position, create_time")
+                .eq("project_id", projectId)
+                .order("position", { ascending: true }),
+            this.db.workflows
+                .findByProject(projectId, {
+                    select: "id, display_name, variation_index, primary_media_id, create_time, session_id, favorited, workflow_type",
+                    order: { column: "create_time", ascending: false },
+                })
+                .catch((err) => {
+                    console.error("❌ Workflow query error:", err);
+                    return [];
+                }),
+            supabase
+                .from("media")
+                .select(`
+                    id, step_id, url, width, height, create_time, status, error_message,
+                    workflow_id, generation_config_id,
+                    generation_config (
+                        id, prompt, model, aspect_ratio, generation_type, seed, visibility,
+                        dna:dna ( id, name, type, description, traits ),
+                        references:generation_config_reference!generation_config_reference_generation_config_id_fkey (
+                            id, position, input_type, ref_media_id,
+                            ref_media:media ( id, url, width, height )
+                        )
+                    )
+                `)
+                .eq("project_id", projectId)
+                .order("create_time", { ascending: false }),
+        ]);
+
+        const sessions = sessionsResult.data || [];
+        const workflows = workflowsResult || [];
+        const mediaItems = mediaResult.data || [];
+        if (mediaResult.error) console.error("❌ Media query error:", mediaResult.error);
 
         const formattedSessions = (sessions || []).map((s) => ({
             name: s.id,
@@ -107,16 +118,6 @@ export class ProjectReadService {
             },
         }));
 
-        const workflows = await this.db.workflows
-            .findByProject(projectId, {
-                select: "id, display_name, variation_index, primary_media_id, create_time, session_id, favorited, workflow_type",
-                order: { column: "create_time", ascending: false },
-            })
-            .catch((err) => {
-                console.error("❌ Workflow query error:", err);
-                return [];
-            });
-
         const workflowIds = (workflows || []).map((w) => w.id);
         let elementMap = {};
         let characterMap = {};
@@ -124,30 +125,31 @@ export class ProjectReadService {
         let charactersList = [];
 
         if (workflowIds.length > 0) {
-            const { data: elements, error: elemErr } = await supabase
-                .from("element")
-                .select("*")
-                .in("workflow_id", workflowIds);
+            const [elemResult, charResult] = await Promise.all([
+                supabase
+                    .from("element")
+                    .select("*")
+                    .in("workflow_id", workflowIds),
+                supabaseAdmin
+                    .from("characters")
+                    .select("*")
+                    .or(`project_id.eq.${projectId},workflow_id.in.(${workflowIds.join(",")})`),
+            ]);
 
-            if (elemErr) {
-                console.warn("⚠️ Element query warning:", elemErr.message);
-            } else if (elements) {
-                elementsList = elements;
-                elements.forEach((elem) => {
+            if (elemResult.error) {
+                console.warn("⚠️ Element query warning:", elemResult.error.message);
+            } else if (elemResult.data) {
+                elementsList = elemResult.data;
+                elementsList.forEach((elem) => {
                     elementMap[elem.workflow_id] = elem;
                 });
             }
 
-            const { data: chars, error: charErr } = await supabaseAdmin
-                .from("characters")
-                .select("*")
-                .or(`project_id.eq.${projectId},workflow_id.in.(${workflowIds.join(",")})`);
-
-            if (charErr) {
-                console.warn("⚠️ Characters query warning:", charErr.message);
-            } else if (chars) {
-                charactersList = chars;
-                chars.forEach((c) => {
+            if (charResult.error) {
+                console.warn("⚠️ Characters query warning:", charResult.error.message);
+            } else if (charResult.data) {
+                charactersList = charResult.data;
+                charactersList.forEach((c) => {
                     if (c.workflow_id) characterMap[c.workflow_id] = c;
                     if (c.id) characterMap[c.id] = c;
                 });
@@ -161,7 +163,7 @@ export class ProjectReadService {
 
             if (!charErr && chars) {
                 charactersList = chars;
-                chars.forEach((c) => {
+                charactersList.forEach((c) => {
                     if (c.workflow_id) characterMap[c.workflow_id] = c;
                     if (c.id) characterMap[c.id] = c;
                 });
@@ -176,8 +178,11 @@ export class ProjectReadService {
             return {
                 id: wf.id,
                 name: wf.id,
+                display_name: displayName,
                 projectId,
                 workflow_type: wf.workflow_type,
+                primary_media_id: wf.primary_media_id || "",
+                primaryMediaId: wf.primary_media_id || "",
                 metadata: {
                     displayName,
                     createTime: wf.create_time,
@@ -187,25 +192,6 @@ export class ProjectReadService {
                 },
             };
         });
-
-        const { data: mediaItems, error: mediaError } = await supabase
-            .from("media")
-            .select(`
-                id, step_id, url, width, height, create_time, status, error_message,
-                workflow_id, generation_config_id,
-                generation_config (
-                    id, prompt, model, aspect_ratio, generation_type, seed, visibility,
-                    dna:dna ( id, name, type, description, traits ),
-                    references:generation_config_reference!generation_config_reference_generation_config_id_fkey (
-                        id, position, input_type, ref_media_id,
-                        ref_media:media ( id, url, width, height )
-                    )
-                )
-            `)
-            .eq("project_id", projectId)
-            .order("create_time", { ascending: false });
-
-        if (mediaError) console.error("❌ Media query error:", mediaError);
 
         const formattedMedia = (mediaItems || []).map((m) => {
             const config = m.generation_config;
@@ -247,6 +233,8 @@ export class ProjectReadService {
                 workflow_id: m.workflow_id,
                 step_id: m.step_id,
                 workflowStepId: m.step_id || (isUpload ? "upload" : "GEN"),
+                create_time: m.create_time,
+                createTime: m.create_time,
                 generationConfig: config
                     ? {
                           prompt: config.prompt || "",
@@ -276,6 +264,12 @@ export class ProjectReadService {
                 },
             };
 
+            const resolvedWidth = m.width || (isVideo ? 1280 : 1024);
+            const resolvedHeight = m.height || (isVideo ? 720 : 1024);
+            const resolvedRatio = (m.width && m.height)
+                ? calculateAspectRatio(m.width, m.height)
+                : (config?.aspect_ratio || (isVideo ? "16:9" : "1:1"));
+
             if (isVideo) {
                 mediaObject.video = {
                     generatedVideo: config
@@ -283,11 +277,11 @@ export class ProjectReadService {
                               seed: config.seed ?? null,
                               model: config.model || "",
                               prompt: config.prompt || "",
-                              aspectRatio: config.aspect_ratio || "",
+                              aspectRatio: config.aspect_ratio || resolvedRatio,
                               url: m.url,
                           }
                         : null,
-                    dimensions: { width: m.width || 1280, height: m.height || 720 },
+                    dimensions: { width: resolvedWidth, height: resolvedHeight },
                 };
             } else {
                 mediaObject.image = {
@@ -298,14 +292,26 @@ export class ProjectReadService {
                                   prompt: config.prompt || "",
                                   modelNameType: config.model || "",
                                   workflowId: m.workflow_id,
-                                  aspectRatio: config.aspect_ratio || "",
+                                  aspectRatio: config.aspect_ratio || resolvedRatio,
                                   url: m.url,
                               }
                             : null,
-                    userUploadedImage: isUpload ? { aspectRatio: "IMAGE_ASPECT_RATIO_UNSPECIFIED" } : undefined,
-                    dimensions: { width: m.width || 1024, height: m.height || 1024 },
+                    userUploadedImage: isUpload ? { aspectRatio: resolvedRatio } : undefined,
+                    dimensions: { width: resolvedWidth, height: resolvedHeight },
                 };
             }
+
+            mediaObject.width = resolvedWidth;
+            mediaObject.height = resolvedHeight;
+            mediaObject.aspectRatio = resolvedRatio;
+            mediaObject.ratio = resolvedRatio;
+            mediaObject.dimensions = { width: resolvedWidth, height: resolvedHeight };
+            mediaObject.params = {
+                ratio: resolvedRatio,
+                aspectRatio: resolvedRatio,
+                width: resolvedWidth,
+                height: resolvedHeight,
+            };
 
             return mediaObject;
         });

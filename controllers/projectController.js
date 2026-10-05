@@ -11,9 +11,13 @@ function safeCalculateCost(modelKey, input) {
     }
 }
 
-// ── Model config (HTTP-layer concern: computed from registry per request) ──────
+// ── Model config (Cached in memory to prevent repeated recalculations) ─────────
+
+let cachedModelConfig = null;
 
 function getModelConfig() {
+    if (cachedModelConfig) return cachedModelConfig;
+
     const catalog = getCatalog();
     const models = catalog.map((m) => {
         const defaultCost = safeCalculateCost(
@@ -36,7 +40,8 @@ function getModelConfig() {
         };
     });
 
-    return { models };
+    cachedModelConfig = { models };
+    return cachedModelConfig;
 }
 
 

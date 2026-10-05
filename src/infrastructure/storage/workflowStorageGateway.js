@@ -46,6 +46,11 @@ export class WorkflowStorageGateway {
     return this.lifecycle.finalizeOutputsForNode(params);
   }
 
+  async failForExpiredHold(params) {
+    return this.lifecycle.failForExpiredHold(params);
+  }
+
+
   /**
    * Persists the result of a V2 node in one step.
    * @deprecated Use startPlaceholder + completePlaceholder instead.

@@ -1,4 +1,4 @@
-import { workflowService, projectReadService, db } from "../src/container.js";
+import { workflowService, projectReadService, characterService, elementService } from "../src/container.js";
 import { createLogger } from "../src/infrastructure/logging/index.js";
 
 const controllerLogger = createLogger("controller");
@@ -10,11 +10,22 @@ const controllerLogger = createLogger("controller");
 // ── PATCH /api/workflows/:id ──────────────────────────────────────────────────
 export const patchWorkflow = async (req, res) => {
     const { id } = req.params;
+    const cleanId = String(id || '').replace(/^workflows\//, '').trim();
     const userId = req.user?.id;
-    controllerLogger.debug({ workflowId: id, userId }, `PATCH /api/workflows/${id}`);
+    controllerLogger.debug({ workflowId: cleanId, userId }, `PATCH /api/workflows/${cleanId}`);
 
     try {
-        const { display_name, name, primary_media_id, favorited } = req.body || {};
+        const { display_name, name, primary_media_id, favorited, description, character_info } = req.body || {};
+
+        let targetWorkflowId = cleanId;
+        // Resolve media_id to its parent workflow_id if cleanId is not directly a workflow
+        const wfExists = await workflowService.db.workflows.findById(cleanId).catch(() => null);
+        if (!wfExists) {
+            const mediaRecord = await workflowService.db.media.findById(cleanId).catch(() => null);
+            if (mediaRecord?.workflow_id) {
+                targetWorkflowId = mediaRecord.workflow_id;
+            }
+        }
 
         const updates = {};
         const targetName = display_name !== undefined ? display_name : name;
@@ -24,17 +35,37 @@ export const patchWorkflow = async (req, res) => {
 
         // Delegate to WorkflowLifecycleService
         const result = await workflowService.updateWorkflowMetadata({
-            workflowId: id,
+            workflowId: targetWorkflowId,
             updates,
             userId,
             req,
         });
 
-        controllerLogger.info({ workflowId: id }, `patchWorkflow ${id} success`);
+        // If character description or info or name is passed, sync with character table
+        const descVal = description !== undefined ? description : character_info;
+        if (descVal !== undefined || targetName !== undefined) {
+            await characterService.updateCharacter({
+                characterId: targetWorkflowId,
+                updates: {
+                    ...(descVal !== undefined ? { description: descVal, character_info: descVal } : {}),
+                    ...(targetName !== undefined ? { name: targetName } : {}),
+                },
+                userId,
+            }).catch((charErr) => {
+                controllerLogger.warn({ workflowId: targetWorkflowId, err: charErr }, `patchWorkflow character sync notice: ${charErr.message}`);
+            });
+        }
 
-        return res.json({ ok: true, workflow: result.workflow });
+        // If this workflow is associated with an element, sync element name as well
+        if (targetName !== undefined) {
+            await elementService.updateElement(targetWorkflowId, { name: targetName }).catch(() => {});
+        }
+
+        controllerLogger.info({ workflowId: targetWorkflowId }, `patchWorkflow ${targetWorkflowId} success`);
+
+        return res.json({ ok: true, workflow: result.workflow, display_name: targetName });
     } catch (err) {
-        controllerLogger.error({ workflowId: id, err }, `patchWorkflow ${id} failed: ${err.message}`);
+        controllerLogger.error({ workflowId: cleanId, err }, `patchWorkflow ${cleanId} failed: ${err.message}`);
         return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
     }
 };
@@ -87,19 +118,11 @@ export const toggleLike = async (req, res) => {
         const { id } = req.params;
         const userId = req.user.id;
 
-        // Ownership check
-        const isAuthorized = await workflowService._verifyWorkflowOwnership(id, userId, req);
-        if (!isAuthorized) {
-            return res.status(403).json({ ok: false, message: "Unauthorized access to this workflow" });
-        }
-
-        const wf = await db.workflows.findById(id, "favorited");
-        const data = await db.workflows.updateFields(id, { favorited: !wf.favorited });
-
-        return res.json({ ok: true, favorited: data.favorited });
+        const result = await workflowService.toggleLike({ workflowId: id, userId, req });
+        return res.json({ ok: true, favorited: result.favorited });
     } catch (err) {
         controllerLogger.error({ workflowId: req.params.id, err }, `Error toggling like for workflow ${req.params.id}: ${err.message}`);
-        return res.status(500).json({ ok: false, message: err.message });
+        return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
     }
 };
 
@@ -108,45 +131,24 @@ export const bulkToggleLike = async (req, res) => {
     try {
         const userId = req.user.id;
         const rawIds = req.body?.workflow_ids;
-        const values = Array.isArray(rawIds) ? rawIds : [rawIds];
-        const workflowIds = [...new Set(values.map((v) => String(v || "").trim()).filter(Boolean))];
 
-        if (!workflowIds.length) {
-            return res.status(400).json({ ok: false, message: "workflow_ids is required" });
-        }
-
-        const ownedIds = await workflowService._verifyWorkflowOwnershipBulk(workflowIds, userId, req);
-        if (!ownedIds) {
-            return res.status(403).json({ ok: false, message: "Unauthorized access to one or more workflows" });
-        }
-
-        const { data: currentRows, error: getErr } = await db.workflows.client()
-            .from("workflow")
-            .select("id, favorited")
-            .in("id", ownedIds);
-        if (getErr) throw getErr;
-
-        const explicitFavorited    = req.body?.favorited;
-        const allCurrentlyFavorited = (currentRows || []).every((row) => !!row.favorited);
-        const nextFavorited         = explicitFavorited === undefined ? !allCurrentlyFavorited : !!explicitFavorited;
-
-        const { data, error } = await db.workflows.client()
-            .from("workflow")
-            .update({ favorited: nextFavorited })
-            .in("id", ownedIds)
-            .select("id, favorited");
-        if (error) throw error;
+        const result = await workflowService.bulkToggleLike({
+            workflowIds: rawIds,
+            favorited:   req.body?.favorited,
+            userId,
+            req,
+        });
 
         return res.json({
-            ok: true,
-            workflow_ids: ownedIds,
-            count:        ownedIds.length,
-            favorited:    nextFavorited,
-            workflows:    data || [],
+            ok:           true,
+            workflow_ids: result.workflow_ids,
+            count:        result.count,
+            favorited:    result.favorited,
+            workflows:    result.workflows,
         });
     } catch (err) {
         controllerLogger.error({ err }, `Bulk like error: ${err.message}`);
-        return res.status(500).json({ ok: false, message: err.message });
+        return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
     }
 };
 

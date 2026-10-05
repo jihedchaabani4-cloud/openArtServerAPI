@@ -207,10 +207,10 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     assert.equal(body.ok, false);
   });
 
-  it("TEST R4-3: GET /api/workflows/assets/:project_id for foreign project returns 403/404", async () => {
+  it("TEST R4-3: GET /api/workflows/assets/:project_id for foreign project returns 404", async () => {
     const res = await reqAlice(`/api/workflows/assets/${FOREIGN_PROJ_ID}`);
     const body = await res.json();
-    assert.ok(res.status === 403 || res.status === 404, `Expected 403/404, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
     assert.equal(body.ok, false);
   });
 
@@ -221,103 +221,103 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     assert.equal(body.ok, false);
   });
 
-  it("TEST R4-5: POST /api/workflows/detach-media for foreign media returns 404/403 and does not detach", async () => {
+  it("TEST R4-5: POST /api/workflows/detach-media for foreign media returns 404 and does not detach", async () => {
     const res = await reqAlice("/api/workflows/detach-media", {
       method: "POST",
       body: JSON.stringify({ media_id: FOREIGN_MEDIA_ID, project_id: FOREIGN_PROJ_ID }),
     });
     const body = await res.json();
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
     assert.equal(body.ok, false);
   });
 
-  it("TEST R4-6: PATCH /api/workflows/workflows/:id for foreign workflow returns 404/403 and does not mutate", async () => {
+  it("TEST R4-6: PATCH /api/workflows/workflows/:id for foreign workflow returns 404 and does not mutate", async () => {
     const res = await reqAlice(`/api/workflows/workflows/${FOREIGN_WF_ID}`, {
       method: "PATCH",
       body: JSON.stringify({ display_name: "Hacked" }),
     });
     const body = await res.json();
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
     assert.equal(body.ok, false);
   });
 
-  it("TEST R4-7: PATCH /api/workflows/workflows/:id/move for foreign workflow returns 404/403", async () => {
+  it("TEST R4-7: PATCH /api/workflows/workflows/:id/move for foreign workflow returns 404", async () => {
     const res = await reqAlice(`/api/workflows/workflows/${FOREIGN_WF_ID}/move`, {
       method: "PATCH",
       body: JSON.stringify({ project_id: FOREIGN_PROJ_ID }),
     });
     const body = await res.json();
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
     assert.equal(body.ok, false);
   });
 
-  it("TEST R4-8: PATCH /api/workflows/workflows/:id/like for foreign workflow returns 404/403", async () => {
+  it("TEST R4-8: PATCH /api/workflows/workflows/:id/like for foreign workflow returns 404", async () => {
     const res = await reqAlice(`/api/workflows/workflows/${FOREIGN_WF_ID}/like`, {
       method: "PATCH",
     });
     const body = await res.json();
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
     assert.equal(body.ok, false);
   });
 
-  it("TEST R4-9: PATCH /api/workflows/workflows/like (bulk) with foreign workflow returns 404/403", async () => {
+  it("TEST R4-9: PATCH /api/workflows/workflows/like (bulk) with foreign workflow returns 404", async () => {
     const res = await reqAlice("/api/workflows/workflows/like", {
       method: "PATCH",
       body: JSON.stringify({ workflow_ids: [FOREIGN_WF_ID] }),
     });
     const body = await res.json();
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
     assert.equal(body.ok, false);
   });
 
-  it("TEST R4-10: PATCH /api/workflows/workflows/:id/primary-media for foreign workflow returns 404/403", async () => {
+  it("TEST R4-10: PATCH /api/workflows/workflows/:id/primary-media for foreign workflow returns 404", async () => {
     const res = await reqAlice(`/api/workflows/workflows/${FOREIGN_WF_ID}/primary-media`, {
       method: "PATCH",
       body: JSON.stringify({ media_id: FOREIGN_MEDIA_ID }),
     });
     const body = await res.json();
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
     assert.equal(body.ok, false);
   });
 
-  it("TEST R4-11: DELETE /api/workflows/workflows/:id for foreign workflow returns 404/403", async () => {
+  it("TEST R4-11: DELETE /api/workflows/workflows/:id for foreign workflow returns 404", async () => {
     const res = await reqAlice(`/api/workflows/workflows/${FOREIGN_WF_ID}`, {
       method: "DELETE",
     });
     const body = await res.json();
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
     assert.equal(body.ok, false);
   });
 
-  it("TEST R4-12: DELETE /api/workflows/workflows (bulk) with foreign workflow returns 404/403", async () => {
+  it("TEST R4-12: DELETE /api/workflows/workflows (bulk) with foreign workflow returns 404", async () => {
     const res = await reqAlice("/api/workflows/workflows", {
       method: "DELETE",
       body: JSON.stringify({ workflow_ids: [FOREIGN_WF_ID] }),
     });
     const body = await res.json();
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
     assert.equal(body.ok, false);
   });
 
-  it("TEST R4-13: DELETE /api/workflows/media/:media_id for foreign media returns 404/403", async () => {
+  it("TEST R4-13: DELETE /api/workflows/media/:media_id for foreign media returns 404", async () => {
     const res = await reqAlice(`/api/workflows/media/${FOREIGN_MEDIA_ID}`, {
       method: "DELETE",
     });
     const body = await res.json();
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
     assert.equal(body.ok, false);
   });
 
-  it("TEST R4-14: DELETE /api/assets/:id for foreign asset returns 404/403", async () => {
+  it("TEST R4-14: DELETE /api/assets/:id for foreign asset returns 404", async () => {
     const res = await reqAlice(`/api/assets/${FOREIGN_MEDIA_ID}`, {
       method: "DELETE",
     });
     const body = await res.json();
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
     assert.equal(body.ok, false);
   });
 
-  it("TEST R4-15: POST /api/media/ingest with foreign workflow_id returns 404/403", async () => {
+  it("TEST R4-15: POST /api/media/ingest with foreign workflow_id returns 404", async () => {
     const res = await reqAlice("/api/media/ingest", {
       method: "POST",
       body: JSON.stringify({
@@ -327,7 +327,7 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
       }),
     });
     const body = await res.json();
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
     assert.equal(body.ok, false);
   });
 
@@ -355,22 +355,22 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     assert.equal(body.error, "FORBIDDEN");
   });
 
-  it("TEST R4-19: DELETE /api/workflows/:id for foreign workflow returns 404/403", async () => {
+  it("TEST R4-19: DELETE /api/workflows/:id for foreign workflow returns 404", async () => {
     const res = await reqAlice(`/api/workflows/${FOREIGN_WF_ID}`, {
       method: "DELETE",
     });
     const body = await res.json();
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
     assert.equal(body.ok, false);
   });
 
-  it("TEST R4-20: PATCH /api/workflows/:id for foreign workflow returns 404/403", async () => {
+  it("TEST R4-20: PATCH /api/workflows/:id for foreign workflow returns 404", async () => {
     const res = await reqAlice(`/api/workflows/${FOREIGN_WF_ID}`, {
       method: "PATCH",
       body: JSON.stringify({ display_name: "Hacked" }),
     });
     const body = await res.json();
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
     assert.equal(body.ok, false);
   });
 
@@ -392,10 +392,10 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     assert.equal(body.ok, false);
   });
 
-  it("TEST R4-23: GET /api/workflows/project-data/:project_id for foreign project returns 403/404", async () => {
+  it("TEST R4-23: GET /api/workflows/project-data/:project_id for foreign project returns 404", async () => {
     const res = await reqAlice(`/api/workflows/project-data/${FOREIGN_PROJ_ID}`);
     const body = await res.json();
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
     assert.equal(body.ok, false);
   });
 
@@ -412,59 +412,67 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     assert.ok(res.status >= 200);
   });
 
-  it("TEST R4-26: DELETE /api/sessions/:id for foreign session returns 403/404", async () => {
+  it("TEST R4-26: DELETE /api/sessions/:id for foreign session returns 404", async () => {
     const res = await reqAlice("/api/sessions/00000000-0000-0000-0000-000000000020", { method: "DELETE" });
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
   });
 
-  it("TEST R4-27: PATCH /api/sessions/:id for foreign session returns 403/404", async () => {
+  it("TEST R4-27: PATCH /api/sessions/:id for foreign session returns 404", async () => {
     const res = await reqAlice("/api/sessions/00000000-0000-0000-0000-000000000020", {
       method: "PATCH",
       body: JSON.stringify({ name: "Hacked" }),
     });
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
   });
 
-  it("TEST R4-28: POST /api/characters/:characterId/media for foreign character returns 404/403", async () => {
+  it("TEST R4-27b: POST /api/sessions for foreign project returns 404", async () => {
+    const res = await reqAlice("/api/sessions", {
+      method: "POST",
+      body: JSON.stringify({ project_id: FOREIGN_PROJ_ID, name: "Intruder Session" }),
+    });
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+  });
+
+  it("TEST R4-28: POST /api/characters/:characterId/media for foreign character returns 404", async () => {
     const res = await reqAlice("/api/characters/char-foreign/media", {
       method: "POST",
       body: JSON.stringify({ imageUrl: "https://example.com/test.png" }),
     });
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
   });
 
-  it("TEST R4-29: DELETE /api/characters/:characterId/media/:mediaId for foreign character returns 404/403", async () => {
+  it("TEST R4-29: DELETE /api/characters/:characterId/media/:mediaId for foreign character returns 404", async () => {
     const res = await reqAlice("/api/characters/char-foreign/media/media-1", { method: "DELETE" });
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
   });
 
-  it("TEST R4-30: POST /api/characters/:characterId/sheet-media for foreign character returns 404/403", async () => {
+  it("TEST R4-30: POST /api/characters/:characterId/sheet-media for foreign character returns 404", async () => {
     const res = await reqAlice("/api/characters/char-foreign/sheet-media", {
       method: "POST",
       body: JSON.stringify({ imageUrl: "https://example.com/test.png" }),
     });
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
   });
 
-  it("TEST R4-31: POST /api/characters/:characterId/upload for foreign character returns 404/403", async () => {
+  it("TEST R4-31: POST /api/characters/:characterId/upload for foreign character returns 404", async () => {
     const res = await reqAlice("/api/characters/char-foreign/upload", {
       method: "POST",
       body: JSON.stringify({}),
     });
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
   });
 
-  it("TEST R4-32: POST /api/v2/elements/:id/images for foreign element returns 404/403", async () => {
+  it("TEST R4-32: POST /api/v2/elements/:id/images for foreign element returns 404", async () => {
     const res = await reqAlice("/api/v2/elements/elem-foreign/images", {
       method: "POST",
       body: JSON.stringify({ imageUrl: "https://example.com/test.png" }),
     });
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
   });
 
-  it("TEST R4-33: DELETE /api/v2/elements/:id/images/:mediaId for foreign element returns 404/403", async () => {
+  it("TEST R4-33: DELETE /api/v2/elements/:id/images/:mediaId for foreign element returns 404", async () => {
     const res = await reqAlice("/api/v2/elements/elem-foreign/images/media-1", { method: "DELETE" });
-    assert.ok(res.status === 404 || res.status === 403, `Expected 404/403, got ${res.status}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
   });
 
   // ── PART 2: Generic Automated Test — Walks Dumped Route Table & Derived Metadata ──

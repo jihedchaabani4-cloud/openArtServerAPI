@@ -60,9 +60,18 @@ export class ProjectReadService {
         if (projectData.user_id && projectData.user_id !== userId) {
             const isDev = process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true;
             if (!isDev) {
-                throw new CrudServiceError("Unauthorized access to this project", {
-                    statusCode: 403,
-                    errorCode: "FORBIDDEN",
+                crudOperationLog({
+                    operation: "getProjectData",
+                    status: "error",
+                    userId,
+                    resourceId: projectId,
+                    resourceType: "project",
+                    errorCode: "NOT_FOUND",
+                    message: "Project not found",
+                });
+                throw new CrudServiceError("Project not found", {
+                    statusCode: 404,
+                    errorCode: "NOT_FOUND",
                 });
             }
         }

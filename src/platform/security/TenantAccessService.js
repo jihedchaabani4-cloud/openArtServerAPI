@@ -56,9 +56,9 @@ export class TenantAccessService {
                 log("assertProjectOwnership", "bypassed", { traceId, userId, projectId });
                 return;
             }
-            const err = new Error(`Forbidden: user '${userId}' does not own project '${projectId}'`);
-            err.statusCode = 403;
-            log("assertProjectOwnership", "forbidden", { traceId, userId, projectId });
+            log("assertProjectOwnership", "foreign_denied", { traceId, userId, resourceId: projectId, resourceType: "project" });
+            const err = new Error(`Project not found`);
+            err.statusCode = 404;
             throw err;
         }
 

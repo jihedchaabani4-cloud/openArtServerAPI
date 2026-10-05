@@ -32,7 +32,8 @@ export const create = async (req, res) => {
             if (process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) {
                 console.warn(`⚠️ [SessionsController] Dev access granted for user ${userId} on project ${project_id}`);
             } else {
-                return res.status(403).json({ ok: false, message: "Unauthorized access to this project" });
+                console.warn(`[SessionsController] Foreign-ownership access denied for user ${userId} on project ${project_id}`, { userId, resourceId: project_id, resourceType: "project" });
+                return res.status(404).json({ ok: false, message: "Project not found" });
             }
         }
 
@@ -66,7 +67,8 @@ export const update = async (req, res) => {
             .single();
 
         if (!session || session.project?.user_id !== userId) {
-            return res.status(403).json({ ok: false, message: "Unauthorized access to this session" });
+            console.warn(`[SessionsController] Foreign-ownership access denied for user ${userId} on session ${id}`, { userId, resourceId: id, resourceType: "session" });
+            return res.status(404).json({ ok: false, message: "Session not found" });
         }
 
         const { data, error } = await supabase
@@ -98,7 +100,8 @@ export const remove = async (req, res) => {
             .single();
 
         if (!session || session.project?.user_id !== userId) {
-            return res.status(403).json({ ok: false, message: "Unauthorized access to this session" });
+            console.warn(`[SessionsController] Foreign-ownership access denied for user ${userId} on session ${id}`, { userId, resourceId: id, resourceType: "session" });
+            return res.status(404).json({ ok: false, message: "Session not found" });
         }
 
         // Count remaining sessions for this project

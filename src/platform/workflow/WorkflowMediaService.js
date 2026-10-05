@@ -48,17 +48,37 @@ export class WorkflowMediaService {
             ]);
 
             if (!wfOk) {
-                throw new CrudServiceError("Unauthorized access to this workflow", {
-                    statusCode: 403,
-                    errorCode: "FORBIDDEN",
+                crudOperationLog({
+                    traceId,
+                    operation: "setPrimaryMedia",
+                    status: "error",
+                    userId,
+                    resourceId: workflowId,
+                    resourceType: "workflow",
+                    errorCode: "NOT_FOUND",
+                    message: "Workflow not found",
+                });
+                throw new CrudServiceError("Workflow not found", {
+                    statusCode: 404,
+                    errorCode: "NOT_FOUND",
                     traceId,
                     operation: "setPrimaryMedia",
                 });
             }
             if (!mediaOk) {
-                throw new CrudServiceError("Unauthorized access to this media", {
-                    statusCode: 403,
-                    errorCode: "FORBIDDEN",
+                crudOperationLog({
+                    traceId,
+                    operation: "setPrimaryMedia",
+                    status: "error",
+                    userId,
+                    resourceId: mediaId,
+                    resourceType: "media",
+                    errorCode: "NOT_FOUND",
+                    message: "Media not found",
+                });
+                throw new CrudServiceError("Media not found", {
+                    statusCode: 404,
+                    errorCode: "NOT_FOUND",
                     traceId,
                     operation: "setPrimaryMedia",
                 });
@@ -112,9 +132,19 @@ export class WorkflowMediaService {
 
             const isAuthorized = await this.authService.verifyMediaOwnership(mediaId, userId, req);
             if (!isAuthorized) {
-                throw new CrudServiceError("Unauthorized access to this media", {
-                    statusCode: 403,
-                    errorCode: "FORBIDDEN",
+                crudOperationLog({
+                    traceId,
+                    operation: "detachMedia",
+                    status: "error",
+                    userId,
+                    resourceId: mediaId,
+                    resourceType: "media",
+                    errorCode: "NOT_FOUND",
+                    message: "Media not found",
+                });
+                throw new CrudServiceError("Media not found", {
+                    statusCode: 404,
+                    errorCode: "NOT_FOUND",
                     traceId,
                     operation: "detachMedia",
                 });
@@ -218,9 +248,19 @@ export class WorkflowMediaService {
 
             const isAuthorized = await this.authService.verifyMediaOwnership(mediaId, userId, req);
             if (!isAuthorized) {
-                throw new CrudServiceError("Unauthorized access to this media", {
-                    statusCode: 403,
-                    errorCode: "FORBIDDEN",
+                crudOperationLog({
+                    traceId,
+                    operation: "deleteMedia",
+                    status: "error",
+                    userId,
+                    resourceId: mediaId,
+                    resourceType: "media",
+                    errorCode: "NOT_FOUND",
+                    message: "Media not found",
+                });
+                throw new CrudServiceError("Media not found", {
+                    statusCode: 404,
+                    errorCode: "NOT_FOUND",
                     traceId,
                     operation: "deleteMedia",
                 });

@@ -138,9 +138,19 @@ export class MediaIngestionService {
 
                 const isAuthorized = await this.authService.verifyMediaOwnership(existingMedia.id, userId, req);
                 if (!isAuthorized) {
-                    throw new CrudServiceError("Unauthorized access to this media asset.", {
-                        statusCode: 403,
-                        errorCode: "FORBIDDEN",
+                    crudOperationLog({
+                        traceId,
+                        operation: "mediaIngest",
+                        status: "error",
+                        userId,
+                        resourceId: existingMedia.id,
+                        resourceType: "media",
+                        errorCode: "NOT_FOUND",
+                        message: "Media not found.",
+                    });
+                    throw new CrudServiceError("Media not found.", {
+                        statusCode: 404,
+                        errorCode: "NOT_FOUND",
                         traceId,
                         operation: "mediaIngest",
                     });
@@ -256,9 +266,19 @@ export class MediaIngestionService {
             if (targetWorkflowId) {
                 const isWfAuthorized = await this.authService.verifyWorkflowOwnership(targetWorkflowId, userId, req);
                 if (!isWfAuthorized) {
-                    throw new CrudServiceError("Unauthorized access to target workflow.", {
-                        statusCode: 403,
-                        errorCode: "FORBIDDEN",
+                    crudOperationLog({
+                        traceId,
+                        operation: "mediaIngest",
+                        status: "error",
+                        userId,
+                        resourceId: targetWorkflowId,
+                        resourceType: "workflow",
+                        errorCode: "NOT_FOUND",
+                        message: "Workflow not found.",
+                    });
+                    throw new CrudServiceError("Workflow not found.", {
+                        statusCode: 404,
+                        errorCode: "NOT_FOUND",
                         traceId,
                         operation: "mediaIngest",
                     });

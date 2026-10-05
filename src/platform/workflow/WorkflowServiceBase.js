@@ -67,9 +67,19 @@ export class WorkflowService {
         try {
             const isAuthorized = await this.authService.verifyWorkflowOwnership(cleanWorkflowId, userId, req);
             if (!isAuthorized) {
-                throw new CrudServiceError("Unauthorized access to this workflow", {
-                    statusCode: 403,
-                    errorCode: "FORBIDDEN",
+                crudOperationLog({
+                    traceId,
+                    operation: "updateWorkflowMetadata",
+                    status: "error",
+                    userId,
+                    resourceId: cleanWorkflowId,
+                    resourceType: "workflow",
+                    errorCode: "NOT_FOUND",
+                    message: "Workflow not found",
+                });
+                throw new CrudServiceError("Workflow not found", {
+                    statusCode: 404,
+                    errorCode: "NOT_FOUND",
                     traceId,
                     operation: "updateWorkflowMetadata",
                 });
@@ -125,9 +135,18 @@ export class WorkflowService {
     async toggleLike({ workflowId, userId, req = null }) {
         const isAuthorized = await this.authService.verifyWorkflowOwnership(workflowId, userId, req);
         if (!isAuthorized) {
-            throw new CrudServiceError("Unauthorized access to this workflow", {
-                statusCode: 403,
-                errorCode: "FORBIDDEN",
+            crudOperationLog({
+                operation: "toggleLike",
+                status: "error",
+                userId,
+                resourceId: workflowId,
+                resourceType: "workflow",
+                errorCode: "NOT_FOUND",
+                message: "Workflow not found",
+            });
+            throw new CrudServiceError("Workflow not found", {
+                statusCode: 404,
+                errorCode: "NOT_FOUND",
                 operation: "toggleLike",
             });
         }
@@ -151,9 +170,18 @@ export class WorkflowService {
 
         const ownedIds = await this.authService.verifyWorkflowOwnershipBulk(cleanIds, userId, req);
         if (!ownedIds) {
-            throw new CrudServiceError("Unauthorized access to one or more workflows", {
-                statusCode: 403,
-                errorCode: "FORBIDDEN",
+            crudOperationLog({
+                operation: "bulkToggleLike",
+                status: "error",
+                userId,
+                resourceIds: cleanIds,
+                resourceType: "workflow",
+                errorCode: "NOT_FOUND",
+                message: "Workflow not found",
+            });
+            throw new CrudServiceError("Workflow not found", {
+                statusCode: 404,
+                errorCode: "NOT_FOUND",
                 operation: "bulkToggleLike",
             });
         }
@@ -193,9 +221,19 @@ export class WorkflowService {
         try {
             const isAuthorized = await this.authService.verifyWorkflowOwnership(workflowId, userId, req);
             if (!isAuthorized) {
-                throw new CrudServiceError("Unauthorized access to this workflow", {
-                    statusCode: 403,
-                    errorCode: "FORBIDDEN",
+                crudOperationLog({
+                    traceId,
+                    operation: "moveWorkflow",
+                    status: "error",
+                    userId,
+                    resourceId: workflowId,
+                    resourceType: "workflow",
+                    errorCode: "NOT_FOUND",
+                    message: "Workflow not found",
+                });
+                throw new CrudServiceError("Workflow not found", {
+                    statusCode: 404,
+                    errorCode: "NOT_FOUND",
                     traceId,
                     operation: "moveWorkflow",
                 });
@@ -225,9 +263,19 @@ export class WorkflowService {
             if (projectId) {
                 const project = await this.db.projects.findById(projectId, "user_id");
                 if (!project || (project.user_id && project.user_id !== userId)) {
-                    throw new CrudServiceError("Unauthorized access to target project", {
-                        statusCode: 403,
-                        errorCode: "FORBIDDEN",
+                    crudOperationLog({
+                        traceId,
+                        operation: "moveWorkflow",
+                        status: "error",
+                        userId,
+                        resourceId: projectId,
+                        resourceType: "project",
+                        errorCode: "NOT_FOUND",
+                        message: "Target project not found",
+                    });
+                    throw new CrudServiceError("Target project not found", {
+                        statusCode: 404,
+                        errorCode: "NOT_FOUND",
                         traceId,
                         operation: "moveWorkflow",
                     });
@@ -314,9 +362,19 @@ export class WorkflowService {
 
             const isAuthorized = await this.authService.verifyWorkflowOwnership(workflowId, userId, req);
             if (!isAuthorized) {
-                throw new CrudServiceError("Unauthorized access to this workflow", {
-                    statusCode: 403,
-                    errorCode: "FORBIDDEN",
+                crudOperationLog({
+                    traceId,
+                    operation: "deleteWorkflow",
+                    status: "error",
+                    userId,
+                    resourceId: workflowId,
+                    resourceType: "workflow",
+                    errorCode: "NOT_FOUND",
+                    message: "Workflow not found",
+                });
+                throw new CrudServiceError("Workflow not found", {
+                    statusCode: 404,
+                    errorCode: "NOT_FOUND",
                     traceId,
                     operation: "deleteWorkflow",
                 });
@@ -406,9 +464,19 @@ export class WorkflowService {
 
             const ownedIds = await this.authService.verifyWorkflowOwnershipBulk(cleanIds, userId, req);
             if (!ownedIds) {
-                throw new CrudServiceError("Unauthorized access to one or more workflows", {
-                    statusCode: 403,
-                    errorCode: "FORBIDDEN",
+                crudOperationLog({
+                    traceId,
+                    operation: "bulkDeleteWorkflows",
+                    status: "error",
+                    userId,
+                    resourceIds: cleanIds,
+                    resourceType: "workflow",
+                    errorCode: "NOT_FOUND",
+                    message: "Workflow not found",
+                });
+                throw new CrudServiceError("Workflow not found", {
+                    statusCode: 404,
+                    errorCode: "NOT_FOUND",
                     traceId,
                     operation: "bulkDeleteWorkflows",
                 });

@@ -176,8 +176,9 @@ export class GenerationService {
         const isOwner = project.user_id === userId;
         const devBypass = process.env.DEV_AUTH_BYPASS === "true";
         if (!isOwner && !devBypass) {
-            const err = new Error("Unauthorized access to this project");
-            err.statusCode = 403;
+            log("getAssets", "foreign_denied", { traceId, userId, resourceId: projectId, resourceType: "project" });
+            const err = new Error("Project not found");
+            err.statusCode = 404;
             throw err;
         }
         if (!isOwner && devBypass) {

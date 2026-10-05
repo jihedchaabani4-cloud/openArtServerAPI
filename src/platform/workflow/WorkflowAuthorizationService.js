@@ -58,6 +58,7 @@ export class WorkflowAuthorizationService {
             .map((wf) => wf.id);
 
         if (ownedIds.length !== cleanIds.length) {
+            console.warn(`[WorkflowAuthorizationService] Foreign-ownership access denied for user ${userId} on workflows:`, { userId, requestedIds: cleanIds, ownedIds });
             return null;
         }
 
@@ -78,7 +79,10 @@ export class WorkflowAuthorizationService {
             .maybeSingle();
 
         if (media) {
-            if (media.project?.user_id && media.project?.user_id !== userId) return false;
+            if (media.project?.user_id && media.project?.user_id !== userId) {
+                console.warn(`[WorkflowAuthorizationService] Foreign-ownership access denied for user ${userId} on media ${mediaId}`, { userId, mediaId, owner: media.project?.user_id });
+                return false;
+            }
             return true;
         }
 
@@ -90,7 +94,10 @@ export class WorkflowAuthorizationService {
             .maybeSingle();
 
         if (wf) {
-            if (wf.project?.user_id && wf.project?.user_id !== userId) return false;
+            if (wf.project?.user_id && wf.project?.user_id !== userId) {
+                console.warn(`[WorkflowAuthorizationService] Foreign-ownership access denied for user ${userId} on workflow ${mediaId}`, { userId, workflowId: mediaId, owner: wf.project?.user_id });
+                return false;
+            }
             return true;
         }
 

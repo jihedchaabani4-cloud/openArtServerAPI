@@ -46,7 +46,9 @@ export function walletRateLimit({
         // Compute remaining TTL to tell client when to retry
         const ttl = await redisConnection.ttl(key);
         return res.status(429).json({
-          error: "TOO_MANY_REQUESTS",
+          ok: false,
+          code: "RATE_LIMIT_EXCEEDED",
+          error: "RATE_LIMIT_EXCEEDED",
           message: `Rate limit exceeded. Maximum ${max} requests per ${windowSec} seconds.`,
           retryAfter: ttl > 0 ? ttl : windowSec,
         });

@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { RateLimiterMemory } from "rate-limiter-flexible";
 import { RATE_LIMIT_POLICIES } from "../config/rateLimitPolicies.js";
 
@@ -89,12 +90,27 @@ export function rateLimit(policyName) {
         return next();
       }
     } else if (policy.keyBy === "email") {
-      const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
-      if (!email) {
-        // Missing email is caught by downstream schema / auth validation
+      const rawEmail = req.body?.email;
+      if (typeof rawEmail !== "string" || !rawEmail.trim()) {
+        // Missing or non-string email skips email limiter without sharing a bucket;
+        // downstream validation and IP-based rate limiting still apply.
         return next();
       }
-      key = `email:${email}`;
+
+      if (rawEmail.length > 254) {
+        return res.status(400).json({
+          ok: false,
+          error: "Email exceeds maximum length of 254 characters",
+          message: "Email exceeds maximum length of 254 characters",
+        });
+      }
+
+      const normalizedEmail = rawEmail.trim().toLowerCase();
+      const hashedEmail = crypto.createHash("sha256").update(normalizedEmail).digest("hex");
+      const clientIp = req.ip || req.socket?.remoteAddress || "unknown";
+      // Key includes both hashed email and client IP to prevent an attacker from locking
+      // a victim's account from another IP, while preventing brute force from this IP.
+      key = `email_ip:${crypto.createHash("sha256").update(`${hashedEmail}:${clientIp}`).digest("hex")}`;
     } else {
       // keyBy === "ip"
       key = req.ip || req.socket?.remoteAddress || "unknown";
@@ -113,6 +129,7 @@ export function rateLimit(policyName) {
         return res.status(429).json({
           ok:      false,
           code:    "RATE_LIMIT_EXCEEDED",
+          error:   "RATE_LIMIT_EXCEEDED",
           message: "Too many requests. Please try again later.",
         });
       }

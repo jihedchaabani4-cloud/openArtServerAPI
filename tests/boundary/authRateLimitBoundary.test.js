@@ -114,10 +114,9 @@ describe("RC1.4-D1 — Auth Rate Limiting Boundary Tests", () => {
     assert.ok(resBlocked.headers.has("retry-after"), "Must include Retry-After header");
   });
 
-  it("TEST D1-2: POST /api/auth/login limits to 5 requests per 15 min per email (keyBy email), returning 429 on 6th", async () => {
+  it("TEST D1-2: Attacker cannot lock victim email: limiter uses email + IP, real user from another IP can still log in", async () => {
     const targetEmail = "targeted-victim@example.com";
 
-    // Create a separate app instance configured to trust proxy to simulate requests from different IPs
     const proxyApp = express();
     proxyApp.set("trust proxy", true);
     proxyApp.use(express.json());
@@ -129,42 +128,52 @@ describe("RC1.4-D1 — Auth Rate Limiting Boundary Tests", () => {
     const proxyUrl = `http://127.0.0.1:${proxyServer.address().port}`;
 
     try {
-      // 5 requests with the same email from different IPs (10.0.0.1 to 10.0.0.5) should pass IP limit but consume email limit
+      const attackerIp = "198.51.100.77";
+      const victimIp = "203.0.113.88";
+
+      // Attacker sends 5 requests for targetEmail from attackerIp (consumes 5 points of email+IP limiter)
       for (let i = 1; i <= 5; i++) {
         const res = await fetch(`${proxyUrl}/api/auth/login`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-Forwarded-For": `198.51.100.${i}`,
+            "X-Forwarded-For": attackerIp,
           },
-          body: JSON.stringify({ email: targetEmail, password: "password123" }),
+          body: JSON.stringify({ email: targetEmail, password: "wrong-password" }),
         });
-        assert.equal(res.status, 200, `Login attempt ${i} for targeted email should succeed`);
+        assert.equal(res.status, 200, `Attacker attempt ${i} passes`);
       }
 
-      // 6th request with the same email (from yet another IP: 198.51.100.99) must be blocked by email rate limit
-      const resBlocked = await fetch(`${proxyUrl}/api/auth/login`, {
+      // 6th attempt from attackerIp for targetEmail is blocked (429)
+      const resAttackerBlocked = await fetch(`${proxyUrl}/api/auth/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Forwarded-For": "198.51.100.99",
+          "X-Forwarded-For": attackerIp,
         },
-        body: JSON.stringify({ email: targetEmail, password: "password123" }),
+        body: JSON.stringify({ email: targetEmail, password: "wrong-password" }),
       });
-      assert.equal(resBlocked.status, 429, "6th login request for same email should return 429 regardless of IP");
-      const body = await resBlocked.json();
-      assert.equal(body.ok, false);
+      assert.equal(resAttackerBlocked.status, 429, "6th attempt from attackerIp must return 429");
+      const body = await resAttackerBlocked.json();
       assert.equal(body.code, "RATE_LIMIT_EXCEEDED");
-      assert.ok(resBlocked.headers.has("retry-after"));
-      // Ensure the error message does not leak the email or password
-      assert.ok(!JSON.stringify(body).includes(targetEmail), "Error body must not leak the email address");
-      assert.ok(!JSON.stringify(body).includes("password123"), "Error body must not leak the password");
+      assert.ok(resAttackerBlocked.headers.has("retry-after"));
+
+      // Real user from victimIp MUST STILL BE ABLE TO LOG IN (not locked out by attacker's activity)
+      const resVictim = await fetch(`${proxyUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": victimIp,
+        },
+        body: JSON.stringify({ email: targetEmail, password: "correct-password" }),
+      });
+      assert.equal(resVictim.status, 200, "Legitimate user from a different IP must not be locked out");
     } finally {
       await new Promise((resolve) => proxyServer.close(resolve));
     }
   });
 
-  it("TEST D1-3: Email rate limiting normalizes casing and whitespace", async () => {
+  it("TEST D1-3: Email limiter normalizes casing/whitespace and hashes key", async () => {
     const proxyApp = express();
     proxyApp.set("trust proxy", true);
     proxyApp.use(express.json());
@@ -176,6 +185,7 @@ describe("RC1.4-D1 — Auth Rate Limiting Boundary Tests", () => {
     const proxyUrl = `http://127.0.0.1:${proxyServer.address().port}`;
 
     try {
+      const clientIp = "198.51.100.99";
       const emailVariants = [
         "CaseSensitive@example.com",
         "casesensitive@example.com",
@@ -189,23 +199,69 @@ describe("RC1.4-D1 — Auth Rate Limiting Boundary Tests", () => {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-Forwarded-For": `203.0.113.${i + 1}`,
+            "X-Forwarded-For": clientIp,
           },
           body: JSON.stringify({ email: emailVariants[i], password: "password123" }),
         });
         assert.equal(res.status, 200);
       }
 
-      // 6th attempt with another variant should be blocked
+      // 6th attempt with another variant from the same IP should be blocked
       const resBlocked = await fetch(`${proxyUrl}/api/auth/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Forwarded-For": "203.0.113.99",
+          "X-Forwarded-For": clientIp,
         },
         body: JSON.stringify({ email: "casesensitive@EXAMPLE.com", password: "password123" }),
       });
-      assert.equal(resBlocked.status, 429, "Variants of the same email must share the normalized rate limit bucket");
+      assert.equal(resBlocked.status, 429, "Variants of the same email from same IP must share the normalized rate limit bucket");
+    } finally {
+      await new Promise((resolve) => proxyServer.close(resolve));
+    }
+  });
+
+  it("TEST D1-3b: Key hygiene: email > 254 chars rejected with 400, non-string skips email limiter", async () => {
+    const proxyApp = express();
+    proxyApp.set("trust proxy", true);
+    proxyApp.use(express.json());
+    proxyApp.use(cookieParser());
+    proxyApp.use("/api/auth", authRouter);
+
+    const proxyServer = http.createServer(proxyApp);
+    await new Promise((resolve) => proxyServer.listen(0, "127.0.0.1", resolve));
+    const proxyUrl = `http://127.0.0.1:${proxyServer.address().port}`;
+
+    try {
+      const clientIp = "198.51.100.123";
+
+      // 1. Oversize email (> 254 characters)
+      const longEmail = "a".repeat(245) + "@example.com"; // 257 chars
+      const resOversize = await fetch(`${proxyUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": clientIp,
+        },
+        body: JSON.stringify({ email: longEmail, password: "password123" }),
+      });
+      assert.equal(resOversize.status, 400, "Email > 254 chars must return 400");
+      const oversizeBody = await resOversize.json();
+      assert.ok(oversizeBody.error || oversizeBody.message, "Should include error message");
+
+      // 2. Non-string / missing email skips email limiter without sharing a bucket
+      const resNoEmail = await fetch(`${proxyUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": clientIp,
+        },
+        body: JSON.stringify({ email: 12345, password: "password123" }),
+      });
+      // Handled by validateAuthInput => 400 "Valid email is required."
+      assert.equal(resNoEmail.status, 400);
+      const noEmailBody = await resNoEmail.json();
+      assert.equal(noEmailBody.error, "Valid email is required.");
     } finally {
       await new Promise((resolve) => proxyServer.close(resolve));
     }

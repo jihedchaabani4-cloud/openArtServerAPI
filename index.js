@@ -19,7 +19,10 @@ const PORT = process.env.PORT || 3001;
 // ── Proxy Trust Configuration ────────────────────────────────
 // Configurable via TRUST_PROXY env var; defaults safe to false (direct connection).
 // When behind a reverse proxy (e.g. AWS ALB, Nginx, Cloudflare), set TRUST_PROXY=1.
-if (process.env.TRUST_PROXY !== undefined) {
+const isProd = process.env.NODE_ENV === "production";
+const isStagingOrProd = isProd || process.env.NODE_ENV === "staging";
+
+if (process.env.TRUST_PROXY !== undefined && process.env.TRUST_PROXY !== "") {
     const rawTrust = process.env.TRUST_PROXY;
     if (rawTrust === "true") app.set("trust proxy", true);
     else if (rawTrust === "false") app.set("trust proxy", false);
@@ -27,6 +30,19 @@ if (process.env.TRUST_PROXY !== undefined) {
     else app.set("trust proxy", rawTrust);
 } else {
     app.set("trust proxy", false);
+    if (isProd) {
+        systemLogger.warn({
+            event: "boot.warning",
+            trustProxy: false,
+        }, "TRUST_PROXY is unset in production: all clients will share one rate-limit bucket if behind a proxy");
+    }
+}
+
+if (isStagingOrProd) {
+    systemLogger.info({
+        event: "boot.config",
+        effectiveTrustProxy: app.get("trust proxy"),
+    }, `Server proxy trust configured: ${app.get("trust proxy")}`);
 }
 
 // ── Middleware ──────────────────────────────────────────────

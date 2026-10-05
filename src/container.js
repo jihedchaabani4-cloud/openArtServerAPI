@@ -44,10 +44,19 @@ export const storageService = new StorageService();
 const walletServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || null;
 
 /**
+ * Evaluates whether current runtime is in production mode.
+ * Any environment other than explicit "development" or "test" is treated as production (fail-safe).
+ */
+export function isProductionEnvironment() {
+    const env = (process.env.NODE_ENV || "").trim().toLowerCase();
+    return env !== "development" && env !== "test";
+}
+
+/**
  * Enforce that production environments must never boot without wallet configuration.
  */
 export function assertWalletConfiguredForEnvironment() {
-    const isProd = process.env.NODE_ENV === "production";
+    const isProd = isProductionEnvironment();
     const hasUrl = Boolean(process.env.SUPABASE_URL);
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
     const hasKey = Boolean(key);
@@ -56,7 +65,9 @@ export function assertWalletConfiguredForEnvironment() {
         const missing = [!hasUrl ? "SUPABASE_URL" : null, !hasKey ? "SUPABASE_SERVICE_ROLE_KEY/SUPABASE_KEY" : null]
             .filter(Boolean)
             .join(", ");
-        throw new Error(`Fatal: WalletService is required in production (NODE_ENV=production). Missing: ${missing}`);
+        throw new Error(
+            `Fatal: WalletService is required in production mode (NODE_ENV=${process.env.NODE_ENV || "unset"}). Missing: ${missing}`
+        );
     }
 }
 
@@ -64,20 +75,48 @@ export function assertWalletConfiguredForEnvironment() {
  * Enforce that production environments must never boot without a strong INTERNAL_SECRET (>= 32 chars).
  */
 export function assertSecurityConfiguredForEnvironment() {
-    const isProd = process.env.NODE_ENV === "production";
+    const isProd = isProductionEnvironment();
     const secret = process.env.INTERNAL_SECRET;
 
     if (isProd) {
         if (!secret || typeof secret !== "string" || secret.trim().length < 32) {
             throw new Error(
-                "Fatal: INTERNAL_SECRET is required in production (NODE_ENV=production) and must be at least 32 characters long."
+                `Fatal: INTERNAL_SECRET is required in production mode (NODE_ENV=${process.env.NODE_ENV || "unset"}) and must be at least 32 characters long.`
             );
         }
     }
 }
 
+/**
+ * Enforce that production environments must use Redis for rate limiting,
+ * unless explicitly exempted for single-instance staging via ALLOW_IN_MEMORY_RATE_LIMIT=true.
+ */
+export function assertRateLimitConfiguredForEnvironment() {
+    const isProd = isProductionEnvironment();
+    if (!isProd) return;
+
+    const store = (process.env.RATE_LIMIT_STORE || "").trim().toLowerCase();
+    const allowMemory = process.env.ALLOW_IN_MEMORY_RATE_LIMIT === "true";
+
+    if (store === "redis") {
+        return;
+    }
+
+    if (allowMemory) {
+        console.warn(
+            "⚠️ CRITICAL SECURITY WARNING: RATE_LIMIT_STORE is running in 'memory' mode in production. Rate limits will NOT be shared across instances! Allowed only via ALLOW_IN_MEMORY_RATE_LIMIT=true."
+        );
+        return;
+    }
+
+    throw new Error(
+        `Fatal: RATE_LIMIT_STORE must be set to 'redis' in production mode (NODE_ENV=${process.env.NODE_ENV || "unset"}), or set ALLOW_IN_MEMORY_RATE_LIMIT=true for single-instance staging.`
+    );
+}
+
 assertWalletConfiguredForEnvironment();
 assertSecurityConfiguredForEnvironment();
+assertRateLimitConfiguredForEnvironment();
 
 const _supabaseForUsageEvents = process.env.SUPABASE_URL && walletServiceKey
     ? createClient(process.env.SUPABASE_URL, walletServiceKey)

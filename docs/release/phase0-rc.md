@@ -172,12 +172,13 @@ ALTER TABLE v2_workflow_runs
 
 | Variable | Scope | Type | Default | Failure Mode if Missing / Misconfigured |
 | :--- | :--- | :--- | :--- | :--- |
-| `NODE_ENV` | Global | String (`production` \| `test` \| `development`) | `development` | If `production`, triggers strict boot assertions requiring `SUPABASE_URL` and service key. In non-test environments, prevents mock runner overrides. |
-| `SUPABASE_URL` | Infrastructure / Wallet | String (URL) | `undefined` | In `production`, boot crashes immediately with `Fatal: WalletService is required in production (NODE_ENV=production). Missing: SUPABASE_URL`. In other envs, wallet falls back to unconfigured state; requests requiring credits throw `WALLET_NOT_CONFIGURED` (never free). |
-| `SUPABASE_SERVICE_ROLE_KEY` (or `SUPABASE_KEY`) | Infrastructure / Wallet | String (Secret) | `undefined` | In `production`, boot crashes immediately with `Fatal: ... Missing: SUPABASE_SERVICE_ROLE_KEY/SUPABASE_KEY`. Positive-cost generation calls throw `WALLET_NOT_CONFIGURED`. |
+| `NODE_ENV` | Global | String (`production` \| `test` \| `development`) | **`production` (fail-safe)** | **Inverted default**: Any value other than explicit `"development"` or `"test"` (including unset) is treated as production mode. Enforces strict boot assertions (`WalletService`, `INTERNAL_SECRET >= 32`, `RATE_LIMIT_STORE=redis`). |
+| `SUPABASE_URL` | Infrastructure / Wallet | String (URL) | `undefined` | In production mode, boot crashes immediately with `Fatal: WalletService is required in production mode... Missing: SUPABASE_URL`. In dev/test, wallet falls back to unconfigured state; requests requiring credits throw `WALLET_NOT_CONFIGURED` (never free). |
+| `SUPABASE_SERVICE_ROLE_KEY` (or `SUPABASE_KEY`) | Infrastructure / Wallet | String (Secret) | `undefined` | In production mode, boot crashes immediately with `Fatal: WalletService is required in production mode... Missing: SUPABASE_SERVICE_ROLE_KEY/SUPABASE_KEY`. |
 | `ENABLE_V2_WORKFLOW_RUN_ENDPOINT` | Feature Flag | String (`"true"` \| `"false"`) | `"false"` (unset) | Missing or not `"true"`: `POST /api/v2/workflows/run` responds with HTTP 404 (`ENDPOINT_DISABLED`). Direct orchestration endpoint remains dark. |
-| `RATE_LIMIT_STORE` | Rate Limiter | String (`"memory"` \| `"redis"`) | `"memory"` | If `"memory"`, rate limits per-node in-memory; if `"redis"`, leverages shared Redis client for cluster-wide rate limiting. |
-| `INTERNAL_SECRET` | Auth / Internal RPC | String | `undefined` | Authenticates internal RPC bypasses and privileged health endpoints if configured. |
+| `RATE_LIMIT_STORE` | Rate Limiter | String (`"memory"` \| `"redis"`) | `"redis"` (required in prod) | In production mode, **must be `"redis"`** or boot throws. If `"memory"` or unset, boot crashes unless `ALLOW_IN_MEMORY_RATE_LIMIT=true` is explicitly provided. In dev/test, defaults to `"memory"`. |
+| `ALLOW_IN_MEMORY_RATE_LIMIT` | Rate Limiter / Staging Escape | String (`"true"` \| `"false"`) | `undefined` | In production mode, if set to `"true"`, permits running in-memory rate limiting with a loud startup warning (`CRITICAL SECURITY WARNING`). For single-instance staging environments only. |
+| `INTERNAL_SECRET` | Auth / Internal S2S | String | `undefined` | In production mode, boot crashes immediately if missing or `< 32` characters. Constant-time timing-safe comparison enforced. Default secret eliminated. |
 | `INITIAL_WALLET_BALANCE` / `DEFAULT_WALLET_BALANCE` | Wallet | Number | `0` | Default credits granted when a new user wallet row is provisioned. Defaults to 0 (no free credits without explicit config). |
 
 ---

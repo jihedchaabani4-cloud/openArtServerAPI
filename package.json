@@ -24,7 +24,7 @@
         "#container.js": "./src/container.js"
     },
     "scripts": {
-        "test": "node --test \"tests/**/*.test.js\"",
+        "test": "node --import ./tests/setup-env.js --test \"tests/**/*.test.js\"",
         "models:validate": "node scripts/validate-all-configs.js",
         "start": "node index.js",
         "start:worker": "node src/workers/worker.js",

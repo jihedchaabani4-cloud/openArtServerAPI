@@ -43,7 +43,7 @@ export function validateUseCaseDefinition(def) {
     if (typeof fieldConfig !== "object" || fieldConfig === null) {
       throw new Error(`inputSchema field "${key}" must be an object`);
     }
-    const allowedTypes = ["string", "number", "enum", "array", "boolean"];
+    const allowedTypes = ["string", "number", "enum", "array", "boolean", "object"];
     if (!allowedTypes.includes(fieldConfig.type)) {
       throw new Error(`Invalid type "${fieldConfig.type}" for inputSchema field "${key}". Allowed types: ${allowedTypes.join(", ")}`);
     }

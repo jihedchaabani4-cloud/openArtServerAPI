@@ -17,8 +17,9 @@ import { evaluateWaveSpeedRoutes } from "../common/routeEvaluator.js";
  * @returns {object} Concrete execution route
  */
 export function resolveUpscaleRoute(binding, semanticInput = {}, context = {}) {
+  const routes = binding.operations || binding.routes || [];
   // If no routes declared, binding is single-route identity
-  if (!Array.isArray(binding.routes) || binding.routes.length === 0) {
+  if (!Array.isArray(routes) || routes.length === 0) {
     return binding;
   }
 
@@ -31,7 +32,7 @@ export function resolveUpscaleRoute(binding, semanticInput = {}, context = {}) {
     normalizedInput.input_image = normalizedInput.image_url;
   }
 
-  return evaluateWaveSpeedRoutes(binding, binding.routes, normalizedInput, "upscale");
+  return evaluateWaveSpeedRoutes(binding, routes, normalizedInput, "upscale");
 }
 
 export const WaveSpeedUpscaleResolver = {

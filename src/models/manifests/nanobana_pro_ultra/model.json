@@ -12,12 +12,10 @@
   "capabilities": {
     "prompt": true,
     "input_image": true,
-    "reference_images": true,
-    "mask": true,
+    "images": true,
     "aspect_ratio": true,
     "resolution": true,
-    "quality": true,
-    "seed": true
+    "output_format": true
   },
   "canonicalInputs": {
     "prompt": {
@@ -25,77 +23,59 @@
       "required": true,
       "description": "Textual prompt describing the image to generate or edit"
     },
-    "negative_prompt": {
-      "type": "string",
+    "images": {
+      "type": "array",
       "required": false,
-      "description": "Elements to avoid in the generated output"
+      "max": 14,
+      "description": "Array of reference images for multi-reference generation or editing"
     },
     "input_image": {
       "type": "string",
       "required": false,
+      "max": 1,
       "description": "Primary source image URL being transformed or edited"
-    },
-    "reference_images": {
-      "type": "array",
-      "required": false,
-      "description": "Optional array of reference images for composition/style guidance"
-    },
-    "mask": {
-      "type": "string",
-      "required": false,
-      "description": "Mask image URL indicating inpaint or replacement region"
     },
     "resolution": {
       "type": "string",
       "values": [
-        "1k",
-        "2k",
         "4k",
         "8k"
       ],
-      "default": "1k"
+      "default": "4k"
     },
     "aspect_ratio": {
       "type": "string",
       "values": [
         "1:1",
-        "16:9",
-        "9:16",
+        "3:2",
+        "2:3",
+        "3:4",
         "4:3",
-        "3:4"
+        "4:5",
+        "5:4",
+        "9:16",
+        "16:9",
+        "21:9"
       ],
       "default": "1:1"
     },
-    "quality": {
+    "output_format": {
       "type": "string",
       "values": [
-        "standard",
-        "hd",
-        "ultra"
+        "png",
+        "jpeg"
       ],
-      "default": "standard"
-    },
-    "seed": {
-      "type": "number",
-      "required": false
+      "default": "png"
     }
   },
   "retailPricing": {
     "currency": "credits",
     "table": {
-      "1k:standard": 15,
-      "1k:hd": 18,
-      "2k:standard": 24,
-      "2k:hd": 30,
-      "4k:standard": 36,
-      "4k:hd": 45,
-      "8k:standard": 60,
-      "8k:hd": 75,
-      "1k": 15,
-      "2k": 24,
       "4k": 36,
-      "8k": 60
+      "8k": 60,
+      "default": 36
     }
   },
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/minimax.svg"
 }

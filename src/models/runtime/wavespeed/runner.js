@@ -72,6 +72,16 @@ export async function run({ binding, payload, credential, options = {} }) {
     }
 
     if (err.name === "WavespeedPredictionException" || err.name === "WavespeedSubmissionException") {
+      const isQuotaExhausted =
+        err.status === 402 ||
+        /insufficient credits|top up your account|quota.*exceeded|funds.*exhausted/i.test(errMsg);
+      if (isQuotaExhausted) {
+        const quotaErr = new ProviderRequestError(`WaveSpeed provider account quota exhausted: ${errMsg}`);
+        quotaErr.statusCode = 402;
+        quotaErr.code = "PROVIDER_QUOTA_EXCEEDED";
+        quotaErr.raw = err;
+        throw quotaErr;
+      }
       const reqErr = new ProviderRequestError(`WaveSpeed rejected request: ${errMsg}`);
       reqErr.statusCode = 400;
       reqErr.code = "INVALID_INPUT_REJECTED_BY_PROVIDER";

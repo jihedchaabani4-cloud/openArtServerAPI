@@ -70,7 +70,10 @@ export function getDeepProperty(obj, pathString) {
  */
 export function mapToProviderPayload(cleanCanonicalInput = {}, binding = {}) {
   const providerPayload = {};
-  const parameterMap = binding.parameterMap || {};
+  const parameterMap = {
+    ...(binding.parameters || {}),
+    ...(binding.parameterMap || {}),
+  };
 
   for (const [canonicalKey, mapping] of Object.entries(parameterMap)) {
     const value = cleanCanonicalInput[canonicalKey];

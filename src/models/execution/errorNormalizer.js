@@ -10,6 +10,7 @@ export const StandardErrorCodes = Object.freeze({
   RATE_LIMITED: "RATE_LIMITED",
   PROVIDER_TIMEOUT: "PROVIDER_TIMEOUT",
   PROVIDER_UNAVAILABLE: "PROVIDER_UNAVAILABLE",
+  PROVIDER_QUOTA_EXCEEDED: "PROVIDER_QUOTA_EXCEEDED",
   INVALID_INPUT_REJECTED_BY_PROVIDER: "INVALID_INPUT_REJECTED_BY_PROVIDER",
   UNSUPPORTED_CAPABILITY: "UNSUPPORTED_CAPABILITY",
   OUTPUT_CONTRACT_VIOLATION: "OUTPUT_CONTRACT_VIOLATION",
@@ -43,8 +44,24 @@ export function normalizeError(err, context = {}) {
     });
   }
 
-  // 3. Rate Limit detection
-  if (statusCode === 429 || /rate limit|quota|too many requests/i.test(rawMessage)) {
+  // 3. Provider Account Balance / Quota Exhaustion (Admin/Platform issue, NOT end-user fault)
+  if (
+    err.code === StandardErrorCodes.PROVIDER_QUOTA_EXCEEDED ||
+    err.code === "PROVIDER_QUOTA_EXCEEDED" ||
+    statusCode === 402 ||
+    /insufficient (credits|funds)|insufficient_funds|top up your account|insufficient_quota|balance.*exhausted|credit limit reached/i.test(rawMessage)
+  ) {
+    const error = new ProviderRequestError(`Provider account quota/credits exhausted: ${rawMessage}`);
+    error.code = StandardErrorCodes.PROVIDER_QUOTA_EXCEEDED;
+    error.statusCode = 503;
+    error.retryable = false;
+    error.safeMessage = "This model is temporarily unavailable due to upstream provider maintenance. Please select a different model.";
+    error.providerRaw = rawData || { message: rawMessage };
+    return error;
+  }
+
+  // 4. Rate Limit detection
+  if (statusCode === 429 || /rate limit|too many requests/i.test(rawMessage)) {
     const error = new ProviderTransientError("Provider rate limit reached. Please try again shortly.");
     error.code = StandardErrorCodes.RATE_LIMITED;
     error.statusCode = 429;

@@ -8,11 +8,9 @@ export const imageGenerationUseCase = {
   billing: { strategy: "per-node" },
   inputSchema: {
     prompt:     { type: "string", required: true  },
-    references: { type: "array",  required: false },
-    ratio:      { type: "string", required: false },
     model:      { type: "string", required: true  },
-    quality:    { type: "string", required: false },
-    count:      { type: "number", required: false },
+    references: { type: "array",  required: false },
+    parameters: { type: "object", required: false }, // model-specific params — validated by Model Management
   }
 };
 

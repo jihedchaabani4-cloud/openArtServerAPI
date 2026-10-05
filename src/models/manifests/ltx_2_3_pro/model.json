@@ -1,0 +1,80 @@
+{
+  "id": "ltx_2_3_pro",
+  "domain": "video",
+  "displayName": "LTX 2.3 Pro",
+  "description": "Lightricks LTX-2.3 Pro — cinematic quality with start+end keyframe interpolation, extend, and retake capabilities.",
+  "status": "active",
+  "aliases": [
+    "ltx-2-3-pro",
+    "ltx-2.3-pro"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "last_frame": true,
+    "duration": true,
+    "resolution": true,
+    "fps": true,
+    "generate_audio": true,
+    "camera_motion": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Text description of the video content"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "First frame image URL. When present, routes to image-to-video."
+    },
+    "last_frame": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Last frame image URL for keyframe interpolation. Requires input_image."
+    },
+    "duration": {
+      "type": "number",
+      "values": ["6", "8", "10"],
+      "default": "8",
+      "description": "Video duration in seconds."
+    },
+    "resolution": {
+      "type": "string",
+      "values": ["720p", "1080p", "1440p", "4k"],
+      "default": "1080p",
+      "description": "Output video resolution tier."
+    },
+    "fps": {
+      "type": "number",
+      "values": ["24", "25", "48", "50"],
+      "default": "24",
+      "description": "Frames per second."
+    },
+    "generate_audio": {
+      "type": "boolean",
+      "default": true,
+      "description": "Generate AI audio synchronized with the video."
+    },
+    "camera_motion": {
+      "type": "string",
+      "values": ["dolly_in", "dolly_out", "dolly_left", "dolly_right", "jib_up", "jib_down", "static", "focus_shift"],
+      "required": false,
+      "description": "Camera movement style."
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "6": 25,
+      "8": 35,
+      "10": 45,
+      "default": 35
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/ltx.svg"
+}

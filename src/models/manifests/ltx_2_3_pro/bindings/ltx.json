@@ -1,0 +1,129 @@
+{
+  "modelId": "ltx_2_3_pro",
+  "providerId": "ltx",
+  "providerModelId": "ltx-2-3-pro",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "prompt": {
+      "providerField": "prompt"
+    },
+    "input_image": {
+      "providerField": "image_uri"
+    },
+    "last_frame": {
+      "providerField": "last_frame_uri"
+    },
+    "duration": {
+      "providerField": "duration"
+    },
+    "resolution": {
+      "providerField": "resolution",
+      "transform": "resolutionToWxH"
+    },
+    "fps": {
+      "providerField": "fps"
+    },
+    "generate_audio": {
+      "providerField": "generate_audio"
+    },
+    "camera_motion": {
+      "providerField": "camera_motion"
+    }
+  },
+  "operations": [
+    {
+      "id": "image_to_video_with_last_frame",
+      "operation": "image_to_video",
+      "priority": 1,
+      "when": {
+        "input_image": "present",
+        "last_frame": "present"
+      },
+      "endpoint": "/v2/image-to-video",
+      "statusEndpoint": "/v2/image-to-video/:id",
+      "requiredInputs": [
+        "prompt",
+        "input_image",
+        "last_frame",
+        "duration",
+        "resolution"
+      ],
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "6": 30,
+          "8": 42,
+          "10": 54,
+          "default": 42
+        }
+      }
+    },
+    {
+      "id": "image_to_video",
+      "operation": "image_to_video",
+      "priority": 2,
+      "when": {
+        "input_image": "present",
+        "last_frame": "absent"
+      },
+      "endpoint": "/v2/image-to-video",
+      "statusEndpoint": "/v2/image-to-video/:id",
+      "requiredInputs": [
+        "prompt",
+        "input_image",
+        "duration",
+        "resolution"
+      ],
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "6": 30,
+          "8": 42,
+          "10": 54,
+          "default": 42
+        }
+      }
+    },
+    {
+      "id": "text_to_video",
+      "operation": "text_to_video",
+      "priority": 3,
+      "when": {
+        "input_image": "absent"
+      },
+      "endpoint": "/v2/text-to-video",
+      "statusEndpoint": "/v2/text-to-video/:id",
+      "requiredInputs": [
+        "prompt",
+        "duration",
+        "resolution"
+      ],
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "6": 25,
+          "8": 35,
+          "10": 45,
+          "default": 35
+        }
+      }
+    }
+  ],
+  "outputMap": {
+    "videos.0.url": "result.video_url",
+    "url": "result.video_url",
+    "images.0.url": "result.video_url"
+  },
+  "pollingConfig": {
+    "pollInterval": 5,
+    "timeout": 600,
+    "completedStatuses": [
+      "completed"
+    ],
+    "failedStatuses": [
+      "failed"
+    ]
+  },
+  "version": "1.0.0"
+}

@@ -1,0 +1,68 @@
+{
+  "modelId": "ltx_retake",
+  "providerId": "ltx",
+  "providerModelId": "ltx-2-3-pro",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "input_video": {
+      "providerField": "video_uri"
+    },
+    "prompt": {
+      "providerField": "prompt"
+    },
+    "start_time": {
+      "providerField": "start_time"
+    },
+    "duration": {
+      "providerField": "duration"
+    },
+    "retake_mode": {
+      "providerField": "mode"
+    },
+    "resolution": {
+      "providerField": "resolution"
+    }
+  },
+  "operations": [
+    {
+      "id": "retake",
+      "operation": "retake",
+      "priority": 1,
+      "endpoint": "/v2/retake",
+      "statusEndpoint": "/v2/retake/:id",
+      "requiredInputs": [
+        "input_video",
+        "start_time",
+        "duration"
+      ],
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "2": 12,
+          "4": 22,
+          "6": 30,
+          "8": 38,
+          "10": 45,
+          "default": 22
+        }
+      }
+    }
+  ],
+  "outputMap": {
+    "videos.0.url": "result.video_url",
+    "url": "result.video_url",
+    "images.0.url": "result.video_url"
+  },
+  "pollingConfig": {
+    "pollInterval": 5,
+    "timeout": 600,
+    "completedStatuses": [
+      "completed"
+    ],
+    "failedStatuses": [
+      "failed"
+    ]
+  },
+  "version": "1.0.0"
+}

@@ -1,0 +1,111 @@
+{
+  "id": "gemini_3_1_flash_lite",
+  "domain": "llm",
+  "displayName": "Google Gemini 3.1 Flash Lite",
+  "description": "High-efficiency, lightweight multimodal reasoning and language model from Google DeepMind optimized for speed and structured output.",
+  "status": "active",
+  "systemOnly": true,
+  "aliases": [
+    "gemini-3.1-flash-lite",
+    "gemini_3_1_flash_lite",
+    "gemini_3.1_flash_lite"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "messages": true,
+    "images": true,
+    "system_prompt": true,
+    "temperature": true,
+    "max_tokens": true,
+    "top_p": true,
+    "streaming": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": false
+    },
+    "messages": {
+      "type": "array",
+      "required": false
+    },
+    "images": {
+      "type": "array",
+      "required": false,
+      "max": 16
+    },
+    "system_prompt": {
+      "type": "string",
+      "required": false
+    },
+    "temperature": {
+      "type": "number",
+      "default": 0.7
+    },
+    "max_tokens": {
+      "type": "number",
+      "default": 2048
+    },
+    "top_p": {
+      "type": "number",
+      "default": 1
+    },
+    "streaming": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "default": 1
+    }
+  },
+  "operations": {
+    "chat_completion": {
+      "canonicalInputs": {
+        "prompt": {
+          "type": "string",
+          "required": false
+        },
+        "messages": {
+          "type": "array",
+          "required": false
+        },
+        "images": {
+          "type": "array",
+          "required": false,
+          "max": 16
+        },
+        "system_prompt": {
+          "type": "string",
+          "required": false
+        },
+        "temperature": {
+          "type": "number",
+          "default": 0.7
+        },
+        "max_tokens": {
+          "type": "number",
+          "default": 2048
+        },
+        "top_p": {
+          "type": "number",
+          "default": 1
+        },
+        "streaming": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "default": 1
+        }
+      }
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/google.svg"
+}

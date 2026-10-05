@@ -5,9 +5,35 @@
   "endpoint": "bytedance/seedance-2.5/video-extend",
   "priority": 1,
   "status": "active",
+  "parameters": {
+    "input_video": {
+      "providerField": "video",
+      "type": "string"
+    },
+    "prompt": {
+      "providerField": "prompt",
+      "type": "string"
+    },
+    "duration": {
+      "providerField": "duration",
+      "type": "number"
+    },
+    "resolution": {
+      "providerField": "resolution",
+      "type": "string",
+      "values": [
+        "720p",
+        "1080p"
+      ]
+    },
+    "generate_audio": {
+      "providerField": "generate_audio",
+      "type": "boolean"
+    }
+  },
   "parameterMap": {
     "input_video": {
-      "providerField": "video_url"
+      "providerField": "video"
     },
     "prompt": {
       "providerField": "prompt"
@@ -17,6 +43,9 @@
     },
     "resolution": {
       "providerField": "resolution"
+    },
+    "generate_audio": {
+      "providerField": "generate_audio"
     }
   },
   "pricing": {
@@ -29,7 +58,8 @@
     }
   },
   "outputMap": {
-    "video": "outputs"
+    "images": "outputs",
+    "videoUrl": "outputs.0"
   },
   "pollingConfig": {
     "pollInterval": 2,

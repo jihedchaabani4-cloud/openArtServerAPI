@@ -26,7 +26,8 @@
     },
     "images": {
       "type": "array",
-      "required": false
+      "required": false,
+      "max": 16
     },
     "system_prompt": {
       "type": "string",
@@ -68,7 +69,8 @@
         },
         "images": {
           "type": "array",
-          "required": false
+          "required": false,
+          "max": 16
         },
         "system_prompt": {
           "type": "string",
@@ -99,5 +101,6 @@
       }
     }
   },
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/google.svg"
 }

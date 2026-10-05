@@ -16,10 +16,20 @@
       "required": false,
       "description": "Source image URL for image-to-video generation (alias for input_image)"
     },
+    "last_frame": {
+      "type": "string",
+      "required": false,
+      "description": "Last frame image URL for video continuation keyframe"
+    },
     "reference_images": {
       "type": "array",
       "required": false,
       "description": "Images used as visual guidance for characters or scenes in video"
+    },
+    "images": {
+      "type": "array",
+      "required": false,
+      "description": "Array of reference images for video reference/integration"
     },
     "reference_videos": {
       "type": "array",
@@ -60,6 +70,18 @@
       "values": ["480p", "720p", "1080p", "4k"],
       "default": "720p",
       "description": "Video resolution tier"
+    },
+    "generate_audio": {
+      "type": "boolean",
+      "required": false,
+      "default": true,
+      "description": "Whether to generate native synchronized audio with the output video"
+    },
+    "enable_audio": {
+      "type": "boolean",
+      "required": false,
+      "default": true,
+      "description": "Alias for generate_audio"
     }
   }
 }

@@ -6,121 +6,90 @@
   "status": "active",
   "capabilities": {
     "prompt": true,
-    "negative_prompt": true,
     "resolution": true,
     "aspect_ratio": true,
-    "quality": true,
-    "seed": true
+    "prompt_optimization_mode": true,
+    "output_format": true
   },
   "canonicalInputs": {
     "prompt": {
       "type": "string",
-      "required": true
-    },
-    "negative_prompt": {
-      "type": "string",
-      "required": false
+      "required": true,
+      "description": "Textual prompt describing the image to generate"
     },
     "resolution": {
       "type": "string",
       "values": [
         "1k",
+        "1.5k",
         "2k"
       ],
-      "default": "1k"
+      "default": "1k",
+      "description": "Output image resolution tier"
     },
     "aspect_ratio": {
       "type": "string",
       "values": [
         "1:1",
-        "16:9",
-        "9:16",
-        "4:3",
-        "3:4",
-        "21:9",
+        "1:2",
+        "2:1",
+        "1:3",
+        "3:1",
+        "2:3",
         "3:2",
-        "2:3"
+        "3:4",
+        "4:3",
+        "4:5",
+        "5:4",
+        "9:16",
+        "16:9",
+        "9:21",
+        "21:9"
       ],
-      "default": "1:1"
+      "default": "1:1",
+      "description": "Target image aspect ratio"
     },
-    "quality": {
+    "prompt_optimization_mode": {
       "type": "string",
       "values": [
         "standard",
-        "hd"
+        "fast"
       ],
-      "default": "standard"
+      "default": "standard",
+      "description": "Prompt optimization mode"
     },
-    "seed": {
-      "type": "number",
-      "required": false
+    "output_format": {
+      "type": "string",
+      "values": [
+        "jpeg",
+        "png"
+      ],
+      "default": "jpeg",
+      "description": "Output image container format"
     }
   },
   "retailPricing": {
     "currency": "credits",
     "table": {
-      "1k:standard": 9,
-      "1k:hd": 12,
-      "2k:standard": 15,
-      "2k:hd": 20
+      "1k": 9,
+      "1.5k": 9,
+      "2k": 18,
+      "default": 9
     }
   },
   "operations": {
     "text_to_image": {
-      "canonicalInputs": {
-        "prompt": {
-          "type": "string",
-          "required": true
-        },
-        "negative_prompt": {
-          "type": "string",
-          "required": false
-        },
-        "resolution": {
-          "type": "string",
-          "values": [
-            "1k",
-            "2k"
-          ],
-          "default": "1k"
-        },
-        "aspect_ratio": {
-          "type": "string",
-          "values": [
-            "1:1",
-            "16:9",
-            "9:16",
-            "4:3",
-            "3:4",
-            "21:9",
-            "3:2",
-            "2:3"
-          ],
-          "default": "1:1"
-        },
-        "quality": {
-          "type": "string",
-          "values": [
-            "standard",
-            "hd"
-          ],
-          "default": "standard"
-        },
-        "seed": {
-          "type": "number",
-          "required": false
-        }
-      },
       "retailPricing": {
         "currency": "credits",
         "table": {
-          "1k:standard": 9,
-          "1k:hd": 12,
-          "2k:standard": 15,
-          "2k:hd": 20
+          "1k": 9,
+          "1.5k": 9,
+          "2k": 18,
+          "default": 9
         }
       }
     }
   },
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/baichuan.svg"
 }

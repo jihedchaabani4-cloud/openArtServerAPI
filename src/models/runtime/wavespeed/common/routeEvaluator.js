@@ -72,13 +72,14 @@ export function matchesCondition(val, condition) {
  * @returns {object} Concrete execution plan with merged configuration
  */
 export function evaluateWaveSpeedRoutes(binding, routes = [], semanticInput = {}, category = "general") {
-  if (!Array.isArray(routes) || routes.length === 0) {
+  const candidateRoutes = Array.isArray(routes) && routes.length > 0 ? routes : (binding.operations || binding.routes || []);
+  if (!Array.isArray(candidateRoutes) || candidateRoutes.length === 0) {
     return binding;
   }
 
   const matchingRoutes = [];
 
-  for (const route of routes) {
+  for (const route of candidateRoutes) {
     const when = route.when || {};
     const conditions = Object.entries(when);
 
@@ -94,6 +95,16 @@ export function evaluateWaveSpeedRoutes(binding, routes = [], semanticInput = {}
       if (!matchesCondition(val, condition)) {
         allMatch = false;
         break;
+      }
+    }
+
+    // Verify all declared requiredInputs are present in semanticInput
+    if (allMatch && Array.isArray(route.requiredInputs)) {
+      for (const reqKey of route.requiredInputs) {
+        if (!isParamPresent(semanticInput[reqKey])) {
+          allMatch = false;
+          break;
+        }
       }
     }
 
@@ -154,9 +165,16 @@ export function evaluateWaveSpeedRoutes(binding, routes = [], semanticInput = {}
     id: selectedRoute.id || binding.id,
     routeId: selectedRoute.id || null,
     operation: selectedRoute.operation || selectedRoute.id || binding.operation,
+    requiredInputs: selectedRoute.requiredInputs || binding.requiredInputs || [],
+    parameters: {
+      ...(binding.parameters || {}),
+      ...(selectedRoute.parameterOverrides || {}),
+    },
     parameterMap: {
       ...(binding.parameterMap || {}),
+      ...(binding.parameters || {}),
       ...(selectedRoute.parameterMap || {}),
+      ...(selectedRoute.parameterOverrides || {}),
     },
     staticPayload: {
       ...(binding.staticPayload || {}),

@@ -13,17 +13,19 @@
     "input_video": true,
     "prompt": true,
     "duration": true,
-    "resolution": true
+    "resolution": true,
+    "generate_audio": true
   },
   "canonicalInputs": {
     "input_video": {
       "type": "string",
       "required": true,
+      "max": 1,
       "description": "Existing video URL to extend"
     },
     "prompt": {
       "type": "string",
-      "required": false,
+      "required": true,
       "description": "Textual prompt guiding the video extension continuation"
     },
     "duration": {
@@ -40,10 +42,16 @@
       "values": [
         "480p",
         "720p",
-        "1080p"
+        "1080p",
+        "4k"
       ],
       "default": "720p",
       "description": "Output video resolution"
+    },
+    "generate_audio": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether to generate native audio synchronized with the output video"
     }
   },
   "retailPricing": {
@@ -54,5 +62,6 @@
       "default": 30
     }
   },
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/bytedance.svg"
 }

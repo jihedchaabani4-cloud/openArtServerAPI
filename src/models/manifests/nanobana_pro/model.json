@@ -12,12 +12,10 @@
   "capabilities": {
     "prompt": true,
     "input_image": true,
-    "reference_images": true,
-    "mask": true,
+    "images": true,
     "aspect_ratio": true,
     "resolution": true,
-    "quality": true,
-    "seed": true
+    "output_format": true
   },
   "canonicalInputs": {
     "prompt": {
@@ -25,25 +23,17 @@
       "required": true,
       "description": "Textual prompt describing the image to generate or edit"
     },
-    "negative_prompt": {
-      "type": "string",
+    "images": {
+      "type": "array",
       "required": false,
-      "description": "Elements to avoid in the generated output"
+      "max": 14,
+      "description": "Array of reference images for multi-reference generation or editing"
     },
     "input_image": {
       "type": "string",
       "required": false,
+      "max": 1,
       "description": "Primary source image URL being transformed or edited"
-    },
-    "reference_images": {
-      "type": "array",
-      "required": false,
-      "description": "Optional array of reference images for composition/style guidance"
-    },
-    "mask": {
-      "type": "string",
-      "required": false,
-      "description": "Mask image URL indicating inpaint or replacement region"
     },
     "resolution": {
       "type": "string",
@@ -58,148 +48,60 @@
       "type": "string",
       "values": [
         "1:1",
-        "16:9",
-        "9:16",
+        "3:2",
+        "2:3",
+        "3:4",
         "4:3",
-        "3:4"
+        "4:5",
+        "5:4",
+        "9:16",
+        "16:9",
+        "21:9"
       ],
       "default": "1:1"
     },
-    "quality": {
+    "output_format": {
       "type": "string",
       "values": [
-        "standard",
-        "hd"
+        "png",
+        "jpeg"
       ],
-      "default": "standard"
-    },
-    "seed": {
-      "type": "number",
-      "required": false
+      "default": "png"
     }
   },
   "retailPricing": {
     "currency": "credits",
     "table": {
-      "1k:standard": 10,
-      "1k:hd": 13,
-      "2k:standard": 16,
-      "2k:hd": 21,
-      "4k:standard": 25,
-      "4k:hd": 33
+      "1k": 10,
+      "2k": 16,
+      "4k": 25,
+      "default": 10
     }
   },
   "operations": {
     "text_to_image": {
-      "canonicalInputs": {
-        "prompt": {
-          "type": "string",
-          "required": true
-        },
-        "negative_prompt": {
-          "type": "string",
-          "required": false
-        },
-        "resolution": {
-          "type": "string",
-          "values": [
-            "1k",
-            "2k",
-            "4k"
-          ],
-          "default": "1k"
-        },
-        "aspect_ratio": {
-          "type": "string",
-          "values": [
-            "1:1",
-            "16:9",
-            "9:16",
-            "4:3",
-            "3:4"
-          ],
-          "default": "1:1"
-        },
-        "quality": {
-          "type": "string",
-          "values": [
-            "standard",
-            "hd"
-          ],
-          "default": "standard"
-        },
-        "seed": {
-          "type": "number",
-          "required": false
-        }
-      },
       "retailPricing": {
         "currency": "credits",
         "table": {
-          "1k:standard": 10,
-          "1k:hd": 13,
-          "2k:standard": 16,
-          "2k:hd": 21,
-          "4k:standard": 25,
-          "4k:hd": 33
+          "1k": 10,
+          "2k": 16,
+          "4k": 25,
+          "default": 10
         }
       }
     },
     "edit": {
-      "canonicalInputs": {
-        "prompt": {
-          "type": "string",
-          "required": true
-        },
-        "input_image": {
-          "type": "string",
-          "required": true,
-          "description": "URL of the source image to edit"
-        },
-        "reference_images": {
-          "type": "array",
-          "required": false,
-          "description": "Optional array of additional reference image URLs"
-        },
-        "mask": {
-          "type": "string",
-          "required": false,
-          "description": "Optional mask image URL for inpainting"
-        },
-        "aspect_ratio": {
-          "type": "string",
-          "values": [
-            "1:1",
-            "16:9",
-            "9:16",
-            "4:3",
-            "3:4"
-          ],
-          "default": "1:1"
-        },
-        "resolution": {
-          "type": "string",
-          "values": [
-            "1k",
-            "2k",
-            "4k"
-          ],
-          "default": "1k"
-        },
-        "seed": {
-          "type": "number",
-          "required": false
-        }
-      },
       "retailPricing": {
         "currency": "credits",
         "table": {
           "1k": 18,
           "2k": 18,
-          "4k": 30
+          "4k": 30,
+          "default": 18
         }
       }
     }
   },
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/minimax.svg"
 }

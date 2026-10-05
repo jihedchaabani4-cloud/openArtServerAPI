@@ -12,12 +12,11 @@
   "capabilities": {
     "prompt": true,
     "input_image": true,
-    "image_url": true,
+    "last_frame": true,
     "duration": true,
     "aspect_ratio": true,
     "resolution": true,
-    "fps": true,
-    "camera_motion": true
+    "generate_audio": true
   },
   "canonicalInputs": {
     "prompt": {
@@ -28,12 +27,14 @@
     "input_image": {
       "type": "string",
       "required": false,
+      "max": 1,
       "description": "Main source image URL being transformed to video"
     },
-    "image_url": {
+    "last_frame": {
       "type": "string",
       "required": false,
-      "description": "Source image URL for image-to-video generation"
+      "max": 1,
+      "description": "Last frame image URL for video continuation"
     },
     "duration": {
       "type": "number",
@@ -62,31 +63,16 @@
       "values": [
         "480p",
         "720p",
-        "1080p"
+        "1080p",
+        "4k"
       ],
       "default": "720p",
       "description": "Video resolution tier"
     },
-    "fps": {
-      "type": "number",
-      "values": [
-        "24",
-        "30"
-      ],
-      "default": "24",
-      "description": "Frames per second"
-    },
-    "camera_motion": {
-      "type": "string",
-      "values": [
-        "static",
-        "pan_left",
-        "pan_right",
-        "zoom_in",
-        "zoom_out"
-      ],
-      "default": "static",
-      "description": "Camera motion effect"
+    "generate_audio": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether to generate native audio synchronized with the output video"
     }
   },
   "retailPricing": {
@@ -99,60 +85,6 @@
   },
   "operations": {
     "text_to_video": {
-      "canonicalInputs": {
-        "prompt": {
-          "type": "string",
-          "required": true
-        },
-        "duration": {
-          "type": "number",
-          "values": [
-            "5",
-            "10"
-          ],
-          "default": "5"
-        },
-        "aspect_ratio": {
-          "type": "string",
-          "values": [
-            "16:9",
-            "9:16",
-            "1:1",
-            "4:3",
-            "3:4",
-            "21:9"
-          ],
-          "default": "16:9"
-        },
-        "resolution": {
-          "type": "string",
-          "values": [
-            "480p",
-            "720p",
-            "1080p"
-          ],
-          "default": "720p"
-        },
-        "fps": {
-          "type": "number",
-          "values": [
-            "24",
-            "30"
-          ],
-          "default": "24"
-        },
-        "camera_motion": {
-          "type": "string",
-          "values": [
-            "static",
-            "pan_left",
-            "pan_right",
-            "zoom_in",
-            "zoom_out"
-          ],
-          "default": "static"
-        }
-      },
       "retailPricing": {
         "currency": "credits",
         "table": {
@@ -163,53 +95,6 @@
       }
     },
     "image_to_video": {
-      "canonicalInputs": {
-        "prompt": {
-          "type": "string",
-          "required": true
-        },
-        "image_url": {
-          "type": "string",
-          "required": true
-        },
-        "duration": {
-          "type": "number",
-          "values": [
-            "5",
-            "10"
-          ],
-          "default": "5"
-        },
-        "aspect_ratio": {
-          "type": "string",
-          "values": [
-            "16:9",
-            "9:16",
-            "1:1",
-            "4:3",
-            "3:4",
-            "21:9"
-          ],
-          "default": "16:9"
-        },
-        "resolution": {
-          "type": "string",
-          "values": [
-            "480p",
-            "720p",
-            "1080p"
-          ],
-          "default": "720p"
-        },
-        "fps": {
-          "type": "number",
-          "values": [
-            "24",
-            "30"
-          ],
-          "default": "24"
-        }
-      },
       "retailPricing": {
         "currency": "credits",
         "table": {
@@ -220,5 +105,6 @@
       }
     }
   },
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/bytedance.svg"
 }

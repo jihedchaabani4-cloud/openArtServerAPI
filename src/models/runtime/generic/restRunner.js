@@ -102,6 +102,16 @@ export async function run({ provider, binding, payload, credential, timeoutMs, o
       serverErr.raw = data;
       throw serverErr;
     }
+    if (
+      response.status === 402 ||
+      /insufficient credits|insufficient_quota|quota.*exceeded|balance.*exhausted|top up your account|credit limit reached/i.test(errorMsg)
+    ) {
+      const quotaErr = new ProviderRequestError(errorMsg);
+      quotaErr.statusCode = 402;
+      quotaErr.code = "PROVIDER_QUOTA_EXCEEDED";
+      quotaErr.raw = data;
+      throw quotaErr;
+    }
     const clientErr = new ProviderRequestError(errorMsg);
     clientErr.statusCode = response.status;
     clientErr.code = "INVALID_INPUT_REJECTED_BY_PROVIDER";

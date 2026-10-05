@@ -6,47 +6,263 @@
   "endpoint": "/api/v3/google/nano-banana-2/text-to-image",
   "priority": 1,
   "status": "active",
+  "parameters": {
+    "prompt": {
+      "providerField": "prompt",
+      "type": "string"
+    },
+    "input_image": {
+      "providerField": "images",
+      "type": "string",
+      "transform": "wrap_array"
+    },
+    "images": {
+      "providerField": "images",
+      "type": "array"
+    },
+    "resolution": {
+      "providerField": "resolution",
+      "type": "string",
+      "values": [
+        "0.5k",
+        "1k",
+        "2k",
+        "4k"
+      ]
+    },
+    "aspect_ratio": {
+      "providerField": "aspect_ratio",
+      "type": "string"
+    },
+    "enable_web_search": {
+      "providerField": "enable_web_search",
+      "type": "boolean"
+    },
+    "enable_image_search": {
+      "providerField": "enable_image_search",
+      "type": "boolean"
+    },
+    "output_format": {
+      "providerField": "output_format",
+      "type": "string"
+    }
+  },
   "parameterMap": {
     "prompt": {
       "providerField": "prompt"
     },
-    "negative_prompt": {
-      "providerField": "negative_prompt"
+    "input_image": {
+      "providerField": "images",
+      "transform": "wrap_array"
+    },
+    "images": {
+      "providerField": "images"
     },
     "resolution": {
-      "providerField": "size",
-      "valueMap": {
-        "1k": "1024x1024",
-        "2k": "2048x2048"
-      }
+      "providerField": "resolution"
     },
     "aspect_ratio": {
       "providerField": "aspect_ratio"
     },
-    "quality": {
-      "providerField": "quality_tier",
-      "valueMap": {
-        "standard": "std",
-        "hd": "high"
-      }
+    "enable_web_search": {
+      "providerField": "enable_web_search"
     },
-    "seed": {
-      "providerField": "seed"
+    "enable_image_search": {
+      "providerField": "enable_image_search"
+    },
+    "output_format": {
+      "providerField": "output_format"
     }
   },
   "pricing": {
-    "base_cost_usd": 0.02,
+    "base_cost_usd": 0.07,
     "modifiers": {
       "resolution": {
+        "0.5k": 0.643,
         "1k": 1,
-        "2k": 1.5
-      },
-      "quality": {
-        "standard": 1,
-        "hd": 1.3
+        "2k": 1.5,
+        "4k": 2.0
       }
     }
   },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "0.5k": 6,
+      "1k": 8,
+      "2k": 14,
+      "4k": 20,
+      "default": 8
+    }
+  },
+  "operations": [
+    {
+      "id": "edit",
+      "operation": "edit",
+      "priority": 1,
+      "when": {
+        "input_image": "present"
+      },
+      "requiredInputs": [
+        "prompt",
+        "input_image"
+      ],
+      "endpoint": "/api/v3/google/nano-banana-2/edit",
+      "providerModelId": "google/nano-banana-2/edit",
+      "pricing": {
+        "base_cost_usd": 0.09,
+        "modifiers": {
+          "resolution": {
+            "0.5k": 0.643,
+            "1k": 1,
+            "2k": 1.5,
+            "4k": 2.0
+          }
+        }
+      },
+      "retailPricing": {
+        "table": {
+          "0.5k": 8,
+          "1k": 12,
+          "2k": 18,
+          "4k": 26,
+          "default": 12
+        }
+      }
+    },
+    {
+      "id": "edit_multi",
+      "operation": "edit",
+      "priority": 2,
+      "when": {
+        "images": "present"
+      },
+      "requiredInputs": [
+        "prompt",
+        "images"
+      ],
+      "endpoint": "/api/v3/google/nano-banana-2/edit",
+      "providerModelId": "google/nano-banana-2/edit",
+      "pricing": {
+        "base_cost_usd": 0.09,
+        "modifiers": {
+          "resolution": {
+            "0.5k": 0.643,
+            "1k": 1,
+            "2k": 1.5,
+            "4k": 2.0
+          }
+        }
+      },
+      "retailPricing": {
+        "table": {
+          "0.5k": 8,
+          "1k": 12,
+          "2k": 18,
+          "4k": 26,
+          "default": 12
+        }
+      }
+    },
+    {
+      "id": "generation",
+      "operation": "text_to_image",
+      "priority": 3,
+      "when": {
+        "input_image": "absent",
+        "images": "absent"
+      },
+      "requiredInputs": [
+        "prompt"
+      ],
+      "endpoint": "/api/v3/google/nano-banana-2/text-to-image",
+      "providerModelId": "google/nano-banana-2/text-to-image"
+    }
+  ],
+  "routes": [
+    {
+      "id": "edit",
+      "operation": "edit",
+      "priority": 1,
+      "when": {
+        "input_image": "present"
+      },
+      "requiredInputs": [
+        "prompt",
+        "input_image"
+      ],
+      "endpoint": "/api/v3/google/nano-banana-2/edit",
+      "providerModelId": "google/nano-banana-2/edit",
+      "pricing": {
+        "base_cost_usd": 0.09,
+        "modifiers": {
+          "resolution": {
+            "0.5k": 0.643,
+            "1k": 1,
+            "2k": 1.5,
+            "4k": 2.0
+          }
+        }
+      },
+      "retailPricing": {
+        "table": {
+          "0.5k": 8,
+          "1k": 12,
+          "2k": 18,
+          "4k": 26,
+          "default": 12
+        }
+      }
+    },
+    {
+      "id": "edit_multi",
+      "operation": "edit",
+      "priority": 2,
+      "when": {
+        "images": "present"
+      },
+      "requiredInputs": [
+        "prompt",
+        "images"
+      ],
+      "endpoint": "/api/v3/google/nano-banana-2/edit",
+      "providerModelId": "google/nano-banana-2/edit",
+      "pricing": {
+        "base_cost_usd": 0.09,
+        "modifiers": {
+          "resolution": {
+            "0.5k": 0.643,
+            "1k": 1,
+            "2k": 1.5,
+            "4k": 2.0
+          }
+        }
+      },
+      "retailPricing": {
+        "table": {
+          "0.5k": 8,
+          "1k": 12,
+          "2k": 18,
+          "4k": 26,
+          "default": 12
+        }
+      }
+    },
+    {
+      "id": "generation",
+      "operation": "text_to_image",
+      "priority": 3,
+      "when": {
+        "input_image": "absent",
+        "images": "absent"
+      },
+      "requiredInputs": [
+        "prompt"
+      ],
+      "endpoint": "/api/v3/google/nano-banana-2/text-to-image",
+      "providerModelId": "google/nano-banana-2/text-to-image"
+    }
+  ],
   "version": "1.0.0",
   "outputMap": {
     "images": "outputs"

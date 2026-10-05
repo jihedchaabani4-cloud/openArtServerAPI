@@ -139,6 +139,8 @@ export function initRegistry(options = {}) {
           bindingDef.modelId = bindingDef.modelId || modelDef.id;
           bindingDef.id = bindingDef.id || `${bindingDef.modelId}.${bindingDef.providerId}`;
           bindingDef.operation = bindingDef.operation || "default";
+          bindingDef.routes = bindingDef.routes || bindingDef.operations;
+          bindingDef.operations = bindingDef.operations || bindingDef.routes;
           bindingDef._sourcePath = bindingPath;
 
           const compositeKey = `${bindingDef.modelId}:${bindingDef.operation}:${bindingDef.providerId}`;
@@ -238,12 +240,18 @@ export function initRegistry(options = {}) {
         }
       };
 
+      if (b.parameters) {
+        validateParamMap(b.parameters);
+      }
       if (b.parameterMap) {
         validateParamMap(b.parameterMap);
       }
-      if (Array.isArray(b.routes)) {
+      const bindingRoutes = b.routes || b.operations;
+      if (Array.isArray(bindingRoutes)) {
         const seenRouteIds = new Set();
-        for (const route of b.routes) {
+        const commonParams = { ...(b.parameters || {}), ...(b.parameterMap || {}) };
+
+        for (const route of bindingRoutes) {
           if (!route.id || typeof route.id !== "string") {
             throw new ConfigIntegrityError(
               `Route in binding "${b.providerId}" for model "${mId}" (${op}) is missing a valid string "id".`
@@ -273,8 +281,26 @@ export function initRegistry(options = {}) {
             }
           }
 
+          // Static Architectural Deduplication Invariant (Section 22):
+          // Reject duplicate parameter declarations in routes that match common binding definitions
           if (route.parameterMap) {
+            for (const [routeParamKey, routeParamDef] of Object.entries(route.parameterMap)) {
+              if (commonParams[routeParamKey]) {
+                const commonDef = commonParams[routeParamKey];
+                const isIdentical = JSON.stringify(routeParamDef) === JSON.stringify(commonDef);
+                if (isIdentical) {
+                  throw new ConfigIntegrityError(
+                    `Architectural Duplication Invariant Violated: Route "${route.id}" in binding "${b.providerId}" for model "${mId}" ` +
+                    `duplicates common parameter "${routeParamKey}". Operations must inherit common parameters or declare genuine overrides under "parameterOverrides".`
+                  );
+                }
+              }
+            }
             validateParamMap(route.parameterMap);
+          }
+
+          if (route.parameterOverrides) {
+            validateParamMap(route.parameterOverrides);
           }
         }
       }

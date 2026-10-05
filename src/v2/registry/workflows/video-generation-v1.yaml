@@ -1,0 +1,57 @@
+id: video-generation-v1
+name: Video Generation
+version: 2.0.0
+description: >
+  Video generation pipeline with LLM safety verification, translation,
+  keyframe reference resolution, and cinematic video rendering.
+  Model-specific parameters pass through directly to the Models Management System —
+  the Workflow does not know or map model-specific fields.
+
+metadata:
+  category: video
+  tags: [video, generation, text-to-video, image-to-video]
+  author: system
+
+input_schema:
+  required: [prompt, model]
+  properties:
+    prompt:     { type: string }   # Required — user text prompt (goes through LLM translation)
+    model:      { type: string }   # Required — which video model to use
+    references: { type: array }    # Optional — workflow IDs for reference image/video resolution
+    parameters: { type: object }   # Optional — model-specific params (pass-through, validated by Model Management)
+
+nodes:
+  llm_translate:
+    type: llm
+    inputs:
+      userPrompt: "${input.prompt}"
+    config:
+      model: gemini-3.1-flash-lite
+      skills: [llm/system-safety, llm/translate, llm/json-output]
+      jsonMode: true
+
+  build_prompt:
+    type: prompt-builder
+    depends_on: [llm_translate]
+    inputs:
+      prompt:     "${llm_translate.output.text}"
+      references: "${input.references}"
+
+  generate:
+    type: video-generation
+    depends_on: [build_prompt]
+    inputs:
+      model:      "${input.model}"
+      prompt:     "${build_prompt.output.finalPrompt}"
+      parameters: "${input.parameters}"
+    persist:
+      target: media
+      step_id: video_generation
+      status: completed
+      value: "$outputs.assets[0].url"
+
+outputs:
+  translated_prompt: "${llm_translate.output.text}"
+  final_prompt:      "${build_prompt.output.finalPrompt}"
+  main_asset:        "${generate.output.assets}"
+  model_used:        "${generate.output.metadata.model}"

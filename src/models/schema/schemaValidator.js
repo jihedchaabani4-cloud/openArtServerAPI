@@ -81,7 +81,28 @@ export function validateCanonicalInput(operationDefOrSchema = {}, rawInput = {},
   const allowUnknown = opts.allowUnknown === true;
 
   // Framework-level properties exempt from validation
-  const FRAMEWORK_EXEMPT = new Set(["operation", "userId", "idempotencyKey", "domain"]);
+  const FRAMEWORK_EXEMPT = new Set([
+    "operation",
+    "userId",
+    "idempotencyKey",
+    "domain",
+    "model",
+    "modelKey",
+    "modelFamily",
+    "workflow_id",
+    "workflowId",
+    "project_id",
+    "projectId",
+    "media_id",
+    "mediaId",
+    "parameters",
+    "references",
+    "skill",
+    "skills",
+    "jsonMode",
+    "userPrompt",
+    "systemPromptOverride",
+  ]);
 
   const cleanInput = {};
 
@@ -162,7 +183,29 @@ export function validateCanonicalInput(operationDefOrSchema = {}, rawInput = {},
 export function validateBindingConstraints(binding, cleanInput = {}, rawInput = null) {
   if (!binding) return;
 
-  const FRAMEWORK_EXEMPT = new Set(["operation", "userId", "idempotencyKey", "domain"]);
+  const FRAMEWORK_EXEMPT = new Set([
+    "operation",
+    "userId",
+    "idempotencyKey",
+    "domain",
+    "model",
+    "modelKey",
+    "modelFamily",
+    "workflow_id",
+    "workflowId",
+    "project_id",
+    "projectId",
+    "media_id",
+    "mediaId",
+    "parameters",
+    "references",
+    "skill",
+    "skills",
+    "jsonMode",
+    "userPrompt",
+    "systemPromptOverride",
+  ]);
+
 
   // 1. Prevent silent parameter dropping: reject canonical parameters supplied by caller that are not supported/mapped
   if (!binding.customAdapter) {

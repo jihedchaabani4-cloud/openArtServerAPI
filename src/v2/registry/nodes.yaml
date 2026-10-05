@@ -18,6 +18,7 @@ image-generation:
   inputs:
     prompt: { type: string, required: true }
     references: { type: array, default: [] }
+    parameters: { type: object, default: {} }
     width: { type: number, default: 1024 }
     height: { type: number, default: 1024 }
     count: { type: number, default: 1 }
@@ -31,6 +32,25 @@ image-generation:
     backoff: none
 
 
+video-generation:
+  skill_aware: false
+  inputs:
+    prompt: { type: string, required: true }
+    references: { type: array, default: [] }
+    parameters: { type: object, default: {} }
+    model: { type: string }
+    duration: { type: number }
+    aspect_ratio: { type: string }
+    resolution: { type: string }
+  outputs:
+    assets: { type: array }
+    metadata: { type: object }
+  retry:
+    max_attempts: 1
+    backoff: none
+
+
+
 
 llm:
   skill_aware: true
@@ -38,7 +58,7 @@ llm:
     skills: { type: array, required: true }
     userPrompt: { type: string, required: true }
     images: { type: array, default: [] }
-    model: { type: string, default: "gemini-3-flash" }
+    model: { type: string, default: "gemini-3.1-flash-lite" }
     temperature: { type: number, default: 0.7 }
     jsonMode: { type: boolean, default: false }
     schema: { type: object }

@@ -3,15 +3,65 @@
   "operation": "text_to_image",
   "providerId": "wavespeed",
   "providerModelId": "openai/gpt-image-2/text-to-image",
-  "endpoint": "openai/gpt-image-2/text-to-image",
+  "endpoint": "/api/v3/openai/gpt-image-2/text-to-image",
   "priority": 1,
   "status": "active",
+  "parameters": {
+    "prompt": {
+      "providerField": "prompt",
+      "type": "string"
+    },
+    "input_image": {
+      "providerField": "images",
+      "type": "string",
+      "transform": "wrap_array"
+    },
+    "images": {
+      "providerField": "images",
+      "type": "array"
+    },
+    "resolution": {
+      "providerField": "resolution",
+      "type": "string",
+      "values": [
+        "1k",
+        "2k",
+        "4k"
+      ]
+    },
+    "aspect_ratio": {
+      "providerField": "aspect_ratio",
+      "type": "string"
+    },
+    "quality": {
+      "providerField": "quality",
+      "type": "string",
+      "values": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "output_format": {
+      "providerField": "output_format",
+      "type": "string",
+      "values": [
+        "png",
+        "jpeg",
+        "webp"
+      ]
+    }
+  },
   "parameterMap": {
     "prompt": {
       "providerField": "prompt"
     },
-    "negative_prompt": {
-      "providerField": "negative_prompt"
+    "input_image": {
+      "providerField": "images",
+      "transform": "wrap_array"
+    },
+    "images": {
+      "providerField": "images"
     },
     "resolution": {
       "providerField": "resolution"
@@ -20,30 +70,205 @@
       "providerField": "aspect_ratio"
     },
     "quality": {
-      "providerField": "quality",
-      "valueMap": {
-        "standard": "medium",
-        "hd": "high"
-      }
+      "providerField": "quality"
     },
-    "seed": {
-      "providerField": "seed"
+    "output_format": {
+      "providerField": "output_format"
     }
   },
   "pricing": {
-    "base_cost_usd": 0.04,
+    "base_cost_usd": 0.06,
     "modifiers": {
       "resolution": {
         "1k": 1,
-        "2k": 1.5,
-        "4k": 2.2
+        "2k": 1.6667,
+        "4k": 3.0
       },
       "quality": {
-        "standard": 1,
-        "hd": 1.4
+        "low": 0.1667,
+        "medium": 1,
+        "high": 3.6667
       }
     }
   },
+  "operations": [
+    {
+      "id": "edit",
+      "operation": "edit",
+      "priority": 1,
+      "when": {
+        "input_image": "present"
+      },
+      "requiredInputs": [
+        "prompt",
+        "input_image"
+      ],
+      "endpoint": "/api/v3/openai/gpt-image-2/edit",
+      "providerModelId": "openai/gpt-image-2/edit",
+      "pricing": {
+        "base_cost_usd": 0.07,
+        "modifiers": {
+          "resolution": {
+            "1k": 1,
+            "2k": 1.5714,
+            "4k": 2.7143
+          },
+          "quality": {
+            "low": 0.2857,
+            "medium": 1,
+            "high": 3.2857
+          }
+        }
+      }
+    },
+    {
+      "id": "edit_multi",
+      "operation": "edit",
+      "priority": 2,
+      "when": {
+        "images": "present"
+      },
+      "requiredInputs": [
+        "prompt",
+        "images"
+      ],
+      "endpoint": "/api/v3/openai/gpt-image-2/edit",
+      "providerModelId": "openai/gpt-image-2/edit",
+      "pricing": {
+        "base_cost_usd": 0.07,
+        "modifiers": {
+          "resolution": {
+            "1k": 1,
+            "2k": 1.5714,
+            "4k": 2.7143
+          },
+          "quality": {
+            "low": 0.2857,
+            "medium": 1,
+            "high": 3.2857
+          }
+        }
+      }
+    },
+    {
+      "id": "generation",
+      "operation": "text_to_image",
+      "priority": 3,
+      "when": {
+        "input_image": "absent",
+        "images": "absent"
+      },
+      "requiredInputs": [
+        "prompt"
+      ],
+      "endpoint": "/api/v3/openai/gpt-image-2/text-to-image",
+      "providerModelId": "openai/gpt-image-2/text-to-image",
+      "pricing": {
+        "base_cost_usd": 0.06,
+        "modifiers": {
+          "resolution": {
+            "1k": 1,
+            "2k": 1.6667,
+            "4k": 3.0
+          },
+          "quality": {
+            "low": 0.1667,
+            "medium": 1,
+            "high": 3.6667
+          }
+        }
+      }
+    }
+  ],
+  "routes": [
+    {
+      "id": "edit",
+      "operation": "edit",
+      "priority": 1,
+      "when": {
+        "input_image": "present"
+      },
+      "requiredInputs": [
+        "prompt",
+        "input_image"
+      ],
+      "endpoint": "/api/v3/openai/gpt-image-2/edit",
+      "providerModelId": "openai/gpt-image-2/edit",
+      "pricing": {
+        "base_cost_usd": 0.07,
+        "modifiers": {
+          "resolution": {
+            "1k": 1,
+            "2k": 1.5714,
+            "4k": 2.7143
+          },
+          "quality": {
+            "low": 0.2857,
+            "medium": 1,
+            "high": 3.2857
+          }
+        }
+      }
+    },
+    {
+      "id": "edit_multi",
+      "operation": "edit",
+      "priority": 2,
+      "when": {
+        "images": "present"
+      },
+      "requiredInputs": [
+        "prompt",
+        "images"
+      ],
+      "endpoint": "/api/v3/openai/gpt-image-2/edit",
+      "providerModelId": "openai/gpt-image-2/edit",
+      "pricing": {
+        "base_cost_usd": 0.07,
+        "modifiers": {
+          "resolution": {
+            "1k": 1,
+            "2k": 1.5714,
+            "4k": 2.7143
+          },
+          "quality": {
+            "low": 0.2857,
+            "medium": 1,
+            "high": 3.2857
+          }
+        }
+      }
+    },
+    {
+      "id": "generation",
+      "operation": "text_to_image",
+      "priority": 3,
+      "when": {
+        "input_image": "absent",
+        "images": "absent"
+      },
+      "requiredInputs": [
+        "prompt"
+      ],
+      "endpoint": "/api/v3/openai/gpt-image-2/text-to-image",
+      "providerModelId": "openai/gpt-image-2/text-to-image",
+      "pricing": {
+        "base_cost_usd": 0.06,
+        "modifiers": {
+          "resolution": {
+            "1k": 1,
+            "2k": 1.6667,
+            "4k": 3.0
+          },
+          "quality": {
+            "low": 0.1667,
+            "medium": 1,
+            "high": 3.6667
+          }
+        }
+      }
+    }
+  ],
   "version": "1.0.0",
   "outputMap": {
     "images": "outputs"

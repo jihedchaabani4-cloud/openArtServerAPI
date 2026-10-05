@@ -6,12 +6,36 @@
   "endpoint": "/api/v3/bytedance/seedream-v5.0-pro",
   "priority": 1,
   "status": "active",
+  "parameters": {
+    "prompt": {
+      "providerField": "prompt",
+      "type": "string"
+    },
+    "resolution": {
+      "providerField": "resolution",
+      "type": "string",
+      "values": [
+        "1k",
+        "1.5k",
+        "2k"
+      ]
+    },
+    "aspect_ratio": {
+      "providerField": "aspect_ratio",
+      "type": "string"
+    },
+    "prompt_optimization_mode": {
+      "providerField": "prompt_optimization_mode",
+      "type": "string"
+    },
+    "output_format": {
+      "providerField": "output_format",
+      "type": "string"
+    }
+  },
   "parameterMap": {
     "prompt": {
       "providerField": "prompt"
-    },
-    "negative_prompt": {
-      "providerField": "negative_prompt"
     },
     "resolution": {
       "providerField": "resolution"
@@ -19,27 +43,20 @@
     "aspect_ratio": {
       "providerField": "aspect_ratio"
     },
-    "quality": {
-      "providerField": "prompt_optimization_mode",
-      "valueMap": {
-        "standard": "fast",
-        "hd": "standard"
-      }
+    "prompt_optimization_mode": {
+      "providerField": "prompt_optimization_mode"
     },
-    "seed": {
-      "providerField": "seed"
+    "output_format": {
+      "providerField": "output_format"
     }
   },
   "pricing": {
-    "base_cost_usd": 0.03,
+    "base_cost_usd": 0.045,
     "modifiers": {
       "resolution": {
         "1k": 1,
-        "2k": 1.6
-      },
-      "quality": {
-        "standard": 1,
-        "hd": 1.3
+        "1.5k": 1,
+        "2k": 2.0
       }
     }
   },

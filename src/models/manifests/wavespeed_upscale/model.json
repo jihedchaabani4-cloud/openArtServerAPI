@@ -2,38 +2,49 @@
   "id": "wavespeed_upscale",
   "domain": "upscale",
   "displayName": "WaveSpeed AI Upscaler",
-  "description": "High-fidelity AI image and media resolution upscaling with facial restoration",
+  "description": "High-fidelity AI image resolution upscaling to 4K or 8K with enhanced detail and clarity",
   "status": "active",
   "capabilities": {
     "input_image": true,
-    "image_url": true,
     "scale_factor": true,
-    "face_restore": true
+    "target_resolution": true,
+    "output_format": true
   },
   "canonicalInputs": {
     "input_image": {
       "type": "string",
       "required": true,
+      "max": 1,
       "description": "Source image URL to be upscaled"
-    },
-    "image_url": {
-      "type": "string",
-      "required": false,
-      "description": "Alias for input_image"
     },
     "scale_factor": {
       "type": "number",
       "values": [
         "2",
-        "4"
+        "4",
+        "8"
       ],
       "default": 2,
-      "description": "Upscaling multiplier (2x or 4x)"
+      "description": "Upscaling multiplier (2x, 4x, or 8x)"
     },
-    "face_restore": {
-      "type": "boolean",
-      "default": false,
-      "description": "Whether to enhance and restore facial details"
+    "target_resolution": {
+      "type": "string",
+      "values": [
+        "2k",
+        "4k",
+        "8k"
+      ],
+      "required": false,
+      "description": "Target output resolution"
+    },
+    "output_format": {
+      "type": "string",
+      "values": [
+        "jpeg",
+        "png",
+        "webp"
+      ],
+      "default": "jpeg"
     }
   },
   "retailPricing": {
@@ -41,38 +52,23 @@
     "table": {
       "2": 2,
       "4": 4,
+      "8": 8,
       "default": 2
     }
   },
   "operations": {
     "upscale": {
-      "canonicalInputs": {
-        "input_image": {
-          "type": "string",
-          "required": true
-        },
-        "scale_factor": {
-          "type": "number",
-          "values": [
-            "2",
-            "4"
-          ],
-          "default": 2
-        },
-        "face_restore": {
-          "type": "boolean",
-          "default": false
-        }
-      },
       "retailPricing": {
         "currency": "credits",
         "table": {
           "2": 2,
           "4": 4,
+          "8": 8,
           "default": 2
         }
       }
     }
   },
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/replicate.svg"
 }

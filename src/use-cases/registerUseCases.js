@@ -1,6 +1,7 @@
 import { registerUseCase, clearUseCaseRegistry } from "./useCaseRegistry.js";
 import { characterSheetUseCase } from "./definitions/characterSheet.js";
 import { imageGenerationUseCase } from "./definitions/imageGeneration.js";
+import { videoGenerationUseCase } from "./definitions/videoGeneration.js";
 import { createLogger } from "../infrastructure/logging/index.js";
 
 const systemLogger = createLogger("system");
@@ -14,6 +15,7 @@ export function registerAllUseCases() {
   const useCases = [
     characterSheetUseCase,
     imageGenerationUseCase,
+    videoGenerationUseCase,
   ];
 
   for (const uc of useCases) {

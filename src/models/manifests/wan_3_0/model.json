@@ -7,11 +7,13 @@
   "capabilities": {
     "prompt": true,
     "input_image": true,
-    "image_url": true,
+    "last_frame": true,
     "duration": true,
     "aspect_ratio": true,
     "resolution": true,
-    "fps": true
+    "generate_audio": true,
+    "enable_prompt_expansion": true,
+    "seed": true
   },
   "canonicalInputs": {
     "prompt": {
@@ -22,12 +24,14 @@
     "input_image": {
       "type": "string",
       "required": false,
+      "max": 1,
       "description": "Main source image URL being transformed to video"
     },
-    "image_url": {
+    "last_frame": {
       "type": "string",
       "required": false,
-      "description": "Source image URL for image-to-video generation"
+      "max": 1,
+      "description": "Last frame image URL for video continuation"
     },
     "duration": {
       "type": "number",
@@ -43,7 +47,9 @@
       "values": [
         "16:9",
         "9:16",
-        "1:1"
+        "1:1",
+        "4:3",
+        "3:4"
       ],
       "default": "16:9",
       "description": "Video aspect ratio"
@@ -58,58 +64,24 @@
       "default": "720p",
       "description": "Video resolution tier"
     },
-    "fps": {
+    "generate_audio": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether to include audio in the generated video"
+    },
+    "enable_prompt_expansion": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether to enable the prompt optimizer"
+    },
+    "seed": {
       "type": "number",
-      "values": [
-        "24",
-        "30"
-      ],
-      "default": "24",
-      "description": "Frames per second"
+      "required": false,
+      "description": "Random seed for generation"
     }
   },
   "operations": {
     "text_to_video": {
-      "canonicalInputs": {
-        "prompt": {
-          "type": "string",
-          "required": true
-        },
-        "duration": {
-          "type": "number",
-          "values": [
-            "5",
-            "10"
-          ],
-          "default": "5"
-        },
-        "aspect_ratio": {
-          "type": "string",
-          "values": [
-            "16:9",
-            "9:16",
-            "1:1"
-          ],
-          "default": "16:9"
-        },
-        "resolution": {
-          "type": "string",
-          "values": [
-            "480p",
-            "720p",
-            "1080p"
-          ],
-          "default": "720p"
-        },
-        "fps": {
-          "type": "number",
-          "values": [
-            "24",
-            "30"
-          ],
-          "default": "24"
-        }
-      },
       "retailPricing": {
         "currency": "credits",
         "table": {
@@ -120,50 +92,6 @@
       }
     },
     "image_to_video": {
-      "canonicalInputs": {
-        "prompt": {
-          "type": "string",
-          "required": true
-        },
-        "image_url": {
-          "type": "string",
-          "required": true
-        },
-        "duration": {
-          "type": "number",
-          "values": [
-            "5",
-            "10"
-          ],
-          "default": "5"
-        },
-        "aspect_ratio": {
-          "type": "string",
-          "values": [
-            "16:9",
-            "9:16",
-            "1:1"
-          ],
-          "default": "16:9"
-        },
-        "resolution": {
-          "type": "string",
-          "values": [
-            "480p",
-            "720p",
-            "1080p"
-          ],
-          "default": "720p"
-        },
-        "fps": {
-          "type": "number",
-          "values": [
-            "24",
-            "30"
-          ],
-          "default": "24"
-        }
-      },
       "retailPricing": {
         "currency": "credits",
         "table": {
@@ -174,5 +102,6 @@
       }
     }
   },
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/alibaba.svg"
 }

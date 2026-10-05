@@ -2,30 +2,71 @@
   "modelId": "wavespeed_upscale",
   "operation": "upscale",
   "providerId": "wavespeed",
-  "providerModelId": "wavespeed-ai/upscaler-v1",
-  "endpoint": "/api/v3/wavespeed-ai/upscaler-v1",
+  "providerModelId": "wavespeed-ai/image-upscaler",
+  "endpoint": "/api/v3/wavespeed-ai/image-upscaler",
   "priority": 1,
   "status": "active",
-  "parameterMap": {
+  "parameters": {
     "input_image": {
-      "providerField": "image_url"
+      "providerField": "image",
+      "type": "string"
     },
     "image_url": {
-      "providerField": "image_url"
+      "providerField": "image",
+      "type": "string"
     },
     "scale_factor": {
-      "providerField": "scale"
+      "providerField": "target_resolution",
+      "type": "string",
+      "values": [
+        "2",
+        "4",
+        "8"
+      ],
+      "valueMap": {
+        "2": "2k",
+        "4": "4k",
+        "8": "8k"
+      }
     },
-    "face_restore": {
-      "providerField": "face_restore"
+    "target_resolution": {
+      "providerField": "target_resolution",
+      "type": "string"
+    },
+    "output_format": {
+      "providerField": "output_format",
+      "type": "string"
+    }
+  },
+  "parameterMap": {
+    "input_image": {
+      "providerField": "image"
+    },
+    "image_url": {
+      "providerField": "image"
+    },
+    "scale_factor": {
+      "providerField": "target_resolution",
+      "valueMap": {
+        "2": "2k",
+        "4": "4k",
+        "8": "8k"
+      }
+    },
+    "target_resolution": {
+      "providerField": "target_resolution"
+    },
+    "output_format": {
+      "providerField": "output_format"
     }
   },
   "pricing": {
-    "base_cost_usd": 0.015,
+    "base_cost_usd": 0.01,
     "modifiers": {
       "scale_factor": {
         "2": 1,
-        "4": 1.8
+        "4": 1,
+        "8": 1
       }
     }
   },
@@ -34,51 +75,10 @@
     "table": {
       "2": 2,
       "4": 4,
+      "8": 8,
       "default": 2
     }
   },
-  "routes": [
-    {
-      "id": "image_upscale",
-      "operation": "upscale",
-      "when": {
-        "input_image": "present"
-      },
-      "providerModelId": "wavespeed-ai/upscaler-v1",
-      "endpoint": "/api/v3/wavespeed-ai/upscaler-v1",
-      "parameterMap": {
-        "input_image": {
-          "providerField": "image_url"
-        },
-        "image_url": {
-          "providerField": "image_url"
-        },
-        "scale_factor": {
-          "providerField": "scale"
-        },
-        "face_restore": {
-          "providerField": "face_restore"
-        }
-      },
-      "pricing": {
-        "base_cost_usd": 0.015,
-        "modifiers": {
-          "scale_factor": {
-            "2": 1,
-            "4": 1.8
-          }
-        }
-      },
-      "retailPricing": {
-        "currency": "credits",
-        "table": {
-          "2": 2,
-          "4": 4,
-          "default": 2
-        }
-      }
-    }
-  ],
   "outputMap": {
     "images": "outputs"
   },

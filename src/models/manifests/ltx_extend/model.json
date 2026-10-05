@@ -1,0 +1,60 @@
+{
+  "id": "ltx_extend",
+  "domain": "video",
+  "displayName": "LTX Extend",
+  "description": "Lightricks LTX Extend — seamlessly extend any existing video at the start or end, preserving motion, audio, and visual style.",
+  "status": "active",
+  "aliases": [
+    "ltx-extend",
+    "ltx-2-3-pro-extend"
+  ],
+  "capabilities": {
+    "input_video": true,
+    "prompt": true,
+    "duration": true,
+    "extend_direction": true
+  },
+  "canonicalInputs": {
+    "input_video": {
+      "type": "string",
+      "required": true,
+      "max": 1,
+      "description": "Existing video URL to extend. Must be 16:9 or 9:16, at least 73 frames (~3s), max 4K."
+    },
+    "prompt": {
+      "type": "string",
+      "required": false,
+      "description": "Optional description of what should happen in the extended portion."
+    },
+    "duration": {
+      "type": "number",
+      "values": ["2", "4", "6", "8", "10", "12", "14", "16", "18", "20"],
+      "default": "4",
+      "description": "Duration in seconds to extend. Minimum 2s, maximum 20s."
+    },
+    "extend_direction": {
+      "type": "string",
+      "values": ["end", "start"],
+      "default": "end",
+      "description": "Where to extend the video: end (append) or start (prepend)."
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "2": 10,
+      "4": 18,
+      "6": 25,
+      "8": 32,
+      "10": 40,
+      "12": 48,
+      "14": 56,
+      "16": 64,
+      "18": 72,
+      "20": 80,
+      "default": 18
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/ltx.svg"
+}

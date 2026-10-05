@@ -1,0 +1,66 @@
+{
+  "modelId": "ltx_extend",
+  "providerId": "ltx",
+  "providerModelId": "ltx-2-3-pro",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "input_video": {
+      "providerField": "video_uri"
+    },
+    "prompt": {
+      "providerField": "prompt"
+    },
+    "duration": {
+      "providerField": "duration"
+    },
+    "extend_direction": {
+      "providerField": "mode"
+    }
+  },
+  "operations": [
+    {
+      "id": "extend",
+      "operation": "extend",
+      "priority": 1,
+      "endpoint": "/v2/extend",
+      "statusEndpoint": "/v2/extend/:id",
+      "requiredInputs": [
+        "input_video",
+        "duration"
+      ],
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "2": 10,
+          "4": 18,
+          "6": 25,
+          "8": 32,
+          "10": 40,
+          "12": 48,
+          "14": 56,
+          "16": 64,
+          "18": 72,
+          "20": 80,
+          "default": 18
+        }
+      }
+    }
+  ],
+  "outputMap": {
+    "videos.0.url": "result.video_url",
+    "url": "result.video_url",
+    "images.0.url": "result.video_url"
+  },
+  "pollingConfig": {
+    "pollInterval": 5,
+    "timeout": 600,
+    "completedStatuses": [
+      "completed"
+    ],
+    "failedStatuses": [
+      "failed"
+    ]
+  },
+  "version": "1.0.0"
+}

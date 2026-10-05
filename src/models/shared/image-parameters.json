@@ -52,6 +52,11 @@
       "required": false,
       "description": "Array of reference images used as visual or character guidance"
     },
+    "images": {
+      "type": "array",
+      "required": false,
+      "description": "Array of reference images used for multi-reference generation or editing"
+    },
     "mask": {
       "type": "string",
       "required": false,

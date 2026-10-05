@@ -58,32 +58,37 @@ export const NodeSafetyService = {
 
   // ── 1. Image Generation ─────────────────────────────────────────────────
 
+  /**
+   * Validates image generation node inputs.
+   *
+   * Only validates prompt — all model-specific parameter validation
+   * (resolution, quality, aspect_ratio, etc.) is handled by Model Management.
+   */
   assertImageInputs(inputs = {}, nodeId = "image-generation") {
     assertString(nodeId, "prompt", inputs.prompt, IMAGE_PROMPT_MAX);
-
-    const safe = {
+    return {
       ...inputs,
       prompt: inputs.prompt.trim(),
     };
-
-    if (inputs.width !== undefined && inputs.width !== null) {
-      safe.width = clamp(inputs.width, IMAGE_WIDTH_MIN, IMAGE_WIDTH_MAX);
-    }
-    if (inputs.height !== undefined && inputs.height !== null) {
-      safe.height = clamp(inputs.height, IMAGE_HEIGHT_MIN, IMAGE_HEIGHT_MAX);
-    }
-    if (inputs.count !== undefined && inputs.count !== null) {
-      const rawCount = Number(inputs.count);
-      safe.count = isNaN(rawCount) ? 1 : clamp(rawCount, 1, IMAGE_COUNT_MAX);
-    }
-    if (inputs.references !== undefined && inputs.references !== null) {
-      safe.references = Array.isArray(inputs.references) ? inputs.references : [];
-    }
-
-    return safe;
   },
 
-  // ── 2. LLM ──────────────────────────────────────────────────────────────
+  // ── 2. Video Generation ─────────────────────────────────────────────────
+
+  /**
+   * Validates video generation node inputs.
+   *
+   * Only validates prompt — all model-specific parameter validation
+   * (duration, resolution, camera_motion, etc.) is handled by Model Management.
+   */
+  assertVideoInputs(inputs = {}, nodeId = "video-generation") {
+    assertString(nodeId, "prompt", inputs.prompt, IMAGE_PROMPT_MAX);
+    return {
+      ...inputs,
+      prompt: inputs.prompt.trim(),
+    };
+  },
+
+  // ── 3. LLM ──────────────────────────────────────────────────────────────
 
   assertLLMInputs(inputs = {}, nodeId = "llm") {
     assertString(nodeId, "userPrompt", inputs.userPrompt, LLM_PROMPT_MAX);

@@ -6,9 +6,58 @@
   "endpoint": "/api/v3/bytedance/seedance-2.5/text-to-video",
   "priority": 1,
   "status": "active",
+  "parameters": {
+    "prompt": {
+      "providerField": "prompt",
+      "type": "string"
+    },
+    "input_image": {
+      "providerField": "image",
+      "type": "string"
+    },
+    "image_url": {
+      "providerField": "image",
+      "type": "string"
+    },
+    "last_frame": {
+      "providerField": "last_image",
+      "type": "string"
+    },
+    "duration": {
+      "providerField": "duration",
+      "type": "number"
+    },
+    "aspect_ratio": {
+      "providerField": "aspect_ratio",
+      "type": "string"
+    },
+    "resolution": {
+      "providerField": "resolution",
+      "type": "string",
+      "values": [
+        "480p",
+        "720p",
+        "1080p",
+        "4k"
+      ]
+    },
+    "generate_audio": {
+      "providerField": "generate_audio",
+      "type": "boolean"
+    }
+  },
   "parameterMap": {
     "prompt": {
       "providerField": "prompt"
+    },
+    "input_image": {
+      "providerField": "image"
+    },
+    "image_url": {
+      "providerField": "image"
+    },
+    "last_frame": {
+      "providerField": "last_image"
     },
     "duration": {
       "providerField": "duration"
@@ -18,6 +67,9 @@
     },
     "resolution": {
       "providerField": "resolution"
+    },
+    "generate_audio": {
+      "providerField": "generate_audio"
     }
   },
   "pricing": {
@@ -37,35 +89,54 @@
       "default": 40
     }
   },
-  "routes": [
+  "operations": [
+    {
+      "id": "start_last_frame",
+      "operation": "image_to_video",
+      "priority": 1,
+      "when": {
+        "input_image": "present",
+        "last_frame": "present"
+      },
+      "requiredInputs": [
+        "prompt",
+        "input_image",
+        "last_frame"
+      ],
+      "providerModelId": "bytedance/seedance-2.5/image-to-video",
+      "endpoint": "/api/v3/bytedance/seedance-2.5/image-to-video",
+      "pricing": {
+        "base_cost_usd": 0.28,
+        "modifiers": {
+          "duration": {
+            "5": 1,
+            "10": 1.8
+          }
+        }
+      },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "5": 45,
+          "10": 80,
+          "default": 45
+        }
+      }
+    },
     {
       "id": "image_to_video",
       "operation": "image_to_video",
+      "priority": 2,
       "when": {
-        "input_image": "present"
+        "input_image": "present",
+        "last_frame": "absent"
       },
+      "requiredInputs": [
+        "prompt",
+        "input_image"
+      ],
       "providerModelId": "bytedance/seedance-2.5/image-to-video",
       "endpoint": "/api/v3/bytedance/seedance-2.5/image-to-video",
-      "parameterMap": {
-        "prompt": {
-          "providerField": "prompt"
-        },
-        "input_image": {
-          "providerField": "image_url"
-        },
-        "image_url": {
-          "providerField": "image_url"
-        },
-        "duration": {
-          "providerField": "duration"
-        },
-        "aspect_ratio": {
-          "providerField": "aspect_ratio"
-        },
-        "resolution": {
-          "providerField": "resolution"
-        }
-      },
       "pricing": {
         "base_cost_usd": 0.28,
         "modifiers": {
@@ -87,25 +158,114 @@
     {
       "id": "text_to_video",
       "operation": "text_to_video",
+      "priority": 3,
       "when": {
-        "input_image": "absent"
+        "input_image": "absent",
+        "last_frame": "absent"
       },
+      "requiredInputs": [
+        "prompt"
+      ],
       "providerModelId": "bytedance/seedance-2.5/text-to-video",
       "endpoint": "/api/v3/bytedance/seedance-2.5/text-to-video",
-      "parameterMap": {
-        "prompt": {
-          "providerField": "prompt"
-        },
-        "duration": {
-          "providerField": "duration"
-        },
-        "aspect_ratio": {
-          "providerField": "aspect_ratio"
-        },
-        "resolution": {
-          "providerField": "resolution"
+      "pricing": {
+        "base_cost_usd": 0.25,
+        "modifiers": {
+          "duration": {
+            "5": 1,
+            "10": 1.9
+          }
         }
       },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "5": 40,
+          "10": 75,
+          "default": 40
+        }
+      }
+    }
+  ],
+  "routes": [
+    {
+      "id": "start_last_frame",
+      "operation": "image_to_video",
+      "priority": 1,
+      "when": {
+        "input_image": "present",
+        "last_frame": "present"
+      },
+      "requiredInputs": [
+        "prompt",
+        "input_image",
+        "last_frame"
+      ],
+      "providerModelId": "bytedance/seedance-2.5/image-to-video",
+      "endpoint": "/api/v3/bytedance/seedance-2.5/image-to-video",
+      "pricing": {
+        "base_cost_usd": 0.28,
+        "modifiers": {
+          "duration": {
+            "5": 1,
+            "10": 1.8
+          }
+        }
+      },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "5": 45,
+          "10": 80,
+          "default": 45
+        }
+      }
+    },
+    {
+      "id": "image_to_video",
+      "operation": "image_to_video",
+      "priority": 2,
+      "when": {
+        "input_image": "present",
+        "last_frame": "absent"
+      },
+      "requiredInputs": [
+        "prompt",
+        "input_image"
+      ],
+      "providerModelId": "bytedance/seedance-2.5/image-to-video",
+      "endpoint": "/api/v3/bytedance/seedance-2.5/image-to-video",
+      "pricing": {
+        "base_cost_usd": 0.28,
+        "modifiers": {
+          "duration": {
+            "5": 1,
+            "10": 1.8
+          }
+        }
+      },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "5": 45,
+          "10": 80,
+          "default": 45
+        }
+      }
+    },
+    {
+      "id": "text_to_video",
+      "operation": "text_to_video",
+      "priority": 3,
+      "when": {
+        "input_image": "absent",
+        "last_frame": "absent"
+      },
+      "requiredInputs": [
+        "prompt"
+      ],
+      "providerModelId": "bytedance/seedance-2.5/text-to-video",
+      "endpoint": "/api/v3/bytedance/seedance-2.5/text-to-video",
       "pricing": {
         "base_cost_usd": 0.25,
         "modifiers": {

@@ -1,0 +1,85 @@
+{
+  "id": "ltx_2_5_fast",
+  "domain": "video",
+  "displayName": "LTX 2.5 Fast",
+  "description": "Lightricks LTX-2.5 Fast — rapid video generation up to 4K with automatic duration support and AI audio.",
+  "status": "active",
+  "aliases": [
+    "ltx-2-5-fast",
+    "ltx-2.5-fast"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "last_frame": true,
+    "duration": true,
+    "resolution": true,
+    "fps": true,
+    "generate_audio": true,
+    "camera_motion": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Text description of the video content"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "First frame image URL. When present, routes to image-to-video."
+    },
+    "last_frame": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Last frame image URL for keyframe interpolation. Requires input_image."
+    },
+    "duration": {
+      "type": "number",
+      "values": ["6", "8", "10", "12", "14", "16", "18", "20"],
+      "default": "8",
+      "description": "Video duration in seconds. Pass null for automatic duration (ltx-2-5 only)."
+    },
+    "resolution": {
+      "type": "string",
+      "values": ["720p", "1080p", "1440p", "4k"],
+      "default": "720p",
+      "description": "Output video resolution tier."
+    },
+    "fps": {
+      "type": "number",
+      "values": ["24", "25", "48", "50"],
+      "default": "24",
+      "description": "Frames per second."
+    },
+    "generate_audio": {
+      "type": "boolean",
+      "default": true,
+      "description": "Generate AI audio synchronized with the video."
+    },
+    "camera_motion": {
+      "type": "string",
+      "values": ["dolly_in", "dolly_out", "dolly_left", "dolly_right", "jib_up", "jib_down", "static", "focus_shift"],
+      "required": false,
+      "description": "Camera movement style."
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "6": 15,
+      "8": 20,
+      "10": 25,
+      "12": 30,
+      "14": 35,
+      "16": 40,
+      "18": 45,
+      "20": 50,
+      "default": 20
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/ltx.svg"
+}

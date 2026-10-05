@@ -1,0 +1,298 @@
+import { describe, it, before, after, beforeEach, afterEach } from "node:test";
+import assert from "node:assert/strict";
+import http from "node:http";
+import express from "express";
+import cookieParser from "cookie-parser";
+import authRouter from "../../routes/authRoutes.js";
+import { supabase } from "../../lib/supabase.js";
+import { walletService } from "../../src/container.js";
+import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+
+describe("RC1.4-D1 — Auth Rate Limiting Boundary Tests", () => {
+  let server;
+  let baseUrl;
+  let app;
+  let origSignInWithPassword;
+  let origSignUp;
+  let origEnsureWallet;
+  let origCreateWallet;
+
+  before(async () => {
+    origSignInWithPassword = supabase?.auth?.signInWithPassword;
+    origSignUp = supabase?.auth?.signUp;
+    origEnsureWallet = walletService?.ensureWallet;
+    origCreateWallet = walletService?.createWallet;
+
+    if (walletService) {
+      walletService.ensureWallet = async () => ({ id: "mock-wallet" });
+      walletService.createWallet = async () => ({ id: "mock-wallet" });
+    }
+
+    if (supabase?.auth) {
+      supabase.auth.signInWithPassword = async ({ email, password }) => {
+        return {
+          data: {
+            user: { id: "mock-user-id", email },
+            session: { access_token: "mock-access-token", refresh_token: "mock-refresh-token" },
+          },
+          error: null,
+        };
+      };
+
+      supabase.auth.signUp = async ({ email, password }) => {
+        return {
+          data: {
+            user: { id: "mock-user-id", email },
+            session: { access_token: "mock-access-token", refresh_token: "mock-refresh-token" },
+          },
+          error: null,
+        };
+      };
+
+      const origFrom = supabase.from;
+      supabase.from = (table) => {
+        if (table === "profiles") {
+          return {
+            upsert: async () => ({ data: [{ id: "mock-user-id" }], error: null }),
+          };
+        }
+        if (origFrom) return origFrom.call(supabase, table);
+        return {};
+      };
+    }
+
+    app = express();
+    app.use(express.json());
+    app.use(cookieParser());
+    app.use("/api/auth", authRouter);
+
+    server = http.createServer(app);
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address();
+    baseUrl = `http://127.0.0.1:${port}`;
+  });
+
+  after(async () => {
+    if (supabase?.auth) {
+      if (origSignInWithPassword) supabase.auth.signInWithPassword = origSignInWithPassword;
+      if (origSignUp) supabase.auth.signUp = origSignUp;
+    }
+    if (walletService) {
+      if (origEnsureWallet) walletService.ensureWallet = origEnsureWallet;
+      if (origCreateWallet) walletService.createWallet = origCreateWallet;
+    }
+    try {
+      await redisConnection?.quit().catch(() => redisConnection?.disconnect());
+      await workerRedisConnection?.quit().catch(() => workerRedisConnection?.disconnect());
+    } catch {}
+    if (server) {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it("TEST D1-1: POST /api/auth/login limits to 10 requests per 5 min per IP, returning 429 on 11th", async () => {
+    // 10 requests from same client IP with different emails should succeed
+    for (let i = 1; i <= 10; i++) {
+      const res = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: `user-diff-${i}@example.com`, password: "password123" }),
+      });
+      assert.equal(res.status, 200, `Login request ${i} from same IP should succeed with 200`);
+    }
+
+    // 11th request from same IP must be rate limited with 429
+    const resBlocked = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "user-diff-11@example.com", password: "password123" }),
+    });
+    assert.equal(resBlocked.status, 429, "11th login request from same IP should return 429");
+    const body = await resBlocked.json();
+    assert.equal(body.ok, false);
+    assert.equal(body.code, "RATE_LIMIT_EXCEEDED");
+    assert.ok(resBlocked.headers.has("retry-after"), "Must include Retry-After header");
+  });
+
+  it("TEST D1-2: POST /api/auth/login limits to 5 requests per 15 min per email (keyBy email), returning 429 on 6th", async () => {
+    const targetEmail = "targeted-victim@example.com";
+
+    // Create a separate app instance configured to trust proxy to simulate requests from different IPs
+    const proxyApp = express();
+    proxyApp.set("trust proxy", true);
+    proxyApp.use(express.json());
+    proxyApp.use(cookieParser());
+    proxyApp.use("/api/auth", authRouter);
+
+    const proxyServer = http.createServer(proxyApp);
+    await new Promise((resolve) => proxyServer.listen(0, "127.0.0.1", resolve));
+    const proxyUrl = `http://127.0.0.1:${proxyServer.address().port}`;
+
+    try {
+      // 5 requests with the same email from different IPs (10.0.0.1 to 10.0.0.5) should pass IP limit but consume email limit
+      for (let i = 1; i <= 5; i++) {
+        const res = await fetch(`${proxyUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": `198.51.100.${i}`,
+          },
+          body: JSON.stringify({ email: targetEmail, password: "password123" }),
+        });
+        assert.equal(res.status, 200, `Login attempt ${i} for targeted email should succeed`);
+      }
+
+      // 6th request with the same email (from yet another IP: 198.51.100.99) must be blocked by email rate limit
+      const resBlocked = await fetch(`${proxyUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": "198.51.100.99",
+        },
+        body: JSON.stringify({ email: targetEmail, password: "password123" }),
+      });
+      assert.equal(resBlocked.status, 429, "6th login request for same email should return 429 regardless of IP");
+      const body = await resBlocked.json();
+      assert.equal(body.ok, false);
+      assert.equal(body.code, "RATE_LIMIT_EXCEEDED");
+      assert.ok(resBlocked.headers.has("retry-after"));
+      // Ensure the error message does not leak the email or password
+      assert.ok(!JSON.stringify(body).includes(targetEmail), "Error body must not leak the email address");
+      assert.ok(!JSON.stringify(body).includes("password123"), "Error body must not leak the password");
+    } finally {
+      await new Promise((resolve) => proxyServer.close(resolve));
+    }
+  });
+
+  it("TEST D1-3: Email rate limiting normalizes casing and whitespace", async () => {
+    const proxyApp = express();
+    proxyApp.set("trust proxy", true);
+    proxyApp.use(express.json());
+    proxyApp.use(cookieParser());
+    proxyApp.use("/api/auth", authRouter);
+
+    const proxyServer = http.createServer(proxyApp);
+    await new Promise((resolve) => proxyServer.listen(0, "127.0.0.1", resolve));
+    const proxyUrl = `http://127.0.0.1:${proxyServer.address().port}`;
+
+    try {
+      const emailVariants = [
+        "CaseSensitive@example.com",
+        "casesensitive@example.com",
+        "  CASESENSITIVE@EXAMPLE.COM  ",
+        "CaseSensitive@EXAMPLE.com",
+        "casesensitive@example.com ",
+      ];
+
+      for (let i = 0; i < 5; i++) {
+        const res = await fetch(`${proxyUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": `203.0.113.${i + 1}`,
+          },
+          body: JSON.stringify({ email: emailVariants[i], password: "password123" }),
+        });
+        assert.equal(res.status, 200);
+      }
+
+      // 6th attempt with another variant should be blocked
+      const resBlocked = await fetch(`${proxyUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": "203.0.113.99",
+        },
+        body: JSON.stringify({ email: "casesensitive@EXAMPLE.com", password: "password123" }),
+      });
+      assert.equal(resBlocked.status, 429, "Variants of the same email must share the normalized rate limit bucket");
+    } finally {
+      await new Promise((resolve) => proxyServer.close(resolve));
+    }
+  });
+
+  it("TEST D1-4: POST /api/auth/signup limits to 10 requests per hour per IP", async () => {
+    const signupApp = express();
+    signupApp.set("trust proxy", true);
+    signupApp.use(express.json());
+    signupApp.use(cookieParser());
+    signupApp.use("/api/auth", authRouter);
+
+    const signupServer = http.createServer(signupApp);
+    await new Promise((resolve) => signupServer.listen(0, "127.0.0.1", resolve));
+    const signupUrl = `http://127.0.0.1:${signupServer.address().port}`;
+
+    try {
+      const clientIp = "192.0.2.50";
+      for (let i = 1; i <= 10; i++) {
+        const res = await fetch(`${signupUrl}/api/auth/signup`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": clientIp,
+          },
+          body: JSON.stringify({ email: `new-user-${i}@example.com`, password: "password123" }),
+        });
+        assert.equal(res.status, 201, `Signup ${i} should succeed`);
+      }
+
+      // 11th signup from same IP must return 429
+      const resBlocked = await fetch(`${signupUrl}/api/auth/signup`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": clientIp,
+        },
+        body: JSON.stringify({ email: "new-user-11@example.com", password: "password123" }),
+      });
+      assert.equal(resBlocked.status, 429, "11th signup request from same IP should return 429");
+      const body = await resBlocked.json();
+      assert.equal(body.ok, false);
+      assert.equal(body.code, "RATE_LIMIT_EXCEEDED");
+      assert.ok(resBlocked.headers.has("retry-after"));
+    } finally {
+      await new Promise((resolve) => signupServer.close(resolve));
+    }
+  });
+
+  it("TEST D1-5: Trust proxy behavior — ignores spoofed X-Forwarded-For when trust proxy is false", async () => {
+    // App with trust proxy: false (default)
+    const directApp = express();
+    directApp.set("trust proxy", false);
+    directApp.use(express.json());
+    directApp.use(cookieParser());
+    directApp.use("/api/auth", authRouter);
+
+    const directServer = http.createServer(directApp);
+    await new Promise((resolve) => directServer.listen(0, "127.0.0.1", resolve));
+    const directUrl = `http://127.0.0.1:${directServer.address().port}`;
+
+    try {
+      // Attacker attempts to spoof X-Forwarded-For with different IPs on every request
+      for (let i = 1; i <= 10; i++) {
+        const res = await fetch(`${directUrl}/api/auth/signup`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": `1.2.3.${i}`, // Attacker spoofing header
+          },
+          body: JSON.stringify({ email: `spoof-${i}@example.com`, password: "password123" }),
+        });
+        assert.equal(res.status, 201);
+      }
+
+      // 11th request from attacker socket (despite new spoofed header) must be blocked because trust proxy is false
+      const resBlocked = await fetch(`${directUrl}/api/auth/signup`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": "1.2.3.99",
+        },
+        body: JSON.stringify({ email: "spoof-11@example.com", password: "password123" }),
+      });
+      assert.equal(resBlocked.status, 429, "When trust proxy is false, spoofed headers must not bypass rate limit");
+    } finally {
+      await new Promise((resolve) => directServer.close(resolve));
+    }
+  });
+});

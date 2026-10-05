@@ -88,6 +88,13 @@ export function rateLimit(policyName) {
         // Auth middleware hasn't run or failed — pass through, let auth handle it
         return next();
       }
+    } else if (policy.keyBy === "email") {
+      const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+      if (!email) {
+        // Missing email is caught by downstream schema / auth validation
+        return next();
+      }
+      key = `email:${email}`;
     } else {
       // keyBy === "ip"
       key = req.ip || req.socket?.remoteAddress || "unknown";
@@ -106,7 +113,7 @@ export function rateLimit(policyName) {
         return res.status(429).json({
           ok:      false,
           code:    "RATE_LIMIT_EXCEEDED",
-          message: "Too many generation requests. Please wait a moment.",
+          message: "Too many requests. Please try again later.",
         });
       }
 

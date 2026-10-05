@@ -16,6 +16,19 @@ bootstrapV2();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// ── Proxy Trust Configuration ────────────────────────────────
+// Configurable via TRUST_PROXY env var; defaults safe to false (direct connection).
+// When behind a reverse proxy (e.g. AWS ALB, Nginx, Cloudflare), set TRUST_PROXY=1.
+if (process.env.TRUST_PROXY !== undefined) {
+    const rawTrust = process.env.TRUST_PROXY;
+    if (rawTrust === "true") app.set("trust proxy", true);
+    else if (rawTrust === "false") app.set("trust proxy", false);
+    else if (!isNaN(Number(rawTrust))) app.set("trust proxy", Number(rawTrust));
+    else app.set("trust proxy", rawTrust);
+} else {
+    app.set("trust proxy", false);
+}
+
 // ── Middleware ──────────────────────────────────────────────
 const allowedOrigins = [
     process.env.FRONTEND_URL ? process.env.FRONTEND_URL.replace(/\/$/, '') : null,

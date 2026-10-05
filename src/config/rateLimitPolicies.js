@@ -32,10 +32,31 @@ export const RATE_LIMIT_POLICIES = {
     keyBy:    "user",
   },
 
-  /** POST /api/auth/login (unauthenticated — key by IP) */
+  /** POST /api/auth/login (10 per 5 min per IP) */
+  loginIp: {
+    points:   Number(process.env.RATE_LIMIT_LOGIN_IP_POINTS) || 10,
+    duration: Number(process.env.RATE_LIMIT_LOGIN_IP_DURATION) || 300,  // 5 minutes
+    keyBy:    "ip",
+  },
+
+  /** POST /api/auth/login (5 per 15 min per email) */
+  loginEmail: {
+    points:   Number(process.env.RATE_LIMIT_LOGIN_EMAIL_POINTS) || 5,
+    duration: Number(process.env.RATE_LIMIT_LOGIN_EMAIL_DURATION) || 900,  // 15 minutes
+    keyBy:    "email",
+  },
+
+  /** POST /api/auth/signup (10 per hour per IP) */
+  signupIp: {
+    points:   Number(process.env.RATE_LIMIT_SIGNUP_IP_POINTS) || 10,
+    duration: Number(process.env.RATE_LIMIT_SIGNUP_IP_DURATION) || 3600, // 1 hour
+    keyBy:    "ip",
+  },
+
+  /** POST /api/auth/login legacy alias */
   login: {
-    points:   5,    // 5 attempts
-    duration: 300,  // per 5 minutes
+    points:   Number(process.env.RATE_LIMIT_LOGIN_IP_POINTS) || 10,
+    duration: Number(process.env.RATE_LIMIT_LOGIN_IP_DURATION) || 300,
     keyBy:    "ip",
   },
 

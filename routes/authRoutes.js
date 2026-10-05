@@ -1,11 +1,12 @@
 import express from "express";
 import { signup, login, googleRedirect, googleCallback, getMe, logout, microsoftRedirect, getWalletBalance } from "../controllers/authController.js";
+import { rateLimit } from "../src/middleware/rateLimit.js";
 
 const router = express.Router();
 
 // Email / Password
-router.post("/signup", signup);
-router.post("/login", login);
+router.post("/signup", rateLimit("signupIp"), signup);
+router.post("/login", rateLimit("loginIp"), rateLimit("loginEmail"), login);
 
 // OAuth flows (both return to the same callback)
 router.get("/google", googleRedirect);

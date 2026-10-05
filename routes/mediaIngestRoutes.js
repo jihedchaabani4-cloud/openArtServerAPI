@@ -2,13 +2,27 @@ import { Router } from "express";
 import multer from "multer";
 import { mediaIngestionService } from "../src/container.js";
 import { requireAuth } from "../src/middleware/auth.js";
+import { createSizeLimitedMemoryStorage } from "../src/middleware/sizeLimitedStorage.js";
 
 const router = Router();
 router.use(requireAuth);
 
 const upload = multer({
-    storage: multer.memoryStorage(),
+    storage: createSizeLimitedMemoryStorage({
+        imageLimit: 20 * 1024 * 1024,
+        videoLimit: 100 * 1024 * 1024,
+    }),
     limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB max (videos)
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) {
+            cb(null, true);
+        } else {
+            const err = new Error(`Unsupported file type: ${file.mimetype}`);
+            err.statusCode = 415;
+            err.code = "UNSUPPORTED_MEDIA_TYPE";
+            cb(err);
+        }
+    },
 });
 
 /**

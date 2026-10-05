@@ -1,4 +1,4 @@
-import { redisConnection } from "../queue/redis.js";
+import { rateLimitRedisConnection } from "../queue/redis.js";
 import { createLogger } from "../infrastructure/logging/index.js";
 
 const systemLogger = createLogger("ratelimit");
@@ -6,8 +6,8 @@ const systemLogger = createLogger("ratelimit");
 /**
  * walletRateLimit — Redis sliding-window rate limiter
  * ─────────────────────────────────────────────────────────────────────────────
- * Uses ioredis INCR + EXPIRE (reuses the existing BullMQ redisConnection,
- * zero new dependencies). Each counter key is per-user and auto-expires.
+ * Uses ioredis INCR + EXPIRE (uses dedicated fail-fast rateLimitRedisConnection).
+ * Each counter key is per-user and auto-expires.
  *
  * Outage Policy:
  *   Wallet read routes fail-open on Redis error/timeout, logging at error level.
@@ -17,7 +17,7 @@ export function walletRateLimit({
   max = 30,
   windowSec = 60,
   keyPrefix = "rate:wallet",
-  storeClient = redisConnection,
+  storeClient = rateLimitRedisConnection,
 } = {}) {
   return async (req, res, next) => {
     const userId = req.user?.id;

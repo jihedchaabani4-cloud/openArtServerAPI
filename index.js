@@ -10,6 +10,8 @@ const systemLogger = createLogger("system");
 import apiRouter from "./src/api/routes.js";
 import { walletService } from "./src/container.js";
 import { bootstrapV2 } from "./src/v2/bootstrap.js";
+import { requireAuth } from "./src/middleware/auth.js";
+import { rateLimit } from "./src/middleware/rateLimit.js";
 
 bootstrapV2();
 
@@ -70,11 +72,16 @@ app.use(
 // Payments webhook raw body parser MUST be mounted before any JSON parser
 app.use("/api/payments/webhook", express.raw({ type: "application/json" }));
 
+// Cookie parser (lightweight header parsing only, zero body buffering, needed for JWT auth)
+app.use(cookieParser());
+app.use(requestLogger());
+
 // ── Body Size Parsers: Scoped 30MB for base64/media ingestion, Global 1MB for all others ──
 const scopedJsonParser = express.json({ limit: "30mb" });
 const scopedUrlencodedParser = express.urlencoded({ extended: true, limit: "30mb" });
 const globalJsonParser = express.json({ limit: "1mb" });
 const globalUrlencodedParser = express.urlencoded({ extended: true, limit: "1mb" });
+const scopedLargeBodyLimiter = rateLimit("scopedLargeBodyIp");
 
 function isScopedLargeBodyRoute(path) {
     if (!path) return false;
@@ -92,19 +99,25 @@ app.use((req, res, next) => {
         return next();
     }
     if (isScopedLargeBodyRoute(path)) {
-        scopedJsonParser(req, res, (err) => {
-            if (err) return next(err);
-            scopedUrlencodedParser(req, res, next);
-        });
-    } else {
-        globalJsonParser(req, res, (err) => {
-            if (err) return next(err);
-            globalUrlencodedParser(req, res, next);
+        // Enforce IP rate limiting and authentication BEFORE buffering/parsing 30MB payload
+        return scopedLargeBodyLimiter(req, res, (limiterErr) => {
+            if (limiterErr) return next(limiterErr);
+            requireAuth(req, res, (authErr) => {
+                if (authErr) return next(authErr);
+                scopedJsonParser(req, res, (jsonErr) => {
+                    if (jsonErr) return next(jsonErr);
+                    scopedUrlencodedParser(req, res, next);
+                });
+            });
         });
     }
+
+    // Global 1MB parser for standard routes
+    globalJsonParser(req, res, (err) => {
+        if (err) return next(err);
+        globalUrlencodedParser(req, res, next);
+    });
 });
-app.use(cookieParser());
-app.use(requestLogger());
 
 // ── Routes ──────────────────────────────────────────────────
 app.use("/api", apiRouter);

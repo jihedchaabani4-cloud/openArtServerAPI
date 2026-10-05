@@ -89,4 +89,12 @@ export const RATE_LIMIT_POLICIES = {
     keyBy:      "user",
     failPolicy: "close",
   },
+
+  /** Scoped large-body pre-parsing rate limit (IP-based, configurable, default 60/min) */
+  scopedLargeBodyIp: {
+    points:     Number(process.env.RATE_LIMIT_SCOPED_LARGE_BODY_POINTS) || 60,
+    duration:   Number(process.env.RATE_LIMIT_SCOPED_LARGE_BODY_DURATION) || 60,
+    keyBy:      "ip",
+    failPolicy: "insurance",
+  },
 };

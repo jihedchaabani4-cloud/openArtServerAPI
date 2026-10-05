@@ -73,7 +73,10 @@ describe("RC1.4-D2 — Body Size & Multer Limits Boundary Tests", () => {
     const base64Data = "data:image/jpeg;base64," + "a".repeat(2.5 * 1024 * 1024);
     const res = await fetch(`${baseUrl}/api/v2/elements`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer test-user-id",
+      },
       body: JSON.stringify({
         name: "test-element",
         sourceImages: [base64Data],
@@ -89,7 +92,10 @@ describe("RC1.4-D2 — Body Size & Multer Limits Boundary Tests", () => {
     const base64Data = "data:image/jpeg;base64," + "a".repeat(31 * 1024 * 1024);
     const res = await fetch(`${baseUrl}/api/v2/elements`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer test-user-id",
+      },
       body: JSON.stringify({
         name: "test-element",
         sourceImages: [base64Data],
@@ -170,7 +176,10 @@ describe("RC1.4-D2 — Body Size & Multer Limits Boundary Tests", () => {
     const sourceImages = [photoBase64, photoBase64, photoBase64, photoBase64, photoBase64];
     const res = await fetch(`${baseUrl}/api/v2/elements`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer test-user-id",
+      },
       body: JSON.stringify({
         name: "test-element-realistic",
         sourceImages,

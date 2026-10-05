@@ -24,10 +24,16 @@ let lastAuthOutageLog = 0;
 const _limiters = new Map();
 
 export function resetLimitersForTest() {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("[rateLimit] resetLimitersForTest is only permitted when NODE_ENV === 'test'");
+  }
   _limiters.clear();
 }
 
 export function setLimiterForTest(key, limiter) {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("[rateLimit] setLimiterForTest is only permitted when NODE_ENV === 'test'");
+  }
   _limiters.set(key, limiter);
 }
 
@@ -43,10 +49,10 @@ async function getLimiter(policy) {
   if (store === "redis") {
     // ── Redis store (V2 / multi-process) ──────────────────────────────────────
     const { RateLimiterRedis } = await import("rate-limiter-flexible");
-    const { redisConnection } = await import("../queue/redis.js");
+    const { rateLimitRedisConnection } = await import("../queue/redis.js");
 
     const opts = {
-      storeClient: redisConnection,
+      storeClient: rateLimitRedisConnection,
       points:      policy.points,
       duration:    policy.duration,
       keyPrefix:   `rl:${policy.cacheKey}`,

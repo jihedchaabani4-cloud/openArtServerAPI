@@ -39,7 +39,7 @@ export class MediaInspector {
             throw new Error("[MediaInspector] Executable ELF binary detected. Ingestion rejected.");
         }
         // HTML / Script sniffing (XSS payload in image disguise)
-        const headerText = buffer.slice(0, 64).toString("utf8").toLowerCase();
+        const headerText = buffer.slice(0, 256).toString("utf8").toLowerCase();
         if (
             headerText.includes("<!doctype") ||
             headerText.includes("<html") ||
@@ -47,6 +47,19 @@ export class MediaInspector {
             headerText.includes("<?php")
         ) {
             throw new Error("[MediaInspector] HTML / Script markup payload detected. Ingestion rejected.");
+        }
+        // SVG / XML sniffing
+        if (
+            headerText.includes("<svg") ||
+            headerText.includes("<?xml") ||
+            headerText.includes("<xml") ||
+            headerText.includes("xmlns=\"http://www.w3.org/2000/svg\"")
+        ) {
+            throw new Error("[MediaInspector] SVG / XML markup payload detected. Vector graphics and scriptable XML are not permitted in raster image ingestion.");
+        }
+        // ZIP archive signatures (PK\x03\x04, PK\x05\x06, PK\x07\x08)
+        if (buffer[0] === 0x50 && buffer[1] === 0x4b) {
+            throw new Error("[MediaInspector] ZIP archive payload (PK) detected. Ingestion rejected.");
         }
 
         // 2. Image Signatures
@@ -138,16 +151,25 @@ export class MediaInspector {
         }
 
         const detectedMime = this.sniffMagicBytes(buffer);
-        const effectiveMime = detectedMime || claimedMime || "application/octet-stream";
-
-        const isVideo = effectiveMime.startsWith("video/");
-        const isImage = effectiveMime.startsWith("image/");
-
-        if (!isVideo && !isImage) {
+        if (!detectedMime) {
             throw new Error(
-                `[MediaInspector] Unrecognized or unsupported file format (detected: "${effectiveMime}").`
+                `[MediaInspector] Unrecognized or unsupported file format (detected: null, claimed: "${claimedMime}").`
             );
         }
+
+        if (claimedMime && !claimedMime.startsWith("multipart/") && !claimedMime.startsWith("application/octet-stream")) {
+            const bothVideo = claimedMime.startsWith("video/") && detectedMime.startsWith("video/");
+            const bothImage = claimedMime.startsWith("image/") && detectedMime.startsWith("image/");
+            if (!bothVideo && !bothImage && claimedMime !== detectedMime) {
+                throw new Error(
+                    `[MediaInspector] Content inspection failed: declared MIME "${claimedMime}" does not match file bytes ("${detectedMime}").`
+                );
+            }
+        }
+
+        const effectiveMime = detectedMime;
+        const isVideo = effectiveMime.startsWith("video/");
+        const isImage = effectiveMime.startsWith("image/");
 
         const sizeBytes = buffer.length;
 

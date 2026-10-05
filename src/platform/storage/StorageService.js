@@ -47,6 +47,11 @@ export class StorageService {
             body = payload;
         }
 
+        // Validate magic bytes to prevent writing dangerous files into storage
+        if (Buffer.isBuffer(body) && body.length >= 4) {
+            MediaInspector.sniffMagicBytes(body);
+        }
+
         // Determine content type based on path extension if not explicitly specified
         let contentType = options.contentType || "image/jpeg";
         if (!options.contentType) {

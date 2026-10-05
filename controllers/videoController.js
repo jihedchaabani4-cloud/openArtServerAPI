@@ -162,11 +162,18 @@ export async function generateVideo(req, res) {
     controllerLogger.info({ mediaId, serverMediaIds, workflowId }, `Video Media placeholder(s) created`);
 
     // ── 3. Prepare UseCase runtime input ─────────────────────────────────────
+    const resolvedParams = (parameters && typeof parameters === "object") ? { ...parameters } : {};
+    if (mediaMeta?.aspect_ratio) {
+      resolvedParams.aspect_ratio = resolvedParams.aspect_ratio || mediaMeta.aspect_ratio;
+    }
     const runtimeInput = {
       prompt:           prompt.trim(),
       model:            chosenModel,
+      aspect_ratio:     mediaMeta.aspect_ratio,
+      width:            mediaMeta.width,
+      height:           mediaMeta.height,
       references:       sanitizedReferences,
-      parameters:       (parameters && typeof parameters === "object") ? parameters : {},
+      parameters:       resolvedParams,
       project_id:       projectId,
       workflow_id:      workflowId,
       media_id:         mediaId,

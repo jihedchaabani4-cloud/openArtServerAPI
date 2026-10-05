@@ -25,9 +25,10 @@ const runRepo = new RunRepository();
 /**
  * Executes declarative node-level persistence from YAML (target: "character" | "media")
  */
-export async function executeNodePersistence({ nodeConfig, output, run, resolvedInputs = {} }) {
+export async function executeNodePersistence({ nodeConfig, output, run, resolvedInputs = {}, db: dbOverride = null }) {
   if (!nodeConfig?.persist) return;
 
+  const activeDb = dbOverride || db;
   const { target, step_id, field, value, status = "completed" } = nodeConfig.persist;
   // F2a: Derive workflowId strictly from server-side targetWorkflowId on the run record.
   // Never read user-controlled run.input.workflow_id or run.input.characterId.
@@ -45,7 +46,7 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
 
     if (target === "character" && workflowId && field) {
       nodeLogger.info({ workflowId, field }, `Updating character ${workflowId} field "${field}"`);
-      await db.characters.updateCharacter(workflowId, { [field]: resolvedValue });
+      await activeDb.characters.updateCharacter(workflowId, { [field]: resolvedValue });
     } else if (target === "media" && workflowId) {
       const allowedMediaIds = run.targetMediaIds || run.execution_plan?.targetMediaIds;
       if (!Array.isArray(allowedMediaIds) || allowedMediaIds.length === 0) {
@@ -56,7 +57,7 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
       nodeLogger.info({ workflowId, stepId: targetStepId }, `Updating media for workflow ${workflowId} (step_id: ${targetStepId}) to completed`);
 
       // Find existing placeholders created by controller for this workflow
-      const existingList = await db.media.findByWorkflow(workflowId);
+      const existingList = await activeDb.media.findByWorkflow(workflowId);
 
       // Map allowedMediaIds in exact order
       const placeholders = allowedMediaIds.map((id) => existingList?.find((m) => m.id === id)).filter(Boolean);
@@ -104,7 +105,7 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
         // SHORTAGE: provider returned fewer assets than pre-allocated placeholders.
         // This is a genuine contract violation — we paid for N outputs and got fewer.
         for (const placeholder of activePlaceholders) {
-          await db.media.updateMedia(placeholder.id, {
+          await activeDb.media.updateMedia(placeholder.id, {
             status: "failed",
             error_message: `Output contract violation: expected ${activePlaceholders.length} assets, received ${assets.length}`,
           }).catch(() => {});
@@ -147,7 +148,7 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
 
         if (!assetUrl) {
           for (const p of activePlaceholders) {
-            await db.media.updateMedia(p.id, {
+            await activeDb.media.updateMedia(p.id, {
               status: "failed",
               error_message: `Output contract violation: asset at index ${i} has empty or missing url`,
             }).catch(() => {});
@@ -161,16 +162,17 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
         }
 
         const mediaMeta = resolveMediaMetadata({
-          ...(typeof asset === "object" ? asset : {}),
+          ...(placeholder?.width && placeholder?.height ? { width: placeholder.width, height: placeholder.height } : {}),
           ...resolvedInputs,
           parameters: resolvedInputs?.parameters,
+          ...(typeof asset === "object" ? asset : {}),
         });
 
-        await db.media.updateMedia(placeholder.id, {
+        await activeDb.media.updateMedia(placeholder.id, {
           url: assetUrl,
           status: status || "completed",
-          width: mediaMeta.width,
-          height: mediaMeta.height,
+          width: mediaMeta.width || placeholder?.width || 1024,
+          height: mediaMeta.height || placeholder?.height || 1024,
         });
       }
     }

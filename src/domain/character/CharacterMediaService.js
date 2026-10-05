@@ -6,6 +6,7 @@
 
 import { randomUUID } from "node:crypto";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
+import { resolveMediaMetadata } from "../../platform/media/mediaMetadataResolver.js";
 
 export class CharacterMediaService {
     /**
@@ -258,8 +259,8 @@ export class CharacterMediaService {
             const safeUserId = userId || wf.user_id || "anonymous";
 
             let resolvedUrl = imageUrl;
-            let resolvedWidth = 1024;
-            let resolvedHeight = 1024;
+            let resolvedWidth = null;
+            let resolvedHeight = null;
 
             // Ingestion via Canonical MediaIngestionService
             if (this.mediaIngestionService) {
@@ -275,8 +276,8 @@ export class CharacterMediaService {
                     imageUrl,
                 });
                 resolvedUrl = ingested.url;
-                resolvedWidth = ingested.width || 1024;
-                resolvedHeight = ingested.height || 1024;
+                resolvedWidth = ingested.width;
+                resolvedHeight = ingested.height;
             } else {
                 // Fallback Case A: Multipart file upload (buffer)
                 if (file && file.buffer) {
@@ -305,8 +306,8 @@ export class CharacterMediaService {
                     const sourceMedia = await this._resolveSourceMedia(mediaId);
                     if (sourceMedia && sourceMedia.url) {
                         resolvedUrl = sourceMedia.url;
-                        resolvedWidth = sourceMedia.width || 1024;
-                        resolvedHeight = sourceMedia.height || 1024;
+                        resolvedWidth = sourceMedia.width;
+                        resolvedHeight = sourceMedia.height;
                     } else if (imageUrl) {
                         resolvedUrl = imageUrl;
                     } else {
@@ -330,6 +331,13 @@ export class CharacterMediaService {
                     }
                 }
             }
+
+            const meta = resolveMediaMetadata({
+                width: resolvedWidth,
+                height: resolvedHeight,
+            });
+            resolvedWidth = meta.width;
+            resolvedHeight = meta.height;
 
             const mediaRow = await this.db.media.createMedia({
                 workflow_id: wf.id,

@@ -1,4 +1,5 @@
 import { V1StorageBridge } from "../../v2/services/v1StorageBridge.js";
+import { resolveMediaMetadata } from "./mediaMetadataResolver.js";
 
 /** Canonical media statuses written to the V1 `media` table. */
 export const MEDIA_WORKFLOW_STATUS = {
@@ -78,10 +79,11 @@ function buildDisplayName(input = {}) {
 }
 
 function buildGenerationConfig(nodeType, input = {}) {
+  const meta = resolveMediaMetadata(input);
   return {
     prompt: input?.prompt || "",
     model: input?.model || "unknown",
-    aspect_ratio: input?.aspect_ratio || "SQUARE",
+    aspect_ratio: meta.aspect_ratio || input?.aspect_ratio || "SQUARE",
     generation_type: "TEXT_ONLY",
   };
 }
@@ -322,8 +324,8 @@ export class MediaWorkflowLifecycleService {
         mediaId,
         {
           url,
-          width: asset?.width || 1024,
-          height: asset?.height || 1024,
+          width: asset?.width,
+          height: asset?.height,
         },
         MEDIA_WORKFLOW_STATUS.SUCCESS
       );

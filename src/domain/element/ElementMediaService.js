@@ -14,6 +14,7 @@
 
 import { randomUUID } from "node:crypto";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
+import { resolveMediaMetadata } from "../../platform/media/mediaMetadataResolver.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -88,14 +89,15 @@ export class ElementMediaService {
                 finalUrl = ingested.url;
             } else {
                 // Direct fallback: create media row directly
-                finalUrl = typeof src === "string" ? src : "";
+                finalUrl = typeof src === "string" ? src : (src?.url || "");
+                const meta = resolveMediaMetadata(typeof src === "object" ? src : {});
                 mediaRecord = await this.db.media.createMedia({
                     workflow_id: workflowId,
                     project_id: projectId,
                     url: finalUrl,
                     step_id: stepId,
-                    width: 1024,
-                    height: 1024,
+                    width: meta.width,
+                    height: meta.height,
                     status: "success",
                 });
             }
@@ -179,13 +181,14 @@ export class ElementMediaService {
                 mediaRecord = ingested.media;
                 resolvedUrl = ingested.url;
             } else {
+                const meta = resolveMediaMetadata(typeof inputSource === "object" ? inputSource : {});
                 mediaRecord = await this.db.media.createMedia({
                     workflow_id: wfId,
                     project_id: effectiveProjectId,
                     url: resolvedUrl,
                     step_id: "element_reference",
-                    width: 1024,
-                    height: 1024,
+                    width: meta.width,
+                    height: meta.height,
                     status: "success",
                 });
             }
@@ -335,13 +338,14 @@ export class ElementMediaService {
                 mediaRecord = ingested.media;
                 resolvedUrl = ingested.url;
             } else {
+                const meta = resolveMediaMetadata(typeof inputSource === "object" ? inputSource : {});
                 mediaRecord = await this.db.media.createMedia({
                     workflow_id: wfId,
                     project_id: effectiveProjectId,
                     url: resolvedUrl,
                     step_id: "element_sheet",
-                    width: 1024,
-                    height: 1024,
+                    width: meta.width,
+                    height: meta.height,
                     status: "success",
                 });
             }

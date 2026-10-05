@@ -1,5 +1,6 @@
 import { createWorkflowWithMedia, createWorkflowWithMediaAtomic, appendMediaToWorkflow } from "../../db/workflowMediaOps.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
+import { resolveMediaMetadata } from "../../platform/media/mediaMetadataResolver.js";
 
 const storageLogger = createLogger("storage");
 
@@ -63,11 +64,18 @@ export class V1StorageBridge {
     };
 
     let generationConfigId = null;
+    let resolvedDimensions = { width: 1024, height: 1024, aspect_ratio: "SQUARE" };
     if (config) {
+      const meta = resolveMediaMetadata({ ...config, parameters: config.parameters || config });
+      resolvedDimensions = {
+        width: meta.width || 1024,
+        height: meta.height || 1024,
+        aspect_ratio: meta.aspect_ratio || config.aspect_ratio || "SQUARE",
+      };
       const configRecord = await this.db.configs.createConfig({
         prompt: config.prompt || "",
         model: config.model || "unknown",
-        aspect_ratio: config.aspect_ratio || "SQUARE",
+        aspect_ratio: resolvedDimensions.aspect_ratio,
         generation_type: config.generation_type || "TEXT_ONLY",
         seed: config.seed || null,
       });
@@ -80,8 +88,8 @@ export class V1StorageBridge {
       generation_config_id: generationConfigId,
       step_id: stepId,
       url: null,
-      width: 1024,
-      height: 1024,
+      width: resolvedDimensions.width,
+      height: resolvedDimensions.height,
       status: "processing",
     };
 
@@ -137,11 +145,18 @@ export class V1StorageBridge {
     } = params;
 
     let generationConfigId = null;
+    let resolvedDimensions = { width: 1024, height: 1024, aspect_ratio: "SQUARE" };
     if (config) {
+      const meta = resolveMediaMetadata({ ...config, parameters: config.parameters || config });
+      resolvedDimensions = {
+        width: meta.width || 1024,
+        height: meta.height || 1024,
+        aspect_ratio: meta.aspect_ratio || config.aspect_ratio || "SQUARE",
+      };
       const configRecord = await this.db.configs.createConfig({
         prompt: config.prompt || "",
         model: config.model || "unknown",
-        aspect_ratio: config.aspect_ratio || "SQUARE",
+        aspect_ratio: resolvedDimensions.aspect_ratio,
         generation_type: config.generation_type || "IMAGE_TO_IMAGE",
       });
       generationConfigId = configRecord.id;
@@ -152,8 +167,8 @@ export class V1StorageBridge {
       generation_config_id: generationConfigId,
       step_id: stepId,
       url: null,
-      width: 1024,
-      height: 1024,
+      width: resolvedDimensions.width,
+      height: resolvedDimensions.height,
       status: "processing",
     };
 
@@ -184,17 +199,32 @@ export class V1StorageBridge {
    * @param {string} [status='success']
    */
   async finalizeV1Media(mediaId, asset, status = "success") {
+    let width = asset?.width;
+    let height = asset?.height;
+
+    if (!width || !height) {
+      try {
+        const existing = this.db?.media?.findById ? await this.db.media.findById(mediaId) : null;
+        if (existing) {
+          width = width || existing.width;
+          height = height || existing.height;
+        }
+      } catch (err) {
+        storageLogger.warn({ mediaId, err }, `Could not retrieve existing media dimensions for ${mediaId}`);
+      }
+    }
+
     await this.db.media.updateFields(mediaId, {
-      url: asset.url,
-      width: asset.width || 1024,
-      height: asset.height || 1024,
+      url: asset?.url,
+      width: width || 1024,
+      height: height || 1024,
       status,
       error_message: null,
     });
 
     storageLogger.debug(
-      { mediaId, status, url: asset.url },
-      `Finalized media=${mediaId} → status=${status} url=${asset.url}`
+      { mediaId, status, url: asset?.url },
+      `Finalized media=${mediaId} → status=${status} url=${asset?.url}`
     );
   }
 
@@ -246,11 +276,18 @@ export class V1StorageBridge {
     };
 
     let generationConfigId = null;
+    let resolvedDimensions = { width: 1024, height: 1024, aspect_ratio: "SQUARE" };
     if (config) {
+      const meta = resolveMediaMetadata({ ...config, parameters: config.parameters || config });
+      resolvedDimensions = {
+        width: meta.width || 1024,
+        height: meta.height || 1024,
+        aspect_ratio: meta.aspect_ratio || config.aspect_ratio || "SQUARE",
+      };
       const configRecord = await this.db.configs.createConfig({
         prompt: config.prompt || "",
         model: config.model || "unknown",
-        aspect_ratio: config.aspect_ratio || "SQUARE",
+        aspect_ratio: resolvedDimensions.aspect_ratio,
         generation_type: config.generation_type || "TEXT_ONLY",
         seed: config.seed || null,
       });
@@ -262,8 +299,8 @@ export class V1StorageBridge {
       generation_config_id: generationConfigId,
       step_id: stepId,
       url: asset.url,
-      width: asset.width || 1024,
-      height: asset.height || 1024,
+      width: asset.width || resolvedDimensions.width,
+      height: asset.height || resolvedDimensions.height,
       status: "success",
     };
 

@@ -202,11 +202,18 @@ export class ProjectReadService {
             };
         });
 
+        const workflowMap = new Map((workflows || []).map((w) => [w.id, w]));
+
         const formattedMedia = (mediaItems || []).map((m) => {
             const config = m.generation_config;
             const refs = (config?.references || []).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
             const isVideo = m.url && /\.(mp4|webm|mov)$/i.test(m.url);
-            const isUpload = !m.generation_config_id;
+            const wf = workflowMap.get(m.workflow_id);
+            const isUpload = !m.generation_config_id ||
+                             wf?.workflow_type === "UPLOAD" ||
+                             config?.generation_type === "UPLOAD" ||
+                             m.step_id === "CAE" ||
+                             m.step_id === "upload";
 
             const imageGenerationImageInputs = isUpload
                 ? undefined

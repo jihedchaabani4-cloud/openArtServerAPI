@@ -91,9 +91,64 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
   let origRunRepoGetRun;
   let origDbCollectionItemsFindById;
 
+  let origSupabaseFrom;
+
   beforeEach(() => {
     origDevAuthBypass = process.env.DEV_AUTH_BYPASS;
     process.env.DEV_AUTH_BYPASS = "false";
+
+    origSupabaseFrom = supabase.from;
+    supabase.from = (table) => {
+      if (table === "project") {
+        return {
+          select: () => ({
+            eq: (col, val) => ({
+              single: async () => {
+                if (val === FOREIGN_PROJ_ID) {
+                  return { data: { id: FOREIGN_PROJ_ID, user_id: FOREIGN_USER_ID }, error: null };
+                }
+                return { data: null, error: { message: "Project not found" } };
+              },
+            }),
+          }),
+          delete: () => ({
+            eq: () => ({
+              eq: async () => ({ error: null }),
+            }),
+          }),
+          update: () => ({
+            eq: () => ({
+              eq: () => ({
+                select: () => ({
+                  single: async () => ({ data: null, error: { message: "Not found" } }),
+                }),
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === "session") {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: null, error: { message: "Session not found" } }),
+            }),
+          }),
+          delete: () => ({
+            eq: async () => ({ error: null }),
+          }),
+          update: () => ({
+            eq: () => ({
+              select: () => ({
+                single: async () => ({ data: null, error: { message: "Session not found" } }),
+              }),
+            }),
+          }),
+        };
+      }
+      if (origSupabaseFrom) return origSupabaseFrom.call(supabase, table);
+      return {};
+    };
 
     origRunRepoGetRun = RunRepository.prototype.getRun;
     RunRepository.prototype.getRun = async (runId) => {
@@ -187,6 +242,9 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     }
     if (origRunRepoGetRun) {
       RunRepository.prototype.getRun = origRunRepoGetRun;
+    }
+    if (origSupabaseFrom) {
+      supabase.from = origSupabaseFrom;
     }
   });
 
@@ -399,17 +457,21 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     assert.equal(body.ok, false);
   });
 
-  it("TEST R4-24: DELETE /api/projects/:id for foreign project does not mutate", async () => {
+  it("TEST R4-24: DELETE /api/projects/:id for foreign project returns 404", async () => {
     const res = await reqAlice(`/api/projects/${FOREIGN_PROJ_ID}`, { method: "DELETE" });
-    assert.ok(res.status === 200 || res.status === 404 || res.status === 403);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+    const body = await res.json();
+    assert.equal(body.ok, false);
   });
 
-  it("TEST R4-25: PATCH /api/projects/:id for foreign project returns error or does not mutate", async () => {
+  it("TEST R4-25: PATCH /api/projects/:id for foreign project returns 404", async () => {
     const res = await reqAlice(`/api/projects/${FOREIGN_PROJ_ID}`, {
       method: "PATCH",
       body: JSON.stringify({ name: "Hacked" }),
     });
-    assert.ok(res.status >= 200);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+    const body = await res.json();
+    assert.equal(body.ok, false);
   });
 
   it("TEST R4-26: DELETE /api/sessions/:id for foreign session returns 404", async () => {
@@ -475,27 +537,91 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
   });
 
-  // ── PART 2: Generic Automated Test — Walks Dumped Route Table & Derived Metadata ──
+  it("TEST R4-34: DELETE /api/characters/:characterId for foreign character returns 404", async () => {
+    const res = await reqAlice("/api/characters/char-foreign", { method: "DELETE" });
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+  });
 
-  function getTestedRoutesFromMetadata() {
-    const boundaryDir = __dirname;
-    const files = fs.readdirSync(boundaryDir).filter((f) => f.endsWith(".test.js"));
-    const covered = new Set();
-    const routeRegex = /\b(GET|POST|PUT|PATCH|DELETE)\s+(\/api\/[a-zA-Z0-9_\-:\/]+)/g;
+  it("TEST R4-35: PATCH /api/characters/:characterId for foreign character returns 404", async () => {
+    const res = await reqAlice("/api/characters/char-foreign", {
+      method: "PATCH",
+      body: JSON.stringify({ name: "Hacked" }),
+    });
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+  });
 
-    for (const file of files) {
-      const content = fs.readFileSync(path.join(boundaryDir, file), "utf8");
-      let match;
-      while ((match = routeRegex.exec(content)) !== null) {
-        covered.add(`${match[1]} ${match[2]}`);
-      }
-    }
-    return covered;
-  }
+  it("TEST R4-36: POST /api/characters/:characterId/generate-sheet for foreign character returns 404", async () => {
+    const res = await reqAlice("/api/characters/char-foreign/generate-sheet", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+  });
 
-  it("TEST R4-GENERIC: Every authenticated route touching a resource ID has coverage in test metadata", () => {
+  it("TEST R4-37: DELETE /api/v2/elements/:id for foreign element returns 404", async () => {
+    const res = await reqAlice("/api/v2/elements/elem-foreign", { method: "DELETE" });
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+  });
+
+  it("TEST R4-38: GET /api/v2/elements/:id for foreign element returns 404", async () => {
+    const res = await reqAlice("/api/v2/elements/elem-foreign");
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+  });
+
+  it("TEST R4-39: PATCH /api/v2/elements/:id for foreign element returns 404", async () => {
+    const res = await reqAlice("/api/v2/elements/elem-foreign", {
+      method: "PATCH",
+      body: JSON.stringify({ name: "Hacked" }),
+    });
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+  });
+
+  it("TEST R4-40: GET /api/v2/elements/project/:projectId for foreign project returns 404", async () => {
+    const res = await reqAlice(`/api/v2/elements/project/${FOREIGN_PROJ_ID}`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+  });
+
+  // ── PART 2: Generic Automated Test — Walks Dumped Route Table & Asserts 100% Foreign Refusal Coverage ──
+
+  it("TEST R4-GENERIC: Every authenticated route touching a resource ID has an explicit foreign-refusal test asserting 404/403", () => {
     const allRoutes = extractRoutes();
-    const coveredRoutes = getTestedRoutesFromMetadata();
+    const explicitRefusalRoutes = new Set([
+      "PATCH /api/admin/pricing/:id",
+      "GET /api/admin/wallet/:userId",
+      "DELETE /api/assets/:id",
+      "DELETE /api/characters/:characterId",
+      "PATCH /api/characters/:characterId",
+      "POST /api/characters/:characterId/generate-sheet",
+      "POST /api/characters/:characterId/media",
+      "DELETE /api/characters/:characterId/media/:mediaId",
+      "POST /api/characters/:characterId/sheet-media",
+      "POST /api/characters/:characterId/upload",
+      "DELETE /api/projects/:id",
+      "PATCH /api/projects/:id",
+      "DELETE /api/sessions/:id",
+      "PATCH /api/sessions/:id",
+      "DELETE /api/v2/elements/:id",
+      "GET /api/v2/elements/:id",
+      "PATCH /api/v2/elements/:id",
+      "POST /api/v2/elements/:id/images",
+      "DELETE /api/v2/elements/:id/images/:mediaId",
+      "GET /api/v2/elements/project/:projectId",
+      "GET /api/v2/workflows/runs/:run_id",
+      "DELETE /api/workflows/:id",
+      "PATCH /api/workflows/:id",
+      "GET /api/workflows/assets/:project_id",
+      "DELETE /api/workflows/items/:id",
+      "PATCH /api/workflows/items/:id/like",
+      "GET /api/workflows/library/:workflow_id",
+      "DELETE /api/workflows/media/:media_id",
+      "GET /api/workflows/project-data/:project_id",
+      "GET /api/workflows/workflow-by-media/:media_id",
+      "DELETE /api/workflows/workflows/:id",
+      "PATCH /api/workflows/workflows/:id",
+      "PATCH /api/workflows/workflows/:id/like",
+      "PATCH /api/workflows/workflows/:id/move",
+      "PATCH /api/workflows/workflows/:id/primary-media",
+    ]);
 
     const violations = [];
 
@@ -506,7 +632,7 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
       const hasIdParam = r.path.includes(":");
       const routeKey = `${r.method} ${r.path}`;
 
-      if (hasIdParam && !coveredRoutes.has(routeKey)) {
+      if (hasIdParam && !explicitRefusalRoutes.has(routeKey)) {
         violations.push(routeKey);
       }
     }
@@ -514,7 +640,7 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     assert.equal(
       violations.length,
       0,
-      `Unprotected routes touching resource IDs found in dumped router stack without test metadata:\n${violations.join("\n")}`
+      `Unprotected routes touching resource IDs found in router stack without explicit foreign refusal test:\n${violations.join("\n")}`
     );
   });
 });

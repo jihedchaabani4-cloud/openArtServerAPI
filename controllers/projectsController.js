@@ -92,6 +92,18 @@ export const update = async (req, res) => {
         const { name, project_name } = req.body;
         const projectName = name || project_name;
 
+        // Verify project ownership
+        const { data: project, error: checkError } = await supabase
+            .from("project")
+            .select("id, user_id")
+            .eq("id", id)
+            .single();
+
+        if (checkError || !project || project.user_id !== userId) {
+            console.warn(`[ProjectsController] Foreign-ownership access denied for user ${userId} on project ${id}`, { userId, resourceId: id, resourceType: "project" });
+            return res.status(404).json({ ok: false, message: "Project not found" });
+        }
+
         const { data, error } = await supabase
             .from("project")
             .update({ 
@@ -121,6 +133,18 @@ export const remove = async (req, res) => {
     try {
         const { id } = req.params;
         const userId = req.user.id;
+
+        // Verify project ownership
+        const { data: project, error: checkError } = await supabase
+            .from("project")
+            .select("id, user_id")
+            .eq("id", id)
+            .single();
+
+        if (checkError || !project || project.user_id !== userId) {
+            console.warn(`[ProjectsController] Foreign-ownership access denied for user ${userId} on project ${id}`, { userId, resourceId: id, resourceType: "project" });
+            return res.status(404).json({ ok: false, message: "Project not found" });
+        }
 
         const { error } = await supabase
             .from("project")

@@ -532,7 +532,7 @@ export async function executeOrchestration(runId) {
       eventRecorder.record({
         executionId: runId,
         traceId: runId,
-        operation: "workflow.complete",
+        operation: "workflow.fail",
         status: "error",
         errorCode: formattedError.code,
         message: formattedError.message,

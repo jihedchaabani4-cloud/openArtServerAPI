@@ -178,6 +178,7 @@ export async function run(modelId, rawInput = {}, options = {}) {
           circuitKey,
           error: normalized.message,
           code: normalized.code,
+          providerRaw: normalized.providerRaw,
         },
         `Execution failed for ${modelId} via ${provider.id} (${routeId}): ${normalized.message}`
       );

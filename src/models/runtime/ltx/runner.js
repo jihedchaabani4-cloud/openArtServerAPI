@@ -150,9 +150,14 @@ async function pollJob({ baseUrl, statusEndpoint, jobId, credential, pollingConf
       const msg = data.error?.message ?? "LTX job failed";
       const err = new ProviderRequestError(msg);
       err.raw   = data;
+      err.terminal = true;
+      err.retryable = false;
       if (data.error?.type === "insufficient_funds_error" || /insufficient funds/i.test(msg)) {
         err.statusCode = 402;
         err.code       = "PROVIDER_QUOTA_EXCEEDED";
+      } else {
+        err.statusCode = 422;
+        err.code       = "PROVIDER_JOB_FAILED";
       }
       throw err;
     }

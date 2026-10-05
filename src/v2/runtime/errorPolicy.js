@@ -48,6 +48,7 @@ export const RUNTIME_ERROR_CODES = Object.freeze({
   // Upstream AI Provider Faults
   PROVIDER_TIMEOUT: "PROVIDER_TIMEOUT",
   PROVIDER_RATE_LIMIT: "PROVIDER_RATE_LIMIT",
+  PROVIDER_UNAVAILABLE: "PROVIDER_UNAVAILABLE",
   PROVIDER_TRANSIENT_ERROR: "PROVIDER_TRANSIENT_ERROR",
   PROVIDER_REQUEST_ERROR: "PROVIDER_REQUEST_ERROR",
   PROVIDER_QUOTA_EXCEEDED: "PROVIDER_QUOTA_EXCEEDED",
@@ -142,6 +143,14 @@ const DEFAULT_DECISIONS = Object.freeze({
     severity: "warning",
   },
   [RUNTIME_ERROR_CODES.PROVIDER_RATE_LIMIT]: {
+    category: ERROR_CATEGORIES.UPSTREAM_FAULT,
+    retryable: true,
+    workflowAction: "retry",
+    billingAction: "rollback",
+    userMessage: DEFAULT_APOLOGY_MESSAGE,
+    severity: "warning",
+  },
+  [RUNTIME_ERROR_CODES.PROVIDER_UNAVAILABLE]: {
     category: ERROR_CATEGORIES.UPSTREAM_FAULT,
     retryable: true,
     workflowAction: "retry",
@@ -357,6 +366,15 @@ export function normalizeCode(errorOrCode) {
     return RUNTIME_ERROR_CODES.PROVIDER_RATE_LIMIT;
   }
 
+  // Provider Outage / Unavailable / 502 / 503
+  if (
+    code === "PROVIDER_UNAVAILABLE" ||
+    code === RUNTIME_ERROR_CODES.PROVIDER_UNAVAILABLE ||
+    /provider.*unavailable|service.*unavailable|bad gateway/i.test(msg)
+  ) {
+    return RUNTIME_ERROR_CODES.PROVIDER_UNAVAILABLE;
+  }
+
   // Timeout / 504
   if (/timed? ?out|timeout|504|gateway timeout/i.test(msg)) {
     return RUNTIME_ERROR_CODES.PROVIDER_TIMEOUT;
@@ -443,12 +461,20 @@ export function formatWorkflowError(errorOrCode, failedNode = null) {
   const decision = getErrorDecision(errorOrCode);
   const nodeId = failedNode?.node_id || failedNode?.id || null;
 
+  const retryable = typeof errorOrCode === "object" && typeof errorOrCode?.retryable === "boolean"
+    ? errorOrCode.retryable
+    : decision.retryable;
+
+  const category = typeof errorOrCode === "object" && errorOrCode?.category && ERROR_CATEGORIES[errorOrCode.category]
+    ? errorOrCode.category
+    : decision.category;
+
   return {
     code: decision.code,
-    category: decision.category,
+    category,
     message: decision.userMessage,
     nodeId,
-    retryable: decision.retryable,
+    retryable,
     // Internal details for backend debugging; sanitized from user view
     internalDetails: decision.internalMessage,
   };
@@ -460,12 +486,21 @@ export function formatWorkflowError(errorOrCode, failedNode = null) {
 export function toRuntimeError(error, fallbackCode = RUNTIME_ERROR_CODES.INTERNAL_ERROR) {
   const code = error?.code || fallbackCode;
   const decision = getErrorDecision({ ...error, code });
+
+  const retryable = typeof error === "object" && typeof error?.retryable === "boolean"
+    ? error.retryable
+    : decision.retryable;
+
+  const category = typeof error === "object" && error?.category && ERROR_CATEGORIES[error.category]
+    ? error.category
+    : decision.category;
+
   return {
     code: decision.code,
-    category: decision.category,
+    category,
     message: decision.userMessage,
     details: error?.details || decision.internalMessage,
-    retryable: decision.retryable,
+    retryable,
   };
 }
 

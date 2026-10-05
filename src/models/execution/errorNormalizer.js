@@ -33,6 +33,18 @@ export function normalizeError(err, context = {}) {
     return err;
   }
 
+  // 1b. Check if terminal provider job failure from polling
+  if (err.terminal || (err.retryable === false && err.code === "PROVIDER_JOB_FAILED")) {
+    const error = new ProviderRequestError(rawMessage);
+    error.code = err.code || StandardErrorCodes.INVALID_INPUT_REJECTED_BY_PROVIDER;
+    error.statusCode = statusCode;
+    error.retryable = false;
+    error.terminal = true;
+    error.safeMessage = err.safeMessage || rawMessage || "The AI generation job failed on the provider.";
+    error.providerRaw = rawData || { message: rawMessage };
+    return error;
+  }
+
   // 2. Custom errorMap defined on binding
   if (context.binding?.errorMap && context.binding.errorMap[err.code]) {
     const mapped = context.binding.errorMap[err.code];

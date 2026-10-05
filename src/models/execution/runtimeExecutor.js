@@ -55,7 +55,8 @@ export class RuntimeExecutor {
             onChunk: options.onStreamChunk,
           });
         } else {
-          rawResponse = await executeProvider({
+          const providerExecutor = options.providerExecutor || executeProvider;
+          rawResponse = await providerExecutor({
             provider,
             binding,
             payload: providerPayload,
@@ -69,7 +70,7 @@ export class RuntimeExecutor {
       } catch (err) {
         lastErr = err;
         const normalized = normalizeError(err, { binding, provider });
-        if (normalized.retryable && attempt < attemptsTotal) {
+        if (normalized.retryable && !err.terminal && !normalized.terminal && attempt < attemptsTotal) {
           const maxBackoffMs = options.maxBackoffMs ?? 2000;
           const randomFn = options.randomFn || Math.random;
           const expCeiling = Math.min(maxBackoffMs, initialBackoffMs * Math.pow(2, attempt - 1));
@@ -81,6 +82,7 @@ export class RuntimeExecutor {
               attempt,
               nextAttemptInMs: backoffMs,
               error: normalized.message,
+              providerRaw: normalized.providerRaw,
             },
             `[RuntimeExecutor] Retryable provider error on attempt ${attempt}/${attemptsTotal}. Backing off with jitter for ${backoffMs}ms...`
           );

@@ -224,35 +224,172 @@ ALTER TABLE v2_workflow_runs
 
 ---
 
-## 5. Deployment Order, Queue Drain & Rollback Plan
+## 5. Deployment Architecture, Environment Checklist & Migrations Pack
 
-### 5.1 Deployment Steps (In Order)
+### 5.1 Process Entrypoints & Runtime Roles
+
+The backend codebase defines four distinct Node.js process entrypoints:
+
+| Entrypoint | Start Command | Primary Role | Queues Listened / Concurrency | Boot Invariants & Fail-Safes |
+|---|---|---|---|---|
+| `index.js` | `npm run start` (`node index.js`) | Web API Server | None (enqueues jobs to Redis via `JobQueueService`) | Enforces `NODE_ENV=production` checks: rejects missing/short `INTERNAL_SECRET` (<32 chars), rejects `RATE_LIMIT_STORE !== "redis"`, rejects `DEV_AUTH_BYPASS === "true"`. Starts in-memory hold expiration sweep every 10m. |
+| `src/workers/worker.js` | `npm run start:worker` (`node src/workers/worker.js`) | Main Generation & UseCase Worker + Reservation Reaper | `usecase-queue` (concurrency: 10) | Runs `bootstrapV2()`. Starts `reservationReaperWorker` immediately at boot and then every 5 minutes (`REAPER_INTERVAL_MS = 300000`) to harvest orphaned holds past 10m TTL. |
+| `src/v2/queue/v2WorkflowWorker.js` | `npm run start:v2-worker` (`node src/v2/queue/v2WorkflowWorker.js`) | Dedicated V2 Workflow Worker (alias of `useCaseWorker`) | `usecase-queue` (concurrency: 10) | Specialized container target for orchestrating workflow execution nodes independently. |
+| `src/workers/walletWorker.js` | `npm run start:wallet-worker` (`node src/workers/walletWorker.js`) | Dedicated Wallet Maintenance Worker | `wallet-maintenance` (concurrency: 1) | **Strict boot assertion**: exits immediately (`process.exit(1)`) if `SUPABASE_URL` or `SUPABASE_SERVICE_ROLE_KEY` is missing. Never shares Redis connection with generation queues. Handles `expire-stale-holds`, `retry-failed-ops`, `reconcile-wallets`. |
+
+---
+
+### 5.2 Environment Variables Checklist (Staging & Production)
+
+Every environment variable required or recognized by the backend:
+
+| Variable | Required? | Staging Default | Production Requirement | Boot / Runtime Enforcement |
+|---|---|---|---|---|
+| `NODE_ENV` | **YES** | `staging` | `production` | Guards all fail-safes. In `production`, insecure flags cause fatal boot exceptions. |
+| `PORT` | Optional | `3001` | `3001` (or PaaS assigned) | Port for Express HTTP listener. |
+| `FRONTEND_URL` | **YES** | `https://staging.openart.ai` | `https://openart.ai` | Used for CORS origin validation (credentials: true). |
+| `INTERNAL_SECRET` | **YES** | Random 32+ char hex | Random 32+ char high-entropy secret | In `production`, boot throws if missing or length < 32. Checked via constant-time buffer comparison. Old hardcoded fallback removed. |
+| `RATE_LIMIT_STORE` | **YES** | `redis` | `redis` (STRICT) | In `production`, boot throws if not `"redis"` (`assertEnvConfig`). Prevents multi-instance memory leaks / bypasses. |
+| `DEV_AUTH_BYPASS` | NO | `false` | Must NOT be `"true"` | In `production`, boot throws if `"true"` (`assertEnvConfig`). Forbidden outside local dev. |
+| `SUPABASE_URL` | **YES** | `https://<ref>.supabase.co` | `https://<ref>.supabase.co` | Required at boot by `lib/supabase.js` and `walletWorker.js`. |
+| `SUPABASE_KEY` / `SUPABASE_SERVICE_ROLE_KEY` | **YES** | Staging Service Role Key | Prod Service Role Key (NEVER anon key for backend) | Required for administrative DB operations, bypasses, and wallet operations. |
+| `REDIS_URL` | **YES** | `rediss://default:<pw>@<host>:6379` | Dedicated Redis / Upstash endpoint | Required for BullMQ job queues and Redis rate limiter store. |
+| `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | Optional | Fallback if `REDIS_URL` omitted | Fallback if `REDIS_URL` omitted | Used by `src/queue/redis.js` if `REDIS_URL` unset. |
+| `ENABLE_V2_WORKFLOW_RUN_ENDPOINT` | NO | `false` | `false` (Omitted) | Feature flag disabling direct `POST /api/v2/workflows/run` until Phase 3. Returns 404 when false. |
+| `RATE_LIMIT_CHARACTER_DESC_POINTS` | NO | `10` (points/min) | `10` | Rate limit cap on `POST /api/characters/generate-description`. Scoped by user. |
+| `RATE_LIMIT_ELEMENT_ANALYZE_POINTS` | NO | `10` (points/min) | `10` | Rate limit cap on `POST /api/v2/elements/analyze`. Scoped by user. |
+| `RATE_LIMIT_PROMPT_OPTIMIZE_POINTS` | NO | `20` (points/min) | `20` | Rate limit cap on `POST /api/prompt/optimize`. Scoped by user. |
+| `GEMINI_API_KEY` | **YES** | Valid Google AI key | Production Google AI key | Required for LLM node execution (`gemini-3.1-flash-lite`, prompt optimizer). |
+| `FAL_KEY` | **YES** | Valid Fal.ai key | Production Fal.ai key | Required for image/video generation models running on Fal. |
+| `HUGGINGFACE_API_KEY` | Optional | Staging key | Production key | Required for models routing to HuggingFace Inference. |
+
+---
+
+### 5.3 Consolidated Database Migrations Pack
+
+The following migrations **MUST** be verified and applied on the database prior to deploying HEAD.
+
+#### Migration 1: `migrations/007_v2_workflow_runs_targets.sql`
+* **Purpose**: Adds execution metadata and explicit target persistence pointers to `v2_workflow_runs`. Allows the V2 runner and node executor to tie execution status directly back to pre-allocated media records.
+* **Code in HEAD that depends on it**:
+  * `src/v2/runner/runRepository.js:14` (selects and inserts `metadata`)
+  * `src/v2/runner/nodeExecutor.js:43` (`executeNodePersistence` verifies `target_media_ids` and `v1_workflow_id`)
+  * **Failure without it**: PostgREST fails with error code `PGRST204: Could not find the 'metadata' column of 'v2_workflow_runs' in the schema cache`.
+* **Execution SQL**:
+  ```sql
+  ALTER TABLE public.v2_workflow_runs
+    ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS v1_workflow_id UUID REFERENCES public.workflow(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS target_media_ids UUID[] DEFAULT '{}'::uuid[];
+
+  CREATE INDEX IF NOT EXISTS idx_v2_workflow_runs_v1_workflow_id ON public.v2_workflow_runs(v1_workflow_id);
+  ```
+* **Rollback SQL** (`migrations/007_v2_workflow_runs_targets_rollback.sql`):
+  ```sql
+  DROP INDEX IF EXISTS idx_v2_workflow_runs_v1_workflow_id;
+  ALTER TABLE public.v2_workflow_runs
+    DROP COLUMN IF EXISTS target_media_ids,
+    DROP COLUMN IF EXISTS v1_workflow_id,
+    DROP COLUMN IF EXISTS metadata;
+  ```
+* **Verification Query**:
+  ```sql
+  SELECT column_name, data_type, is_nullable
+  FROM information_schema.columns
+  WHERE table_name = 'v2_workflow_runs'
+    AND column_name IN ('metadata', 'v1_workflow_id', 'target_media_ids');
+  ```
+* **Schema Reload**:
+  ```sql
+  NOTIFY pgrst, 'reload schema';
+  ```
+
+#### Migration 2: `migrations/20260924_drop_element_keywords_tags.sql`
+* **Purpose**: Drops legacy redundant columns `keywords` and `tags` from `public.element`.
+* **Code in HEAD that depends on it**: `src/domain/element/ElementService.js` (no longer queries or returns keywords/tags).
+* **Execution SQL**:
+  ```sql
+  ALTER TABLE public.element
+    DROP COLUMN IF EXISTS keywords,
+    DROP COLUMN IF EXISTS tags;
+  ```
+* **Rollback SQL**:
+  ```sql
+  ALTER TABLE public.element
+    ADD COLUMN IF NOT EXISTS keywords TEXT[] DEFAULT '{}'::text[],
+    ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}'::text[];
+  ```
+* **Verification Query**:
+  ```sql
+  SELECT column_name FROM information_schema.columns 
+  WHERE table_name = 'element' AND column_name IN ('keywords', 'tags');
+  -- Expected: 0 rows
+  ```
+* **Schema Reload**:
+  ```sql
+  NOTIFY pgrst, 'reload schema';
+  ```
+
+#### Migration 3: `migrations/20260925_convert_element_guidelines_to_text.sql`
+* **Purpose**: Converts `guidelines` column in `public.element` from legacy JSON array to plain text string to support prompt synthesis.
+* **Code in HEAD that depends on it**: `src/domain/element/ElementService.js`, `src/domain/element/ElementAnalysisService.js`.
+* **Execution SQL**:
+  ```sql
+  ALTER TABLE public.element ALTER COLUMN guidelines DROP DEFAULT;
+  ALTER TABLE public.element ALTER COLUMN guidelines TYPE TEXT USING guidelines::text;
+  ALTER TABLE public.element ALTER COLUMN guidelines SET DEFAULT '';
+  UPDATE public.element SET guidelines = '' WHERE guidelines = '[]' OR guidelines = '[""]' OR guidelines IS NULL;
+  ```
+* **Rollback SQL**:
+  ```sql
+  -- Not strictly reversible without data loss if plain text was entered; can revert column default:
+  ALTER TABLE public.element ALTER COLUMN guidelines DROP DEFAULT;
+  ALTER TABLE public.element ALTER COLUMN guidelines SET DEFAULT '';
+  ```
+* **Verification Query**:
+  ```sql
+  SELECT column_name, data_type 
+  FROM information_schema.columns 
+  WHERE table_name = 'element' AND column_name = 'guidelines';
+  -- Expected: data_type = 'text'
+  ```
+* **Schema Reload**:
+  ```sql
+  NOTIFY pgrst, 'reload schema';
+  ```
+
+---
+
+### 5.4 Deployment Steps (In Order)
 
 1. **Pre-flight Environment Check**:
-   * Verify environment variables in deployment environment:
-     * `NODE_ENV=production`
-     * `SUPABASE_URL` is set to valid project URL.
-     * `SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_KEY` is set to valid service role secret.
-     * Confirm `ENABLE_V2_WORKFLOW_RUN_ENDPOINT` is omitted or `"false"`.
+   * Verify all required environment variables in Section 5.2 are populated in CI/CD secrets and container environment.
+   * Verify `ENABLE_V2_WORKFLOW_RUN_ENDPOINT="false"`.
 
-2. **Execute Database Migration**:
-   * Run `migrations/007_v2_workflow_runs_targets.sql` against the database.
-   * Run the verification query (Section 2.2) to verify `metadata`, `v1_workflow_id`, and `target_media_ids` columns exist.
+2. **Execute Database Migrations**:
+   * Apply migrations in order: `007_v2_workflow_runs_targets.sql`, `20260924_drop_element_keywords_tags.sql`, `20260925_convert_element_guidelines_to_text.sql`.
+   * Run verification queries for each migration.
+   * Send Supabase PostgREST schema cache reload signal:
+     ```sql
+     NOTIFY pgrst, 'reload schema';
+     ```
 
 3. **Queue Drain Step**:
-   * Prior to restarting worker containers, allow active jobs in BullMQ queues (`usecase-execution`, `workflow-execution`, `image-generation`) to finish:
+   * Prior to restarting worker containers, allow active jobs in BullMQ queues (`usecase-queue`, `wallet-maintenance`) to finish:
      * In staging/production: issue a graceful SIGTERM to workers, or call `queue.pause()` to prevent new job pickup while active jobs complete.
-     * Ensure no jobs are stuck in active state.
+     * Ensure no jobs remain in active state.
 
 4. **Deploy Backend Services**:
-   * Deploy updated API server containers (`apiOpenArt`).
-   * Deploy updated worker processes (`useCaseWorker.js`, `worker.js`, `reservationReaperWorker.js`).
+   * Deploy updated API server containers (`index.js`).
+   * Deploy updated worker processes (`src/workers/worker.js` and `src/workers/walletWorker.js`).
 
 5. **Post-Deployment Verification**:
-   * Check container startup logs for `assertWalletConfiguredForEnvironment()`.
-   * Run smoke tests according to Section 6.
+   * Inspect container startup logs for `assertEnvConfig()` and `assertWalletConfiguredForEnvironment()`.
+   * Execute manual staging verification smoke tests (Section 6).
 
-### 5.2 Rollback Plan
+---
+
+### 5.5 Rollback Plan
 
 If critical regressions or alerts occur:
 1. **Pause Workers**: Pause BullMQ queues to stop picking up new jobs.
@@ -260,6 +397,7 @@ If critical regressions or alerts occur:
 3. **Database Schema Rollback** (Only if necessary):
    * Run `migrations/007_v2_workflow_runs_targets_rollback.sql`.
    * Columns dropped: `target_media_ids`, `v1_workflow_id`, `metadata`.
+   * Run `NOTIFY pgrst, 'reload schema';`.
 4. **Resume Workers**: Unpause queues and verify previous workers recover.
 
 ---

@@ -1,6 +1,31 @@
 import { randomUUID } from "node:crypto";
 import { BILLING_STATUS } from "./runtimeConstants.js";
 
+/**
+ * Compacts internal workflow billing plan into a minimal financial transaction summary.
+ * Strips all prompts, parameters, input_image data URIs, and references so transactions.metadata
+ * never exceeds Postgres or Wallet limits (< 4096 bytes).
+ */
+export function buildCompactCostBreakdown(costBreakdown) {
+  if (!costBreakdown || typeof costBreakdown !== "object") return null;
+
+  const totalCredits = Number(costBreakdown.totalCredits || 0);
+  const rawNodes = Array.isArray(costBreakdown.billableNodes)
+    ? costBreakdown.billableNodes
+    : (Array.isArray(costBreakdown.nodes) ? costBreakdown.nodes : []);
+
+  const nodes = rawNodes.map((n) => ({
+    nodeId: n.nodeId || n.id || "unknown",
+    nodeType: n.nodeType || n.type || "unknown",
+    credits: n.cost?.totalCredits ?? (typeof n.cost?.amount === "string" ? Number(n.cost.amount) : (n.credits ?? 0)),
+  }));
+
+  return {
+    totalCredits,
+    nodes,
+  };
+}
+
 export class UseCaseBillingRuntime {
   constructor({ walletService = null, billingGateway = null } = {}) {
     this.walletService = walletService;
@@ -49,7 +74,7 @@ export class UseCaseBillingRuntime {
       workflowId: workflowId || workflowRunId,
       mediaId,
       totalCredits: amount,
-      costBreakdown,
+      costBreakdown: buildCompactCostBreakdown(costBreakdown),
     };
 
 

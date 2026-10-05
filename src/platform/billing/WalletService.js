@@ -632,7 +632,8 @@ export class WalletService {
       throw new WalletError("Metadata must be a plain object", "INVALID_METADATA");
     }
     const json = JSON.stringify(metadata);
-    if (json.length > this.METADATA_MAX_BYTES) {
+    const bytes = Buffer.byteLength(json, "utf8");
+    if (bytes > this.METADATA_MAX_BYTES) {
       throw new WalletError(
         `Metadata too large (max ${this.METADATA_MAX_BYTES} bytes)`,
         "INVALID_METADATA"

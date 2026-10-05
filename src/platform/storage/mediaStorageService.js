@@ -38,9 +38,8 @@ export function detectInputType(input) {
 export async function uploadMedia(input, { userId, projectId, index = 0, filename } = {}) {
     const type = detectInputType(input);
     const ts = Date.now();
-    const path = filename
-        ? `elements/${userId}/${projectId}/${filename}`
-        : `elements/${userId}/${projectId}/${ts}-${index}.jpg`;
+    const resolvedFilename = filename || `${ts}-${index}.jpg`;
+    const path = storageService.paths.element(userId, projectId, resolvedFilename);
 
     try {
         if (type === "url") {

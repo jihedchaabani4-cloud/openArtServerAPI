@@ -6,14 +6,7 @@
  */
 
 import sharp from 'sharp';
-
-// ── Helper: compute GCD for ratio simplification ─────────────────────────────
-function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
-
-function simplifyRatio(w, h) {
-    const d = gcd(Math.round(w), Math.round(h));
-    return `${Math.round(w / d)}:${Math.round(h / d)}`;
-}
+import { calculateAspectRatio } from './ratioUtils.js';
 
 function getResolutionLabel(w, h) {
     const min = Math.min(w, h);
@@ -29,8 +22,16 @@ function getResolutionLabel(w, h) {
 export async function extractImageMetadata(buffer, mime) {
     try {
         const meta = await sharp(buffer).metadata();
-        const w = meta.width;
-        const h = meta.height;
+        let w = meta.width;
+        let h = meta.height;
+
+        // Handle EXIF orientation: orientations 5, 6, 7, 8 rotate 90 or 270 degrees,
+        // which flips width and height in the browser.
+        if (meta.orientation && meta.orientation >= 5 && meta.orientation <= 8) {
+            w = meta.height;
+            h = meta.width;
+        }
+
         const fileSizeBytes = buffer.length;
         const fileSizeKB = Math.round(fileSizeBytes / 1024);
         const fileSizeMB = (fileSizeBytes / (1024 * 1024)).toFixed(2);
@@ -38,7 +39,7 @@ export async function extractImageMetadata(buffer, mime) {
         return {
             width:     w,
             height:    h,
-            ratio:     simplifyRatio(w, h),
+            ratio:     calculateAspectRatio(w, h),
             resolution: getResolutionLabel(w, h),
             size:      `${w}x${h}`,
             format:    meta.format?.toUpperCase() || mime?.split('/')[1]?.toUpperCase(),
@@ -154,7 +155,7 @@ export function extractVideoMetadata(buffer, mime) {
             ...(width && height ? {
                 width,
                 height,
-                ratio: simplifyRatio(width, height),
+                ratio: calculateAspectRatio(width, height),
                 resolution: getResolutionLabel(width, height),
                 size: `${width}x${height}`,
             } : {}),

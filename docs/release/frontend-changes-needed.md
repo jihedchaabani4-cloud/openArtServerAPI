@@ -221,3 +221,40 @@ When any request exceeds the configured body or file limit, the server returns *
    - If `file.type.startsWith("image/") && file.size > 20 * 1024 * 1024`: Show toast "Image exceeds maximum allowed size of 20MB".
    - If `file.type.startsWith("video/") && file.size > 100 * 1024 * 1024`: Show toast "Video exceeds maximum allowed size of 100MB".
 2. **Error handling**: Catch HTTP 413 / `code === "PAYLOAD_TOO_LARGE"` in API client error interceptor and display a user-friendly error rather than generic 500 error messages.
+
+---
+
+## (h) Error Payload Handling in `LoginPage.jsx` & API Client (RC1.4-D1.2)
+
+### Current State in `my-app/src/app/login/page.jsx:38`
+```javascript
+const data = await res.json();
+if (!res.ok) {
+  setError(data.error || "Login failed. Please try again.");
+  setIsLoading(false);
+  return;
+}
+```
+
+### Problem
+When rate-limited (HTTP 429), the server returns `{ ok: false, code: "RATE_LIMIT_EXCEEDED", message: "Too many requests. Please try again later." }` alongside a `Retry-After: <seconds>` HTTP header.
+Because `data.error` is undefined on standardized 429, 503, and 413 error responses (which use `{ code, message }`), the frontend falls back to `"Login failed. Please try again."`, obscuring the rate-limit status and retry duration from the user.
+
+### Required Frontend Change
+Update `LoginPage.jsx:38` to read `data.message || data.error`:
+```diff
+--- a/src/app/login/page.jsx
++++ b/src/app/login/page.jsx
+@@ -35,7 +35,7 @@ export default function LoginPage() {
+       const data = await res.json();
+ 
+       if (!res.ok) {
+-        setError(data.error || "Login failed. Please try again.");
++        const retryAfter = res.headers.get("Retry-After");
++        const retryText = retryAfter ? ` (retry in ${retryAfter}s)` : "";
++        setError((data.message || data.error || "Login failed. Please try again.") + retryText);
+         setIsLoading(false);
+         return;
+       }
+```
+Similarly, any global API error handlers should read `data.message` for HTTP 503 (`SERVICE_UNAVAILABLE`) and HTTP 413 (`PAYLOAD_TOO_LARGE`).

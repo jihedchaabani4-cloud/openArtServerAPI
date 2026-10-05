@@ -1,6 +1,10 @@
 import crypto from "crypto";
 import { RateLimiterMemory } from "rate-limiter-flexible";
 import { RATE_LIMIT_POLICIES } from "../config/rateLimitPolicies.js";
+import { createLogger } from "../infrastructure/logging/index.js";
+
+const systemLogger = createLogger("ratelimit");
+let lastAuthOutageLog = 0;
 
 /**
  * Generic Rate Limit Middleware
@@ -8,26 +12,24 @@ import { RATE_LIMIT_POLICIES } from "../config/rateLimitPolicies.js";
  * Usage:
  *   router.post("/images/generated", requireAuth, rateLimit("imageGeneration"), controller)
  *
- * The middleware:
- *   1. Resolves the identity key (userId or IP) from the policy config
- *   2. Applies the configured policy limits
- *   3. Returns HTTP 429 + Retry-After on limit exceeded
- *   4. On infrastructure error: fails open (request passes through)
- *
- * Store (V1 = Memory):
- *   Controlled by RATE_LIMIT_STORE env var.
- *   Memory: per-process, counters reset on restart.
- *   Redis:  set RATE_LIMIT_STORE=redis to enable cross-process sharing.
- *           Requires REDIS_URL env var. No route/policy code changes needed.
- *
- * ⚠️  MULTI-PROCESS NOTE:
- *   With Memory store, each process tracks its own counter.
- *   To enforce global limits across PM2 / Docker / k8s replicas, switch to Redis.
+ * Outage Policies:
+ *   - failPolicy: "insurance" (Auth routes): Uses in-memory insuranceLimiter per instance.
+ *     Degrades safely when Redis is down; logs error once per 60s window.
+ *   - failPolicy: "close" (Expensive AI routes): Fails closed with 503 SERVICE_UNAVAILABLE + Retry-After.
+ *   - Default (Wallet / Read): Fails open.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
 // ── Limiter instance cache (one per policy, created on first use) ─────────────
 const _limiters = new Map();
+
+export function resetLimitersForTest() {
+  _limiters.clear();
+}
+
+export function setLimiterForTest(key, limiter) {
+  _limiters.set(key, limiter);
+}
 
 async function getLimiter(policy) {
   if (_limiters.has(policy.cacheKey)) {
@@ -40,16 +42,37 @@ async function getLimiter(policy) {
 
   if (store === "redis") {
     // ── Redis store (V2 / multi-process) ──────────────────────────────────────
-    // Lazy import so the module works without Redis configured in V1 memory mode
     const { RateLimiterRedis } = await import("rate-limiter-flexible");
     const { redisConnection } = await import("../queue/redis.js");
 
-    limiter = new RateLimiterRedis({
+    const opts = {
       storeClient: redisConnection,
       points:      policy.points,
       duration:    policy.duration,
       keyPrefix:   `rl:${policy.cacheKey}`,
-    });
+    };
+
+    if (policy.failPolicy === "insurance") {
+      const baseInsurance = new RateLimiterMemory({
+        points:   policy.points,
+        duration: policy.duration,
+      });
+      const origConsume = baseInsurance.consume.bind(baseInsurance);
+      baseInsurance.consume = async (...args) => {
+        const now = Date.now();
+        if (now - lastAuthOutageLog > 60_000) {
+          lastAuthOutageLog = now;
+          systemLogger.error({
+            event: "ratelimit.auth_degraded",
+            policy: policy.cacheKey,
+          }, `[rateLimit:auth] Redis outage detected — operating with in-memory insurance limiter`);
+        }
+        return origConsume(...args);
+      };
+      opts.insuranceLimiter = baseInsurance;
+    }
+
+    limiter = new RateLimiterRedis(opts);
   } else {
     // ── Memory store (V1 default) ─────────────────────────────────────────────
     limiter = new RateLimiterMemory({
@@ -117,9 +140,15 @@ export function rateLimit(policyName) {
     }
 
     // ── Apply policy ──────────────────────────────────────────────────────────
+    const RATE_LIMIT_TIMEOUT_MS = Number(process.env.RATE_LIMIT_TIMEOUT_MS) || 1500;
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error("Rate limiter command timeout")), RATE_LIMIT_TIMEOUT_MS);
+    });
+
     try {
       const limiter = await getLimiter(policy);
-      await limiter.consume(key);
+      await Promise.race([limiter.consume(key), timeoutPromise]);
       return next();
     } catch (err) {
       // RateLimiterRes thrown when limit exceeded
@@ -134,12 +163,43 @@ export function rateLimit(policyName) {
         });
       }
 
-      // Infrastructure failure (Redis down, etc.) — fail open, do not block
+      // Infrastructure failure (Redis down, command timeout, connection refused, etc.)
+      if (policy.failPolicy === "close") {
+        systemLogger.error({
+          event: "ratelimit.fail_closed",
+          policy: policyName,
+          err: err?.message,
+        }, `[rateLimit:${policyName}] Redis infrastructure failure on AI route — failing closed (503)`);
+
+        res.setHeader("Retry-After", 30);
+        return res.status(503).json({
+          ok:      false,
+          code:    "SERVICE_UNAVAILABLE",
+          message: "Service temporarily unavailable. Please try again shortly.",
+        });
+      }
+
+      if (policy.failPolicy === "insurance") {
+        const now = Date.now();
+        if (now - lastAuthOutageLog > 60_000) {
+          lastAuthOutageLog = now;
+          systemLogger.error({
+            event: "ratelimit.auth_degraded",
+            policy: policyName,
+            err: err?.message,
+          }, `[rateLimit:auth] Redis outage detected — operating with in-memory insurance limiter`);
+        }
+        return next();
+      }
+
+      // Default fallback (e.g. read routes): log warning and fail open
       console.warn(
         `[rateLimit:${policyName}] Infrastructure error — failing open:`,
         err?.message
       );
       return next();
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
   };
 }

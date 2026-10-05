@@ -1,4 +1,7 @@
 import { redisConnection } from "../queue/redis.js";
+import { createLogger } from "../infrastructure/logging/index.js";
+
+const systemLogger = createLogger("ratelimit");
 
 /**
  * walletRateLimit — Redis sliding-window rate limiter
@@ -6,24 +9,15 @@ import { redisConnection } from "../queue/redis.js";
  * Uses ioredis INCR + EXPIRE (reuses the existing BullMQ redisConnection,
  * zero new dependencies). Each counter key is per-user and auto-expires.
  *
- * Rate-limit commands (INCR, EXPIRE) are non-blocking — safe to share the
- * BullMQ connection without affecting queue performance.
- *
- * Usage:
- *   // Default: 30 requests / 60 seconds per user on wallet routes
- *   router.use(walletRateLimit())
- *
- *   // Custom limit for admin routes with separate key namespace
- *   router.post('/credit', walletRateLimit({ max: 10, windowSec: 60, keyPrefix: 'rate:admin' }))
- *
- * Response on limit exceeded (HTTP 429):
- *   { error: 'TOO_MANY_REQUESTS', message: '...', retryAfter: 60 }
+ * Outage Policy:
+ *   Wallet read routes fail-open on Redis error/timeout, logging at error level.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 export function walletRateLimit({
   max = 30,
   windowSec = 60,
   keyPrefix = "rate:wallet",
+  storeClient = redisConnection,
 } = {}) {
   return async (req, res, next) => {
     const userId = req.user?.id;
@@ -34,17 +28,23 @@ export function walletRateLimit({
 
     const key = `${keyPrefix}:${userId}`;
 
+    const WALLET_RATE_LIMIT_TIMEOUT_MS = Number(process.env.WALLET_RATE_LIMIT_TIMEOUT_MS) || 1500;
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error("Wallet rate limiter command timeout")), WALLET_RATE_LIMIT_TIMEOUT_MS);
+    });
+
     try {
-      const count = await redisConnection.incr(key);
+      const count = await Promise.race([storeClient.incr(key), timeoutPromise]);
 
       // Only set TTL on the first request to avoid resetting the window on every call
       if (count === 1) {
-        await redisConnection.expire(key, windowSec);
+        await storeClient.expire(key, windowSec);
       }
 
       if (count > max) {
         // Compute remaining TTL to tell client when to retry
-        const ttl = await redisConnection.ttl(key);
+        const ttl = await storeClient.ttl(key);
         return res.status(429).json({
           ok: false,
           code: "RATE_LIMIT_EXCEEDED",
@@ -56,9 +56,14 @@ export function walletRateLimit({
 
       next();
     } catch (err) {
-      // If Redis is temporarily unavailable, fail open (do not block the request)
-      console.warn("[walletRateLimit] Redis error — failing open:", err?.message);
+      // If Redis is temporarily unavailable, fail open with error-level log
+      systemLogger.error({
+        event: "wallet.ratelimit.error",
+        err: err?.message,
+      }, "[walletRateLimit] Redis error — failing open for wallet reads");
       next();
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
   };
 }

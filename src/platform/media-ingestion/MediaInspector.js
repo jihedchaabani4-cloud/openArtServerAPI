@@ -113,6 +113,16 @@ export class MediaInspector {
             if (brand.includes("avif") || brand.includes("avis")) {
                 return "image/avif";
             }
+            if (
+                brand.includes("heic") ||
+                brand.includes("heix") ||
+                brand.includes("heim") ||
+                brand.includes("heis") ||
+                brand.includes("mif1") ||
+                brand.includes("msf1")
+            ) {
+                return "image/heic";
+            }
             if (brand.includes("qt")) {
                 return "video/quicktime";
             }

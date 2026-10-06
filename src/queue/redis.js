@@ -81,3 +81,56 @@ rateLimitRedisConnection.on('error', (err) => {
     console.warn('[RateLimit Redis] Connection warning:', err.message);
   }
 });
+
+/**
+ * Waits for the rate limit Redis connection to reach 'ready' status.
+ * Prevents commands failing before the socket is open.
+ *
+ * @param {number} [timeoutMs=5000] - Maximum milliseconds to wait
+ * @returns {Promise<boolean>} True if ready, false if timed out or in test env
+ */
+export async function waitForRateLimitRedis(timeoutMs = 5000) {
+  if (isTestEnv) {
+    return true;
+  }
+
+  if (rateLimitRedisConnection.status === "ready") {
+    return true;
+  }
+
+  if (rateLimitRedisConnection.status === "wait") {
+    rateLimitRedisConnection.connect().catch((err) => {
+      console.warn('[RateLimit Redis] Connection error during waitForRateLimitRedis:', err.message);
+    });
+  }
+
+  return new Promise((resolve) => {
+    let timer = null;
+
+    const onReady = () => {
+      cleanup();
+      console.info('[RateLimit Redis] Connection ready.');
+      resolve(true);
+    };
+
+    const onError = () => {
+      // Keep waiting until timeout or ready
+    };
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      rateLimitRedisConnection.removeListener('ready', onReady);
+      rateLimitRedisConnection.removeListener('error', onError);
+    };
+
+    timer = setTimeout(() => {
+      cleanup();
+      console.warn(`⚠️ [RateLimit Redis] Connection timed out after ${timeoutMs}ms (status: ${rateLimitRedisConnection.status}). Proceeding with startup.`);
+      resolve(false);
+    }, timeoutMs);
+
+    rateLimitRedisConnection.once('ready', onReady);
+    rateLimitRedisConnection.on('error', onError);
+  });
+}
+

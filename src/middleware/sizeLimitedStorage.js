@@ -70,6 +70,18 @@ export function createSizeLimitedMemoryStorage({
                 }
             };
 
+            // Release slot on client abort, stream error, or connection termination
+            file.stream.on("close", releaseSlot);
+            file.stream.on("aborted", releaseSlot);
+            if (req && typeof req.on === "function") {
+                req.on("close", () => {
+                    if (!file.stream.readableEnded) {
+                        releaseSlot();
+                    }
+                });
+                req.on("aborted", releaseSlot);
+            }
+
             // ── 2. Streaming Chunk Handler & Early Magic-Bytes Sniff ──────────────
             let detectedMime = null;
             let maxBytes = defaultLimit;
@@ -83,10 +95,10 @@ export function createSizeLimitedMemoryStorage({
             file.stream.on("data", (chunk) => {
                 if (aborted) return;
 
-                // Early sniff on first bytes received
+                // Early sniff on first bytes received (buffer up to 32 bytes for longest signature)
                 if (!headerSniffed) {
                     headerBuffer = Buffer.concat([headerBuffer, chunk]);
-                    if (headerBuffer.length >= 12) {
+                    if (headerBuffer.length >= 32) {
                         headerSniffed = true;
                         try {
                             detectedMime = MediaInspector.sniffMagicBytes(headerBuffer);

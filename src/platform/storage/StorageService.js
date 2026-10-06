@@ -18,6 +18,47 @@ function isStream(val) {
     );
 }
 
+const SAFE_MEDIA_MIME_TYPES = new Set([
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "image/avif",
+    "image/heic",
+    "image/heif",
+    "image/bmp",
+    "image/tiff",
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
+    "video/x-matroska",
+    "video/avi",
+    "video/mpeg",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/aac",
+    "audio/ogg",
+    "audio/webm",
+    "audio/flac",
+    "application/octet-stream",
+]);
+
+const DANGEROUS_MIME_TYPES = new Set([
+    "text/html",
+    "image/svg+xml",
+    "application/xml",
+    "text/xml",
+    "application/x-sh",
+    "application/javascript",
+    "text/javascript",
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/x-msdownload",
+    "application/x-executable",
+]);
+
 export class StorageService {
     constructor(bucketName = "generated_images", provider = null) {
         this.bucketName = bucketName;
@@ -63,7 +104,7 @@ export class StorageService {
         let declaredMime = options.contentType || options.declaredMime || options.mimetype;
 
         // Determine content type based on path extension if not explicitly specified
-        let contentType = declaredMime || "image/jpeg";
+        let contentType = declaredMime || null;
         if (!declaredMime) {
             const lowerPath = path.toLowerCase();
             if (lowerPath.endsWith(".png")) contentType = "image/png";
@@ -74,13 +115,37 @@ export class StorageService {
             else if (lowerPath.endsWith(".mp4")) contentType = "video/mp4";
             else if (lowerPath.endsWith(".webm")) contentType = "video/webm";
             else if (lowerPath.endsWith(".mov")) contentType = "video/quicktime";
+            else if (lowerPath.endsWith(".mkv")) contentType = "video/x-matroska";
+            else if (lowerPath.endsWith(".heic")) contentType = "image/heic";
+            else if (lowerPath.endsWith(".mp3")) contentType = "audio/mpeg";
+            else if (lowerPath.endsWith(".wav")) contentType = "audio/wav";
+            else if (lowerPath.endsWith(".jpg") || lowerPath.endsWith(".jpeg")) contentType = "image/jpeg";
+            else contentType = isProviderOrInternal ? "application/octet-stream" : "image/jpeg";
             declaredMime = contentType;
         }
 
         if (isProviderOrInternal) {
-            // Provider outputs / internal copies: use DETECTED type and ignore wrong/generic declared MIME
+            // Reject dangerous declared MIME types even if bytes were unrecognized
+            if (declaredMime && DANGEROUS_MIME_TYPES.has(declaredMime.toLowerCase())) {
+                throw new Error(`[StorageService] Dangerous MIME type "${declaredMime}" rejected for provider output.`);
+            }
+
             if (detectedMime) {
+                // Provider outputs / internal copies: use DETECTED type and ignore wrong/generic declared MIME
                 contentType = detectedMime;
+            } else {
+                // Unrecognized but non-dangerous format: safe allow-list or fallback to application/octet-stream
+                if (declaredMime && SAFE_MEDIA_MIME_TYPES.has(declaredMime.toLowerCase())) {
+                    contentType = declaredMime.toLowerCase();
+                } else {
+                    contentType = "application/octet-stream";
+                }
+                const runId = options.runId || "none";
+                const model = options.model || "none";
+                const provider = options.provider || options.providerId || "none";
+                console.warn(
+                    `⚠️ [StorageService] Unrecognized format for provider asset. Falling back to safe type "${contentType}". runId=${runId}, model=${model}, provider=${provider}`
+                );
             }
         } else {
             // End-user uploads: enforce strict declared == real format
@@ -154,16 +219,24 @@ export class StorageService {
                 throw new Error(`[SourcePolicy] File format validation failed: ${err.message}`);
             }
 
+            const isProviderOrInternal = Boolean(
+                options.isProviderOutput ||
+                options.isInternal ||
+                options.origin === "provider" ||
+                options.origin === "internal" ||
+                (options.isProviderOutput !== false && !options.isEndUserUpload)
+            );
+
             // Enforce MIME restrictions using detected MIME (or mimeHint fallback)
             const effectiveMime = sniffedMime || mimeHint;
-            if (profile.allowedMimeTypes && effectiveMime && !profile.allowedMimeTypes.includes(effectiveMime)) {
+            if (!isProviderOrInternal && profile.allowedMimeTypes && effectiveMime && !profile.allowedMimeTypes.includes(effectiveMime)) {
                 throw new Error(
                     `[SourcePolicy] File format "${effectiveMime}" is not allowed for this operation. Allowed: ${profile.allowedMimeTypes.join(", ")}`
                 );
             }
 
             return await this.upload(path, buffer, {
-                isProviderOutput: options.isProviderOutput !== false,
+                isProviderOutput: isProviderOrInternal,
                 ...options,
                 contentType: sniffedMime || options.contentType || mimeHint || undefined,
             });

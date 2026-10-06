@@ -12,6 +12,7 @@ import { walletService } from "./src/container.js";
 import { bootstrapV2 } from "./src/v2/bootstrap.js";
 import { requireAuth } from "./src/middleware/auth.js";
 import { rateLimit } from "./src/middleware/rateLimit.js";
+import { waitForRateLimitRedis } from "./src/queue/redis.js";
 
 bootstrapV2();
 
@@ -75,6 +76,12 @@ app.use("/api/payments/webhook", express.raw({ type: "application/json" }));
 // Cookie parser (lightweight header parsing only, zero body buffering, needed for JWT auth)
 app.use(cookieParser());
 app.use(requestLogger());
+
+// Defense-in-depth: Ensure all responses have nosniff to prevent MIME type sniffing attacks
+app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    next();
+});
 
 // ── Body Size Parsers: Scoped 30MB for base64/media ingestion, Global 1MB for all others ──
 const scopedJsonParser = express.json({ limit: "30mb" });
@@ -202,6 +209,12 @@ app.use((err, req, res, next) => {
 
 // ── Start server ─────────────────────────────────────────────
 if (process.env.NODE_ENV !== "test") {
+    const isRedisLimiter = (process.env.RATE_LIMIT_STORE || "").trim().toLowerCase() === "redis";
+    if (isRedisLimiter) {
+        systemLogger.info({ event: "boot.redis_wait" }, "Waiting for rate-limit Redis connection to become ready...");
+        await waitForRateLimitRedis(5000);
+    }
+
     app.listen(PORT, () => {
     const appName = process.env.APP_NAME || "Labveil";
     systemLogger.info({ port: PORT, appName }, `${appName} API running on http://localhost:${PORT}`);

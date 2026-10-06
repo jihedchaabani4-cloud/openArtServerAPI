@@ -1,5 +1,6 @@
 import express from 'express';
 import healthRouter      from '../../routes/health.js';
+import readyRouter       from '../../routes/ready.js';
 import workflowsRouter   from '../../routes/workflows.js';
 import imagesRouter      from '../../routes/images.js';
 import videoRouter       from '../../routes/video.js';
@@ -23,6 +24,7 @@ router.use('/media',        mediaIngestRouter);
 
 router.use('/auth',         authRouter);
 router.use('/health',       healthRouter);
+router.use('/ready',        readyRouter);
 router.use('/workflows',    workflowsRouter);
 router.use('/images',       imagesRouter);
 router.use('/video',        videoRouter);

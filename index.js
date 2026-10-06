@@ -164,7 +164,9 @@ app.use((req, res, next) => {
 
 // ── Routes ──────────────────────────────────────────────────
 import healthRouter from "./routes/health.js";
+import readyRouter from "./routes/ready.js";
 app.use("/health", healthRouter);
+app.use("/ready", readyRouter);
 app.use("/api", apiRouter);
 
 // ── 404 handler ─────────────────────────────────────────────

@@ -5,51 +5,32 @@ import { safeCompareSecret } from "../platform/security/secretComparison.js";
 
 const authLogger = createLogger("auth");
 
-const DISALLOWED_INTERNAL_SECRET_ROUTE_PATTERNS = [
-    /^\/api\/wallet(\/.*)?$/,
-    /^\/wallet(\/.*)?$/,
-    /^\/api\/payments(\/.*)?$/,
-    /^\/payments(\/.*)?$/,
-    /^\/api\/auth(\/.*)?$/,
-    /^\/auth(\/.*)?$/,
-    /^\/api\/admin(\/.*)?$/,
-    /^\/admin(\/.*)?$/,
-    /^\/api\/users(\/.*)?$/,
-    /^\/users(\/.*)?$/,
+/**
+ * Exact allowed method + path pairs for internal secret S2S caller (ElementVisionService).
+ * Strictly requires INTERNAL_AUTH_ENABLED === "true".
+ * Never allows generation, billing, characters or element-write routes.
+ */
+const INTERNAL_SECRET_ALLOWED_METHOD_PATH_PAIRS = [
+    { method: "GET", pattern: /^\/(api\/)?workflows\/project-data\/[^/]+$/ },
+    { method: "PATCH", pattern: /^\/(api\/)?workflows\/workflows\/[^/]+$/ },
 ];
 
-const INTERNAL_SECRET_ALLOWED_ROUTE_PATTERNS = [
-    /^\/api\/workflows(\/.*)?$/,
-    /^\/workflows(\/.*)?$/,
-    /^\/items(\/.*)?$/,
-    /^\/api\/images(\/.*)?$/,
-    /^\/images(\/.*)?$/,
-    /^\/generated(\/.*)?$/,
-    /^\/api\/video(\/.*)?$/,
-    /^\/video(\/.*)?$/,
-    /^\/api\/v2\/workflows(\/.*)?$/,
-    /^\/api\/prompt(\/.*)?$/,
-    /^\/prompt(\/.*)?$/,
-    /^\/api\/media(\/.*)?$/,
-    /^\/media(\/.*)?$/,
-    /^\/api\/characters(\/.*)?$/,
-    /^\/characters(\/.*)?$/,
-    /^\/api\/v2\/elements(\/.*)?$/,
-    /^\/api\/generations(\/.*)?$/,
-    /^\/generations(\/.*)?$/,
-    /^\/api\/projects(\/.*)?$/,
-    /^\/projects(\/.*)?$/,
-    /^\/api\/assets(\/.*)?$/,
-    /^\/assets(\/.*)?$/,
-];
-
-export function isInternalSecretAllowedRoute(rawPath) {
-    if (!rawPath || typeof rawPath !== "string") return false;
-    const cleanPath = rawPath.split("?")[0].split("#")[0].toLowerCase().replace(/\/+$/, "");
-    if (DISALLOWED_INTERNAL_SECRET_ROUTE_PATTERNS.some((pattern) => pattern.test(cleanPath))) {
+export function isInternalSecretAllowedRequest(req) {
+    if (process.env.INTERNAL_AUTH_ENABLED !== "true") {
         return false;
     }
-    return INTERNAL_SECRET_ALLOWED_ROUTE_PATTERNS.some((pattern) => pattern.test(cleanPath));
+    const method = req?.method?.toUpperCase();
+    const rawPath = req?.originalUrl?.split("?")[0] || req?.path || req?.baseUrl || "";
+    if (!rawPath || typeof rawPath !== "string") return false;
+    const cleanPath = rawPath.split("?")[0].split("#")[0].toLowerCase().replace(/\/+$/, "");
+
+    return INTERNAL_SECRET_ALLOWED_METHOD_PATH_PAIRS.some(
+        (pair) => pair.method === method && pair.pattern.test(cleanPath)
+    );
+}
+
+export function isInternalSecretAllowedRoute(rawPath, method = "GET") {
+    return isInternalSecretAllowedRequest({ method, path: rawPath, originalUrl: rawPath });
 }
 
 /**
@@ -63,18 +44,22 @@ export const requireAuth = async (req, res, next) => {
         return next();
     }
 
-    // S2S internal secret check (requires explicit x-user-id header and allow-listed internal route)
+    // S2S internal secret check (strictly requires INTERNAL_AUTH_ENABLED === "true", explicit x-user-id header, and allow-listed method+path pair)
     const internalSecret = req.headers?.["x-internal-secret"];
     const requestPath = req.originalUrl?.split("?")[0] || req.path || req.baseUrl || "";
     if (
         internalSecret &&
-        isInternalSecretAllowedRoute(requestPath) &&
+        isInternalSecretAllowedRequest(req) &&
         safeCompareSecret(internalSecret, process.env.INTERNAL_SECRET)
     ) {
         const headerUserId = req.headers?.["x-user-id"];
         if (headerUserId) {
             req.user = { id: headerUserId };
             setContext({ userId: headerUserId });
+            authLogger.info(
+                { event: "auth.internal_secret_used", route: requestPath, userId: headerUserId },
+                "Internal secret S2S authentication accepted"
+            );
             return next();
         }
     }

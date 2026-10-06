@@ -163,6 +163,8 @@ app.use((req, res, next) => {
 });
 
 // ── Routes ──────────────────────────────────────────────────
+import healthRouter from "./routes/health.js";
+app.use("/health", healthRouter);
 app.use("/api", apiRouter);
 
 // ── 404 handler ─────────────────────────────────────────────
@@ -183,6 +185,11 @@ app.use((err, req, res, next) => {
 
     const statusCode = err.statusCode || 500;
     const errorCode = err.code || (statusCode >= 500 ? LogErrorCodes.INTERNAL_UNEXPECTED_ERROR : "REQUEST_ERROR");
+
+    // 503 Service Unavailable / In-Flight Memory Cap with Retry-After
+    if (statusCode === 503 && (err.retryAfter || err.code === "SERVICE_UNAVAILABLE")) {
+        res.setHeader("Retry-After", String(err.retryAfter || 5));
+    }
 
     if (statusCode >= 500) {
         systemLogger.error({

@@ -125,7 +125,7 @@ export async function waitForRateLimitRedis(timeoutMs = 5000) {
 
     timer = setTimeout(() => {
       cleanup();
-      console.warn(`⚠️ [RateLimit Redis] Connection timed out after ${timeoutMs}ms (status: ${rateLimitRedisConnection.status}). Proceeding with startup.`);
+      console.error(`❌ [RateLimit Redis] Connection timed out after ${timeoutMs}ms (status: ${rateLimitRedisConnection.status}). Proceeding with startup.`);
       resolve(false);
     }, timeoutMs);
 

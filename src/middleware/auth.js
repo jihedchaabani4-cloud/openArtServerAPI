@@ -5,6 +5,53 @@ import { safeCompareSecret } from "../platform/security/secretComparison.js";
 
 const authLogger = createLogger("auth");
 
+const DISALLOWED_INTERNAL_SECRET_ROUTE_PATTERNS = [
+    /^\/api\/wallet(\/.*)?$/,
+    /^\/wallet(\/.*)?$/,
+    /^\/api\/payments(\/.*)?$/,
+    /^\/payments(\/.*)?$/,
+    /^\/api\/auth(\/.*)?$/,
+    /^\/auth(\/.*)?$/,
+    /^\/api\/admin(\/.*)?$/,
+    /^\/admin(\/.*)?$/,
+    /^\/api\/users(\/.*)?$/,
+    /^\/users(\/.*)?$/,
+];
+
+const INTERNAL_SECRET_ALLOWED_ROUTE_PATTERNS = [
+    /^\/api\/workflows(\/.*)?$/,
+    /^\/workflows(\/.*)?$/,
+    /^\/items(\/.*)?$/,
+    /^\/api\/images(\/.*)?$/,
+    /^\/images(\/.*)?$/,
+    /^\/generated(\/.*)?$/,
+    /^\/api\/video(\/.*)?$/,
+    /^\/video(\/.*)?$/,
+    /^\/api\/v2\/workflows(\/.*)?$/,
+    /^\/api\/prompt(\/.*)?$/,
+    /^\/prompt(\/.*)?$/,
+    /^\/api\/media(\/.*)?$/,
+    /^\/media(\/.*)?$/,
+    /^\/api\/characters(\/.*)?$/,
+    /^\/characters(\/.*)?$/,
+    /^\/api\/v2\/elements(\/.*)?$/,
+    /^\/api\/generations(\/.*)?$/,
+    /^\/generations(\/.*)?$/,
+    /^\/api\/projects(\/.*)?$/,
+    /^\/projects(\/.*)?$/,
+    /^\/api\/assets(\/.*)?$/,
+    /^\/assets(\/.*)?$/,
+];
+
+export function isInternalSecretAllowedRoute(rawPath) {
+    if (!rawPath || typeof rawPath !== "string") return false;
+    const cleanPath = rawPath.split("?")[0].split("#")[0].toLowerCase().replace(/\/+$/, "");
+    if (DISALLOWED_INTERNAL_SECRET_ROUTE_PATTERNS.some((pattern) => pattern.test(cleanPath))) {
+        return false;
+    }
+    return INTERNAL_SECRET_ALLOWED_ROUTE_PATTERNS.some((pattern) => pattern.test(cleanPath));
+}
+
 /**
  * Middleware to strictly authenticate users using Supabase Auth.
  * Blocks the request with 401 Unauthorized if token is missing or invalid.
@@ -16,9 +63,14 @@ export const requireAuth = async (req, res, next) => {
         return next();
     }
 
-    // S2S internal secret check (requires explicit x-user-id header, no hardcoded defaults)
+    // S2S internal secret check (requires explicit x-user-id header and allow-listed internal route)
     const internalSecret = req.headers?.["x-internal-secret"];
-    if (internalSecret && safeCompareSecret(internalSecret, process.env.INTERNAL_SECRET)) {
+    const requestPath = req.originalUrl?.split("?")[0] || req.path || req.baseUrl || "";
+    if (
+        internalSecret &&
+        isInternalSecretAllowedRoute(requestPath) &&
+        safeCompareSecret(internalSecret, process.env.INTERNAL_SECRET)
+    ) {
         const headerUserId = req.headers?.["x-user-id"];
         if (headerUserId) {
             req.user = { id: headerUserId };

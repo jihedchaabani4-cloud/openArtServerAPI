@@ -177,6 +177,12 @@ headers: {
      ```
    - The backend already enforces tenant ownership cleanly via `req.user.id` on both `GET /api/workflows/project-data/:projectId` and `PATCH /api/workflows/workflows/:id`. When the user is authenticated and owns the workflow, normal JWT authorization succeeds without any internal secret.
 
+6. **RC1.4-D2.5 Security Hardening Finding**:
+   - The backend `src/middleware/auth.js` now strictly restricts `x-internal-secret` to an explicit server-to-server route allow-list (`INTERNAL_SECRET_ALLOWED_ROUTE_PATTERNS`).
+   - Sending `x-internal-secret` on non-allowlisted endpoints (e.g. `/api/wallet/*`, `/api/payments/*`) is strictly ignored and rejected without a valid Supabase JWT.
+   - The frontend (`my-app`) must never bundle or transmit `x-internal-secret` under any circumstance. All browser requests must authenticate strictly via standard user session JWTs.
+
+
 
 ---
 

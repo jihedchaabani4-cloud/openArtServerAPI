@@ -103,5 +103,11 @@ export const RATE_LIMIT_POLICIES = {
     limit: Number(process.env.MAX_CONCURRENT_UPLOADS_PER_USER) || 2,
     keyBy: "user",
   },
+
+  /** Per-instance total in-flight upload memory cap (configurable via MAX_IN_FLIGHT_UPLOAD_BYTES, default 250MB) */
+  inFlightUploadMemory: {
+    maxBytes: Number(process.env.MAX_IN_FLIGHT_UPLOAD_BYTES) || 250 * 1024 * 1024,
+  },
 };
+
 

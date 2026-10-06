@@ -13,12 +13,21 @@ import { RATE_LIMIT_POLICIES } from "../config/rateLimitPolicies.js";
 import { MediaInspector } from "../platform/media-ingestion/MediaInspector.js";
 
 const activeUploadsByUser = new Map();
+let currentInFlightBytes = 0;
 
 function getMaxConcurrentUploads() {
     return (
         RATE_LIMIT_POLICIES?.concurrentUploads?.limit ||
         Number(process.env.MAX_CONCURRENT_UPLOADS_PER_USER) ||
         2
+    );
+}
+
+function getMaxInFlightUploadBytes() {
+    return (
+        RATE_LIMIT_POLICIES?.inFlightUploadMemory?.maxBytes ||
+        Number(process.env.MAX_IN_FLIGHT_UPLOAD_BYTES) ||
+        250 * 1024 * 1024
     );
 }
 
@@ -29,6 +38,13 @@ export function resetActiveUploadsForTest() {
     activeUploadsByUser.clear();
 }
 
+export function resetInFlightBytesForTest() {
+    if (process.env.NODE_ENV !== "test") {
+        throw new Error("[sizeLimitedStorage] resetInFlightBytesForTest is only permitted when NODE_ENV === 'test'");
+    }
+    currentInFlightBytes = 0;
+}
+
 export function getActiveUploadsCountForTest(userId) {
     if (process.env.NODE_ENV !== "test") {
         throw new Error("[sizeLimitedStorage] getActiveUploadsCountForTest is only permitted when NODE_ENV === 'test'");
@@ -36,13 +52,32 @@ export function getActiveUploadsCountForTest(userId) {
     return activeUploadsByUser.get(userId) || 0;
 }
 
+export function getInFlightBytesForTest() {
+    if (process.env.NODE_ENV !== "test") {
+        throw new Error("[sizeLimitedStorage] getInFlightBytesForTest is only permitted when NODE_ENV === 'test'");
+    }
+    return currentInFlightBytes;
+}
+
 export function createSizeLimitedMemoryStorage({
     imageLimit = 20 * 1024 * 1024,
     videoLimit = 100 * 1024 * 1024,
     defaultLimit = 20 * 1024 * 1024,
+    maxInFlightBytes = null,
 } = {}) {
+    const instanceMaxInFlight = maxInFlightBytes || getMaxInFlightUploadBytes();
     return {
         _handleFile(req, file, cb) {
+            // ── 0. Per-Instance Total In-Flight Upload Memory Cap ──────────────────
+            if (currentInFlightBytes >= instanceMaxInFlight) {
+                const err = new Error("Server upload capacity temporarily exceeded. Please retry shortly.");
+                err.code = "SERVICE_UNAVAILABLE";
+                err.statusCode = 503;
+                err.retryAfter = 5;
+                if (req?.res?.setHeader) req.res.setHeader("Retry-After", "5");
+                return cb(err);
+            }
+
             // ── 1. Per-User Concurrent Upload Limiter ─────────────────────────────
             const userId = req.user?.id || req.ip || "anonymous";
             const maxConcurrent = getMaxConcurrentUploads();
@@ -57,10 +92,13 @@ export function createSizeLimitedMemoryStorage({
 
             activeUploadsByUser.set(userId, currentActive + 1);
 
+            let uploadInFlightBytes = 0;
             let released = false;
             const releaseSlot = () => {
                 if (!released) {
                     released = true;
+                    currentInFlightBytes = Math.max(0, currentInFlightBytes - uploadInFlightBytes);
+                    uploadInFlightBytes = 0;
                     const count = activeUploadsByUser.get(userId) || 1;
                     if (count <= 1) {
                         activeUploadsByUser.delete(userId);
@@ -94,6 +132,22 @@ export function createSizeLimitedMemoryStorage({
 
             file.stream.on("data", (chunk) => {
                 if (aborted) return;
+
+                uploadInFlightBytes += chunk.length;
+                currentInFlightBytes += chunk.length;
+
+                if (currentInFlightBytes > instanceMaxInFlight) {
+                    aborted = true;
+                    releaseSlot();
+                    file.stream.pause();
+                    file.stream.destroy();
+                    const err = new Error("Server upload capacity temporarily exceeded. Please retry shortly.");
+                    err.code = "SERVICE_UNAVAILABLE";
+                    err.statusCode = 503;
+                    err.retryAfter = 5;
+                    if (req?.res?.setHeader) req.res.setHeader("Retry-After", "5");
+                    return cb(err);
+                }
 
                 // Early sniff on first bytes received (buffer up to 32 bytes for longest signature)
                 if (!headerSniffed) {

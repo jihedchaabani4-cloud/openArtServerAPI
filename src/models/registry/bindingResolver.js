@@ -47,6 +47,11 @@ export function resolveConfiguredBinding(modelId) {
  * @returns {object} matched binding manifest
  */
 export function resolveBindingForTest(modelId, targetBindingId) {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error(
+      `resolveBindingForTest is only allowed when NODE_ENV === "test" (current: "${process.env.NODE_ENV}")`
+    );
+  }
   const model = getModel(modelId);
   const normModelId = normalizeId(model.id);
   const availableBindings = getModelBindings(model.id);

@@ -106,6 +106,9 @@ describe("RC1.4-D2.2 — Parse-Before-Auth and Upload Hardening Boundary Tests",
   it("TEST D2.2-c: Image > 20MB on mixed route (/api/assets/upload) is rejected with 413 during streaming", async () => {
     const formData = new FormData();
     const largeImage = Buffer.alloc(21 * 1024 * 1024, 0x61);
+    largeImage[0] = 0xff;
+    largeImage[1] = 0xd8;
+    largeImage[2] = 0xff;
     const blob = new Blob([largeImage], { type: "image/jpeg" });
     formData.append("file", blob, "large.jpg");
 

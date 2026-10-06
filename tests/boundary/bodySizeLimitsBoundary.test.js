@@ -136,6 +136,9 @@ describe("RC1.4-D2 — Body Size & Multer Limits Boundary Tests", () => {
   it("TEST D2-6: Multer image upload > 20MB is rejected with 413 and clean PAYLOAD_TOO_LARGE error", async () => {
     const formData = new FormData();
     const largeImageBuffer = Buffer.alloc(21 * 1024 * 1024, 0x61);
+    largeImageBuffer[0] = 0xff;
+    largeImageBuffer[1] = 0xd8;
+    largeImageBuffer[2] = 0xff;
     const blob = new Blob([largeImageBuffer], { type: "image/jpeg" });
     formData.append("file", blob, "large-image.jpg");
 
@@ -156,6 +159,9 @@ describe("RC1.4-D2 — Body Size & Multer Limits Boundary Tests", () => {
   it("TEST D2-7: Multer image upload <= 20MB is accepted (not rejected with 413)", async () => {
     const formData = new FormData();
     const imageBuffer = Buffer.alloc(100 * 1024, 0x61);
+    imageBuffer[0] = 0xff;
+    imageBuffer[1] = 0xd8;
+    imageBuffer[2] = 0xff;
     const blob = new Blob([imageBuffer], { type: "image/jpeg" });
     formData.append("file", blob, "small-image.jpg");
 
@@ -209,6 +215,9 @@ describe("RC1.4-D2 — Body Size & Multer Limits Boundary Tests", () => {
   it("TEST D2.1-3: Image-only character route rejects file > 20MB directly via multer limits", async () => {
     const formData = new FormData();
     const largeBuffer = Buffer.alloc(22 * 1024 * 1024, 0x61);
+    largeBuffer[0] = 0xff;
+    largeBuffer[1] = 0xd8;
+    largeBuffer[2] = 0xff;
     const blob = new Blob([largeBuffer], { type: "image/jpeg" });
     formData.append("file", blob, "large-photo.jpg");
 

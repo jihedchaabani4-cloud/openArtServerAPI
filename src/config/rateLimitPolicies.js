@@ -97,4 +97,11 @@ export const RATE_LIMIT_POLICIES = {
     keyBy:      "ip",
     failPolicy: "insurance",
   },
+
+  /** Per-user concurrent upload limit (configurable via MAX_CONCURRENT_UPLOADS_PER_USER, default 2) */
+  concurrentUploads: {
+    limit: Number(process.env.MAX_CONCURRENT_UPLOADS_PER_USER) || 2,
+    keyBy: "user",
+  },
 };
+

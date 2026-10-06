@@ -102,6 +102,12 @@ export class MediaInspector {
         }
 
         // 3. Video / ISO Box Signatures (MP4, MOV, AVIF)
+        if (buffer.length >= 8) {
+            const box = buffer.slice(4, 8).toString("ascii").toLowerCase();
+            if (box === "moov" || box === "wide") {
+                return "video/quicktime";
+            }
+        }
         if (buffer.length >= 12 && buffer.slice(4, 8).toString("ascii") === "ftyp") {
             const brand = buffer.slice(8, 12).toString("ascii").toLowerCase();
             if (brand.includes("avif") || brand.includes("avis")) {

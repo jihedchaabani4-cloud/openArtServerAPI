@@ -40,6 +40,8 @@ export const workerRedisConnection = redisUrl
   ? new Redis(redisUrl, BASE_OPTIONS)
   : new Redis({ host: redisHost, port: Number(redisPort), password: redisPassword || undefined, ...BASE_OPTIONS });
 
+const isTestEnv = process.env.NODE_ENV === "test";
+
 // ── Rate limiter connection (fail fast: no offline queue, strict command timeout) ─
 const RATE_LIMIT_BASE_OPTIONS = {
   ...BASE_OPTIONS,
@@ -47,12 +49,19 @@ const RATE_LIMIT_BASE_OPTIONS = {
   commandTimeout:       Number(process.env.RATE_LIMIT_COMMAND_TIMEOUT_MS) || 1500,
   connectTimeout:       2000,
   maxRetriesPerRequest: 1,
-  lazyConnect:          true,  // Connect on-demand so module imports do not keep event loop open
+  lazyConnect:          isTestEnv,  // Keep lazyConnect in tests; connect eagerly outside NODE_ENV=test
 };
 
 export const rateLimitRedisConnection = redisUrl
   ? new Redis(redisUrl, RATE_LIMIT_BASE_OPTIONS)
   : new Redis({ host: redisHost, port: Number(redisPort), password: redisPassword || undefined, ...RATE_LIMIT_BASE_OPTIONS });
+
+// Eagerly connect outside test environment to prevent 503 on boot
+if (!isTestEnv && rateLimitRedisConnection.status === "wait") {
+  rateLimitRedisConnection.connect().catch((err) => {
+    console.warn('[RateLimit Redis] Eager connection warning:', err.message);
+  });
+}
 
 // Error handlers to prevent unhandled log floods
 redisConnection.on('error', (err) => {

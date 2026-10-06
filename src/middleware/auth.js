@@ -10,6 +10,12 @@ const authLogger = createLogger("auth");
  * Blocks the request with 401 Unauthorized if token is missing or invalid.
  */
 export const requireAuth = async (req, res, next) => {
+    // If request has already been authenticated (e.g. by index.js pre-parser), short-circuit
+    if (req.user?.id) {
+        setContext({ userId: req.user.id });
+        return next();
+    }
+
     // S2S internal secret check (requires explicit x-user-id header, no hardcoded defaults)
     const internalSecret = req.headers?.["x-internal-secret"];
     if (internalSecret && safeCompareSecret(internalSecret, process.env.INTERNAL_SECRET)) {

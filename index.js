@@ -83,22 +83,58 @@ const globalJsonParser = express.json({ limit: "1mb" });
 const globalUrlencodedParser = express.urlencoded({ extended: true, limit: "1mb" });
 const scopedLargeBodyLimiter = rateLimit("scopedLargeBodyIp");
 
-function isScopedLargeBodyRoute(path) {
+export function normalizeRoutePath(rawPath) {
+    if (!rawPath || typeof rawPath !== "string") return "/";
+    let p = rawPath.split("?")[0].split("#")[0];
+    try {
+        p = decodeURIComponent(p);
+    } catch {
+        // Fallback to raw if decodeURIComponent fails
+    }
+    // Collapse consecutive slashes
+    p = p.replace(/\/+/g, "/");
+    // Lowercase
+    p = p.toLowerCase();
+    // Strip trailing slash if path is longer than 1 char
+    if (p.length > 1 && p.endsWith("/")) {
+        p = p.replace(/\/+$/, "");
+    }
+    return p;
+}
+
+const EXACT_LARGE_BODY_ROUTES = new Set([
+    "/api/assets/upload",
+    "/api/media/ingest",
+    "/api/characters",
+    "/api/characters/create",
+    "/api/characters/character",
+    "/api/v2/elements",
+]);
+
+const PARAM_LARGE_BODY_ROUTES = [
+    /^\/api\/characters\/[^/]+\/media$/,
+    /^\/api\/characters\/[^/]+\/sheet-media$/,
+    /^\/api\/characters\/[^/]+\/upload$/,
+    /^\/api\/v2\/elements\/[^/]+\/images$/,
+];
+
+export function isScopedLargeBodyRoute(path) {
     if (!path) return false;
-    // Routes identified in frontend audit that accept base64 / large photo data
-    if (path === "/api/v2/elements" || path.startsWith("/api/v2/elements/")) return true;
-    if (path === "/api/characters" || path.startsWith("/api/characters/")) return true;
-    if (path === "/api/assets/upload") return true;
-    if (path === "/api/media/ingest") return true;
+    const normalized = normalizeRoutePath(path);
+    if (EXACT_LARGE_BODY_ROUTES.has(normalized)) return true;
+    for (const pattern of PARAM_LARGE_BODY_ROUTES) {
+        if (pattern.test(normalized)) return true;
+    }
     return false;
 }
 
 app.use((req, res, next) => {
-    const path = req.originalUrl?.split("?")[0] || req.path;
-    if (path === "/api/payments/webhook") {
+    const rawPath = req.originalUrl?.split("?")[0] || req.path;
+    const normalized = normalizeRoutePath(rawPath);
+    if (normalized === "/api/payments/webhook") {
         return next();
     }
-    if (isScopedLargeBodyRoute(path)) {
+    if (isScopedLargeBodyRoute(rawPath)) {
         // Enforce IP rate limiting and authentication BEFORE buffering/parsing 30MB payload
         return scopedLargeBodyLimiter(req, res, (limiterErr) => {
             if (limiterErr) return next(limiterErr);

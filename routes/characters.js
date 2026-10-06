@@ -3,9 +3,14 @@ import multer from "multer";
 import * as characterController from "../controllers/characterController.js";
 import { requireAuth } from "../src/middleware/auth.js";
 import { rateLimit } from "../src/middleware/rateLimit.js";
+import { createSizeLimitedMemoryStorage } from "../src/middleware/sizeLimitedStorage.js";
 
 const upload = multer({
-    storage: multer.memoryStorage(),
+    storage: createSizeLimitedMemoryStorage({
+        imageLimit: 20 * 1024 * 1024,
+        videoLimit: 20 * 1024 * 1024,
+        defaultLimit: 20 * 1024 * 1024,
+    }),
     limits: { fileSize: 20 * 1024 * 1024 }, // 20MB max (images only)
     fileFilter: (req, file, cb) => {
         if (file.mimetype.startsWith("image/")) {

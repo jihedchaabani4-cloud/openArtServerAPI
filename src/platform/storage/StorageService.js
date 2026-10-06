@@ -48,13 +48,23 @@ export class StorageService {
         }
 
         // Validate magic bytes to prevent writing dangerous files into storage
+        let detectedMime = null;
         if (Buffer.isBuffer(body) && body.length >= 4) {
-            MediaInspector.sniffMagicBytes(body);
+            detectedMime = MediaInspector.sniffMagicBytes(body);
         }
 
+        const isProviderOrInternal = Boolean(
+            options.isProviderOutput ||
+            options.isInternal ||
+            options.origin === "provider" ||
+            options.origin === "internal"
+        );
+
+        let declaredMime = options.contentType || options.declaredMime || options.mimetype;
+
         // Determine content type based on path extension if not explicitly specified
-        let contentType = options.contentType || "image/jpeg";
-        if (!options.contentType) {
+        let contentType = declaredMime || "image/jpeg";
+        if (!declaredMime) {
             const lowerPath = path.toLowerCase();
             if (lowerPath.endsWith(".png")) contentType = "image/png";
             else if (lowerPath.endsWith(".webp")) contentType = "image/webp";
@@ -64,18 +74,50 @@ export class StorageService {
             else if (lowerPath.endsWith(".mp4")) contentType = "video/mp4";
             else if (lowerPath.endsWith(".webm")) contentType = "video/webm";
             else if (lowerPath.endsWith(".mov")) contentType = "video/quicktime";
+            declaredMime = contentType;
+        }
+
+        if (isProviderOrInternal) {
+            // Provider outputs / internal copies: use DETECTED type and ignore wrong/generic declared MIME
+            if (detectedMime) {
+                contentType = detectedMime;
+            }
+        } else {
+            // End-user uploads: enforce strict declared == real format
+            if (
+                declaredMime &&
+                detectedMime &&
+                !declaredMime.startsWith("application/octet-stream") &&
+                !declaredMime.startsWith("multipart/")
+            ) {
+                if (declaredMime !== detectedMime) {
+                    throw new Error(
+                        `[StorageService] Content inspection failed: declared MIME "${declaredMime}" does not match file bytes ("${detectedMime}").`
+                    );
+                }
+            }
+            if (detectedMime) {
+                contentType = detectedMime;
+            }
         }
 
         try {
             return await this.provider.upload(path, body, {
+                ...options,
                 contentType,
                 upsert: true,
-                ...options,
             });
         } catch (error) {
             console.error("❌ [StorageService] Upload Error:", error);
             throw error;
         }
+    }
+
+    /**
+     * Upload a buffer directly to storage path with MIME integrity verification.
+     */
+    async uploadBuffer(path, buffer, options = {}) {
+        return this.upload(path, buffer, options);
     }
 
     /**
@@ -103,13 +145,6 @@ export class StorageService {
                 profile
             );
 
-            // Enforce MIME restrictions if profile specifies allowedMimeTypes
-            if (profile.allowedMimeTypes && mimeHint && !profile.allowedMimeTypes.includes(mimeHint)) {
-                throw new Error(
-                    `[SourcePolicy] File format "${mimeHint}" is not allowed for this operation. Allowed: ${profile.allowedMimeTypes.join(", ")}`
-                );
-            }
-
             // Sniff magic bytes to detect disguised scripts / executable payloads
             let sniffedMime = null;
             try {
@@ -119,15 +154,18 @@ export class StorageService {
                 throw new Error(`[SourcePolicy] File format validation failed: ${err.message}`);
             }
 
-            if (profile.allowedMimeTypes && sniffedMime && !profile.allowedMimeTypes.includes(sniffedMime)) {
+            // Enforce MIME restrictions using detected MIME (or mimeHint fallback)
+            const effectiveMime = sniffedMime || mimeHint;
+            if (profile.allowedMimeTypes && effectiveMime && !profile.allowedMimeTypes.includes(effectiveMime)) {
                 throw new Error(
-                    `[SourcePolicy] File format "${sniffedMime}" is not allowed for this operation. Allowed: ${profile.allowedMimeTypes.join(", ")}`
+                    `[SourcePolicy] File format "${effectiveMime}" is not allowed for this operation. Allowed: ${profile.allowedMimeTypes.join(", ")}`
                 );
             }
 
             return await this.upload(path, buffer, {
+                isProviderOutput: options.isProviderOutput !== false,
                 ...options,
-                contentType: options.contentType || sniffedMime || mimeHint || undefined,
+                contentType: sniffedMime || options.contentType || mimeHint || undefined,
             });
         } catch (e) {
             console.error("❌ [StorageService] uploadFromUrl Error:", e.message || e);

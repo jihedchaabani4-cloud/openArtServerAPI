@@ -277,3 +277,82 @@ Update `LoginPage.jsx:38` to read `data.message || data.error`:
        }
 ```
 Similarly, any global API error handlers should read `data.message` for HTTP 503 (`SERVICE_UNAVAILABLE`) and HTTP 413 (`PAYLOAD_TOO_LARGE`).
+
+---
+
+## (i) Folders (Phase 3)
+
+### 1. Project Sidebar Hierarchy
+The project sidebar hierarchy should be organized into:
+- Project brief
+- Settings
+- Elements
+- Tools
+- Folders
+  - **All assets**: A fixed, top-level item that queries all assets in the project (`GET /api/projects/:projectId/assets` without `folderId`).
+  - **User Folders Tree**: Rendered hierarchically under "Folders", displaying the folder name and direct `assetCount` badge next to each folder.
+
+### 2. Building the Client-side Folder Tree
+1. Invoke `GET /api/projects/:projectId/folders` once on project load.
+2. The response is a flat array of folder objects:
+   ```json
+   {
+     "items": [
+       {
+         "id": "6f1c7d2e-0000-0000-0000-000000000001",
+         "projectId": "a2b3c4d5-0000-0000-0000-000000000001",
+         "parentId": null,
+         "name": "Scene 1",
+         "position": 0,
+         "assetCount": 12,
+         "createdAt": "2026-10-07T10:00:00.000Z",
+         "updatedAt": "2026-10-07T10:00:00.000Z"
+       }
+     ]
+   }
+   ```
+3. Group the flat array by `parentId` (`null` for root folders) to build the hierarchical tree in client memory. No recursive SQL or multi-request queries are needed.
+4. `assetCount` indicates only direct child assets in that specific folder (excluding descendants).
+
+### 3. Breadcrumb Construction
+Build breadcrumbs dynamically from the in-memory flat folder list:
+- Root level: `All` (or `Project Name`)
+- Folder level: `All / Scene 1 / Shots` by walking `parentId` up to `null`.
+
+### 4. API Contract Endpoints
+- `GET /api/projects/:projectId/folders`
+  - Returns `{ items: [Folder, ...] }` sorted by `position`, then `name`.
+- `POST /api/projects/:projectId/folders`
+  - Body: `{ "name": "Scene 1", "parentId": null }` (`parentId` optional).
+  - Returns 201 with created Folder object.
+- `PATCH /api/folders/:folderId`
+  - Body: Any of `{ "name", "parentId", "position" }`.
+  - Returns 200 with updated Folder object. `projectId` is immutable.
+- `DELETE /api/folders/:folderId`
+  - Returns 204 No Content. Returns 409 `FOLDER_NOT_EMPTY` if it contains assets or sub-folders.
+- `GET /api/projects/:projectId/assets?folderId=<id>&includeDescendants=true&limit=50&cursor=<token>`
+  - Returns `{ items: [...], nextCursor: "..." | null }`.
+- `PATCH /api/assets/:assetId/folder`
+  - Dedicated route for moving assets. Body: `{ "folderId": "<uuid>" | null }`.
+  - Passing `folderId: null` moves the asset back to project root.
+
+### 5. Error Codes & UI Toast / Modal Handling
+- `FOLDER_NOT_EMPTY`: Display "Move or delete the content first". Folder cannot be deleted while containing assets or child folders.
+- `FOLDER_NAME_TAKEN`: Display "A folder with this name already exists at this level".
+- `FOLDER_CYCLE`: Display "Cannot move a folder into itself or one of its sub-folders".
+- `FOLDER_DEPTH_EXCEEDED`: Display "Maximum folder nesting depth (3 levels) reached".
+- `FOLDER_LIMIT_REACHED`: Display "Maximum folder limit (100 folders) reached for this project".
+
+### 6. Generation & Upload Context
+- When generating images (`POST /api/images/generate`), video (`POST /api/video/generate`), or uploading media (`POST /api/assets/upload`), include `folderId` if the user is currently inside a folder view.
+- Omit `folderId` (or pass `null`) when the user is viewing "All assets" or root.
+
+### 7. Asset Moves
+- Moving an asset must use the dedicated endpoint `PATCH /api/assets/:assetId/folder`.
+- Setting `{ "folderId": null }` moves the asset back to the project root.
+- The generic update route `PATCH /api/workflows/workflows/:id` rejects `folderId`, `projectId`, and `userId` to protect against mass-assignment.
+
+### 8. View Toggle: Direct Assets vs. Sub-folder Assets
+- By default, opening a folder queries direct child assets only (`GET /api/projects/:projectId/assets?folderId=<id>`).
+- Provide an "Include sub-folders" toggle in the asset gallery toolbar that sets `includeDescendants=true` to view all assets within the entire subtree.
+

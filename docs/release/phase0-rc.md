@@ -180,6 +180,9 @@ ALTER TABLE v2_workflow_runs
 | `ALLOW_IN_MEMORY_RATE_LIMIT` | Rate Limiter / Staging Escape | String (`"true"` \| `"false"`) | `undefined` | In production mode, if set to `"true"`, permits running in-memory rate limiting with a loud startup warning (`CRITICAL SECURITY WARNING`). For single-instance staging environments only. |
 | `INTERNAL_SECRET` | Auth / Internal S2S | String | `undefined` | In production mode, boot crashes immediately if missing or `< 32` characters. Constant-time timing-safe comparison enforced. Default secret eliminated. |
 | `INITIAL_WALLET_BALANCE` / `DEFAULT_WALLET_BALANCE` | Wallet | Number | `0` | Default credits granted when a new user wallet row is provisioned. Defaults to 0 (no free credits without explicit config). |
+| `FOLDER_MAX_DEPTH` | Folders | Number | `3` | Maximum allowed tree depth for folders in a project (root = 1). Moves/creates exceeding depth throw 400 `FOLDER_DEPTH_EXCEEDED`. |
+| `FOLDER_MAX_PER_PROJECT` | Folders | Number | `100` | Maximum number of folders allowed in a single project. Creates exceeding quota throw 400 `FOLDER_LIMIT_REACHED`. |
+| `ASSET_LIST_MAX_LIMIT` | Assets | Number | `200` | Maximum allowable `limit` parameter for `GET /api/projects/:projectId/assets` (default query limit is 50). Values exceeding this cap are clamped. |
 
 ---
 
@@ -262,6 +265,10 @@ Every environment variable required or recognized by the backend:
 | `GEMINI_API_KEY` | **YES** | Valid Google AI key | Production Google AI key | Required for LLM node execution (`gemini-3.1-flash-lite`, prompt optimizer). |
 | `FAL_KEY` | **YES** | Valid Fal.ai key | Production Fal.ai key | Required for image/video generation models running on Fal. |
 | `HUGGINGFACE_API_KEY` | Optional | Staging key | Production key | Required for models routing to HuggingFace Inference. |
+| `FOLDER_MAX_DEPTH` | NO | `3` | `3` | Maximum nesting depth for folders in a project (root = 1). |
+| `FOLDER_MAX_PER_PROJECT` | NO | `100` | `100` | Quota cap on folders per project. |
+| `ASSET_LIST_MAX_LIMIT` | NO | `200` | `200` | Ceiling on page size for asset listing endpoint. |
+
 
 ---
 

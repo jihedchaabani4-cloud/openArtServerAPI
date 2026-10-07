@@ -48,8 +48,22 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         }
 
         const userId    = req.user.id;
-        const projectId = req.body?.project_id || null;
-        const sessionId = req.body?.session_id || null;
+        const projectId = req.body?.project_id || req.body?.projectId || null;
+        const sessionId = req.body?.session_id || req.body?.sessionId || null;
+        const rawFolderId = req.body?.folder_id || req.body?.folderId || null;
+
+        if (projectId) {
+            await assertOwns("project", projectId, userId);
+        }
+
+        let validatedFolderId = null;
+        if (rawFolderId && rawFolderId !== "none") {
+            if (!projectId) {
+                return res.status(400).json({ ok: false, errorCode: "VALIDATION_ERROR", error: "project_id is required when folderId is specified" });
+            }
+            await folderService.assertFolderUsable(rawFolderId, userId, projectId);
+            validatedFolderId = rawFolderId;
+        }
 
         const sourceInput = req.file || req.body?.base64;
         if (!sourceInput) {
@@ -61,6 +75,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
             userId,
             projectId,
             sessionId,
+            folderId: validatedFolderId,
             displayName: req.file?.originalname || "Upload",
             purpose: "default",
             req,
@@ -82,7 +97,14 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         });
 
     } catch (err) {
-        console.error("❌ [AssetsRoute] Upload error:", err.message);
+        if (err instanceof AppError) {
+            return res.status(err.statusCode).json({
+                ok: false,
+                errorCode: err.errorCode || "APP_ERROR",
+                message: err.message,
+                error: err.message,
+            });
+        }
         return res.status(err.statusCode || 500).json({ ok: false, error: err.message });
     }
 });

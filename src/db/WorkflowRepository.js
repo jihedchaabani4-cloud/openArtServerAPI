@@ -28,6 +28,8 @@ export class WorkflowRepository extends BaseRepository {
 
         if (data.id) newWorkflow.id = data.id;
         if (workflow_type) newWorkflow.workflow_type = workflow_type;
+        if (data.folder_id !== undefined) newWorkflow.folder_id = data.folder_id || null;
+        if (data.user_id) newWorkflow.user_id = data.user_id;
 
         const { select = "*" } = options;
 

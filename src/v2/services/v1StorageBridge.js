@@ -56,11 +56,27 @@ export class V1StorageBridge {
 
     const validWfType = workflowType;
 
+    let effectiveFolderId = null;
+    if (params.folderId) {
+      try {
+        const folder = await this.db.folders.findOwnedInProject(params.folderId, projectId, userId);
+        if (folder) {
+          effectiveFolderId = params.folderId;
+        } else {
+          storageLogger.warn({ folderId: params.folderId, projectId, userId }, "Folder no longer exists or not accessible in worker; falling back to null folder_id");
+        }
+      } catch (err) {
+        storageLogger.warn({ folderId: params.folderId, err }, "Error checking folder in worker; falling back to null folder_id");
+      }
+    }
+
     const workflowData = {
       project_id: projectId,
       session_id: sessionId,
       display_name: displayName,
       workflow_type: validWfType,
+      folder_id: effectiveFolderId,
+      user_id: userId,
     };
 
     let generationConfigId = null;

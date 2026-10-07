@@ -631,6 +631,13 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
   });
 
+  it("TEST R4-46: GET /api/projects/:projectId/assets for foreign project returns 404", async () => {
+    const res = await reqAlice(`/api/projects/${FOREIGN_PROJ_ID}/assets`, {
+      method: "GET",
+    });
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+  });
+
   // ── PART 2: Generic Automated Test — Walks Dumped Route Table & Asserts 100% Foreign Refusal Coverage ──
 
   it("TEST R4-GENERIC: Every authenticated route touching a resource ID has an explicit foreign-refusal test asserting 404/403", () => {
@@ -649,6 +656,7 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
       "POST /api/characters/:characterId/upload",
       "DELETE /api/folders/:folderId",
       "PATCH /api/folders/:folderId",
+      "GET /api/projects/:projectId/assets",
       "GET /api/projects/:projectId/folders",
       "POST /api/projects/:projectId/folders",
       "DELETE /api/projects/:id",

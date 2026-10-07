@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { db, useCaseService } from "../src/container.js";
+import { db, useCaseService, folderService } from "../src/container.js";
 import { createLogger } from "../src/infrastructure/logging/index.js";
 
 const controllerLogger = createLogger("controller");
@@ -97,6 +97,14 @@ export async function generateImage(req, res) {
     // ── 0. Enforce Project Ownership ─────────────────────────────────────────
     await assertOwns("project", projectId, userId);
 
+    // ── 0a. Enforce Folder Usability (BEFORE billing and workflow creation) ───
+    const rawFolderId = req.body.folder_id || req.body.folderId || null;
+    let validatedFolderId = null;
+    if (rawFolderId && rawFolderId !== "none") {
+      await folderService.assertFolderUsable(rawFolderId, userId, projectId);
+      validatedFolderId = rawFolderId;
+    }
+
     // ── 0b. Enforce Reference Ownership ──────────────────────────────────────
     for (const refId of sanitizedReferences) {
       await assertOwnsAny(["workflow", "character", "element", "media"], refId, userId);
@@ -133,6 +141,8 @@ export async function generateImage(req, res) {
       session_id:    sessionId,
       display_name:  prompt.slice(0, 60),
       workflow_type: "GENERATION",
+      folder_id:     validatedFolderId,
+      user_id:       userId,
     });
 
     controllerLogger.info({ workflowId, projectId, outputCount }, `Workflow created: ${workflowId}`);

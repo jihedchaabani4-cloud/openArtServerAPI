@@ -307,6 +307,8 @@ export class MediaIngestionService {
                     display_name: displayName || originalName || "Ingested Asset",
                     workflow_type: "UPLOAD",
                     variation_index: null,
+                    folder_id: options.folderId || null,
+                    user_id: userId,
                 });
                 targetWorkflowId = containerWf.id;
             }

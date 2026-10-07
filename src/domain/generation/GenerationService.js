@@ -1,13 +1,17 @@
 /**
  * GenerationService
- * Domain Service — owns all generation read/mutation business logic.
+ * Domain Service — owns all generation read/mutation business logic and project asset listings.
  *
- * Extracted from: generationsQueryController.js, generationsMutationController.js
- * Feature: 026-backend-platform-layer-refactor
+ * Owns:
+ * - Generation reads and mutations (generationsQuery / generationsMutation)
+ * - Project asset listings with folder filtering, recursive traversal, and cursor pagination
+ * - Project ownership and folder usability validation for asset listings
  *
- * Layer: Domain (src/domain/generation/)
- * Dependencies: db.projects, db.workflows, db.media, db.configs (via Repositories only)
- * No direct supabase imports — all DB access via injected `db` repositories.
+ * Public methods:
+ * - listGenerations(...)
+ * - getLibrary(...)
+ * - mutateGeneration(...)
+ * - listProjectAssets({ userId, projectId, folderId, includeDescendants, limit, cursor })
  */
 
 import { randomUUID } from "node:crypto";
@@ -16,16 +20,17 @@ import { calculateAspectRatio } from "../../utils/ratioUtils.js";
 import { toAssetDto } from "../assetDto.js";
 import { indexChildren, collectDescendantIds } from "../folderTree.js";
 import { AppError } from "../../utils/AppError.js";
+import { createLogger } from "../../infrastructure/logging/index.js";
 
 // ── Structured log helper (FR-011) ───────────────────────────────────────────
+const genLogger = createLogger("domain:generation");
 
 function log(operation, status, meta = {}) {
-    console.log(JSON.stringify({
-        timestamp: new Date().toISOString(),
+    genLogger.debug({
         operation: `GenerationService.${operation}`,
         status,
         ...meta,
-    }));
+    });
 }
 
 export class GenerationService {
@@ -312,6 +317,23 @@ export class GenerationService {
      * @returns {Promise<{ items: Object[], nextCursor: string|null }>}
      */
     async listProjectAssets({ userId, projectId, folderId, includeDescendants, limit, cursor }) {
+        if (!userId) {
+            throw new AppError("Authentication required", 401);
+        }
+        if (!projectId) {
+            const err = new AppError("projectId is required", 400);
+            err.errorCode = "VALIDATION_ERROR";
+            throw err;
+        }
+
+        // Ownership check: project must belong to user (404 on missing or foreign)
+        const ownedProjects = await this.db.projects.findByUser(userId, projectId);
+        if (!ownedProjects || ownedProjects.length === 0) {
+            const err = new AppError("Project not found", 404);
+            err.errorCode = "NOT_FOUND";
+            throw err;
+        }
+
         let targetFolderIds = null;
         let folderIdNull = false;
 

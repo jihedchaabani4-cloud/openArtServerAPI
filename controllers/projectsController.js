@@ -1,6 +1,5 @@
 import { supabase } from "../lib/supabase.js";
 import { generationService } from "../src/container.js";
-import { assertOwns } from "../src/platform/security/ownership.js";
 import { AppError } from "../src/utils/AppError.js";
 
 /** GET all projects for the authenticated user */
@@ -172,10 +171,6 @@ export const listAssets = async (req, res, next) => {
     try {
         const { projectId } = req.params;
         const userId = req.user.id;
-
-        // 1. Ownership check: project must belong to user (404 on missing or foreign)
-        await assertOwns("project", projectId, userId);
-
         const { folderId, includeDescendants, limit, cursor } = req.query;
 
         const result = await generationService.listProjectAssets({

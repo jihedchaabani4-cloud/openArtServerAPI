@@ -333,11 +333,11 @@ export class FolderService {
    * Null folderId is accepted as valid (represents project root).
    */
   async assertFolderUsable(folderId, userId, projectId) {
-    if (folderId === null || folderId === undefined) {
+    if (folderId === null || folderId === undefined || folderId === "none") {
       return null;
     }
 
-    const folder = await this.folderRepo.findOwnedInProject(folderId, projectId, userId);
+    const folder = await this.folderRepo.findOwnedInProject(folderId.trim(), projectId, userId);
     if (!folder) {
       throw new FolderError(
         `Folder ${folderId} not found in project ${projectId}`,

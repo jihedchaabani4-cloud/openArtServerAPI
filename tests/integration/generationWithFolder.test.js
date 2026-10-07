@@ -72,8 +72,8 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
     ];
 
     folders = [
-      { id: "folder-valid", project_id: "proj-A", user_id: "user-A", name: "Valid Folder" },
-      { id: "folder-foreign", project_id: "proj-B", user_id: "user-B", name: "Foreign Folder" },
+      { id: "00000000-0000-4000-8000-000000000001", project_id: "proj-A", user_id: "user-A", name: "Valid Folder" },
+      { id: "00000000-0000-4000-8000-000000000002", project_id: "proj-B", user_id: "user-B", name: "Foreign Folder" },
     ];
 
     workflows = [];
@@ -138,7 +138,7 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
           prompt: "A beautiful mountain",
           model: "seedream_v5",
           project_id: "proj-A",
-          folder_id: "folder-foreign",
+          folder_id: "00000000-0000-4000-8000-000000000002",
         }),
       });
 
@@ -158,14 +158,14 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
           prompt: "A beautiful forest",
           model: "seedream_v5",
           project_id: "proj-A",
-          folder_id: "folder-valid",
+          folder_id: "00000000-0000-4000-8000-000000000001",
         }),
       });
 
       const data = await res.json();
       assert.equal(res.status, 200, `Expected 200, got ${res.status}: ${JSON.stringify(data)}`);
       assert.equal(workflows.length, 1);
-      assert.equal(workflows[0].folder_id, "folder-valid");
+      assert.equal(workflows[0].folder_id, "00000000-0000-4000-8000-000000000001");
     });
   });
 
@@ -181,7 +181,7 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
           prompt: "A river flowing",
           model: "seedance_2_5_extend",
           project_id: "proj-A",
-          folder_id: "folder-foreign",
+          folder_id: "00000000-0000-4000-8000-000000000002",
         }),
       });
 
@@ -201,7 +201,7 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
         body: JSON.stringify({
           base64: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
           project_id: "proj-A",
-          folder_id: "folder-foreign",
+          folder_id: "00000000-0000-4000-8000-000000000002",
         }),
       });
 
@@ -219,13 +219,13 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
         body: JSON.stringify({
           base64: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
           project_id: "proj-A",
-          folder_id: "folder-valid",
+          folder_id: "00000000-0000-4000-8000-000000000001",
         }),
       });
 
       assert.equal(res.status, 200);
       assert.equal(workflows.length, 1);
-      assert.equal(workflows[0].folder_id, "folder-valid");
+      assert.equal(workflows[0].folder_id, "00000000-0000-4000-8000-000000000001");
     });
   });
 

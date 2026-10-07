@@ -3,6 +3,7 @@ import { db, useCaseService, folderService } from "../src/container.js";
 import { createLogger } from "../src/infrastructure/logging/index.js";
 
 const controllerLogger = createLogger("controller");
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 import { resolveMediaMetadata } from "../src/platform/media/mediaMetadataResolver.js";
 import { assertOwns, assertOwnsAny } from "../src/platform/security/ownership.js";
@@ -101,8 +102,11 @@ export async function generateImage(req, res) {
     const rawFolderId = req.body.folder_id || req.body.folderId || null;
     let validatedFolderId = null;
     if (rawFolderId && rawFolderId !== "none") {
-      await folderService.assertFolderUsable(rawFolderId, userId, projectId);
-      validatedFolderId = rawFolderId;
+      if (typeof rawFolderId !== "string" || !rawFolderId.trim() || !UUID_REGEX.test(rawFolderId.trim())) {
+        return res.status(400).json({ ok: false, code: "VALIDATION_ERROR", message: "folderId must be a valid UUID" });
+      }
+      await folderService.assertFolderUsable(rawFolderId.trim(), userId, projectId);
+      validatedFolderId = rawFolderId.trim();
     }
 
     // ── 0b. Enforce Reference Ownership ──────────────────────────────────────

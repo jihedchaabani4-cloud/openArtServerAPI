@@ -26,6 +26,8 @@
 
 ## High Severity
 - [High] src/domain/project/ProjectReadService.js:62 | lets projects with user_id NULL be read by any user (assertOwns rejects, but ProjectReadService check is permissive) | found during PREP-P3
+- [High] src/platform/security/ownership.js | Route ownership audit covers only URL parameters (:id), not IDs provided in JSON request bodies (e.g. folderId, projectId, sessionId). Protection for body IDs relies on manual service/controller checks | found during P3 audit
+- [High] routes/assets.js:52 (POST /upload) | session_id parameter in request body is forwarded directly to MediaIngestionService / WorkflowRepository.createWorkflow without ownership or project scoping checks, allowing potential cross-tenant / IDOR session linkage | found during P3 audit
 
 ## Remaining Pre-existing Failures (9 total)
 

@@ -227,25 +227,44 @@ export class WorkflowRepository extends BaseRepository {
      * Updates folder_id on a workflow, scoped to its owner and project.
      * @param {string} workflowId
      * @param {string|null} folderId
+    /**
+     * Updates folder_id for a workflow row strictly scoped by project_id and id.
+     * userId and projectId are required.
+     * @param {string} workflowId
+     * @param {string|null} folderId
      * @param {string} userId
-     * @param {string|null} [projectId]
+     * @param {string} projectId
      * @returns {Promise<Object>}
      */
-    async updateFolderId(workflowId, folderId, userId, projectId = null) {
-        let query = this.client()
-            .from(this.tableName)
-            .update({ folder_id: folderId })
-            .eq("id", workflowId);
+    async updateFolderId(workflowId, folderId, userId, projectId) {
+        if (!workflowId || !userId || !projectId) {
+            throw new Error("workflowId, userId, and projectId are required to update folderId");
+        }
 
-        if (userId) {
-            query = query.eq("user_id", userId);
-        }
-        if (projectId) {
-            query = query.eq("project_id", projectId);
-        }
+        const query = this.client()
+            .from(this.tableName)
+            .update({ folder_id: folderId, user_id: userId })
+            .eq("id", workflowId)
+            .eq("project_id", projectId);
 
         const { data, error } = await query.select().single();
-        if (error) throw error;
+        if (error) {
+            if (error.code === "PGRST116") {
+                const notFoundErr = new Error(`Workflow ${workflowId} not found in project ${projectId}`);
+                notFoundErr.code = "PGRST116";
+                notFoundErr.statusCode = 404;
+                notFoundErr.errorCode = "NOT_FOUND";
+                throw notFoundErr;
+            }
+            if (error.code === "23503") {
+                const fkErr = new Error(`Folder ${folderId} not found in project ${projectId}`);
+                fkErr.code = "23503";
+                fkErr.statusCode = 404;
+                fkErr.errorCode = "NOT_FOUND";
+                throw fkErr;
+            }
+            throw error;
+        }
         return data;
     }
 

@@ -69,7 +69,7 @@ describe("Asset Folder Move Route & Mass-Assignment Defense (Task F-T6)", () => 
 
     folders = [
       {
-        id: "folder-A-1",
+        id: "00000000-0000-4000-8000-0000000000a1",
         project_id: "proj-A1",
         user_id: "user-A",
         parent_id: null,
@@ -77,7 +77,7 @@ describe("Asset Folder Move Route & Mass-Assignment Defense (Task F-T6)", () => 
         position: 0,
       },
       {
-        id: "folder-A-2",
+        id: "00000000-0000-4000-8000-0000000000a2",
         project_id: "proj-A1",
         user_id: "user-A",
         parent_id: null,
@@ -85,7 +85,7 @@ describe("Asset Folder Move Route & Mass-Assignment Defense (Task F-T6)", () => 
         position: 1,
       },
       {
-        id: "folder-A-other-proj",
+        id: "00000000-0000-4000-8000-0000000000a3",
         project_id: "proj-A2",
         user_id: "user-A",
         parent_id: null,
@@ -93,7 +93,7 @@ describe("Asset Folder Move Route & Mass-Assignment Defense (Task F-T6)", () => 
         position: 0,
       },
       {
-        id: "folder-B-1",
+        id: "00000000-0000-4000-8000-0000000000b1",
         project_id: "proj-B1",
         user_id: "user-B",
         parent_id: null,
@@ -107,7 +107,7 @@ describe("Asset Folder Move Route & Mass-Assignment Defense (Task F-T6)", () => 
         id: "wf-A-1",
         project_id: "proj-A1",
         user_id: "user-A",
-        folder_id: "folder-A-1",
+        folder_id: "00000000-0000-4000-8000-0000000000a1",
         display_name: "Workflow A1",
         create_time: new Date().toISOString(),
       },
@@ -115,7 +115,7 @@ describe("Asset Folder Move Route & Mass-Assignment Defense (Task F-T6)", () => 
         id: "wf-B-1",
         project_id: "proj-B1",
         user_id: "user-B",
-        folder_id: "folder-B-1",
+        folder_id: "00000000-0000-4000-8000-0000000000b1",
         display_name: "Workflow B1",
         create_time: new Date().toISOString(),
       },
@@ -176,13 +176,13 @@ describe("Asset Folder Move Route & Mass-Assignment Defense (Task F-T6)", () => 
           Authorization: "Bearer token-user-A",
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ folderId: "folder-A-2" }),
+        body: JSON.stringify({ folderId: "00000000-0000-4000-8000-0000000000a2" }),
       });
 
       assert.equal(res.status, 200);
       const data = await res.json();
-      assert.equal(data.folderId, "folder-A-2");
-      assert.equal(workflows.find((w) => w.id === "wf-A-1").folder_id, "folder-A-2");
+      assert.equal(data.folderId, "00000000-0000-4000-8000-0000000000a2");
+      assert.equal(workflows.find((w) => w.id === "wf-A-1").folder_id, "00000000-0000-4000-8000-0000000000a2");
     });
 
     it("Scenario 8: moves asset to null (returns to project root)", async () => {
@@ -223,12 +223,12 @@ describe("Asset Folder Move Route & Mass-Assignment Defense (Task F-T6)", () => 
           Authorization: "Bearer token-user-A",
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ folderId: "folder-B-1" }),
+        body: JSON.stringify({ folderId: "00000000-0000-4000-8000-0000000000b1" }),
       });
 
       assert.equal(res.status, 404);
       // Asset folder must NOT change
-      assert.equal(workflows.find((w) => w.id === "wf-A-1").folder_id, "folder-A-1");
+      assert.equal(workflows.find((w) => w.id === "wf-A-1").folder_id, "00000000-0000-4000-8000-0000000000a1");
     });
 
     it("refuses moving asset to a folder of another project of the same user -> 404", async () => {
@@ -238,11 +238,11 @@ describe("Asset Folder Move Route & Mass-Assignment Defense (Task F-T6)", () => 
           Authorization: "Bearer token-user-A",
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ folderId: "folder-A-other-proj" }),
+        body: JSON.stringify({ folderId: "00000000-0000-4000-8000-0000000000a3" }),
       });
 
       assert.equal(res.status, 404);
-      assert.equal(workflows.find((w) => w.id === "wf-A-1").folder_id, "folder-A-1");
+      assert.equal(workflows.find((w) => w.id === "wf-A-1").folder_id, "00000000-0000-4000-8000-0000000000a1");
     });
 
     it("refuses moving another user's asset to root (cross-tenant) -> 404", async () => {
@@ -265,7 +265,7 @@ describe("Asset Folder Move Route & Mass-Assignment Defense (Task F-T6)", () => 
           Authorization: "Bearer token-user-B",
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ folderId: "folder-B-1" }),
+        body: JSON.stringify({ folderId: "00000000-0000-4000-8000-0000000000b1" }),
       });
 
       assert.equal(res.status, 404);
@@ -316,7 +316,7 @@ describe("Asset Folder Move Route & Mass-Assignment Defense (Task F-T6)", () => 
             Authorization: "Bearer token-user-A",
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ folderId: "folder-A-2" }),
+          body: JSON.stringify({ folderId: "00000000-0000-4000-8000-0000000000a2" }),
         });
 
         assert.equal(res.status, 404);

@@ -9,6 +9,7 @@ import { AppError } from "../src/utils/AppError.js";
 import { createLogger } from "../src/infrastructure/logging/index.js";
 
 const routeLogger = createLogger("route:assets");
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const router = Router();
 router.use(requireAuth);
@@ -58,11 +59,14 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 
         let validatedFolderId = null;
         if (rawFolderId && rawFolderId !== "none") {
+            if (typeof rawFolderId !== "string" || !rawFolderId.trim() || !UUID_REGEX.test(rawFolderId.trim())) {
+                return res.status(400).json({ ok: false, errorCode: "VALIDATION_ERROR", error: "folderId must be a valid UUID or null" });
+            }
             if (!projectId) {
                 return res.status(400).json({ ok: false, errorCode: "VALIDATION_ERROR", error: "project_id is required when folderId is specified" });
             }
-            await folderService.assertFolderUsable(rawFolderId, userId, projectId);
-            validatedFolderId = rawFolderId;
+            await folderService.assertFolderUsable(rawFolderId.trim(), userId, projectId);
+            validatedFolderId = rawFolderId.trim();
         }
 
         const sourceInput = req.file || req.body?.base64;
@@ -138,8 +142,8 @@ router.patch("/:assetId/folder", async (req, res, next) => {
         // Normalize folderId: null, undefined, or "none" (case-insensitive) -> null
         let targetFolderId = null;
         if (rawFolderId !== null && rawFolderId !== undefined && String(rawFolderId).toLowerCase() !== "none") {
-            if (typeof rawFolderId !== "string" || !rawFolderId.trim()) {
-                return res.status(400).json({ ok: false, error: "Invalid folderId format" });
+            if (typeof rawFolderId !== "string" || !rawFolderId.trim() || !UUID_REGEX.test(rawFolderId.trim())) {
+                return res.status(400).json({ ok: false, errorCode: "VALIDATION_ERROR", error: "folderId must be a valid UUID or null" });
             }
             targetFolderId = rawFolderId.trim();
         }
@@ -157,11 +161,11 @@ router.patch("/:assetId/folder", async (req, res, next) => {
             const updated = await db.workflows.updateFolderId(assetId, targetFolderId, userId, asset.project_id);
             return res.status(200).json(toAssetDto(updated || { ...asset, folder_id: targetFolderId }));
         } catch (dbErr) {
-            if (dbErr.code === "23503") {
+            if (dbErr.code === "23503" || dbErr.code === "PGRST116" || dbErr.statusCode === 404) {
                 return res.status(404).json({
                     ok: false,
                     errorCode: "NOT_FOUND",
-                    message: "Target folder not found in project",
+                    message: "Asset or target folder not found in project",
                 });
             }
             throw dbErr;

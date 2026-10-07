@@ -105,6 +105,7 @@ export class ElementService {
                 session_id:    null,
                 workflow_type: "ELEMENT_SHEET",
                 display_name:  name.trim(),
+                user_id:       userId || (safeUserId !== "anonymous" ? safeUserId : null),
             });
 
             // 2. Ingest all source images → media records

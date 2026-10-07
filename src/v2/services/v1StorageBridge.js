@@ -287,6 +287,7 @@ export class V1StorageBridge {
     const workflowData = {
       project_id: projectId,
       session_id: sessionId,
+      user_id: userId || null,
       display_name: displayName,
       workflow_type: workflowType,
     };

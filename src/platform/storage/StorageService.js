@@ -3,6 +3,9 @@ import { StoragePathResolver, storagePathResolver } from "./StoragePathResolver.
 import { SourceReader } from "../media-ingestion/SourceReader.js";
 import { SourcePolicy } from "../media-ingestion/SourcePolicy.js";
 import { MediaInspector } from "../media-ingestion/MediaInspector.js";
+import { createLogger } from "../../infrastructure/logging/index.js";
+
+const storageLogger = createLogger("storage");
 
 /**
  * StorageService
@@ -143,8 +146,9 @@ export class StorageService {
                 const runId = options.runId || "none";
                 const model = options.model || "none";
                 const provider = options.provider || options.providerId || "none";
-                console.warn(
-                    `⚠️ [StorageService] Unrecognized format for provider asset. Falling back to safe type "${contentType}". runId=${runId}, model=${model}, provider=${provider}`
+                storageLogger.warn(
+                    { event: "storage.fallback_type", runId, model, provider, contentType },
+                    "Unrecognized format for provider asset; falling back to safe type"
                 );
             }
         } else {
@@ -173,7 +177,7 @@ export class StorageService {
                 upsert: true,
             });
         } catch (error) {
-            console.error("❌ [StorageService] Upload Error:", error);
+            storageLogger.error({ event: "storage.upload_error", err: error.message }, "Storage upload error");
             throw error;
         }
     }
@@ -241,7 +245,7 @@ export class StorageService {
                 contentType: sniffedMime || options.contentType || mimeHint || undefined,
             });
         } catch (e) {
-            console.error("❌ [StorageService] uploadFromUrl Error:", e.message || e);
+            storageLogger.error({ event: "storage.upload_from_url_error", err: e.message || String(e) }, "Storage uploadFromUrl error");
             throw e;
         }
     }
@@ -253,7 +257,7 @@ export class StorageService {
         try {
             await this.provider.delete(path);
         } catch (error) {
-            console.error("❌ [StorageService] Delete Error:", error);
+            storageLogger.error({ event: "storage.delete_error", err: error.message }, "Storage delete error");
             throw error;
         }
     }
@@ -271,7 +275,7 @@ export class StorageService {
         try {
             return await this.provider.deleteFiles(uniquePaths);
         } catch (error) {
-            console.error("❌ [StorageService] Batch Delete Error:", error);
+            storageLogger.error({ event: "storage.batch_delete_error", err: error.message }, "Storage batch delete error");
             return {
                 deletedCount: 0,
                 failures: uniquePaths.map((p) => ({ path: p, error })),

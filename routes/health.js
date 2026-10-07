@@ -8,7 +8,7 @@ const router = express.Router();
  * Minimal response, always 200 { status: "ok" } as long as the process is running.
  */
 router.get("/", (req, res) => {
-    res.json({ status: "ok" });
+    res.status(200).json({ ok: true });
 });
 
 export default router;

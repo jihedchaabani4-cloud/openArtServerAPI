@@ -177,10 +177,20 @@ headers: {
      ```
    - The backend already enforces tenant ownership cleanly via `req.user.id` on both `GET /api/workflows/project-data/:projectId` and `PATCH /api/workflows/workflows/:id`. When the user is authenticated and owns the workflow, normal JWT authorization succeeds without any internal secret.
 
-6. **RC1.4-D2.5 Security Hardening Finding**:
-   - The backend `src/middleware/auth.js` now strictly restricts `x-internal-secret` to an explicit server-to-server route allow-list (`INTERNAL_SECRET_ALLOWED_ROUTE_PATTERNS`).
+6. **RC1.4-D2.5 & D2.6 Security Hardening Finding**:
+   - The backend `src/middleware/auth.js` now strictly restricts `x-internal-secret` to an explicit server-to-server route allow-list (`INTERNAL_SECRET_ALLOWED_METHOD_PATH_PAIRS`) and requires `INTERNAL_AUTH_ENABLED === "true"`.
    - Sending `x-internal-secret` on non-allowlisted endpoints (e.g. `/api/wallet/*`, `/api/payments/*`) is strictly ignored and rejected without a valid Supabase JWT.
    - The frontend (`my-app`) must never bundle or transmit `x-internal-secret` under any circumstance. All browser requests must authenticate strictly via standard user session JWTs.
+
+### ElementVisionService: stop using the internal secret
+- **Current behavior**: Sends `x-internal-secret` and `x-user-id`.
+- **Required change**: Use the logged-in user's JWT (`Authorization: Bearer <access token>`, same way the other frontend services do) on exactly these two calls:
+  - `GET /api/workflows/project-data/:projectId`
+  - `PATCH /api/workflows/workflows/:id`
+  Remove both internal headers (`x-internal-secret` and `x-user-id`). Remove `INTERNAL_SECRET` from every frontend env file and build config.
+- **Deploy order**: Ship the frontend change BEFORE (or together with) the backend release that turns the internal path off, otherwise element vision breaks.
+- **Check after deploy**: Element vision works for a normal logged-in user; the network tab shows no `x-internal-secret`.
+
 
 
 

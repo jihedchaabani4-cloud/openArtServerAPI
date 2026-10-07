@@ -1,12 +1,12 @@
 # STATE
-Current phase: P-1    Current task: SETUP-1
+Current phase: P0    Current task: D2.6
 Updated: 2026-10-07
 
 | Task | Status (TODO/DONE/BLOCKED/SKIPPED) | Commit | Report |
 |---|---|---|---|
-| SETUP-1 | DONE | | docs/plan/reports/SETUP-1.md |
-| SETUP-2 | TODO | | |
-| D2.6 | TODO | | |
+| SETUP-1 | DONE | 1c52bff | docs/plan/reports/SETUP-1.md |
+| SETUP-2 | SKIPPED | | docs/plan/reports/SETUP-2.md |
+| D2.6 | DONE | | docs/plan/reports/D2.6.md |
 | D3 | TODO | | |
 | SES0 | TODO | | |
 | GEN1 | TODO | | |

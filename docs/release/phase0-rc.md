@@ -433,3 +433,63 @@ If critical regressions or alerts occur:
    * Google (`nanobana_pro`, `gemini`) and WaveSpeed (`nanobana_2`, `gpt_image_2`, `wan_3_0`, `seedance_2_5`) execute via vendor SDK clients; LTX models execute via REST runners with validated response mappings.
 4. **Reaper Cleanup Heartbeats**:
    * The hold reaper relies on heartbeat updates on active workflow runs. In case of catastrophic worker loss without SIGTERM, holds expire after `HOLD_TTL_SECONDS` (10 minutes) and are released automatically.
+
+---
+
+## 8. D2.6 Hardening Configuration & Staging Operations
+
+### 8.1 Internal Secret & Environment Variables
+- `INTERNAL_AUTH_ENABLED`: Must be unset or false in production.
+  - When unset, empty, or `"false"`, `x-internal-secret` and `x-user-id` headers are completely ignored, and requests fall through to normal JWT authentication.
+  - When `"true"`, requests are strictly constrained to:
+    - `GET /api/workflows/project-data/:projectId`
+    - `PATCH /api/workflows/workflows/:id`
+  - Generation, billing, characters, elements, and other paths unconditionally reject the secret.
+
+### 8.2 Health & Readiness Probes
+- **Load balancer**: health check target = `/ready`. Platform restart probe (liveness) = `/health`.
+- `GET /health` (Liveness): Always returns HTTP 200 with minimal payload `{ "ok": true }`. Does not query Redis or database to prevent cascading restart loops during transient dependency outages.
+- `GET /ready` (Readiness): Verifies rate-limit Redis and queue Redis readiness.
+  - Returns HTTP 200 with `{ "ready": true }` when both connections are ready.
+  - Returns HTTP 503 with `{ "ready": false }` if either connection is disconnected or failing pings.
+  - Leaks zero internal hostnames, versions, or error details to unauthenticated callers.
+
+### 8.3 In-Flight Upload Memory Cap & Sizing Guide
+Uploads are buffered in memory (`Buffer.concat` in `sizeLimitedStorage.js`), making explicit RAM bounds vital against OOM failures.
+- `MAX_IN_FLIGHT_UPLOAD_BYTES`: Default 250MB (`262144000` bytes). Read in `src/middleware/sizeLimitedStorage.js`.
+- `MAX_CONCURRENT_UPLOADS_PER_USER`: Default `2`. Read in `src/middleware/sizeLimitedStorage.js`.
+- **Sizing Rule**: In-flight cap is about 25% of instance RAM and never below 2 x the largest single allowed file (video 100MB means at least 200MB).
+- **Starting Sizing Recommendations**:
+  | Instance RAM | Recommended `MAX_IN_FLIGHT_UPLOAD_BYTES` | Max Concurrent Per User | Notes |
+  |---|---|---|---|
+  | 512 MB | 128 MB | 1 - 2 | Below 2 x 100MB; allow only 1 large upload concurrently |
+  | 1 GB | 250 MB (default) | 2 | Standard tier |
+  | 2 GB | 500 MB | 2 - 3 | High throughput |
+  | 4 GB | 1000 MB | 3 | Dedicated ingestion nodes |
+- **Client Behavior**: When upload cap is reached, server returns **HTTP 503** with `Retry-After: 5` header and payload `code: "SERVICE_UNAVAILABLE"`.
+- **Reservation Leak Check**: Verified leak-free. Buffer reservations decrement reliably on stream completion, client disconnect/abort (`req.on("close")`, `req.on("aborted")`), upload timeout, or inspection failure.
+
+### 8.4 Staging Asset URL Retrieval & Curl Verification
+To verify storage object accessibility without hardcoding guessed bucket names:
+
+#### Step 1: Obtain a Real Stored Object URL
+- **Option 1 (API - Recommended)**:
+  Call `GET /api/workflows/project-data/:projectId` or `GET /api/media` as an authenticated user. Inspect the returned JSON payload and copy the `url` field of an existing completed media item.
+- **Option 2 (Supabase SQL Editor)**:
+  Run in Supabase dashboard:
+  ```sql
+  SELECT bucket_id, name FROM storage.objects ORDER BY created_at DESC LIMIT 5;
+  ```
+  Construct the URL using the project's standard formula:
+  `${SUPABASE_URL}/storage/v1/object/public/${bucket_id}/${name}`
+
+#### Step 2: Verification Curl Command
+Execute curl against the real resolved URL:
+```bash
+curl -I -s "<REAL_URL_FROM_STEP_1>"
+```
+Expected checks:
+1. HTTP status code is **200 OK**.
+2. `Content-Type` matches the valid media format (e.g. `image/png`, `image/webp`, `video/mp4`).
+3. SSRF / private IP protections correctly block non-public origins on provider ingestion.
+

@@ -1,4 +1,7 @@
 import Redis from 'ioredis';
+import { createLogger } from '../infrastructure/logging/index.js';
+
+const redisLogger = createLogger('redis');
 
 const redisUrl = process.env.REDIS_URL || process.env.REDIS_DEV_URL || "";
 const redisHost = process.env.REDIS_HOST || "127.0.0.1";
@@ -21,7 +24,7 @@ const BASE_OPTIONS = {
   retryStrategy(times) {
     // Stop retrying after max attempts — prevents quota drain on Upstash plan limits
     if (times > MAX_RECONNECT_ATTEMPTS) {
-      console.error(`[Redis] Max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Giving up.`);
+      redisLogger.error({ event: 'redis.reconnect_exhausted', maxAttempts: MAX_RECONNECT_ATTEMPTS }, `[Redis] Max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Giving up.`);
       return null; // null = stop retrying
     }
     return Math.min(times * 200, 3000); // Smooth exponential reconnect backoff
@@ -59,26 +62,26 @@ export const rateLimitRedisConnection = redisUrl
 // Eagerly connect outside test environment to prevent 503 on boot
 if (!isTestEnv && rateLimitRedisConnection.status === "wait") {
   rateLimitRedisConnection.connect().catch((err) => {
-    console.warn('[RateLimit Redis] Eager connection warning:', err.message);
+    redisLogger.warn({ event: 'redis.eager_connect_warning', err: err.message }, '[RateLimit Redis] Eager connection warning');
   });
 }
 
 // Error handlers to prevent unhandled log floods
 redisConnection.on('error', (err) => {
   if (!err.message?.includes('enableOfflineQueue')) {
-    console.warn('[Redis] Connection warning:', err.message);
+    redisLogger.warn({ event: 'redis.connection_warning', err: err.message }, '[Redis] Connection warning');
   }
 });
 
 workerRedisConnection.on('error', (err) => {
   if (!err.message?.includes('enableOfflineQueue')) {
-    console.warn('[Worker Redis] Connection warning:', err.message);
+    redisLogger.warn({ event: 'redis.worker_connection_warning', err: err.message }, '[Worker Redis] Connection warning');
   }
 });
 
 rateLimitRedisConnection.on('error', (err) => {
   if (!err.message?.includes('enableOfflineQueue')) {
-    console.warn('[RateLimit Redis] Connection warning:', err.message);
+    redisLogger.warn({ event: 'redis.ratelimit_connection_warning', err: err.message }, '[RateLimit Redis] Connection warning');
   }
 });
 
@@ -100,7 +103,7 @@ export async function waitForRateLimitRedis(timeoutMs = 5000) {
 
   if (rateLimitRedisConnection.status === "wait") {
     rateLimitRedisConnection.connect().catch((err) => {
-      console.warn('[RateLimit Redis] Connection error during waitForRateLimitRedis:', err.message);
+      redisLogger.warn({ event: 'redis.wait_error', err: err.message }, '[RateLimit Redis] Connection error during waitForRateLimitRedis');
     });
   }
 
@@ -109,7 +112,7 @@ export async function waitForRateLimitRedis(timeoutMs = 5000) {
 
     const onReady = () => {
       cleanup();
-      console.info('[RateLimit Redis] Connection ready.');
+      redisLogger.info({ event: 'redis.ready' }, '[RateLimit Redis] Connection ready.');
       resolve(true);
     };
 
@@ -125,7 +128,7 @@ export async function waitForRateLimitRedis(timeoutMs = 5000) {
 
     timer = setTimeout(() => {
       cleanup();
-      console.error(`❌ [RateLimit Redis] Connection timed out after ${timeoutMs}ms (status: ${rateLimitRedisConnection.status}). Proceeding with startup.`);
+      redisLogger.error({ event: 'redis.timeout', timeoutMs, status: rateLimitRedisConnection.status }, `[RateLimit Redis] Connection timed out after ${timeoutMs}ms. Proceeding with startup.`);
       resolve(false);
     }, timeoutMs);
 

@@ -11,8 +11,8 @@ const authLogger = createLogger("auth");
  * Never allows generation, billing, characters or element-write routes.
  */
 const INTERNAL_SECRET_ALLOWED_METHOD_PATH_PAIRS = [
-    { method: "GET", pattern: /^\/(api\/)?workflows\/project-data\/[^/]+$/ },
-    { method: "PATCH", pattern: /^\/(api\/)?workflows\/workflows\/[^/]+$/ },
+    { method: "GET", pattern: /^\/api\/workflows\/project-data\/[A-Za-z0-9_-]+$/, route: "/api/workflows/project-data/:projectId" },
+    { method: "PATCH", pattern: /^\/api\/workflows\/workflows\/[A-Za-z0-9_-]+$/, route: "/api/workflows/workflows/:id" },
 ];
 
 export function isInternalSecretAllowedRequest(req) {
@@ -20,12 +20,15 @@ export function isInternalSecretAllowedRequest(req) {
         return false;
     }
     const method = req?.method?.toUpperCase();
-    const rawPath = req?.originalUrl?.split("?")[0] || req?.path || req?.baseUrl || "";
+    const rawPath = (req?.originalUrl || req?.url || req?.path || "").split("?")[0];
     if (!rawPath || typeof rawPath !== "string") return false;
-    const cleanPath = rawPath.split("?")[0].split("#")[0].toLowerCase().replace(/\/+$/, "");
+
+    // Strict regex disallows trailing slash, traversal segments (.. or %2e)
+    if (rawPath.length > 1 && rawPath.endsWith("/")) return false;
+    if (rawPath.includes("..") || rawPath.toLowerCase().includes("%2e") || rawPath.toLowerCase().includes("%2f")) return false;
 
     return INTERNAL_SECRET_ALLOWED_METHOD_PATH_PAIRS.some(
-        (pair) => pair.method === method && pair.pattern.test(cleanPath)
+        (pair) => pair.method === method && pair.pattern.test(rawPath)
     );
 }
 
@@ -44,23 +47,51 @@ export const requireAuth = async (req, res, next) => {
         return next();
     }
 
-    // S2S internal secret check (strictly requires INTERNAL_AUTH_ENABLED === "true", explicit x-user-id header, and allow-listed method+path pair)
+    // S2S internal secret check:
+    // Only processed if INTERNAL_AUTH_ENABLED === "true" and secret header is provided.
     const internalSecret = req.headers?.["x-internal-secret"];
-    const requestPath = req.originalUrl?.split("?")[0] || req.path || req.baseUrl || "";
-    if (
-        internalSecret &&
-        isInternalSecretAllowedRequest(req) &&
-        safeCompareSecret(internalSecret, process.env.INTERNAL_SECRET)
-    ) {
-        const headerUserId = req.headers?.["x-user-id"];
-        if (headerUserId) {
-            req.user = { id: headerUserId };
-            setContext({ userId: headerUserId });
-            authLogger.info(
-                { event: "auth.internal_secret_used", route: requestPath, userId: headerUserId },
-                "Internal secret S2S authentication accepted"
+    if (process.env.INTERNAL_AUTH_ENABLED === "true" && internalSecret) {
+        const method = req?.method?.toUpperCase();
+        const rawPath = (req?.originalUrl || req?.url || req?.path || "").split("?")[0];
+        const isPathClean = !(
+            (rawPath.length > 1 && rawPath.endsWith("/")) ||
+            rawPath.includes("..") ||
+            rawPath.toLowerCase().includes("%2e") ||
+            rawPath.toLowerCase().includes("%2f")
+        );
+
+        const matchedPair = isPathClean
+            ? INTERNAL_SECRET_ALLOWED_METHOD_PATH_PAIRS.find(
+                  (pair) => pair.method === method && pair.pattern.test(rawPath)
+              )
+            : null;
+
+        if (!matchedPair) {
+            authLogger.warn(
+                { event: "auth.internal_secret_rejected", reason: "not_allowed", method, route: rawPath },
+                "Internal secret rejected: method or path not allowed"
             );
-            return next();
+        } else if (!safeCompareSecret(internalSecret, process.env.INTERNAL_SECRET)) {
+            authLogger.warn(
+                { event: "auth.internal_secret_rejected", reason: "bad_secret", method, route: matchedPair.route },
+                "Internal secret rejected: invalid secret"
+            );
+        } else {
+            const headerUserId = req.headers?.["x-user-id"];
+            if (typeof headerUserId === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(headerUserId)) {
+                req.user = { id: headerUserId };
+                setContext({ userId: headerUserId });
+                authLogger.info(
+                    { event: "auth.internal_secret_used", route: matchedPair.route, method, userId: headerUserId },
+                    "Internal secret authentication accepted"
+                );
+                return next();
+            } else {
+                authLogger.warn(
+                    { event: "auth.internal_secret_rejected", reason: "invalid_user_id", method, route: matchedPair.route },
+                    "Internal secret rejected: invalid user id format"
+                );
+            }
         }
     }
 

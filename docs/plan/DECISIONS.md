@@ -27,3 +27,5 @@
 | D-23 | Public API vocabulary | New public endpoints and JSON use product words (`assets`, `folders`, `folderId`). One serializer maps the real row to the asset JSON. Existing routes unchanged |
 | D-24 | Hierarchy storage | Only direct relations (`parent_id`, `folder_id`). No `level`, `depth`, `path`, `root_id`, `ancestor_ids` columns |
 | D-25 | Same-project rule | Enforced twice: composite foreign keys in the DB AND checks in the service. Depth check on move includes the height of the moved sub-tree |
+
+D-14 | 2026-10-07 | Question: Spec Kit usage | Options: SPEC_KIT=ON, SPEC_KIT=OFF | Chosen: SPEC_KIT=OFF | Reason: Prompt explicitly set SPEC_KIT=OFF; Spec Kit is already installed, using the task cards of the phase files as spec

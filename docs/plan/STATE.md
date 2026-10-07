@@ -1,8 +1,8 @@
 # STATE
 Current phase: P3    Current task: PREP-P3 Completed
 Updated: 2026-10-07
-Test status: 554 pass, 9 pre-existing fail, 0 regressions (total 563 tests across 107 suites)
-Next step: F-T3 (waiting for human review of hardened F-T2 migration file)
+Test status: 570 pass, 9 pre-existing fail, 0 regressions (total 579 tests across 108 suites)
+Next step: F-T4 (FolderService)
 
 | Task | Status (TODO/DONE/BLOCKED/SKIPPED) | Commit | Report |
 |---|---|---|---|
@@ -16,7 +16,7 @@ Next step: F-T3 (waiting for human review of hardened F-T2 migration file)
 | DM1 | SKIPPED | e083d78 | docs/plan/escalations/DM1-scope.md |
 | F-T1 | DONE | fa92e8b | docs/plan/reports/F-T1.md |
 | F-T2 | DONE | ea47912 | docs/plan/reports/F-T2.md |
-| F-T3 | TODO | | |
+| F-T3 | DONE | <SHA> | docs/plan/reports/F-T3.md |
 | F-T4 | TODO | | |
 | F-T5 | TODO | | |
 | F-T6 | TODO | | |

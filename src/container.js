@@ -20,6 +20,7 @@ import { GenerationConfigRepository } from "#db/GenerationConfigRepository.js";
 import { DnaRepository }              from "#db/DnaRepository.js";
 import { CharacterRepository }        from "#db/CharacterRepository.js";
 import { ElementRepository }          from "#db/ElementRepository.js";
+import { FolderRepository }           from "#db/FolderRepository.js";
 
 // ─── Infrastructure ───────────────────────────────────────────────────────────
 import { WorkflowEventRecorder } from "./infrastructure/events/workflowEventRecorder.js";
@@ -180,6 +181,7 @@ export const db = {
     dna:        new DnaRepository(),       // table: dna
     characters: new CharacterRepository(), // Dedicated Character Domain Repository
     elements:   new ElementRepository(),   // Dedicated Element Domain Repository
+    folders:    new FolderRepository(),    // Dedicated Folders Domain Repository
 };
 
 // ─── Workflow Architecture (feature 008) ─────────────────────────────────────

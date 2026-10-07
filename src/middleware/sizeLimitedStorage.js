@@ -118,6 +118,7 @@ export function createSizeLimitedMemoryStorage({
                     }
                 });
                 req.on("aborted", releaseSlot);
+                req.on("timeout", releaseSlot);
             }
 
             // ── 2. Streaming Chunk Handler & Early Magic-Bytes Sniff ──────────────

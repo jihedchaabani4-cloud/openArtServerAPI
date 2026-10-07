@@ -15,6 +15,8 @@ const INTERNAL_SECRET_ALLOWED_METHOD_PATH_PAIRS = [
     { method: "PATCH", pattern: /^\/api\/workflows\/workflows\/[A-Za-z0-9_-]+$/, route: "/api/workflows/workflows/:id" },
 ];
 
+export const USER_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function isInternalSecretAllowedRequest(req) {
     if (process.env.INTERNAL_AUTH_ENABLED !== "true") {
         return false;
@@ -78,7 +80,7 @@ export const requireAuth = async (req, res, next) => {
             );
         } else {
             const headerUserId = req.headers?.["x-user-id"];
-            if (typeof headerUserId === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(headerUserId)) {
+            if (typeof headerUserId === "string" && USER_ID_REGEX.test(headerUserId)) {
                 req.user = { id: headerUserId };
                 setContext({ userId: headerUserId });
                 authLogger.info(

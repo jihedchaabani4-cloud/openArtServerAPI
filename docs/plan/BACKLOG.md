@@ -1,3 +1,34 @@
 # Backlog
 
-- [Low] tests/boundary/* | Legacy boundary tests (T1-T3) expect universal internal-secret bypass on generation routes; update to mock JWT | found during D2.6
+## Pre-existing test failures cataloged during D2.6 baseline verification (commit 39a8c19)
+- [Medium] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 1: Character Sheet: User B on User A's character returns 404 and prevents sheet generation | found during D2.6
+- [Medium] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 2: Character Update: User B on User A's character returns 404 and prevents mutation | found during D2.6
+- [Medium] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 3: Character Delete: User B on User A's character returns 404 and prevents deletion | found during D2.6
+- [Medium] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 4: Element Read: User B on User A's element returns 404 | found during D2.6
+- [Medium] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 5: Element Update: User B on User A's element returns 404 and prevents mutation | found during D2.6
+- [Medium] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 6: Element Delete: User B on User A's element returns 404 and prevents deletion | found during D2.6
+- [Medium] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 7: Element List: User B on User A's project returns 404 | found during D2.6
+- [Medium] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 8: Character & Element: Legitimate owner User A operations succeed | found during D2.6
+- [Medium] tests/boundary/collectionItemOwnershipBoundary.test.js | TEST 1: Foreign user calling DELETE /api/workflows/items/:id gets 404 and item is NOT deleted | found during D2.6
+- [Medium] tests/boundary/collectionItemOwnershipBoundary.test.js | TEST 2: Owner calling DELETE /api/workflows/items/:id succeeds with 200 | found during D2.6
+- [Medium] tests/boundary/collectionItemOwnershipBoundary.test.js | TEST 3: Foreign user calling PATCH /api/workflows/items/:id/like gets 404 | found during D2.6
+- [Medium] tests/boundary/collectionItemOwnershipBoundary.test.js | TEST 4: Owner calling PATCH /api/workflows/items/:id/like succeeds with 200 | found during D2.6
+- [Low] tests/boundary/countBehaviorBoundary.test.js | TEST 1: top-level count: 4 on nanobana_2 today — server clamps silently to 1 placeholder and returns 200 | found during D2.6
+- [Low] tests/boundary/countBehaviorBoundary.test.js | TEST 2: parameters.count: 4 on nanobana_2 today — server clamps silently to 1 placeholder and returns 200 | found during D2.6
+- [Low] tests/boundary/countBehaviorBoundary.test.js | TEST 3: count: 4 on all catalog image models (gpt_image_2, seedream_v5, nanobana_pro) — all clamp silently to 1 | found during D2.6
+- [Medium] tests/boundary/internalSecretBoundary.test.js | TEST 6: Request with correct configured secret allows bypass on authorized internal routes | found during D2.6
+- [Medium] tests/boundary/projectOwnershipBoundary.test.js | TEST 1: Image: User B using User A's projectId returns 404 and creates NO workflow/media/hold | found during D2.6
+- [Medium] tests/boundary/projectOwnershipBoundary.test.js | TEST 2: Video: User B using User A's projectId returns 404 and creates NO workflow/media/hold | found during D2.6
+- [Medium] tests/boundary/projectOwnershipBoundary.test.js | TEST 3: Image: Legitimate project owner (User A) using proj-user-A succeeds with 200 | found during D2.6
+- [Medium] tests/boundary/projectOwnershipBoundary.test.js | TEST 4: Video: Legitimate project owner (User A) using proj-user-A succeeds with 200 | found during D2.6
+- [Low] tests/boundary/promptOptimizationBoundary.test.js | TEST 3: Identity & Billing: forwards authenticated userId to promptService | found during D2.6
+- [Low] tests/boundary/promptOptimizationBoundary.test.js | TEST 5: Rate Limiting: blocks requests exceeding limit with 429 and Retry-After | found during D2.6
+- [Medium] tests/boundary/referenceAndMediaOwnershipBoundary.test.js | TEST 1: Image Gen: User B referencing User A's character returns 404 and prevents generation | found during D2.6
+- [Medium] tests/boundary/referenceAndMediaOwnershipBoundary.test.js | TEST 2: Image Gen: User B using User A's media as input_image returns 404 and prevents generation | found during D2.6
+- [Medium] tests/boundary/referenceAndMediaOwnershipBoundary.test.js | TEST 3: Video Gen: User B using User A's media as input_image or references returns 404 and prevents generation | found during D2.6
+- [Medium] tests/boundary/referenceAndMediaOwnershipBoundary.test.js | TEST 7: Legitimate Owner: User A referencing own character and media succeeds | found during D2.6
+- [Low] tests/boundary/uploadHardeningD25Boundary.test.js | allows internal secret on allow-listed route | found during D2.6
+- [Low] tests/boundary/uploadHardeningD25Boundary.test.js | /health endpoint exposes redis readiness status without crashing | found during D2.6
+- [Medium] tests/boundary/v2WorkflowRunBoundary.test.js | TEST 1: Default config: POST /api/v2/workflows/run is disabled and returns 404 | found during D2.6
+- [Medium] tests/boundary/v2WorkflowRunBoundary.test.js | TEST 2: Feature flag enabled: allows execution only when ENABLE_V2_WORKFLOW_RUN_ENDPOINT=true | found during D2.6
+- [Medium] tests/boundary/v2WorkflowRunBoundary.test.js | TEST 3: GET /runs/:run_id returns 404 when requested by a different user | found during D2.6

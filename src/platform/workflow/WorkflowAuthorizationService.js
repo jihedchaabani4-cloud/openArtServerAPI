@@ -1,4 +1,8 @@
 import { safeCompareSecret } from "../security/secretComparison.js";
+import { isInternalSecretAllowedRequest } from "../../middleware/auth.js";
+import { createLogger } from "../../infrastructure/logging/index.js";
+
+const authLogger = createLogger("workflow_auth");
 
 /**
  * WorkflowAuthorizationService
@@ -16,10 +20,15 @@ export class WorkflowAuthorizationService {
     }
 
     _isBypassed(req = null) {
-        const secret = req?.headers?.["x-internal-secret"];
-        const isInternal = Boolean(secret && safeCompareSecret(secret, process.env.INTERNAL_SECRET));
+        if (!req) return false;
         const isDev = process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true;
-        return isInternal || isDev;
+        if (isDev) return true;
+
+        if (process.env.INTERNAL_AUTH_ENABLED !== "true") return false;
+        if (!isInternalSecretAllowedRequest(req)) return false;
+
+        const secret = req?.headers?.["x-internal-secret"];
+        return Boolean(secret && safeCompareSecret(secret, process.env.INTERNAL_SECRET));
     }
 
     /**
@@ -49,7 +58,7 @@ export class WorkflowAuthorizationService {
             .in("id", cleanIds);
 
         if (error) {
-            console.error("❌ [WorkflowAuthorizationService] verifyWorkflowOwnershipBulk error:", error);
+            authLogger.error({ event: "workflow_auth.bulk_error", err: error.message }, "verifyWorkflowOwnershipBulk error");
             throw error;
         }
 
@@ -58,7 +67,7 @@ export class WorkflowAuthorizationService {
             .map((wf) => wf.id);
 
         if (ownedIds.length !== cleanIds.length) {
-            console.warn(`[WorkflowAuthorizationService] Foreign-ownership access denied for user ${userId} on workflows:`, { userId, requestedIds: cleanIds, ownedIds });
+            authLogger.warn({ event: "workflow_auth.access_denied", userId, requestedIds: cleanIds, ownedIds }, "Foreign-ownership access denied for workflows");
             return null;
         }
 
@@ -80,7 +89,7 @@ export class WorkflowAuthorizationService {
 
         if (media) {
             if (media.project?.user_id && media.project?.user_id !== userId) {
-                console.warn(`[WorkflowAuthorizationService] Foreign-ownership access denied for user ${userId} on media ${mediaId}`, { userId, mediaId, owner: media.project?.user_id });
+                authLogger.warn({ event: "workflow_auth.media_access_denied", userId, mediaId, owner: media.project?.user_id }, "Foreign-ownership access denied for media");
                 return false;
             }
             return true;
@@ -95,7 +104,7 @@ export class WorkflowAuthorizationService {
 
         if (wf) {
             if (wf.project?.user_id && wf.project?.user_id !== userId) {
-                console.warn(`[WorkflowAuthorizationService] Foreign-ownership access denied for user ${userId} on workflow ${mediaId}`, { userId, workflowId: mediaId, owner: wf.project?.user_id });
+                authLogger.warn({ event: "workflow_auth.wf_access_denied", userId, workflowId: mediaId, owner: wf.project?.user_id }, "Foreign-ownership access denied for workflow");
                 return false;
             }
             return true;

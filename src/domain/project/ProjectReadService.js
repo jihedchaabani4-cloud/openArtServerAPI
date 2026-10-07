@@ -3,6 +3,10 @@ import { getCatalog } from "../../models/index.js";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
 import { calculateAspectRatio } from "../../utils/ratioUtils.js";
 import { safeCompareSecret } from "../../platform/security/secretComparison.js";
+import { isInternalSecretAllowedRequest } from "../../middleware/auth.js";
+import { createLogger } from "../../infrastructure/logging/index.js";
+
+const projectLogger = createLogger("project_read");
 
 function getCatalogPricing() {
     const catalog = getCatalog();
@@ -91,7 +95,7 @@ export class ProjectReadService {
                     order: { column: "create_time", ascending: false },
                 })
                 .catch((err) => {
-                    console.error("❌ Workflow query error:", err);
+                    projectLogger.error({ event: "project_read.workflow_query_error", err: err?.message || String(err) }, "Workflow query error");
                     return [];
                 }),
             supabase
@@ -115,7 +119,7 @@ export class ProjectReadService {
         const sessions = sessionsResult.data || [];
         const workflows = workflowsResult || [];
         const mediaItems = mediaResult.data || [];
-        if (mediaResult.error) console.error("❌ Media query error:", mediaResult.error);
+        if (mediaResult.error) projectLogger.error({ event: "project_read.media_query_error", err: mediaResult.error.message }, "Media query error");
 
         const formattedSessions = (sessions || []).map((s) => ({
             name: s.id,
@@ -146,7 +150,7 @@ export class ProjectReadService {
             ]);
 
             if (elemResult.error) {
-                console.warn("⚠️ Element query warning:", elemResult.error.message);
+                projectLogger.warn({ event: "project_read.element_query_warn", err: elemResult.error.message }, "Element query warning");
             } else if (elemResult.data) {
                 elementsList = elemResult.data;
                 elementsList.forEach((elem) => {
@@ -155,7 +159,7 @@ export class ProjectReadService {
             }
 
             if (charResult.error) {
-                console.warn("⚠️ Characters query warning:", charResult.error.message);
+                projectLogger.warn({ event: "project_read.character_query_warn", err: charResult.error.message }, "Characters query warning");
             } else if (charResult.data) {
                 charactersList = charResult.data;
                 charactersList.forEach((c) => {
@@ -386,9 +390,14 @@ export class ProjectReadService {
     }
 
     async _verifyMediaOwnership(mediaId, userId, req = null) {
-        const secret = req?.headers?.["x-internal-secret"];
-        const isInternal = Boolean(secret && safeCompareSecret(secret, process.env.INTERNAL_SECRET));
         const isDev = process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true;
+        const secret = req?.headers?.["x-internal-secret"];
+        const isInternal = Boolean(
+            process.env.INTERNAL_AUTH_ENABLED === "true" &&
+            isInternalSecretAllowedRequest(req) &&
+            secret &&
+            safeCompareSecret(secret, process.env.INTERNAL_SECRET)
+        );
 
         if (isInternal || isDev) return true;
 

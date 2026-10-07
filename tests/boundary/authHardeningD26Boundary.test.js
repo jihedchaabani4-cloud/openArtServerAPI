@@ -2,10 +2,12 @@ import { describe, it, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { requireAuth } from "../../src/middleware/auth.js";
 import healthRouter from "../../routes/health.js";
-import readyRouter from "../../routes/ready.js";
+import readyRouter, { _resetReadinessCacheForTest } from "../../routes/ready.js";
 import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
 import { StorageService } from "../../src/platform/storage/StorageService.js";
 import { supabase } from "../../lib/supabase.js";
+import { WorkflowAuthorizationService } from "../../src/platform/workflow/WorkflowAuthorizationService.js";
+import { ProjectReadService } from "../../src/domain/project/ProjectReadService.js";
 
 const VALID_TEST_SECRET = "test-internal-secret-for-d26-auth-min-32-chars-ok!";
 
@@ -14,6 +16,7 @@ describe("D2.6 Security Hardening Boundary Tests", () => {
   let origInternalAuthEnabled;
 
   beforeEach(() => {
+    _resetReadinessCacheForTest?.();
     origEnvSecret = process.env.INTERNAL_SECRET;
     origInternalAuthEnabled = process.env.INTERNAL_AUTH_ENABLED;
     process.env.INTERNAL_SECRET = VALID_TEST_SECRET;
@@ -261,7 +264,7 @@ describe("D2.6 Security Hardening Boundary Tests", () => {
     it("9. flag 'true', correct secret, invalid user id format -> allowed path -> ignored", async () => {
       process.env.INTERNAL_AUTH_ENABLED = "true";
 
-      const invalidUserIds = ["", "   ", "bad/user", "user$inject", "user;drop table"];
+      const invalidUserIds = ["", "   ", "bad/user", "user$inject", "user;drop table", "element-vision-worker", "not-a-uuid-12345"];
 
       for (const badId of invalidUserIds) {
         const req = {
@@ -286,8 +289,9 @@ describe("D2.6 Security Hardening Boundary Tests", () => {
       }
     });
 
-    it("10. flag 'true', correct secret, valid user id -> GET /api/workflows/project-data/abc -> accepted", async () => {
+    it("10. flag 'true', correct secret, valid user id (real UUID) -> GET /api/workflows/project-data/abc -> accepted", async () => {
       process.env.INTERNAL_AUTH_ENABLED = "true";
+      const REAL_UUID = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
 
       const req = {
         method: "GET",
@@ -295,7 +299,7 @@ describe("D2.6 Security Hardening Boundary Tests", () => {
         originalUrl: "/api/workflows/project-data/abc",
         headers: {
           "x-internal-secret": VALID_TEST_SECRET,
-          "x-user-id": "element-vision-worker",
+          "x-user-id": REAL_UUID,
         },
         cookies: {},
       };
@@ -307,11 +311,12 @@ describe("D2.6 Security Hardening Boundary Tests", () => {
       });
 
       assert.equal(nextCalled, true);
-      assert.equal(req.user?.id, "element-vision-worker");
+      assert.equal(req.user?.id, REAL_UUID);
     });
 
-    it("11. flag 'true', correct secret, valid user id -> PATCH /api/workflows/workflows/abc -> accepted", async () => {
+    it("11. flag 'true', correct secret, valid user id (real UUID) -> PATCH /api/workflows/workflows/abc -> accepted", async () => {
       process.env.INTERNAL_AUTH_ENABLED = "true";
+      const REAL_UUID = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
 
       const req = {
         method: "PATCH",
@@ -319,7 +324,7 @@ describe("D2.6 Security Hardening Boundary Tests", () => {
         originalUrl: "/api/workflows/workflows/abc",
         headers: {
           "x-internal-secret": VALID_TEST_SECRET,
-          "x-user-id": "element-vision-worker",
+          "x-user-id": REAL_UUID,
         },
         cookies: {},
       };
@@ -331,11 +336,12 @@ describe("D2.6 Security Hardening Boundary Tests", () => {
       });
 
       assert.equal(nextCalled, true);
-      assert.equal(req.user?.id, "element-vision-worker");
+      assert.equal(req.user?.id, REAL_UUID);
     });
 
     it("12. any accepted/rejected case -> serialized logs do NOT contain secret string", async () => {
       process.env.INTERNAL_AUTH_ENABLED = "true";
+      const REAL_UUID = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
 
       const req = {
         method: "GET",
@@ -343,14 +349,14 @@ describe("D2.6 Security Hardening Boundary Tests", () => {
         originalUrl: "/api/workflows/project-data/abc",
         headers: {
           "x-internal-secret": VALID_TEST_SECRET,
-          "x-user-id": "user-check-12",
+          "x-user-id": REAL_UUID,
         },
         cookies: {},
       };
 
       await requireAuth(req, {}, () => {});
       // Headers and req objects sanitized through logging serializers
-      assert.ok(!JSON.stringify(req.user).includes(VALID_TEST_SECRET));
+      assert.ok(!JSON.stringify(req.user || {}).includes(VALID_TEST_SECRET));
     });
 
     it("13. flag 'true', NO secret header, valid JWT -> normal JWT authentication still works", async () => {
@@ -515,6 +521,78 @@ describe("D2.6 Security Hardening Boundary Tests", () => {
         rateLimitRedisConnection.ping = origRLPing;
       }
     });
+
+    it("7. /ready caches result for 1 to 2 seconds without re-pinging Redis within TTL", async () => {
+      const origRLStatus = rateLimitRedisConnection.status;
+      const origQStatus = redisConnection.status;
+      const origRLPing = rateLimitRedisConnection.ping;
+      const origQPing = redisConnection.ping;
+
+      rateLimitRedisConnection.status = "ready";
+      redisConnection.status = "ready";
+
+      let pingCount = 0;
+      rateLimitRedisConnection.ping = async () => {
+        pingCount++;
+        return "PONG";
+      };
+      redisConnection.ping = async () => {
+        pingCount++;
+        return "PONG";
+      };
+
+      try {
+        const req1 = { method: "GET", url: "/", path: "/" };
+        const res1 = await invokeHandler(readyRouter, req1);
+        assert.equal(res1.statusCode, 200);
+        assert.deepEqual(res1.data, { ready: true });
+        const initialPings = pingCount;
+        assert.ok(initialPings >= 2, "Initial check must perform pings");
+
+        // Immediate second call should hit cache and NOT invoke ping again
+        const req2 = { method: "GET", url: "/", path: "/" };
+        const res2 = await invokeHandler(readyRouter, req2);
+        assert.equal(res2.statusCode, 200);
+        assert.deepEqual(res2.data, { ready: true });
+        assert.equal(pingCount, initialPings, "Second check within cache TTL must hit cache without re-pinging Redis");
+      } finally {
+        rateLimitRedisConnection.status = origRLStatus;
+        redisConnection.status = origQStatus;
+        rateLimitRedisConnection.ping = origRLPing;
+        redisConnection.ping = origQPing;
+      }
+    });
+
+    it("8. /ready respects short timeout (READINESS_TIMEOUT_MS) and returns 503 on slow ping", async () => {
+      const origRLStatus = rateLimitRedisConnection.status;
+      const origQStatus = redisConnection.status;
+      const origRLPing = rateLimitRedisConnection.ping;
+      const origTimeoutEnv = process.env.READINESS_TIMEOUT_MS;
+
+      process.env.READINESS_TIMEOUT_MS = "50"; // 50ms short timeout for test
+      rateLimitRedisConnection.status = "ready";
+      redisConnection.status = "ready";
+
+      // Hang ping beyond 50ms
+      rateLimitRedisConnection.ping = () => new Promise((resolve) => setTimeout(resolve, 200));
+
+      try {
+        const req = { method: "GET", url: "/", path: "/" };
+        const { statusCode, data } = await invokeHandler(readyRouter, req);
+
+        assert.equal(statusCode, 503);
+        assert.deepEqual(data, { ready: false });
+      } finally {
+        rateLimitRedisConnection.status = origRLStatus;
+        redisConnection.status = origQStatus;
+        rateLimitRedisConnection.ping = origRLPing;
+        if (origTimeoutEnv !== undefined) {
+          process.env.READINESS_TIMEOUT_MS = origTimeoutEnv;
+        } else {
+          delete process.env.READINESS_TIMEOUT_MS;
+        }
+      }
+    });
   });
 
   // ── (c) Structured logger tests ───────────────────────────────────────────
@@ -551,6 +629,74 @@ describe("D2.6 Security Hardening Boundary Tests", () => {
       } finally {
         console.error = origConsoleError;
       }
+    });
+  });
+
+  // ── (d) Internal secret hardening in WorkflowAuthorizationService & ProjectReadService ────
+  describe("(d) Internal secret hardening in WorkflowAuthorizationService and ProjectReadService", () => {
+    it("WorkflowAuthorizationService._isBypassed returns false when INTERNAL_AUTH_ENABLED is unset/false", () => {
+      delete process.env.INTERNAL_AUTH_ENABLED;
+      const service = new WorkflowAuthorizationService({ db: {} });
+
+      const req = {
+        method: "PATCH",
+        originalUrl: "/api/workflows/workflows/wf-123",
+        headers: { "x-internal-secret": VALID_TEST_SECRET },
+      };
+
+      assert.equal(service._isBypassed(req), false, "Must not bypass when INTERNAL_AUTH_ENABLED is unset");
+
+      process.env.INTERNAL_AUTH_ENABLED = "false";
+      assert.equal(service._isBypassed(req), false, "Must not bypass when INTERNAL_AUTH_ENABLED is false");
+    });
+
+    it("WorkflowAuthorizationService._isBypassed returns false for unauthorized routes even if flag is true", () => {
+      process.env.INTERNAL_AUTH_ENABLED = "true";
+      const service = new WorkflowAuthorizationService({ db: {} });
+
+      const forbiddenReqs = [
+        { method: "POST", originalUrl: "/api/workflows/run", headers: { "x-internal-secret": VALID_TEST_SECRET } },
+        { method: "DELETE", originalUrl: "/api/workflows/items/item-123", headers: { "x-internal-secret": VALID_TEST_SECRET } },
+        { method: "GET", originalUrl: "/api/workflows/workflow-by-media/media-123", headers: { "x-internal-secret": VALID_TEST_SECRET } },
+      ];
+
+      for (const req of forbiddenReqs) {
+        assert.equal(service._isBypassed(req), false, `Must not bypass on unauthorized route ${req.method} ${req.originalUrl}`);
+      }
+    });
+
+    it("WorkflowAuthorizationService._isBypassed returns true ONLY for allow-listed pairs with flag true & valid secret", () => {
+      process.env.INTERNAL_AUTH_ENABLED = "true";
+      const service = new WorkflowAuthorizationService({ db: {} });
+
+      const allowedReq1 = {
+        method: "PATCH",
+        originalUrl: "/api/workflows/workflows/wf-123",
+        headers: { "x-internal-secret": VALID_TEST_SECRET },
+      };
+      const allowedReq2 = {
+        method: "GET",
+        originalUrl: "/api/workflows/project-data/proj-123",
+        headers: { "x-internal-secret": VALID_TEST_SECRET },
+      };
+
+      assert.equal(service._isBypassed(allowedReq1), true, "Must bypass for PATCH /api/workflows/workflows/:id");
+      assert.equal(service._isBypassed(allowedReq2), true, "Must bypass for GET /api/workflows/project-data/:projectId");
+    });
+
+    it("ProjectReadService._verifyMediaOwnership returns false without valid allowed internal request or dev bypass", async () => {
+      delete process.env.INTERNAL_AUTH_ENABLED;
+      const service = new ProjectReadService({ db: {} });
+
+      const reqWithSecret = {
+        method: "GET",
+        originalUrl: "/api/workflows/workflow-by-media/media-123",
+        headers: { "x-internal-secret": VALID_TEST_SECRET },
+      };
+
+      // Must not bypass ownership via x-internal-secret for workflow-by-media
+      const isAuthorized = await service._verifyMediaOwnership("media-123", "user-foreign", reqWithSecret);
+      assert.equal(isAuthorized, false, "Must not bypass media ownership check on unauthorized route");
     });
   });
 });

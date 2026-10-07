@@ -20,6 +20,7 @@ import {
   rateLimitRedisConnection,
   waitForRateLimitRedis,
 } from "../../src/queue/redis.js";
+import { baseLogger } from "../../src/infrastructure/logging/index.js";
 
 // Helper sample bytes for D2.4 tests
 function createD24SampleBytes(type) {
@@ -151,7 +152,12 @@ describe("RC1.4-D2.4 — Upload Hardening Follow-up Boundary Tests", () => {
 
       const warnings = [];
       const origWarn = console.warn;
+      const origBaseWarn = baseLogger.warn;
       console.warn = (...args) => warnings.push(args.join(" "));
+      baseLogger.warn = (obj, msg, ...rest) => {
+        warnings.push(JSON.stringify(obj) + " " + (msg || ""));
+        return origBaseWarn.call(baseLogger, obj, msg, ...rest);
+      };
 
       try {
         // 1. HEIC with declared MIME in safe allowlist
@@ -196,6 +202,7 @@ describe("RC1.4-D2.4 — Upload Hardening Follow-up Boundary Tests", () => {
         assert.ok(hasWarningWithMetadata, "Expected warning logged for unrecognized provider asset");
       } finally {
         console.warn = origWarn;
+        baseLogger.warn = origBaseWarn;
       }
     });
 
@@ -336,6 +343,36 @@ describe("RC1.4-D2.4 — Upload Hardening Follow-up Boundary Tests", () => {
       }
 
       assert.equal(getActiveUploadsCountForTest(userId), 0, "Counter must be 0 after client abort");
+    });
+
+    it("Path 6: decrements and releases in-flight bytes on request timeout", async () => {
+      const engine = createSizeLimitedMemoryStorage();
+      const userId = "test-user-b6";
+
+      let timeoutHandler = null;
+      const req = {
+        user: { id: userId },
+        ip: "127.0.0.1",
+        on: (event, handler) => {
+          if (event === "timeout") timeoutHandler = handler;
+        },
+      };
+
+      const stream = new Readable({
+        read() {
+          // Never emit end to simulate abandoned/timed out stream
+        },
+      });
+      const file = { stream, mimetype: "image/jpeg" };
+
+      engine._handleFile(req, file, () => {});
+
+      assert.equal(getActiveUploadsCountForTest(userId), 1, "Counter must be 1 while upload is in progress");
+
+      assert.ok(timeoutHandler, "req must register timeout handler");
+      timeoutHandler();
+
+      assert.equal(getActiveUploadsCountForTest(userId), 0, "Counter must be 0 after timeout");
     });
   });
 

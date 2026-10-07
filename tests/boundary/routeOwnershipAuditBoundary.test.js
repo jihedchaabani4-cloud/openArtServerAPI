@@ -313,14 +313,12 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     assert.equal(body.ok, false);
   });
 
-  it("TEST R4-7: PATCH /api/workflows/workflows/:id/move for foreign workflow returns 404", async () => {
+  it("TEST R4-7: Retired legacy endpoint PATCH /api/workflows/workflows/:id/move returns 404", async () => {
     const res = await reqAlice(`/api/workflows/workflows/${FOREIGN_WF_ID}/move`, {
       method: "PATCH",
       body: JSON.stringify({ project_id: FOREIGN_PROJ_ID }),
     });
-    const body = await res.json();
     assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
-    assert.equal(body.ok, false);
   });
 
   it("TEST R4-8: PATCH /api/workflows/workflows/:id/like for foreign workflow returns 404", async () => {
@@ -661,8 +659,6 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
       "POST /api/projects/:projectId/folders",
       "DELETE /api/projects/:id",
       "PATCH /api/projects/:id",
-      "DELETE /api/sessions/:id",
-      "PATCH /api/sessions/:id",
       "DELETE /api/v2/elements/:id",
       "GET /api/v2/elements/:id",
       "PATCH /api/v2/elements/:id",
@@ -682,7 +678,6 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
       "DELETE /api/workflows/workflows/:id",
       "PATCH /api/workflows/workflows/:id",
       "PATCH /api/workflows/workflows/:id/like",
-      "PATCH /api/workflows/workflows/:id/move",
       "PATCH /api/workflows/workflows/:id/primary-media",
     ]);
 

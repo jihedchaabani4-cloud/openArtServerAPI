@@ -1,14 +1,13 @@
 /**
  * WorkflowServiceBase
  * Platform Service — owns workflow entity lifecycle, metadata mutation,
- * moving workflows across folders/sessions/projects, cascading deletion,
+ * moving workflows across folders/projects, cascading deletion,
  * and entity synchronization.
  *
  * Public methods:
  *   - updateWorkflowMetadata({ workflowId, updates, userId, req })
  *   - patchWorkflow({ id, userId, body, req })
  *   - moveToFolder({ assetId, folderId, userId })
- *   - moveWorkflow({ workflowId, sessionId, projectId, newsession, sessionName, userId, req })
  *   - deleteWorkflow({ workflowId, userId, req })
  *   - bulkDeleteWorkflows({ workflowIds, userId, req })
  *   - toggleLike({ workflowId, userId, req })
@@ -225,138 +224,6 @@ export class WorkflowService {
             favorited: nextFavorited,
             workflows: data || [],
         };
-    }
-
-    // ── moveWorkflow ─────────────────────────────────────────────────────────
-
-    async moveWorkflow({ workflowId, sessionId, projectId, newsession, sessionName, userId, req = null }) {
-        const traceId = randomUUID();
-        const start = Date.now();
-
-        crudOperationLog({ traceId, operation: "moveWorkflow", workflowId });
-
-        try {
-            const isAuthorized = await this.authService.verifyWorkflowOwnership(workflowId, userId, req);
-            if (!isAuthorized) {
-                crudOperationLog({
-                    traceId,
-                    operation: "moveWorkflow",
-                    status: "error",
-                    userId,
-                    resourceId: workflowId,
-                    resourceType: "workflow",
-                    errorCode: "NOT_FOUND",
-                    message: "Workflow not found",
-                });
-                throw new CrudServiceError("Workflow not found", {
-                    statusCode: 404,
-                    errorCode: "NOT_FOUND",
-                    traceId,
-                    operation: "moveWorkflow",
-                });
-            }
-
-            if (!sessionId && !newsession) {
-                throw new CrudServiceError("session_id or newsession is required", {
-                    statusCode: 400,
-                    errorCode: "VALIDATION_ERROR",
-                    traceId,
-                    operation: "moveWorkflow",
-                });
-            }
-
-            if (sessionId) {
-                const session = await this.db.sessions.findById(sessionId, "id, project_id");
-                if (!session) {
-                    throw new CrudServiceError("Target session not found", {
-                        statusCode: 404,
-                        errorCode: "NOT_FOUND",
-                        traceId,
-                        operation: "moveWorkflow",
-                    });
-                }
-            }
-
-            if (projectId) {
-                const project = await this.db.projects.findById(projectId, "user_id");
-                if (!project || (project.user_id && project.user_id !== userId)) {
-                    crudOperationLog({
-                        traceId,
-                        operation: "moveWorkflow",
-                        status: "error",
-                        userId,
-                        resourceId: projectId,
-                        resourceType: "project",
-                        errorCode: "NOT_FOUND",
-                        message: "Target project not found",
-                    });
-                    throw new CrudServiceError("Target project not found", {
-                        statusCode: 404,
-                        errorCode: "NOT_FOUND",
-                        traceId,
-                        operation: "moveWorkflow",
-                    });
-                }
-            }
-
-            let targetSessionId = sessionId;
-            let targetProjectId = projectId;
-            let createdSession = null;
-
-            if (newsession) {
-                if (!targetProjectId) {
-                    const wf = await this.db.workflows.findById(workflowId, "project_id");
-                    if (wf?.project_id) targetProjectId = wf.project_id;
-                }
-                if (!targetProjectId) {
-                    throw new CrudServiceError("Cannot determine project_id for new session", {
-                        statusCode: 400,
-                        errorCode: "VALIDATION_ERROR",
-                        traceId,
-                        operation: "moveWorkflow",
-                    });
-                }
-
-                createdSession = await this.db.sessions.createSession({
-                    name: sessionName || "New Session",
-                    project_id: targetProjectId,
-                    position: 0,
-                });
-                targetSessionId = createdSession.id;
-            }
-
-            const wfUpdates = { session_id: targetSessionId };
-            if (targetProjectId) wfUpdates.project_id = targetProjectId;
-
-            const workflow = await this.db.workflows.updateFields(workflowId, wfUpdates);
-
-            if (targetProjectId) {
-                await this.db.media.client()
-                    .from("media")
-                    .update({ project_id: targetProjectId })
-                    .eq("workflow_id", workflowId);
-            }
-
-            crudOperationLog({
-                traceId,
-                operation: "moveWorkflow",
-                status: "ok",
-                durationMs: Date.now() - start,
-                workflowId,
-            });
-
-            return { workflow, new_session: createdSession };
-        } catch (err) {
-            crudOperationLog({
-                traceId,
-                operation: "moveWorkflow",
-                status: "error",
-                durationMs: Date.now() - start,
-                errorCode: err.errorCode || 500,
-                message: err.message,
-            });
-            throw err;
-        }
     }
 
     // ── deleteWorkflow ───────────────────────────────────────────────────────

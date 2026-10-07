@@ -116,29 +116,6 @@ export const bulkToggleLike = async (req, res) => {
     }
 };
 
-// ── PATCH /api/workflows/:id/move ─────────────────────────────────────────────
-export const moveWorkflow = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const userId = req.user.id;
-        const { session_id, project_id, newsession, session_name } = req.body;
-
-        const result = await workflowService.moveWorkflow({
-            workflowId:  id,
-            sessionId:   session_id,
-            projectId:   project_id,
-            newsession,
-            sessionName: session_name,
-            userId,
-            req,
-        });
-
-        return res.json({ ok: true, workflow: result.workflow, new_session: result.new_session });
-    } catch (err) {
-        controllerLogger.error({ workflowId: req.params.id, err }, `[moveWorkflow] Error moving workflow ${req.params.id}: ${err.message}`);
-        return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
-    }
-};
 
 // ── PATCH /api/workflows/:id/primary-media ────────────────────────────────────
 export const setPrimaryMedia = async (req, res) => {

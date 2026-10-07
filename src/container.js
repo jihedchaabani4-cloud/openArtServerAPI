@@ -205,7 +205,8 @@ export { jobQueueService };
 export const useCaseService = new UseCaseService({ walletService, pricingService, jobQueueService, db });
 
 // ─── Domain & Platform Services ──────────────────────────────────────────────
-export const workflowService = new WorkflowLifecycleService({ db, storageService });
+export const folderService = new FolderService({ folderRepo: db.folders, projectRepo: db.projects });
+export const workflowService = new WorkflowLifecycleService({ db, storageService, folderService });
 export const workflowMediaService = workflowService.mediaService;
 export const mediaService = new MediaService({ db });
 
@@ -240,7 +241,11 @@ export const elementService = new ElementService({
     analysisService: new ElementAnalysisService(),
 });
 
+workflowService.setEntitySyncHandlers({
+    syncCharacter: (targetWorkflowId, updates, userId) => characterService.updateCharacter({ characterId: targetWorkflowId, updates, userId }),
+    syncElement: (targetWorkflowId, name) => elementService.updateElement(targetWorkflowId, { name }),
+});
+
 export const projectReadService = new ProjectReadService({ db });
 export const generationService = new GenerationService({ db });
-export const folderService = new FolderService({ folderRepo: db.folders, projectRepo: db.projects });
 

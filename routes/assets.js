@@ -139,37 +139,8 @@ router.patch("/:assetId/folder", async (req, res, next) => {
 
         routeLogger.debug({ assetId, userId, folderId: rawFolderId }, "PATCH /api/assets/:assetId/folder");
 
-        // Normalize folderId: null, undefined, or "none" (case-insensitive) -> null
-        let targetFolderId = null;
-        if (rawFolderId !== null && rawFolderId !== undefined && String(rawFolderId).toLowerCase() !== "none") {
-            if (typeof rawFolderId !== "string" || !rawFolderId.trim() || !UUID_REGEX.test(rawFolderId.trim())) {
-                return res.status(400).json({ ok: false, errorCode: "VALIDATION_ERROR", error: "folderId must be a valid UUID or null" });
-            }
-            targetFolderId = rawFolderId.trim();
-        }
-
-        // 1. Assert asset ownership (returns 404 on missing or foreign asset)
-        const asset = await assertOwns("workflow", assetId, userId);
-
-        // 2. If targetFolderId is provided, validate folder is usable in this project
-        if (targetFolderId !== null) {
-            await folderService.assertFolderUsable(targetFolderId, userId, asset.project_id);
-        }
-
-        // 3. Update folder_id in DB scoped by user and project
-        try {
-            const updated = await db.workflows.updateFolderId(assetId, targetFolderId, userId, asset.project_id);
-            return res.status(200).json(toAssetDto(updated || { ...asset, folder_id: targetFolderId }));
-        } catch (dbErr) {
-            if (dbErr.code === "23503" || dbErr.code === "PGRST116" || dbErr.statusCode === 404) {
-                return res.status(404).json({
-                    ok: false,
-                    errorCode: "NOT_FOUND",
-                    message: "Asset or target folder not found in project",
-                });
-            }
-            throw dbErr;
-        }
+        const asset = await workflowService.moveToFolder({ assetId, folderId: rawFolderId, userId });
+        return res.status(200).json(asset);
     } catch (err) {
         if (err instanceof AppError) {
             return res.status(err.statusCode).json({

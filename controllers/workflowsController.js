@@ -15,72 +15,22 @@ export const patchWorkflow = async (req, res) => {
     controllerLogger.debug({ workflowId: cleanId, userId }, `PATCH /api/workflows/${cleanId}`);
 
     try {
-        const body = req.body || {};
-
-        // Mass-assignment defense (F-T6 / D-16): reject attempts to modify folderId, projectId, or userId via generic workflow update
-        const forbiddenKeys = ["folderId", "folder_id", "projectId", "project_id", "userId", "user_id"];
-        for (const key of forbiddenKeys) {
-            if (body[key] !== undefined) {
-                return res.status(400).json({
-                    ok: false,
-                    code: "MASS_ASSIGNMENT_FORBIDDEN",
-                    message: `Updating '${key}' via generic workflow update is forbidden`,
-                });
-            }
-        }
-
-        const { display_name, name, primary_media_id, favorited, description, character_info } = body;
-
-        let targetWorkflowId = cleanId;
-        // Resolve media_id to its parent workflow_id if cleanId is not directly a workflow
-        const wfExists = await workflowService.db.workflows.findById(cleanId).catch(() => null);
-        if (!wfExists) {
-            const mediaRecord = await workflowService.db.media.findById(cleanId).catch(() => null);
-            if (mediaRecord?.workflow_id) {
-                targetWorkflowId = mediaRecord.workflow_id;
-            }
-        }
-
-        const updates = {};
-        const targetName = display_name !== undefined ? display_name : name;
-        if (targetName !== undefined) updates.display_name = targetName;
-        if (primary_media_id !== undefined) updates.primary_media_id = primary_media_id;
-        if (favorited !== undefined) updates.favorited = favorited;
-
-        // Delegate to WorkflowLifecycleService
-        const result = await workflowService.updateWorkflowMetadata({
-            workflowId: targetWorkflowId,
-            updates,
+        const result = await workflowService.patchWorkflow({
+            id: cleanId,
             userId,
+            body: req.body || {},
             req,
         });
 
-        // If character description or info or name is passed, sync with character table
-        const descVal = description !== undefined ? description : character_info;
-        if (descVal !== undefined || targetName !== undefined) {
-            await characterService.updateCharacter({
-                characterId: targetWorkflowId,
-                updates: {
-                    ...(descVal !== undefined ? { description: descVal, character_info: descVal } : {}),
-                    ...(targetName !== undefined ? { name: targetName } : {}),
-                },
-                userId,
-            }).catch((charErr) => {
-                controllerLogger.warn({ workflowId: targetWorkflowId, err: charErr }, `patchWorkflow character sync notice: ${charErr.message}`);
-            });
-        }
-
-        // If this workflow is associated with an element, sync element name as well
-        if (targetName !== undefined) {
-            await elementService.updateElement(targetWorkflowId, { name: targetName }).catch(() => {});
-        }
-
-        controllerLogger.info({ workflowId: targetWorkflowId }, `patchWorkflow ${targetWorkflowId} success`);
-
-        return res.json({ ok: true, workflow: result.workflow, display_name: targetName });
+        controllerLogger.info({ workflowId: cleanId }, `patchWorkflow ${cleanId} success`);
+        return res.json({ ok: true, workflow: result.workflow, display_name: result.displayName });
     } catch (err) {
         controllerLogger.error({ workflowId: cleanId, err }, `patchWorkflow ${cleanId} failed: ${err.message}`);
-        return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+        return res.status(err.statusCode || 500).json({
+            ok: false,
+            code: err.code || err.errorCode,
+            message: err.message,
+        });
     }
 };
 

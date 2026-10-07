@@ -1,8 +1,8 @@
 # STATE
 Current phase: P3    Current task: PREP-P3 Completed
 Updated: 2026-10-07
-Test status: 542 pass, 9 pre-existing fail, 0 regressions (total 551 tests across 106 suites)
-Next step: F-T2 (database migration)
+Test status: 552 pass, 9 pre-existing fail, 0 regressions (total 561 tests across 107 suites)
+Next step: F-T3 (waiting for human review of F-T2 migration file)
 
 | Task | Status (TODO/DONE/BLOCKED/SKIPPED) | Commit | Report |
 |---|---|---|---|
@@ -14,8 +14,8 @@ Next step: F-T2 (database migration)
 | GEN1 | SKIPPED | 04ea421 | docs/plan/escalations/GEN1-scope.md |
 | NAM0 | SKIPPED | 62f96ef | docs/plan/escalations/NAM0-scope.md |
 | DM1 | SKIPPED | e083d78 | docs/plan/escalations/DM1-scope.md |
-| F-T1 | DONE | <SHA> | docs/plan/reports/F-T1.md |
-| F-T2 | TODO | | |
+| F-T1 | DONE | fa92e8b | docs/plan/reports/F-T1.md |
+| F-T2 | DONE | <SHA> | docs/plan/reports/F-T2.md |
 | F-T3 | TODO | | |
 | F-T4 | TODO | | |
 | F-T5 | TODO | | |

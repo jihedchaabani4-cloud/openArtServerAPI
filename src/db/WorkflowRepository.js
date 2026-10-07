@@ -246,4 +246,42 @@ export class WorkflowRepository extends BaseRepository {
         if (error) throw error;
         return data;
     }
+
+    /**
+     * Lists workflows in a project with optional folder filtering and cursor-based pagination.
+     * Order: newest first (create_time DESC, id DESC).
+     *
+     * @param {string} projectId
+     * @param {Object} options
+     * @param {string[]|null} [options.folderIds] - List of folder IDs to filter by
+     * @param {boolean} [options.folderIdNull=false] - If true, filter where folder_id IS NULL
+     * @param {number} [options.limit=50]
+     * @param {Object|null} [options.cursor=null] - { createTime, id }
+     * @returns {Promise<Object[]>}
+     */
+    async listProjectAssets(projectId, { folderIds = null, folderIdNull = false, limit = 50, cursor = null } = {}) {
+        let query = this.client()
+            .from(this.tableName)
+            .select("*")
+            .eq("project_id", projectId);
+
+        if (folderIdNull) {
+            query = query.is("folder_id", null);
+        } else if (Array.isArray(folderIds)) {
+            query = query.in("folder_id", folderIds);
+        }
+
+        if (cursor && cursor.createTime && cursor.id) {
+            query = query.or(`create_time.lt.${cursor.createTime},and(create_time.eq.${cursor.createTime},id.lt.${cursor.id})`);
+        }
+
+        query = query
+            .order("create_time", { ascending: false })
+            .order("id", { ascending: false })
+            .limit(limit + 1);
+
+        const { data, error } = await query;
+        if (error) throw error;
+        return data || [];
+    }
 }

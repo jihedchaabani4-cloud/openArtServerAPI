@@ -1,4 +1,7 @@
 import { supabase } from "../lib/supabase.js";
+import { generationService } from "../src/container.js";
+import { assertOwns } from "../src/platform/security/ownership.js";
+import { AppError } from "../src/utils/AppError.js";
 
 /** GET all projects for the authenticated user */
 export const getAll = async (req, res) => {
@@ -157,5 +160,42 @@ export const remove = async (req, res) => {
     } catch (error) {
         console.error("deleteProject error:", error);
         res.status(500).json({ ok: false, message: error.message });
+    }
+};
+
+/**
+ * GET /api/projects/:projectId/assets
+ * Lists assets for a project with optional folder filtering and cursor-based pagination.
+ * Task F-T7 (Scenario 9).
+ */
+export const listAssets = async (req, res, next) => {
+    try {
+        const { projectId } = req.params;
+        const userId = req.user.id;
+
+        // 1. Ownership check: project must belong to user (404 on missing or foreign)
+        await assertOwns("project", projectId, userId);
+
+        const { folderId, includeDescendants, limit, cursor } = req.query;
+
+        const result = await generationService.listProjectAssets({
+            userId,
+            projectId,
+            folderId,
+            includeDescendants,
+            limit,
+            cursor,
+        });
+
+        return res.status(200).json(result);
+    } catch (err) {
+        if (err instanceof AppError) {
+            return res.status(err.statusCode).json({
+                ok: false,
+                errorCode: err.errorCode || "APP_ERROR",
+                message: err.message,
+            });
+        }
+        return next(err);
     }
 };

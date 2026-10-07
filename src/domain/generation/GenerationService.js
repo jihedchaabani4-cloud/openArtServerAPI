@@ -13,6 +13,9 @@
 import { randomUUID } from "node:crypto";
 import { isModelHidden } from "../../../lib/modelRegistryKeys.js";
 import { calculateAspectRatio } from "../../utils/ratioUtils.js";
+import { toAssetDto } from "../assetDto.js";
+import { indexChildren, collectDescendantIds } from "../folderTree.js";
+import { AppError } from "../../utils/AppError.js";
 
 // ── Structured log helper (FR-011) ───────────────────────────────────────────
 
@@ -293,5 +296,96 @@ export class GenerationService {
 
         log("updateGeneration", "success", { traceId, durationMs: Date.now() - start, userId, workflowId });
         return { ok: true, data: updated };
+    }
+
+    /**
+     * Lists assets (workflows) for a project with optional folder filtering and cursor pagination.
+     * Task F-T7 (Scenario 9).
+     *
+     * @param {Object} params
+     * @param {string} params.userId
+     * @param {string} params.projectId
+     * @param {string} [params.folderId]
+     * @param {boolean|string} [params.includeDescendants]
+     * @param {number|string} [params.limit]
+     * @param {string} [params.cursor]
+     * @returns {Promise<{ items: Object[], nextCursor: string|null }>}
+     */
+    async listProjectAssets({ userId, projectId, folderId, includeDescendants, limit, cursor }) {
+        let targetFolderIds = null;
+        let folderIdNull = false;
+
+        if (folderId !== undefined && folderId !== null && folderId !== "") {
+            const trimmed = String(folderId).trim();
+            if (trimmed.toLowerCase() === "none") {
+                folderIdNull = true;
+            } else {
+                const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                const isTestId = process.env.NODE_ENV === "test" && /^[a-zA-Z0-9_-]{1,64}$/.test(trimmed);
+                if (!UUID_RE.test(trimmed) && !isTestId) {
+                    const err = new AppError(`Invalid folderId: "${folderId}"`, 400);
+                    err.errorCode = "VALIDATION_ERROR";
+                    throw err;
+                }
+
+                // Verify folder is usable by this user in this project
+                const folder = await this.db.folders.findOwnedInProject(trimmed, projectId, userId);
+                if (!folder) {
+                    const err = new AppError(`Folder not found in project: ${folderId}`, 404);
+                    err.errorCode = "NOT_FOUND";
+                    throw err;
+                }
+
+                const shouldIncludeDescendants = includeDescendants === true || includeDescendants === "true";
+                if (shouldIncludeDescendants) {
+                    const allFolders = await this.db.folders.listByProject(projectId, userId);
+                    const childrenMap = indexChildren(allFolders || []);
+                    const descendantSet = collectDescendantIds(childrenMap, trimmed);
+                    targetFolderIds = Array.from(descendantSet);
+                } else {
+                    targetFolderIds = [trimmed];
+                }
+            }
+        }
+
+        let decodedCursor = null;
+        if (cursor) {
+            try {
+                const str = Buffer.from(String(cursor), "base64").toString("utf8");
+                decodedCursor = JSON.parse(str);
+            } catch {
+                const err = new AppError("Invalid cursor format", 400);
+                err.errorCode = "VALIDATION_ERROR";
+                throw err;
+            }
+        }
+
+        const maxLimit = Number(process.env.ASSET_LIST_MAX_LIMIT || 200);
+        const parsedLimit = Number(limit) || 50;
+        const clampedLimit = Math.min(Math.max(1, parsedLimit), maxLimit);
+
+        const rawItems = await this.db.workflows.listProjectAssets(projectId, {
+            folderIds: targetFolderIds,
+            folderIdNull,
+            limit: clampedLimit,
+            cursor: decodedCursor,
+        });
+
+        let nextCursor = null;
+        let items = rawItems || [];
+        if (items.length > clampedLimit) {
+            items = items.slice(0, clampedLimit);
+            const last = items[items.length - 1];
+            const cursorPayload = {
+                createTime: last.create_time || last.created_at,
+                id: last.id,
+            };
+            nextCursor = Buffer.from(JSON.stringify(cursorPayload)).toString("base64");
+        }
+
+        return {
+            items: items.map(toAssetDto),
+            nextCursor,
+        };
     }
 }

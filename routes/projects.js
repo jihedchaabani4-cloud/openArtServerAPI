@@ -9,9 +9,10 @@ const router = express.Router();
 // Apply auth middleware to all project routes
 router.use(requireAuth);
 
-// Project Folders
+// Project Folders & Assets
 router.get("/:projectId/folders", foldersController.listProjectFolders);
 router.post("/:projectId/folders", rateLimit("folderWrite"), foldersController.createProjectFolder);
+router.get("/:projectId/assets", projectsController.listAssets);
 
 router.get("/", projectsController.getAll);
 router.post("/", projectsController.create);

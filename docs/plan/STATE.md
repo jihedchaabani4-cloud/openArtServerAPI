@@ -15,7 +15,7 @@ Next step: F-T3 (waiting for human review of F-T2 migration file)
 | NAM0 | SKIPPED | 62f96ef | docs/plan/escalations/NAM0-scope.md |
 | DM1 | SKIPPED | e083d78 | docs/plan/escalations/DM1-scope.md |
 | F-T1 | DONE | fa92e8b | docs/plan/reports/F-T1.md |
-| F-T2 | DONE | <SHA> | docs/plan/reports/F-T2.md |
+| F-T2 | DONE | a9584e2 | docs/plan/reports/F-T2.md |
 | F-T3 | TODO | | |
 | F-T4 | TODO | | |
 | F-T5 | TODO | | |

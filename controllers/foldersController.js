@@ -36,16 +36,15 @@ export const listProjectFolders = async (req, res, next) => {
 export const createProjectFolder = async (req, res, next) => {
   const { projectId } = req.params;
   const userId = req.user?.id;
-  const { name, parentId, parent_id, collection_id, collectionId } = req.body || {};
-  const effectiveParentId = parentId ?? parent_id ?? collection_id ?? collectionId ?? null;
+  const { name, parentId } = req.body || {};
 
-  controllerLogger.debug({ projectId, userId, name, effectiveParentId }, "POST /api/projects/:projectId/folders");
+  controllerLogger.debug({ projectId, userId, name, parentId }, "POST /api/projects/:projectId/folders");
 
   try {
     const folder = await folderService.create({
       projectId,
       userId,
-      parentId: effectiveParentId || null,
+      parentId: parentId || null,
       name,
     });
     return res.status(201).json(folder);

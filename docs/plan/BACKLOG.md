@@ -24,6 +24,9 @@
 - [RESOLVED in D3(4)] tests/boundary/referenceAndMediaOwnershipBoundary.test.js | TEST 3: Video Gen: User B using User A's media as input_image or references returns 404 and prevents generation
 - [RESOLVED in D3(4)] tests/boundary/referenceAndMediaOwnershipBoundary.test.js | TEST 7: Legitimate Owner: User A referencing own character and media succeeds
 
+## High Severity
+- [High] src/domain/project/ProjectReadService.js:62 | lets projects with user_id NULL be read by any user (assertOwns rejects, but ProjectReadService check is permissive) | found during PREP-P3
+
 ## Remaining Pre-existing Failures (9 total)
 
 ### Medium Severity (Execution & Feature Flags)

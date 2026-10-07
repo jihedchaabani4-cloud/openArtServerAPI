@@ -3,6 +3,9 @@
 > Read `00_CORE.md` completely BEFORE this file (rules, loop, rubric, decisions). Section numbers are those of the original plan; the index in `00_CORE.md` says where each section lives.
 > Scope of THIS file: section 7 (7.1 to 7.10, tasks F-T1 to F-T9). Do not read or start other phase files.
 > Prerequisites: Phase P2 is DONE: `docs/plan/reports/SES0.md` exists with a Path A or Path B verdict and `docs/plan/NAMING_MAP.md` exists. If not, STOP and say so.
+>
+> NAMING WARNING: in this phase the word "asset" is a PRODUCT word. In the database the asset is the EXISTING table that `NAMING_MAP.md` lists (probably `workflow`). You only ADD a `folder_id` column (and constraints) to that existing table. You NEVER create a table, view, alias or repository named `asset` or `assets`. Only the NEW public API endpoints say `assets` (decisions D-21, D-22, D-23).
+
 
 ## Order of work in this session
 
@@ -46,7 +49,7 @@ Project
 The model is deliberately simple. The protections around it are NOT optional extras; they are what keeps the simple model safe.
 
 1. **Only direct relations.** A folder knows only its direct parent (`parent_id`). An asset knows only its direct folder (`folder_id`). Nobody stores the chain above them. The full hierarchy is computed when needed. Example: asset X has `folder_id = Takes`; it does not know `Shots` or `Scene 1`.
-2. **No copies of the hierarchy.** Never add `level`, `depth`, `path`, `root_id`, `ancestor_ids` or similar columns to `folders` or to the asset table (D-24). Depth is computed at creation/move time from the flat list.
+2. **No copies of the hierarchy.** Never add `level`, `depth`, `path`, `root_id`, `ancestor_ids` or similar columns to `folders` or to the existing workflow-level table that is the Asset (D-24). Depth is computed at creation/move time from the flat list.
 3. **Moving a folder is one change.** Changing the structure means changing ONE `parent_id`. No asset row is touched.
 4. **Optional links.** `folder_id` is nullable (asset with no folder shows only in "All assets"). `parent_id` is nullable (root folder).
 5. **Same project, enforced twice.** A folder and its parent must be in the same project. An asset and its folder must be in the same project. Enforced by the database (composite foreign keys, see 7.3) AND by the service layer (see 7.6). Never only by the service.
@@ -151,29 +154,29 @@ Notes the agent must understand:
 
 *Path A (SES0 confirmed: workflow row = asset).* Add to the existing asset-level table (the workflow table) ONLY these:
 ```sql
-alter table <asset_table> add column if not exists folder_id uuid null;
+alter table <WORKFLOW_TABLE> add column if not exists folder_id uuid null;
 
 -- an asset may only point to a folder of its OWN project
-alter table <asset_table>
-  add constraint <asset_table>_folder_same_project_fk
+alter table <WORKFLOW_TABLE>
+  add constraint <WORKFLOW_TABLE>_folder_same_project_fk
   foreign key (folder_id, project_id) references folders (id, project_id);
 
 -- if project_id can be NULL on this table, the composite key would not be enforced; guard it:
-alter table <asset_table>
-  add constraint <asset_table>_folder_needs_project_ck
+alter table <WORKFLOW_TABLE>
+  add constraint <WORKFLOW_TABLE>_folder_needs_project_ck
   check (folder_id is null or project_id is not null);
 
-create index if not exists <asset_table>_project_folder_idx
-  on <asset_table> (project_id, folder_id, created_at desc);
+create index if not exists <WORKFLOW_TABLE>_project_folder_idx
+  on <WORKFLOW_TABLE> (project_id, folder_id, created_at desc);
 ```
-- Do NOT create a new `assets` table, view or alias. Do NOT touch media/version tables. `<asset_table>` in the SQL above is the REAL table name from SES0 (probably `workflow`): write the real name in the migration and keep the table name unchanged (D-21).
+- Do NOT create a new `assets` table, view or alias. Do NOT touch media/version tables. `<WORKFLOW_TABLE>` in the SQL above is the REAL name of the table that `NAMING_MAP.md` lists as the Asset (probably `workflow`). Write that real name in the migration. It is NOT a new table, its name must NOT become `assets`, and you keep its name unchanged (D-21).
 - `add constraint` has no `IF NOT EXISTS` in Postgres. Make the migration safe to re-run by wrapping it in a `do $$ begin ... exception when duplicate_object then null; end $$;` block, or follow the repo's migration tool convention for idempotence.
 - If the table is big, use `not valid` then `validate constraint` in a separate step (all `folder_id` are null at first, so validation is instant; this is optional).
 - If the migration tool wraps migrations in a transaction, do not use `create index concurrently`.
 
 *Path B (SES0 refuted or partial).* Write the smallest additive change that gives ONE row per user-visible item with `user_id`, `project_id`, `folder_id`, following the same constraints as above. If making that work requires renaming, moving or rewriting existing data: escalate (reason 1.5.4) and stop P3.
 
-**Direct `user_id` on the asset table.** If SES0 shows the asset table has no `user_id`: add `user_id uuid null` in one migration, backfill from the project owner in a separate idempotent migration, and verify the backfill (count of rows where `user_id is null` must be 0) before any code relies on it. Enforcing `NOT NULL` is a LATER migration, not part of this phase (record it in BACKLOG.md). Reason: keeps rollback safe.
+**Direct `user_id` on the existing Asset table (probably `workflow`).** If SES0 shows that table has no `user_id`: add `user_id uuid null` in one migration, backfill from the project owner in a separate idempotent migration, and verify the backfill (count of rows where `user_id is null` must be 0) before any code relies on it. Enforcing `NOT NULL` is a LATER migration, not part of this phase (record it in BACKLOG.md). Reason: keeps rollback safe.
 
 **`project_id` on assets.** Keep whatever it is today. Do not make it nullable in this phase (open product question D-04). The schema above does not block making it nullable later.
 
@@ -308,7 +311,7 @@ Commit message: `phase3(F-T<n>)`. After each task update STATE.md.
 - DoD: all vectors pass; no database or framework import in the module; every function documented with one comment line.
 
 **F-T2: migration**
-- Files: one migration for `folders`; one for the asset-table change (Path A or B); a user_id backfill migration only if SES0 showed `user_id` missing.
+- Files: one migration for `folders`; one that adds `folder_id` to the EXISTING Asset table from `NAMING_MAP.md` (Path A or B); a user_id backfill migration only if SES0 showed `user_id` missing.
 - Steps: write following the repo's migration convention; make them idempotent; add rollback comments; if the repo has migration tests or a schema snapshot, update them; verify with whatever hermetic check exists (for example SQL lint or a schema test). If you cannot apply the migration (no DB), mark `NOT-RUN` and give the human the exact command.
 - DoD: files exist; additive only (search the SQL for `drop`, `rename`, `alter column`, `type`: none); constraints named; `NO ACTION` used on the folder foreign keys; rollback notes present.
 

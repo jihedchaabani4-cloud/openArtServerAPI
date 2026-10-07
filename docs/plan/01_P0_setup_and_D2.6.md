@@ -7,7 +7,7 @@
 ## Order of work in this session
 
 1. SETUP-1 (plan folders and state files).
-2. SETUP-2 (Spec Kit install and init). If `SPEC_KIT = OFF`: mark SETUP-2 as SKIPPED in STATE.md and log D-14 in DECISIONS.md.
+2. SETUP-2 (Spec Kit install and init, or only a verification if it is already installed; see its Step 0). If `SPEC_KIT = OFF`: mark SETUP-2 as SKIPPED in STATE.md and log D-14 in DECISIONS.md.
 3. If `SPEC_KIT = ON`: PREP-P0 (see the end of section 3 below), STOP, wait for `GO`.
 4. Task D2.6 (sub-items a to e), one commit.
 5. Phase gate, acceptance test, STOP.
@@ -25,6 +25,7 @@ Create these files (they live in `docs/plan/`):
 - `BACKLOG.md`: header only.
 - Folders `reports/` and `escalations/` (put an empty `.gitkeep` in each).
 - Add `docs/plan/scratch/` to `.gitignore` (create the entry if missing).
+- Check `AGENTS.md`: if it does NOT contain the `Project rules` block (`00_CORE.md` section 9.4), add that block ABOVE any Spec Kit markers (`<!-- SPECKIT ... -->`), or at the top if there are none. Do not edit or delete anything else in AGENTS.md, in particular not the line that points to `specs/<NNN>-.../plan.md` and not anything between Spec Kit markers. Show the result with `git diff AGENTS.md` in the report.
 
 Commit: `phase-1(SETUP-1)`. No test needed (docs only), but still run `npm test` to confirm the baseline.
 
@@ -34,7 +35,19 @@ What it is: Spec Kit is GitHub's toolkit for spec-driven development. It adds sl
 
 How we use it (details in `05_SPEC_KIT_GUIDE.md`): Spec Kit is the PLANNER and task splitter. This file stays the source of truth. One Spec Kit feature per phase (P0, P1, P3). It is prepared at the end of the previous phase, never far ahead. If Spec Kit and this file disagree, this file wins.
 
-Steps:
+**Step 0 (always first): is Spec Kit already installed in this repo?**
+Run: `ls -a | rg "^\.specify$"; ls specs 2>/dev/null; ls .gemini/commands .claude/commands 2>/dev/null`.
+- If `.specify/` or `specs/` exists: Spec Kit is ALREADY installed (this repo already has Spec Kit features, for example `specs/033-prompt-bar-platform/`). Then:
+  a. Do NOT run `specify init` (it could overwrite files).
+  b. Run `specify check` if the CLI is available (not mandatory).
+  c. List the command files of your agent and write the REAL command names in DECISIONS.md.
+  d. Do NOT replace the existing constitution (`.specify/memory/constitution.md`). Our rules live in AGENTS.md and `00_CORE.md` and win for this plan. Log that in DECISIONS.md.
+  e. Never touch the existing feature folders under `specs/` (for example `specs/033-...`). New features are numbered automatically after them (for example `034-...`).
+  f. Skip steps 1 to 6 below; no init commit is needed. Mark SETUP-2 DONE with the note "already installed".
+- If neither exists: Spec Kit is not installed; continue with steps 1 to 6.
+- The line in AGENTS.md that points to `specs/<NNN>-.../plan.md` is Spec Kit's pointer to the plan of ANOTHER feature. Background context only. NOT your task. Never modify it.
+
+Steps (only when Spec Kit is not installed yet):
 1. Check the tools: `uv --version` (or `uvx --version`) and `git --version`. If `uv` is missing, try `pipx run` or `pip install uv`. If you cannot install anything, go to the fallback at the end.
 2. Read the current install instructions at https://github.com/github/spec-kit (command syntax changes between versions). The usual command is:
    `uvx --from git+https://github.com/github/spec-kit.git specify init --here --ai <agent>`

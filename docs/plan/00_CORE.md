@@ -44,9 +44,9 @@ Stops from section 1.5 always apply.
 
 ### 0.1 Reading order (saves your context window)
 
-1. Read `AGENTS.md` first. If AGENTS.md and the plan files disagree, AGENTS.md wins.
+1. Read `AGENTS.md` first. If AGENTS.md and the plan files disagree, AGENTS.md wins. Note: AGENTS.md may contain a line written by Spec Kit that points to `specs/<NNN>-.../plan.md` (for example `specs/033-prompt-bar-platform/plan.md`). That is the plan of ANOTHER Spec Kit feature. It is background context only. It is NOT your task and you must never modify that line or anything between Spec Kit markers (`<!-- SPECKIT ... -->`).
 2. Read this file (`00_CORE.md`) completely: rules, loop, review rubric, checklists, gates, decisions.
-3. Read ONLY the phase file the human named in the prompt. Do not open other phase files.
+3. Read ONLY the phase file the human named in the prompt. Do not open other phase files. The only extra file you may open is `05_SPEC_KIT_GUIDE.md`, and only when the prompt says `SPEC_KIT = ON` (the phase file tells you when).
 4. Your current position is always in `docs/plan/STATE.md`.
 
 ### 0.2 Facts in the plan files are hints, not truth
@@ -103,6 +103,8 @@ Read this once. These words appear everywhere.
 - **Naming map**: the table in 7.1.2 that says which product word (for example "Asset") corresponds to which REAL table, class and route (for example the `workflow` table). We keep the real names. We do NOT rename them in this plan.
 
 ### 1.2 Rules inherited from AGENTS.md (AGENTS.md wins on conflict)
+
+If AGENTS.md does not contain some of these rules, they STILL apply: they are written here and in the `Project rules` block of section 9.4.
 
 1. One commit per task. Message format for phase 0 tasks: `phase0(RC1.4-<id>)`. For other phases use `phase<N>(<id>)`.
 2. Failing test FIRST wherever code changes.
@@ -459,6 +461,21 @@ D-15 | 2026-10-07 | Question: ... | Options: A ..., B ... | Chosen: A | Reason: 
 - [ ] Errors use the repo's error class and the codes in 7.5.
 - [ ] Rate limiter applied on write routes.
 - [ ] Tests: success, 401, 404 for foreign ids, validation error.
+
+### 9.4 `Project rules` block for AGENTS.md
+
+AGENTS.md must contain this block (SETUP-1 checks it and adds it if missing). Put it ABOVE any Spec Kit markers, or at the top if there are none. Never edit or delete anything between Spec Kit markers or the pointer line to `specs/.../plan.md`.
+
+```
+## Project rules
+- Before any task, read docs/plan/00_CORE.md and the phase file the human names. The plan files win over any Spec Kit file.
+- One commit per task. Failing test first. Full hermetic `npm test` before every commit (no .env, no network, no real DB).
+- Secrets scan on `git diff --cached` before every commit.
+- Use the structured logger, never console.*. Never log secrets, tokens or prompts.
+- Never push, tag, merge, or edit anything under my-app/.
+- Every id from a client must be ownership-checked and project-scoped. Cross-tenant access returns 404, never 403.
+- Additive migrations only. Never rename existing tables, columns, classes or routes.
+```
 
 ---
 

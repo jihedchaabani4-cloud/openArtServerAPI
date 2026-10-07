@@ -1,6 +1,6 @@
 # F-T2: Additive Database Migrations (Schema Hardened)
 Status: DONE
-Commit: PENDING (phase3(F-T2-fix))
+Commit: ea47912 (not pushed)
 Self-review score: 100/100 (loops: 2)
 Baseline `npm test` before: FAIL (542 pass, 9 fail / 551 tests)   After: FAIL (554 pass, 9 fail / 563 tests)
 

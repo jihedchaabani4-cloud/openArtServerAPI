@@ -272,6 +272,22 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
       assert.equal(data.parentId, "f-root-A1");
     });
 
+    it("creates sub-folder when parent_id or collection_id is provided in request body", async () => {
+      const res = await fetch(`${baseUrl}/api/projects/proj-A/folders`, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer token-user-A",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: "Sub Collection A", collection_id: "f-root-A1" }),
+      });
+
+      assert.equal(res.status, 201);
+      const data = await res.json();
+      assert.equal(data.name, "Sub Collection A");
+      assert.equal(data.parentId, "f-root-A1");
+    });
+
     it("Scenario 3: renames folder successfully (PATCH /api/folders/:id)", async () => {
       const res = await fetch(`${baseUrl}/api/folders/f-root-A1`, {
         method: "PATCH",

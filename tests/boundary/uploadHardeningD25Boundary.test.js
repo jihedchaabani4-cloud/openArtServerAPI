@@ -62,22 +62,31 @@ describe("RC1.4-D2.5 — Upload Hardening & Security Follow-up Boundary Tests", 
   // ── (a) auth.js internal-secret path route allowlist ──────────────────────────
   describe("(a) Internal-secret path route restriction", () => {
     it("allows internal secret on allow-listed route", async () => {
-      const req = {
-        path: "/api/workflows/project-data/proj-123",
-        originalUrl: "/api/workflows/project-data/proj-123",
-        headers: {
-          "x-internal-secret": VALID_TEST_SECRET,
-          "x-user-id": "service-worker-user",
-        },
-      };
+      const origFlag = process.env.INTERNAL_AUTH_ENABLED;
+      process.env.INTERNAL_AUTH_ENABLED = "true";
+      const REAL_UUID = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
+      try {
+        const req = {
+          method: "GET",
+          path: "/api/workflows/project-data/proj-123",
+          originalUrl: "/api/workflows/project-data/proj-123",
+          headers: {
+            "x-internal-secret": VALID_TEST_SECRET,
+            "x-user-id": REAL_UUID,
+          },
+        };
 
-      let nextCalled = false;
-      await requireAuth(req, {}, () => {
-        nextCalled = true;
-      });
+        let nextCalled = false;
+        await requireAuth(req, {}, () => {
+          nextCalled = true;
+        });
 
-      assert.equal(nextCalled, true);
-      assert.equal(req.user?.id, "service-worker-user");
+        assert.equal(nextCalled, true);
+        assert.equal(req.user?.id, REAL_UUID);
+      } finally {
+        if (origFlag !== undefined) process.env.INTERNAL_AUTH_ENABLED = origFlag;
+        else delete process.env.INTERNAL_AUTH_ENABLED;
+      }
     });
 
     it("ignores internal secret on non-allowlisted route and rejects without JWT", async () => {

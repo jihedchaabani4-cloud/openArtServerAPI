@@ -445,6 +445,14 @@ If critical regressions or alerts occur:
     - `GET /api/workflows/project-data/:projectId`
     - `PATCH /api/workflows/workflows/:id`
   - Generation, billing, characters, elements, and other paths unconditionally reject the secret.
+  - **No Ownership Bypass**: The internal secret authenticates the caller as the validated UUID provided in `x-user-id`. It grants zero cross-tenant ownership bypass: all domain ownership checks run against `req.user.id`, and cross-tenant requests return HTTP 404 with no sensitive details revealed.
+- `DEV_AUTH_BYPASS`: Strictly forbidden in production.
+  - If set to `"true"` while `NODE_ENV=production`, the process throws a fatal boot error immediately (`assertSecurityConfiguredForEnvironment`).
+  - Across all services (`WorkflowAuthorizationService`, `ProjectReadService`, `GenerationService`, `TenantAccessService`), development bypass is unconditionally ignored whenever `NODE_ENV === "production"`.
+- `READINESS_TIMEOUT_MS`: Probe timeout for readiness checks in milliseconds.
+  - Default: `1500` ms. Enforced via `Promise.race` during Redis pings to avoid hung readiness checks.
+- `READINESS_CACHE_TTL_MS`: In-memory caching TTL for readiness probe results.
+  - Default: `1500` ms (recommended range: `1000` to `2000` ms). Avoids Redis connection hammering under high-frequency load-balancer health checks.
 
 ### 8.2 Health & Readiness Probes
 - **Load balancer**: health check target = `/ready`. Platform restart probe (liveness) = `/health`.
@@ -453,6 +461,7 @@ If critical regressions or alerts occur:
   - Returns HTTP 200 with `{ "ready": true }` when both connections are ready.
   - Returns HTTP 503 with `{ "ready": false }` if either connection is disconnected or failing pings.
   - Leaks zero internal hostnames, versions, or error details to unauthenticated callers.
+  - Cached for `READINESS_CACHE_TTL_MS` (default 1500ms) and times out after `READINESS_TIMEOUT_MS` (default 1500ms).
 
 ### 8.3 In-Flight Upload Memory Cap & Sizing Guide
 Uploads are buffered in memory (`Buffer.concat` in `sizeLimitedStorage.js`), making explicit RAM bounds vital against OOM failures.

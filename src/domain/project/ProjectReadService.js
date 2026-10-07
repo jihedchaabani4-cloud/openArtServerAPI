@@ -2,8 +2,6 @@ import { supabase, supabaseAdmin } from "../../../lib/supabase.js";
 import { getCatalog } from "../../models/index.js";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
 import { calculateAspectRatio } from "../../utils/ratioUtils.js";
-import { safeCompareSecret } from "../../platform/security/secretComparison.js";
-import { isInternalSecretAllowedRequest } from "../../middleware/auth.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
 
 const projectLogger = createLogger("project_read");
@@ -62,7 +60,7 @@ export class ProjectReadService {
         }
 
         if (projectData.user_id && projectData.user_id !== userId) {
-            const isDev = process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true;
+            const isDev = (process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) && process.env.NODE_ENV !== "production";
             if (!isDev) {
                 crudOperationLog({
                     operation: "getProjectData",
@@ -390,16 +388,8 @@ export class ProjectReadService {
     }
 
     async _verifyMediaOwnership(mediaId, userId, req = null) {
-        const isDev = process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true;
-        const secret = req?.headers?.["x-internal-secret"];
-        const isInternal = Boolean(
-            process.env.INTERNAL_AUTH_ENABLED === "true" &&
-            isInternalSecretAllowedRequest(req) &&
-            secret &&
-            safeCompareSecret(secret, process.env.INTERNAL_SECRET)
-        );
-
-        if (isInternal || isDev) return true;
+        const isDev = (process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) && process.env.NODE_ENV !== "production";
+        if (isDev) return true;
 
         const { data: media, error } = await supabase
             .from("media")

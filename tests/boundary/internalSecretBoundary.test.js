@@ -7,20 +7,22 @@ import { safeCompareSecret } from "../../src/platform/security/secretComparison.
 import workflowsRouter from "../../routes/workflows.js";
 import { projectReadService } from "../../src/container.js";
 import { supabase } from "../../lib/supabase.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
 
 describe("RC1.1-R1 — Internal Secret Security & Timing-Safe Enforcement", () => {
   let origEnv;
 
   after(async () => {
-    try {
-      await redisConnection?.quit().catch(() => redisConnection?.disconnect());
-      await workerRedisConnection?.quit().catch(() => workerRedisConnection?.disconnect());
-    } catch {}
+    await Promise.allSettled([
+      rateLimitRedisConnection?.quit().catch(() => rateLimitRedisConnection?.disconnect()),
+      redisConnection?.quit().catch(() => redisConnection?.disconnect()),
+      workerRedisConnection?.quit().catch(() => workerRedisConnection?.disconnect()),
+    ]);
   });
 
   beforeEach(() => {
     origEnv = { ...process.env };
+    delete process.env.DEV_AUTH_BYPASS;
   });
 
   afterEach(() => {
@@ -155,18 +157,7 @@ describe("RC1.1-R1 — Internal Secret Security & Timing-Safe Enforcement", () =
       assert.match(body.message, /not found/i);
     });
 
-    it("TEST 6: Request with correct configured secret allows bypass on authorized internal routes", async () => {
-      projectReadService.getWorkflowByMedia = async ({ mediaId, userId, req }) => {
-        const secret = req?.headers?.["x-internal-secret"];
-        const isInternal = Boolean(secret && safeCompareSecret(secret, process.env.INTERNAL_SECRET));
-        if (isInternal) {
-          return { workflow: { id: "wf-1" }, items: [] };
-        }
-        const err = new Error("Media not found");
-        err.statusCode = 404;
-        throw err;
-      };
-
+    it("TEST 6: Request with secret on unauthorized route gets no bypass and is rejected with 401", async () => {
       const res = await fetch(`${baseUrl}/api/workflows/workflow-by-media/media-foreign-123`, {
         headers: {
           "x-internal-secret": testSecret,
@@ -175,9 +166,8 @@ describe("RC1.1-R1 — Internal Secret Security & Timing-Safe Enforcement", () =
       });
 
       const body = await res.json();
-      assert.equal(res.status, 200, `Expected 200, got ${res.status}: ${JSON.stringify(body)}`);
-      assert.equal(body.ok, true);
-      assert.equal(body.workflow.id, "wf-1");
+      assert.equal(res.status, 401, `Expected 401, got ${res.status}: ${JSON.stringify(body)}`);
+      assert.equal(body.ok, false);
     });
   });
 });

@@ -52,7 +52,7 @@ export class TenantAccessService {
 
         if (project.user_id !== userId) {
             // Allow dev bypass for local development
-            if (process.env.DEV_AUTH_BYPASS === "true") {
+            if ((process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) && process.env.NODE_ENV !== "production") {
                 log("assertProjectOwnership", "bypassed", { traceId, userId, projectId });
                 return;
             }

@@ -6,16 +6,17 @@ import {
   assertWalletConfiguredForEnvironment,
   assertRateLimitConfiguredForEnvironment,
 } from "../../src/container.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
 
 describe("RC1.2-S2 — NODE_ENV and Rate Limit Fail-Safe Boundary Tests", () => {
   let origEnv;
 
   after(async () => {
-    try {
-      await redisConnection?.quit().catch(() => redisConnection?.disconnect());
-      await workerRedisConnection?.quit().catch(() => workerRedisConnection?.disconnect());
-    } catch {}
+    await Promise.allSettled([
+      rateLimitRedisConnection?.quit().catch(() => rateLimitRedisConnection?.disconnect()),
+      redisConnection?.quit().catch(() => redisConnection?.disconnect()),
+      workerRedisConnection?.quit().catch(() => workerRedisConnection?.disconnect()),
+    ]);
   });
 
   beforeEach(() => {

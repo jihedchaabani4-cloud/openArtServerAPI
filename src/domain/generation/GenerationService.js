@@ -174,7 +174,7 @@ export class GenerationService {
         }
 
         const isOwner = project.user_id === userId;
-        const devBypass = process.env.DEV_AUTH_BYPASS === "true";
+        const devBypass = (process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) && process.env.NODE_ENV !== "production";
         if (!isOwner && !devBypass) {
             log("getAssets", "foreign_denied", { traceId, userId, resourceId: projectId, resourceType: "project" });
             const err = new Error("Project not found");

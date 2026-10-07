@@ -84,6 +84,11 @@ export function assertSecurityConfiguredForEnvironment() {
                 `Fatal: INTERNAL_SECRET is required in production mode (NODE_ENV=${process.env.NODE_ENV || "unset"}) and must be at least 32 characters long.`
             );
         }
+        if (process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) {
+            throw new Error(
+                `Fatal: DEV_AUTH_BYPASS cannot be enabled in production mode (NODE_ENV=${process.env.NODE_ENV || "unset"}).`
+            );
+        }
     }
 }
 
@@ -103,6 +108,10 @@ export function assertRateLimitConfiguredForEnvironment() {
     }
 
     if (allowMemory) {
+        systemLogger.warn(
+            { event: "security.rate_limit_memory_warning" },
+            "CRITICAL SECURITY WARNING: RATE_LIMIT_STORE is running in 'memory' mode in production. Rate limits will NOT be shared across instances! Allowed only via ALLOW_IN_MEMORY_RATE_LIMIT=true."
+        );
         console.warn(
             "⚠️ CRITICAL SECURITY WARNING: RATE_LIMIT_STORE is running in 'memory' mode in production. Rate limits will NOT be shared across instances! Allowed only via ALLOW_IN_MEMORY_RATE_LIMIT=true."
         );

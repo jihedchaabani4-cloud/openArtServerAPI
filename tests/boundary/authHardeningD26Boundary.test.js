@@ -1,10 +1,14 @@
-import { describe, it, after, beforeEach, afterEach } from "node:test";
+import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { requireAuth } from "../../src/middleware/auth.js";
 import healthRouter from "../../routes/health.js";
 import readyRouter, { _resetReadinessCacheForTest } from "../../routes/ready.js";
 import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
 import { StorageService } from "../../src/platform/storage/StorageService.js";
+import http from "node:http";
+import express from "express";
+import workflowsRouter from "../../routes/workflows.js";
+import { assertSecurityConfiguredForEnvironment, workflowService, projectReadService } from "../../src/container.js";
 import { supabase } from "../../lib/supabase.js";
 import { WorkflowAuthorizationService } from "../../src/platform/workflow/WorkflowAuthorizationService.js";
 import { ProjectReadService } from "../../src/domain/project/ProjectReadService.js";
@@ -14,11 +18,14 @@ const VALID_TEST_SECRET = "test-internal-secret-for-d26-auth-min-32-chars-ok!";
 describe("D2.6 Security Hardening Boundary Tests", () => {
   let origEnvSecret;
   let origInternalAuthEnabled;
+  let origDevAuthBypass;
 
   beforeEach(() => {
     _resetReadinessCacheForTest?.();
     origEnvSecret = process.env.INTERNAL_SECRET;
     origInternalAuthEnabled = process.env.INTERNAL_AUTH_ENABLED;
+    origDevAuthBypass = process.env.DEV_AUTH_BYPASS;
+    delete process.env.DEV_AUTH_BYPASS;
     process.env.INTERNAL_SECRET = VALID_TEST_SECRET;
   });
 
@@ -36,6 +43,11 @@ describe("D2.6 Security Hardening Boundary Tests", () => {
       process.env.INTERNAL_AUTH_ENABLED = origInternalAuthEnabled;
     } else {
       delete process.env.INTERNAL_AUTH_ENABLED;
+    }
+    if (origDevAuthBypass !== undefined) {
+      process.env.DEV_AUTH_BYPASS = origDevAuthBypass;
+    } else {
+      delete process.env.DEV_AUTH_BYPASS;
     }
   });
 
@@ -632,71 +644,308 @@ describe("D2.6 Security Hardening Boundary Tests", () => {
     });
   });
 
-  // ── (d) Internal secret hardening in WorkflowAuthorizationService & ProjectReadService ────
-  describe("(d) Internal secret hardening in WorkflowAuthorizationService and ProjectReadService", () => {
-    it("WorkflowAuthorizationService._isBypassed returns false when INTERNAL_AUTH_ENABLED is unset/false", () => {
-      delete process.env.INTERNAL_AUTH_ENABLED;
-      const service = new WorkflowAuthorizationService({ db: {} });
+  // ── (d) DEV_AUTH_BYPASS production ban & ownership bypass removal ──────────────────────────
+  describe("(d) DEV_AUTH_BYPASS production ban and internal secret ownership enforcement", () => {
+    it("DEV_AUTH_BYPASS throws at boot/config when NODE_ENV=production", () => {
+      const origNodeEnv = process.env.NODE_ENV;
+      const origBypass = process.env.DEV_AUTH_BYPASS;
+      try {
+        process.env.NODE_ENV = "production";
+        process.env.INTERNAL_SECRET = "a".repeat(32);
+        process.env.DEV_AUTH_BYPASS = "true";
 
-      const req = {
-        method: "PATCH",
-        originalUrl: "/api/workflows/workflows/wf-123",
-        headers: { "x-internal-secret": VALID_TEST_SECRET },
-      };
-
-      assert.equal(service._isBypassed(req), false, "Must not bypass when INTERNAL_AUTH_ENABLED is unset");
-
-      process.env.INTERNAL_AUTH_ENABLED = "false";
-      assert.equal(service._isBypassed(req), false, "Must not bypass when INTERNAL_AUTH_ENABLED is false");
-    });
-
-    it("WorkflowAuthorizationService._isBypassed returns false for unauthorized routes even if flag is true", () => {
-      process.env.INTERNAL_AUTH_ENABLED = "true";
-      const service = new WorkflowAuthorizationService({ db: {} });
-
-      const forbiddenReqs = [
-        { method: "POST", originalUrl: "/api/workflows/run", headers: { "x-internal-secret": VALID_TEST_SECRET } },
-        { method: "DELETE", originalUrl: "/api/workflows/items/item-123", headers: { "x-internal-secret": VALID_TEST_SECRET } },
-        { method: "GET", originalUrl: "/api/workflows/workflow-by-media/media-123", headers: { "x-internal-secret": VALID_TEST_SECRET } },
-      ];
-
-      for (const req of forbiddenReqs) {
-        assert.equal(service._isBypassed(req), false, `Must not bypass on unauthorized route ${req.method} ${req.originalUrl}`);
+        assert.throws(
+          () => assertSecurityConfiguredForEnvironment(),
+          /DEV_AUTH_BYPASS cannot be enabled in production/i,
+          "Must throw at boot when DEV_AUTH_BYPASS is enabled in production"
+        );
+      } finally {
+        process.env.NODE_ENV = origNodeEnv;
+        process.env.DEV_AUTH_BYPASS = origBypass;
       }
     });
 
-    it("WorkflowAuthorizationService._isBypassed returns true ONLY for allow-listed pairs with flag true & valid secret", () => {
+    it("WorkflowAuthorizationService._isBypassed returns false in production even if DEV_AUTH_BYPASS=true", () => {
+      const origNodeEnv = process.env.NODE_ENV;
+      const origBypass = process.env.DEV_AUTH_BYPASS;
+      try {
+        process.env.NODE_ENV = "production";
+        process.env.DEV_AUTH_BYPASS = "true";
+        const service = new WorkflowAuthorizationService({ db: {} });
+        assert.equal(service._isBypassed({}), false, "Must not bypass in production");
+      } finally {
+        process.env.NODE_ENV = origNodeEnv;
+        process.env.DEV_AUTH_BYPASS = origBypass;
+      }
+    });
+
+    it("WorkflowAuthorizationService._isBypassed NEVER bypasses for internal-secret (returns false)", () => {
       process.env.INTERNAL_AUTH_ENABLED = "true";
       const service = new WorkflowAuthorizationService({ db: {} });
 
-      const allowedReq1 = {
+      const reqWithSecret = {
         method: "PATCH",
         originalUrl: "/api/workflows/workflows/wf-123",
         headers: { "x-internal-secret": VALID_TEST_SECRET },
       };
-      const allowedReq2 = {
+
+      // CRITICAL: internal secret MUST NOT bypass ownership check!
+      assert.equal(
+        service._isBypassed(reqWithSecret),
+        false,
+        "Internal secret must authenticate only and never bypass ownership"
+      );
+    });
+
+    it("ProjectReadService._verifyMediaOwnership NEVER bypasses for internal-secret (must check userId)", async () => {
+      process.env.INTERNAL_AUTH_ENABLED = "true";
+      const service = new ProjectReadService({ db: {} });
+
+      // Mock verifyMediaOwnership to check whether internal secret returns true without owner check
+      const reqWithSecret = {
         method: "GET",
         originalUrl: "/api/workflows/project-data/proj-123",
         headers: { "x-internal-secret": VALID_TEST_SECRET },
       };
 
-      assert.equal(service._isBypassed(allowedReq1), true, "Must bypass for PATCH /api/workflows/workflows/:id");
-      assert.equal(service._isBypassed(allowedReq2), true, "Must bypass for GET /api/workflows/project-data/:projectId");
+      // Mock db/supabase inside service: foreign owner
+      const origVerify = service._verifyMediaOwnership;
+      try {
+        // Calling _verifyMediaOwnership for foreign user must return false
+        const isAuthorized = await service._verifyMediaOwnership("media-123", "foreign-user-id", reqWithSecret);
+        assert.equal(isAuthorized, false, "Internal secret must never grant ownership bypass on media");
+      } finally {
+        service._verifyMediaOwnership = origVerify;
+      }
     });
+  });
 
-    it("ProjectReadService._verifyMediaOwnership returns false without valid allowed internal request or dev bypass", async () => {
-      delete process.env.INTERNAL_AUTH_ENABLED;
-      const service = new ProjectReadService({ db: {} });
+  // ── (e) HTTP route tests: internal-secret strictly enforces tenant ownership (both allowed pairs) ──
+  describe("(e) Allowed internal-secret routes enforce tenant ownership (no cross-tenant bypass)", () => {
+    let server;
+    let baseUrl;
+    const USER_A = "11111111-1111-4111-8111-111111111111";
+    const USER_B = "22222222-2222-4222-8222-222222222222";
 
-      const reqWithSecret = {
-        method: "GET",
-        originalUrl: "/api/workflows/workflow-by-media/media-123",
-        headers: { "x-internal-secret": VALID_TEST_SECRET },
+    let origGetProjectData;
+    let origUpdateMetadata;
+
+    before(async () => {
+      origGetProjectData = projectReadService.getProjectData;
+      origUpdateMetadata = workflowService.updateWorkflowMetadata;
+
+      // Mock getProjectData strictly enforcing ownership
+      projectReadService.getProjectData = async ({ projectId, userId }) => {
+        if (projectId === "proj-user-B" && userId !== USER_B) {
+          const err = new Error("Project not found");
+          err.statusCode = 404;
+          throw err;
+        }
+        if (projectId === "proj-user-A" && userId === USER_A) {
+          return {
+            projectName: "User A Project",
+            projectId: "proj-user-A",
+            sessions: [],
+            workflows: [],
+            media: [],
+            elements: [],
+            characters: [],
+          };
+        }
+        const err = new Error("Project not found");
+        err.statusCode = 404;
+        throw err;
       };
 
-      // Must not bypass ownership via x-internal-secret for workflow-by-media
-      const isAuthorized = await service._verifyMediaOwnership("media-123", "user-foreign", reqWithSecret);
-      assert.equal(isAuthorized, false, "Must not bypass media ownership check on unauthorized route");
+      // Mock updateWorkflowMetadata strictly delegating to authService
+      workflowService.updateWorkflowMetadata = async ({ workflowId, updates, userId, req }) => {
+        const isAuthorized = await workflowService.authService.verifyWorkflowOwnership(workflowId, userId, req);
+        if (!isAuthorized) {
+          const err = new Error("Workflow not found");
+          err.statusCode = 404;
+          throw err;
+        }
+        return { workflow: { id: workflowId, ...updates } };
+      };
+
+      const app = express();
+      app.use(express.json());
+      app.use("/api/workflows", workflowsRouter);
+      app.use((err, req, res, next) => {
+        const status = err.statusCode || 500;
+        res.status(status).json({ ok: false, message: err.message });
+      });
+
+      server = http.createServer(app);
+      await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const { port } = server.address();
+      baseUrl = `http://127.0.0.1:${port}`;
+    });
+
+    after(async () => {
+      projectReadService.getProjectData = origGetProjectData;
+      workflowService.updateWorkflowMetadata = origUpdateMetadata;
+      if (server) {
+        await new Promise((resolve) => server.close(resolve));
+      }
+    });
+
+    // Pair 1: GET /api/workflows/project-data/:projectId
+    describe("Pair 1: GET /api/workflows/project-data/:projectId", () => {
+      it("a) internal secret + x-user-id = User A + foreign project of User B -> 404, reveals nothing", async () => {
+        process.env.INTERNAL_AUTH_ENABLED = "true";
+
+        const res = await fetch(`${baseUrl}/api/workflows/project-data/proj-user-B`, {
+          method: "GET",
+          headers: {
+            "x-internal-secret": VALID_TEST_SECRET,
+            "x-user-id": USER_A,
+          },
+        });
+
+        assert.equal(res.status, 404, `Cross-tenant access must return 404, got ${res.status}`);
+        const body = await res.json();
+        assert.equal(body.ok, false);
+        assert.match(body.message, /not found/i);
+        assert.equal(body.projectContents, undefined, "Body must reveal zero project contents");
+      });
+
+      it("b) internal secret + x-user-id = User A + own project of User A -> 200", async () => {
+        process.env.INTERNAL_AUTH_ENABLED = "true";
+
+        const res = await fetch(`${baseUrl}/api/workflows/project-data/proj-user-A`, {
+          method: "GET",
+          headers: {
+            "x-internal-secret": VALID_TEST_SECRET,
+            "x-user-id": USER_A,
+          },
+        });
+
+        assert.equal(res.status, 200, `Legitimate owner access must return 200, got ${res.status}`);
+        const body = await res.json();
+        assert.equal(body.result.data.json.projectId, "proj-user-A");
+      });
+
+      it("c) INTERNAL_AUTH_ENABLED unset + valid secret -> 401 rejected", async () => {
+        delete process.env.INTERNAL_AUTH_ENABLED;
+
+        const res = await fetch(`${baseUrl}/api/workflows/project-data/proj-user-A`, {
+          method: "GET",
+          headers: {
+            "x-internal-secret": VALID_TEST_SECRET,
+            "x-user-id": USER_A,
+          },
+        });
+
+        assert.equal(res.status, 401, `Must reject when flag unset, got ${res.status}`);
+      });
+
+      it("d) valid secret on non-allowed route -> 401 rejected", async () => {
+        process.env.INTERNAL_AUTH_ENABLED = "true";
+
+        const res = await fetch(`${baseUrl}/api/workflows/workflow-by-media/media-123`, {
+          method: "GET",
+          headers: {
+            "x-internal-secret": VALID_TEST_SECRET,
+            "x-user-id": USER_A,
+          },
+        });
+
+        assert.equal(res.status, 401, `Non-allowed route must reject internal secret, got ${res.status}`);
+      });
+    });
+
+    // Pair 2: PATCH /api/workflows/workflows/:id
+    describe("Pair 2: PATCH /api/workflows/workflows/:id", () => {
+      it("a) internal secret + x-user-id = User A + foreign workflow of User B -> 404, reveals nothing", async () => {
+        process.env.INTERNAL_AUTH_ENABLED = "true";
+
+        // Mock authService ownership check for foreign workflow
+        const origVerifyOwnership = workflowService.authService.verifyWorkflowOwnership;
+        workflowService.authService.verifyWorkflowOwnership = async (wfId, userId, req) => {
+          if (wfId === "wf-user-B" && userId !== USER_B) return false;
+          return true;
+        };
+
+        try {
+          const res = await fetch(`${baseUrl}/api/workflows/workflows/wf-user-B`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              "x-internal-secret": VALID_TEST_SECRET,
+              "x-user-id": USER_A,
+            },
+            body: JSON.stringify({ display_name: "Hacked by User A" }),
+          });
+
+          assert.equal(res.status, 404, `Foreign workflow patch must return 404, got ${res.status}`);
+          const body = await res.json();
+          assert.equal(body.ok, false);
+          assert.match(body.message, /not found/i);
+        } finally {
+          workflowService.authService.verifyWorkflowOwnership = origVerifyOwnership;
+        }
+      });
+
+      it("b) internal secret + x-user-id = User A + own workflow of User A -> 200", async () => {
+        process.env.INTERNAL_AUTH_ENABLED = "true";
+
+        const origVerifyOwnership = workflowService.authService.verifyWorkflowOwnership;
+        workflowService.authService.verifyWorkflowOwnership = async (wfId, userId, req) => {
+          if (wfId === "wf-user-A" && userId === USER_A) return true;
+          return false;
+        };
+
+        try {
+          const res = await fetch(`${baseUrl}/api/workflows/workflows/wf-user-A`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              "x-internal-secret": VALID_TEST_SECRET,
+              "x-user-id": USER_A,
+            },
+            body: JSON.stringify({ display_name: "Updated by User A" }),
+          });
+
+          assert.equal(res.status, 200, `Own workflow patch must return 200, got ${res.status}`);
+          const body = await res.json();
+          assert.equal(body.ok, true);
+        } finally {
+          workflowService.authService.verifyWorkflowOwnership = origVerifyOwnership;
+        }
+      });
+
+      it("c) INTERNAL_AUTH_ENABLED unset + valid secret -> 401 rejected", async () => {
+        delete process.env.INTERNAL_AUTH_ENABLED;
+
+        const res = await fetch(`${baseUrl}/api/workflows/workflows/wf-user-A`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            "x-internal-secret": VALID_TEST_SECRET,
+            "x-user-id": USER_A,
+          },
+          body: JSON.stringify({ display_name: "Test" }),
+        });
+
+        assert.equal(res.status, 401, `Must reject when flag unset, got ${res.status}`);
+      });
+
+      it("d) valid secret on non-allowed method (POST) -> 401 rejected", async () => {
+        process.env.INTERNAL_AUTH_ENABLED = "true";
+
+        const res = await fetch(`${baseUrl}/api/workflows/workflows/wf-user-A`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-internal-secret": VALID_TEST_SECRET,
+            "x-user-id": USER_A,
+          },
+          body: JSON.stringify({ display_name: "Test" }),
+        });
+
+        assert.equal(res.status, 401, `POST on workflows/:id must reject internal secret with 401, got ${res.status}`);
+      });
     });
   });
 });

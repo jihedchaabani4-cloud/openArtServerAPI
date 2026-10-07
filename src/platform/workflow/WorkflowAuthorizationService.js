@@ -1,5 +1,3 @@
-import { safeCompareSecret } from "../security/secretComparison.js";
-import { isInternalSecretAllowedRequest } from "../../middleware/auth.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
 
 const authLogger = createLogger("workflow_auth");
@@ -9,7 +7,6 @@ const authLogger = createLogger("workflow_auth");
  * Dedicated security and ownership verification service for workflows and media assets.
  * Encapsulates internal service-to-service secrets, development bypasses, and project owner checks.
  */
-
 export class WorkflowAuthorizationService {
     /**
      * @param {Object} deps
@@ -20,15 +17,8 @@ export class WorkflowAuthorizationService {
     }
 
     _isBypassed(req = null) {
-        if (!req) return false;
-        const isDev = process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true;
-        if (isDev) return true;
-
-        if (process.env.INTERNAL_AUTH_ENABLED !== "true") return false;
-        if (!isInternalSecretAllowedRequest(req)) return false;
-
-        const secret = req?.headers?.["x-internal-secret"];
-        return Boolean(secret && safeCompareSecret(secret, process.env.INTERNAL_SECRET));
+        const isDev = (process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) && process.env.NODE_ENV !== "production";
+        return isDev;
     }
 
     /**

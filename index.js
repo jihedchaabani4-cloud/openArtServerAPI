@@ -25,6 +25,10 @@ const PORT = process.env.PORT || 3001;
 const isProd = process.env.NODE_ENV === "production";
 const isStagingOrProd = isProd || process.env.NODE_ENV === "staging";
 
+if (isProd && (process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true)) {
+    throw new Error("Fatal: DEV_AUTH_BYPASS cannot be enabled in production mode (NODE_ENV=production).");
+}
+
 if (process.env.TRUST_PROXY !== undefined && process.env.TRUST_PROXY !== "") {
     const rawTrust = process.env.TRUST_PROXY;
     if (rawTrust === "true") app.set("trust proxy", true);

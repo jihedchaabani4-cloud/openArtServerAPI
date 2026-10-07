@@ -100,14 +100,7 @@ export async function generateImage(req, res) {
 
     // ── 0a. Enforce Folder Usability (BEFORE billing and workflow creation) ───
     const rawFolderId = req.body.folder_id || req.body.folderId || null;
-    let validatedFolderId = null;
-    if (rawFolderId && rawFolderId !== "none") {
-      if (typeof rawFolderId !== "string" || !rawFolderId.trim() || !UUID_REGEX.test(rawFolderId.trim())) {
-        return res.status(400).json({ ok: false, code: "VALIDATION_ERROR", message: "folderId must be a valid UUID" });
-      }
-      await folderService.assertFolderUsable(rawFolderId.trim(), userId, projectId);
-      validatedFolderId = rawFolderId.trim();
-    }
+    const validatedFolderId = await folderService.validateAndAssertUsable(rawFolderId, userId, projectId);
 
     // ── 0b. Enforce Reference Ownership ──────────────────────────────────────
     for (const refId of sanitizedReferences) {

@@ -19,16 +19,27 @@ export class FolderError extends AppError {
 }
 
 /**
- * Domain service enforcing business logic, hierarchical limits,
- * cycle prevention, and empty-folder deletion rules for folders.
+ * FolderService
+ * Domain Service — owns all folder lifecycle operations, tree validation,
+ * position calculations, depth limits, cycle prevention, and usable folder resolution.
+ *
+ * Public methods:
+ *   - list({ projectId, userId })
+ *   - create({ projectId, userId, parentId, name })
+ *   - update({ folderId, userId, patch })
+ *   - remove({ folderId, userId })
+ *   - assertFolderUsable(folderId, userId, projectId)
+ *   - validateAndAssertUsable(folderId, userId, projectId)
  */
 export class FolderService {
   constructor({
     folderRepo,
+    projectRepo = null,
     maxDepth = Number(process.env.FOLDER_MAX_DEPTH || 3),
     maxFoldersPerProject = Number(process.env.FOLDER_MAX_PER_PROJECT || 50),
   } = {}) {
     this.folderRepo = folderRepo;
+    this.projectRepo = projectRepo;
     this.maxDepth = Number.isFinite(maxDepth) && maxDepth > 0 ? maxDepth : 3;
     this.maxFoldersPerProject =
       Number.isFinite(maxFoldersPerProject) && maxFoldersPerProject > 0
@@ -78,6 +89,13 @@ export class FolderService {
       throw new FolderError("Project and User ID required", 400, "VALIDATION_ERROR");
     }
 
+    if (this.projectRepo?.findByUser) {
+      const projects = await this.projectRepo.findByUser(userId, projectId);
+      if (!projects || projects.length === 0) {
+        throw new FolderError(`Project ${projectId} not found or not owned by user`, 404, "NOT_FOUND");
+      }
+    }
+
     const [folders, counts] = await Promise.all([
       this.folderRepo.listByProject(projectId, userId),
       this.folderRepo.countAssetsByFolder(projectId, userId),
@@ -93,6 +111,13 @@ export class FolderService {
   async create({ projectId, userId, parentId = null, name }) {
     if (!projectId || !userId) {
       throw new FolderError("Project and User ID required", 400, "VALIDATION_ERROR");
+    }
+
+    if (this.projectRepo?.findByUser) {
+      const projects = await this.projectRepo.findByUser(userId, projectId);
+      if (!projects || projects.length === 0) {
+        throw new FolderError(`Project ${projectId} not found or not owned by user`, 404, "NOT_FOUND");
+      }
     }
 
     const cleanName = this._validateName(name);
@@ -347,5 +372,34 @@ export class FolderService {
     }
 
     return folder;
+  }
+
+  /**
+   * Validates that a folderId is a valid UUID and usable within a project.
+   * Null, undefined, or "none" (case-insensitive) resolves to null (project root).
+   * Throws VALIDATION_ERROR (400) if folderId is not a valid UUID string.
+   * Throws NOT_FOUND (404) if folder does not exist or does not belong to user & project.
+   *
+   * @param {string|null} folderId
+   * @param {string} userId
+   * @param {string} projectId
+   * @returns {Promise<string|null>} The validated folderId or null
+   */
+  async validateAndAssertUsable(folderId, userId, projectId) {
+    if (folderId === null || folderId === undefined) {
+      return null;
+    }
+    const trimmed = typeof folderId === "string" ? folderId.trim() : String(folderId);
+    if (!trimmed || trimmed.toLowerCase() === "none") {
+      return null;
+    }
+
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_REGEX.test(trimmed)) {
+      throw new FolderError("folderId must be a valid UUID", 400, "VALIDATION_ERROR");
+    }
+
+    await this.assertFolderUsable(trimmed, userId, projectId);
+    return trimmed;
   }
 }

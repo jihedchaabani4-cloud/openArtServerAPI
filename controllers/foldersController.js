@@ -1,5 +1,4 @@
 import { folderService } from "../src/container.js";
-import { assertOwns } from "../src/platform/security/ownership.js";
 import { AppError } from "../src/utils/AppError.js";
 import { createLogger } from "../src/infrastructure/logging/index.js";
 
@@ -16,7 +15,6 @@ export const listProjectFolders = async (req, res, next) => {
   controllerLogger.debug({ projectId, userId }, "GET /api/projects/:projectId/folders");
 
   try {
-    await assertOwns("project", projectId, userId);
     const result = await folderService.list({ projectId, userId });
     return res.status(200).json(result);
   } catch (err) {
@@ -43,7 +41,6 @@ export const createProjectFolder = async (req, res, next) => {
   controllerLogger.debug({ projectId, userId, name, parentId }, "POST /api/projects/:projectId/folders");
 
   try {
-    await assertOwns("project", projectId, userId);
     const folder = await folderService.create({
       projectId,
       userId,
@@ -74,7 +71,6 @@ export const updateFolder = async (req, res, next) => {
   controllerLogger.debug({ folderId, userId, patch: req.body }, "PATCH /api/folders/:folderId");
 
   try {
-    await assertOwns("folder", folderId, userId);
     const folder = await folderService.update({
       folderId,
       userId,
@@ -104,7 +100,6 @@ export const deleteFolder = async (req, res, next) => {
   controllerLogger.debug({ folderId, userId }, "DELETE /api/folders/:folderId");
 
   try {
-    await assertOwns("folder", folderId, userId);
     await folderService.remove({
       folderId,
       userId,

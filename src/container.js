@@ -242,5 +242,5 @@ export const elementService = new ElementService({
 
 export const projectReadService = new ProjectReadService({ db });
 export const generationService = new GenerationService({ db });
-export const folderService = new FolderService({ folderRepo: db.folders });
+export const folderService = new FolderService({ folderRepo: db.folders, projectRepo: db.projects });
 

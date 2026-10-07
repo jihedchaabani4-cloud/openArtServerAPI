@@ -222,13 +222,14 @@ export class WorkflowRepository extends BaseRepository {
     }
 
     /**
-     * Updates folder_id on a workflow, scoped to its owner.
+     * Updates folder_id on a workflow, scoped to its owner and project.
      * @param {string} workflowId
      * @param {string|null} folderId
      * @param {string} userId
+     * @param {string|null} [projectId]
      * @returns {Promise<Object>}
      */
-    async updateFolderId(workflowId, folderId, userId) {
+    async updateFolderId(workflowId, folderId, userId, projectId = null) {
         let query = this.client()
             .from(this.tableName)
             .update({ folder_id: folderId })
@@ -236,6 +237,9 @@ export class WorkflowRepository extends BaseRepository {
 
         if (userId) {
             query = query.eq("user_id", userId);
+        }
+        if (projectId) {
+            query = query.eq("project_id", projectId);
         }
 
         const { data, error } = await query.select().single();

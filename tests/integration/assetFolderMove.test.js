@@ -149,8 +149,13 @@ describe("Asset Folder Move Route & Mass-Assignment Defense (Task F-T6)", () => 
     db.workflows.getWorkflow = async (id) => {
       return workflows.find((w) => w.id === id) || null;
     };
-    db.workflows.updateFolderId = async (workflowId, folderId, userId) => {
-      const wf = workflows.find((w) => w.id === workflowId && (!userId || w.user_id === userId));
+    db.workflows.updateFolderId = async (workflowId, folderId, userId, projectId) => {
+      const wf = workflows.find(
+        (w) =>
+          w.id === workflowId &&
+          (!userId || w.user_id === userId) &&
+          (!projectId || w.project_id === projectId)
+      );
       if (!wf) return null;
       wf.folder_id = folderId;
       return wf;
@@ -240,7 +245,20 @@ describe("Asset Folder Move Route & Mass-Assignment Defense (Task F-T6)", () => 
       assert.equal(workflows.find((w) => w.id === "wf-A-1").folder_id, "folder-A-1");
     });
 
-    it("refuses moving another user's asset (cross-tenant) -> 404", async () => {
+    it("refuses moving another user's asset to root (cross-tenant) -> 404", async () => {
+      const res = await fetch(`${baseUrl}/api/assets/wf-A-1/folder`, {
+        method: "PATCH",
+        headers: {
+          Authorization: "Bearer token-user-B",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ folderId: null }),
+      });
+
+      assert.equal(res.status, 404);
+    });
+
+    it("refuses moving another user's asset into own folder (cross-tenant theft) -> 404", async () => {
       const res = await fetch(`${baseUrl}/api/assets/wf-A-1/folder`, {
         method: "PATCH",
         headers: {
@@ -280,6 +298,32 @@ describe("Asset Folder Move Route & Mass-Assignment Defense (Task F-T6)", () => 
         assert.equal(res.status, 401);
       } finally {
         process.env.INTERNAL_AUTH_ENABLED = origEnabled;
+      }
+    });
+
+    it("returns 404 if folder is deleted concurrently (FK violation 23503 race)", async () => {
+      const origUpdate = db.workflows.updateFolderId;
+      db.workflows.updateFolderId = async () => {
+        const err = new Error("insert or update on table 'workflow' violates foreign key constraint");
+        err.code = "23503";
+        throw err;
+      };
+
+      try {
+        const res = await fetch(`${baseUrl}/api/assets/wf-A-1/folder`, {
+          method: "PATCH",
+          headers: {
+            Authorization: "Bearer token-user-A",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ folderId: "folder-A-2" }),
+        });
+
+        assert.equal(res.status, 404);
+        const data = await res.json();
+        assert.equal(data.errorCode, "NOT_FOUND");
+      } finally {
+        db.workflows.updateFolderId = origUpdate;
       }
     });
   });

@@ -130,10 +130,20 @@ router.patch("/:assetId/folder", async (req, res, next) => {
             await folderService.assertFolderUsable(targetFolderId, userId, asset.project_id);
         }
 
-        // 3. Update folder_id in DB scoped by user
-        const updated = await db.workflows.updateFolderId(assetId, targetFolderId, userId);
-
-        return res.status(200).json(toAssetDto(updated || { ...asset, folder_id: targetFolderId }));
+        // 3. Update folder_id in DB scoped by user and project
+        try {
+            const updated = await db.workflows.updateFolderId(assetId, targetFolderId, userId, asset.project_id);
+            return res.status(200).json(toAssetDto(updated || { ...asset, folder_id: targetFolderId }));
+        } catch (dbErr) {
+            if (dbErr.code === "23503") {
+                return res.status(404).json({
+                    ok: false,
+                    errorCode: "NOT_FOUND",
+                    message: "Target folder not found in project",
+                });
+            }
+            throw dbErr;
+        }
     } catch (err) {
         if (err instanceof AppError) {
             return res.status(err.statusCode).json({

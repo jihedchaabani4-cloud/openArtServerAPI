@@ -224,6 +224,9 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
       });
 
       assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.folder_id, "00000000-0000-4000-8000-000000000001");
+      assert.equal(body.folderId, "00000000-0000-4000-8000-000000000001");
       assert.equal(workflows.length, 1);
       assert.equal(workflows[0].folder_id, "00000000-0000-4000-8000-000000000001");
     });

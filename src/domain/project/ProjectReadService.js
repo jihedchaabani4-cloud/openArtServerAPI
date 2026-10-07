@@ -84,7 +84,7 @@ export class ProjectReadService {
         const [workflowsResult, mediaResult] = await Promise.all([
             this.db.workflows
                 .findByProject(projectId, {
-                    select: "id, display_name, variation_index, primary_media_id, create_time, session_id, favorited, workflow_type",
+                    select: "id, display_name, variation_index, primary_media_id, create_time, session_id, favorited, workflow_type, folder_id",
                     order: { column: "create_time", ascending: false },
                 })
                 .catch((err) => {
@@ -178,6 +178,8 @@ export class ProjectReadService {
                 display_name: displayName,
                 projectId,
                 workflow_type: wf.workflow_type,
+                folder_id: wf.folder_id || null,
+                folderId: wf.folder_id || null,
                 primary_media_id: wf.primary_media_id || "",
                 primaryMediaId: wf.primary_media_id || "",
                 metadata: {
@@ -186,6 +188,8 @@ export class ProjectReadService {
                     primaryMediaId: wf.primary_media_id || "",
                     sessionId: wf.session_id,
                     favorited: !!wf.favorited,
+                    folder_id: wf.folder_id || null,
+                    folderId: wf.folder_id || null,
                 },
             };
         });
@@ -235,6 +239,8 @@ export class ProjectReadService {
                 projectId,
                 workflowId: m.workflow_id,
                 workflow_id: m.workflow_id,
+                folder_id: wf?.folder_id || null,
+                folderId: wf?.folder_id || null,
                 step_id: m.step_id,
                 workflowStepId: m.step_id || (isUpload ? "upload" : "GEN"),
                 create_time: m.create_time,

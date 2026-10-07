@@ -98,7 +98,7 @@ export async function generateImage(req, res) {
     await assertOwns("project", projectId, userId);
 
     // ── 0a. Enforce Folder Usability (BEFORE billing and workflow creation) ───
-    const rawFolderId = req.body.folder_id || req.body.folderId || null;
+    const rawFolderId = req.body.folder_id || req.body.folderId || req.body.collection_id || req.body.collectionId || null;
     const validatedFolderId = await folderService.validateAndAssertUsable(rawFolderId, userId, projectId);
 
     // ── 0b. Enforce Reference Ownership ──────────────────────────────────────

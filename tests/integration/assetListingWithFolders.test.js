@@ -361,5 +361,79 @@ describe("Asset Listing with Folder Filters & Pagination (Task F-T7)", () => {
         projectReadService.getProjectData = origGetProjectData;
       }
     });
+
+    it("returns folder_id and folderId on workflows in /api/workflows/project-data/:projectId", async () => {
+      const origFrom = supabase.from;
+      supabase.from = (table) => {
+        if (table === "project") {
+          return {
+            select: () => ({
+              eq: () => ({
+                single: async () => ({
+                  data: { id: "proj-A", user_id: "user-A", project_name: "Project A" },
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === "media") {
+          return {
+            select: () => ({
+              eq: () => ({
+                order: async () => ({ data: [], error: null }),
+              }),
+            }),
+          };
+        }
+        if (table === "element") {
+          return {
+            select: () => ({
+              in: async () => ({ data: [], error: null }),
+            }),
+          };
+        }
+        return origFrom?.call(supabase, table);
+      };
+
+      const origFindByProject = db.workflows.findByProject;
+      db.workflows.findByProject = async (projectId, options = {}) => {
+        return [
+          {
+            id: "wf-2",
+            display_name: "In Root 1",
+            folder_id: "folder-root-1",
+            workflow_type: "UPLOAD",
+            create_time: "2026-10-07T11:05:00.000Z",
+          },
+          {
+            id: "wf-1",
+            display_name: "Root Asset 1",
+            folder_id: null,
+            workflow_type: "UPLOAD",
+            create_time: "2026-10-07T11:00:00.000Z",
+          },
+        ];
+      };
+
+      try {
+        const res = await fetch(`${baseUrl}/api/workflows/project-data/proj-A`, {
+          headers: { Authorization: "Bearer token-user-A" },
+        });
+
+        assert.equal(res.status, 200);
+        const data = await res.json();
+        const workflowsInResponse = data.result?.data?.json?.projectContents?.workflows;
+        assert.ok(workflowsInResponse, "Expected workflows array");
+        const wfInFolder = workflowsInResponse.find((w) => w.id === "wf-2");
+        assert.ok(wfInFolder, "Expected wf-2");
+        assert.equal(wfInFolder.folder_id, "folder-root-1", "wf-2 must have folder_id");
+        assert.equal(wfInFolder.folderId, "folder-root-1", "wf-2 must have folderId alias");
+        assert.equal(wfInFolder.metadata?.folder_id, "folder-root-1", "metadata must have folder_id");
+      } finally {
+        supabase.from = origFrom;
+        db.workflows.findByProject = origFindByProject;
+      }
+    });
   });
 });

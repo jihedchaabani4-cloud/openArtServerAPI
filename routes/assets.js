@@ -50,11 +50,16 @@ router.post("/upload", upload.single("file"), async (req, res) => {
             return res.status(400).json({ ok: false, error: "No file or base64 provided." });
         }
 
+        const rawFolder = req.body?.folder_id ?? req.body?.folderId ?? req.body?.collection_id ?? req.body?.collectionId ?? req.query?.folder_id ?? req.query?.folderId ?? req.query?.collection_id ?? req.query?.collectionId ?? null;
+        const normalizedFolder = (rawFolder && !["null", "undefined", "none", ""].includes(String(rawFolder).trim().toLowerCase()))
+            ? String(rawFolder).trim()
+            : null;
+
         const result = await mediaIngestionService.ingest({
             source: sourceInput,
             userId: req.user.id,
             projectId: req.body?.project_id || req.body?.projectId || null,
-            folderId: req.body?.folder_id ?? req.body?.folderId ?? req.body?.collection_id ?? req.body?.collectionId ?? null,
+            folderId: normalizedFolder,
             displayName: req.file?.originalname || "Upload",
             purpose: "default",
             req,
@@ -65,6 +70,10 @@ router.post("/upload", upload.single("file"), async (req, res) => {
             url:           result.url,
             media_id:      result.mediaId,
             workflow_id:   result.workflowId,
+            folder_id:     result.folder_id ?? null,
+            folderId:      result.folderId ?? null,
+            collection_id: result.folder_id ?? null,
+            collectionId:  result.folderId ?? null,
             workflow_type: "UPLOAD",
             asset_id:      result.mediaId, // backward compat alias
             type:          result.type,

@@ -135,19 +135,10 @@ export class MediaIngestionService {
             }
 
             // Folder validation & usability verification
-            const rawFolderId = options.folderId ?? options.folder_id ?? null;
+            const rawFolderId = options.folderId ?? options.folder_id ?? options.collectionId ?? options.collection_id ?? null;
             let validatedFolderId = null;
 
-            if (rawFolderId && rawFolderId !== "none") {
-                const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-                if (typeof rawFolderId !== "string" || !rawFolderId.trim() || !UUID_REGEX.test(rawFolderId.trim())) {
-                    throw new CrudServiceError("folderId must be a valid UUID or null", {
-                        statusCode: 400,
-                        errorCode: "VALIDATION_ERROR",
-                        traceId,
-                        operation: "mediaIngest",
-                    });
-                }
+            if (rawFolderId && !["none", "null", "undefined"].includes(String(rawFolderId).trim().toLowerCase())) {
                 if (!projectId) {
                     throw new CrudServiceError("project_id is required when folderId is specified", {
                         statusCode: 400,
@@ -157,19 +148,39 @@ export class MediaIngestionService {
                     });
                 }
                 if (this.folderService) {
-                    await this.folderService.assertFolderUsable(rawFolderId.trim(), userId, projectId);
-                } else if (this.db?.folders?.findOwnedInProject) {
-                    const folder = await this.db.folders.findOwnedInProject(rawFolderId.trim(), projectId, userId);
-                    if (!folder) {
-                        throw new CrudServiceError(`Folder ${rawFolderId} not found in project ${projectId}`, {
-                            statusCode: 404,
-                            errorCode: "NOT_FOUND",
+                    try {
+                        validatedFolderId = await this.folderService.validateAndAssertUsable(rawFolderId, userId, projectId);
+                    } catch (folderErr) {
+                        throw new CrudServiceError(folderErr.message, {
+                            statusCode: folderErr.statusCode || (folderErr.status === 404 ? 404 : 400),
+                            errorCode: folderErr.errorCode || (folderErr.statusCode === 404 ? "NOT_FOUND" : "VALIDATION_ERROR"),
                             traceId,
                             operation: "mediaIngest",
                         });
                     }
+                } else {
+                    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                    if (typeof rawFolderId !== "string" || !rawFolderId.trim() || !UUID_REGEX.test(rawFolderId.trim())) {
+                        throw new CrudServiceError("folderId must be a valid UUID or null", {
+                            statusCode: 400,
+                            errorCode: "VALIDATION_ERROR",
+                            traceId,
+                            operation: "mediaIngest",
+                        });
+                    }
+                    if (this.db?.folders?.findOwnedInProject) {
+                        const folder = await this.db.folders.findOwnedInProject(rawFolderId.trim(), projectId, userId);
+                        if (!folder) {
+                            throw new CrudServiceError(`Folder ${rawFolderId} not found in project ${projectId}`, {
+                                statusCode: 404,
+                                errorCode: "NOT_FOUND",
+                                traceId,
+                                operation: "mediaIngest",
+                            });
+                        }
+                    }
+                    validatedFolderId = rawFolderId.trim();
                 }
-                validatedFolderId = rawFolderId.trim();
             }
 
             // 1. Resolve source format
@@ -422,6 +433,8 @@ export class MediaIngestionService {
                 isNew: true,
                 mediaId: mediaRecord.id,
                 workflowId: targetWorkflowId,
+                folderId: validatedFolderId,
+                folder_id: validatedFolderId,
                 url: publicUrl,
                 type: inspection.type,
                 width: finalWidth,

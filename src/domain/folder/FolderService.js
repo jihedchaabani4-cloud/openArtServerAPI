@@ -390,7 +390,7 @@ export class FolderService {
       return null;
     }
     const trimmed = typeof folderId === "string" ? folderId.trim() : String(folderId);
-    if (!trimmed || trimmed.toLowerCase() === "none") {
+    if (!trimmed || ["none", "null", "undefined"].includes(trimmed.toLowerCase())) {
       return null;
     }
 

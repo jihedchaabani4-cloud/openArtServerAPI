@@ -58,6 +58,11 @@ router.post("/ingest", upload.single("file"), async (req, res) => {
             display_name,
         } = req.body || {};
 
+        const rawFolder = req.body?.folder_id ?? req.body?.folderId ?? req.body?.collection_id ?? req.body?.collectionId ?? req.query?.folder_id ?? req.query?.folderId ?? req.query?.collection_id ?? req.query?.collectionId ?? null;
+        const normalizedFolder = (rawFolder && !["null", "undefined", "none", ""].includes(String(rawFolder).trim().toLowerCase()))
+            ? String(rawFolder).trim()
+            : null;
+
         const result = await mediaIngestionService.ingest({
             source: sourceInput,
             userId,
@@ -66,6 +71,7 @@ router.post("/ingest", upload.single("file"), async (req, res) => {
             workflowId: workflow_id,
             purpose,
             folder,
+            folderId: normalizedFolder,
             displayName: display_name,
             req,
         });
@@ -74,6 +80,10 @@ router.post("/ingest", upload.single("file"), async (req, res) => {
             ok: true,
             media_id: result.mediaId,
             workflow_id: result.workflowId,
+            folder_id: result.folder_id ?? null,
+            folderId: result.folderId ?? null,
+            collection_id: result.folder_id ?? null,
+            collectionId: result.folderId ?? null,
             url: result.url,
             type: result.type,
             width: result.width,

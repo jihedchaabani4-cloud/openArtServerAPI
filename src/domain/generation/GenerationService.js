@@ -260,6 +260,21 @@ export class GenerationService {
         const traceId = randomUUID();
         const start = Date.now();
 
+        if (userId) {
+            const projectIds = await this.#getOwnedProjectIds(userId);
+            if (projectIds.length === 0) {
+                const err = new Error("Workflow not found");
+                err.statusCode = 404;
+                throw err;
+            }
+            const workflow = await this.db.workflows.findByIdInProjects(workflowId, projectIds);
+            if (!workflow) {
+                const err = new Error("Workflow not found");
+                err.statusCode = 404;
+                throw err;
+            }
+        }
+
         await this.db.workflows.deleteById(workflowId);
 
         log("deleteGeneration", "success", { traceId, durationMs: Date.now() - start, userId, workflowId });

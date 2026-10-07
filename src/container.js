@@ -12,7 +12,6 @@ const systemLogger = createLogger("system");
 
 // ─── Repositories ───────────────────────────────────────────────────────────
 import { ProjectRepository }          from "#db/ProjectRepository.js";
-import { SessionRepository }          from "#db/SessionRepository.js";
 import { BatchRepository }            from "#db/BatchRepository.js";
 import { WorkflowRepository }         from "#db/WorkflowRepository.js";
 import { MediaRepository }            from "#db/MediaRepository.js";
@@ -174,7 +173,6 @@ if (failedOpsService) {
 // ─── DB (new 7-table schema) ─────────────────────────────────────────────────
 export const db = {
     projects:  new ProjectRepository(),   // table: project
-    sessions:  new SessionRepository(),   // table: session
     batches:   new BatchRepository(),     // table: batch
     workflows: new WorkflowRepository(),  // table: workflow
     media:     new MediaRepository(),     // table: media

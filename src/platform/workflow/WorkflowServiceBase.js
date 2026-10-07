@@ -33,7 +33,7 @@ function normalizeWorkflowIds(input) {
 export class WorkflowService {
     /**
      * @param {Object} deps
-     * @param {Object} deps.db            - Repository map (db.workflows, db.media, db.projects, db.sessions)
+     * @param {Object} deps.db            - Repository map (db.workflows, db.media, db.projects, db.folders)
      * @param {Object} deps.storageService - StorageService instance
      * @param {Object} [deps.authService] - Optional pre-configured WorkflowAuthorizationService
      * @param {Object} [deps.mediaService] - Optional pre-configured WorkflowMediaService

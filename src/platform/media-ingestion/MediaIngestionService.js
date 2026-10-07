@@ -27,7 +27,7 @@ import { calculateAspectRatio } from "../../utils/ratioUtils.js";
 export class MediaIngestionService {
     /**
      * @param {Object} deps
-     * @param {Object} deps.db                  - Repositories (db.media, db.workflows, db.projects, db.sessions)
+     * @param {Object} deps.db                  - Repositories (db.media, db.workflows, db.projects)
      * @param {Object} deps.storageService       - StorageService instance
      * @param {Object} [deps.workflowAuthService] - WorkflowAuthorizationService instance
      * @param {Object} [deps.mediaService]       - Canonical MediaService instance

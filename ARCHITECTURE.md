@@ -117,7 +117,7 @@ The Labveil backend is structured into **Three Clear Tiers** adhering to Domain-
 
 ### 4.2. Persistence & Repositories (`src/db/`)
 * Repository pattern cleanly abstracting Supabase Postgres.
-* Repositories: `ProjectRepository`, `SessionRepository`, `BatchRepository`, `WorkflowRepository`, `MediaRepository`, `GenerationConfigRepository`, `CharacterRepository`, `DnaRepository`, `ElementRepository`.
+* Repositories: `ProjectRepository`, `FolderRepository`, `BatchRepository`, `WorkflowRepository`, `MediaRepository`, `GenerationConfigRepository`, `CharacterRepository`, `DnaRepository`, `ElementRepository`.
 
 ### 4.3. Security & Multi-Tenancy (`src/platform/security/`, `src/middleware/auth.js`)
 * JWT token authentication via Supabase Auth.

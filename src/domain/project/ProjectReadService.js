@@ -33,7 +33,7 @@ export class ProjectReadService {
         this.db = db;
     }
 
-    async getProjectData({ projectId, userId, sessionId = null }) {
+    async getProjectData({ projectId, userId }) {
         const started = Date.now();
         const operation = "getProjectData";
 
@@ -80,13 +80,8 @@ export class ProjectReadService {
 
         const projectName = projectData?.project_name || "Unknown Project";
 
-        // Fetch sessions, workflows, and media concurrently to minimize latency
-        const [sessionsResult, workflowsResult, mediaResult] = await Promise.all([
-            supabase
-                .from("session")
-                .select("id, name, position, create_time")
-                .eq("project_id", projectId)
-                .order("position", { ascending: true }),
+        // Fetch workflows and media concurrently to minimize latency
+        const [workflowsResult, mediaResult] = await Promise.all([
             this.db.workflows
                 .findByProject(projectId, {
                     select: "id, display_name, variation_index, primary_media_id, create_time, session_id, favorited, workflow_type",
@@ -114,20 +109,11 @@ export class ProjectReadService {
                 .order("create_time", { ascending: false }),
         ]);
 
-        const sessions = sessionsResult.data || [];
         const workflows = workflowsResult || [];
         const mediaItems = mediaResult.data || [];
         if (mediaResult.error) projectLogger.error({ event: "project_read.media_query_error", err: mediaResult.error.message }, "Media query error");
 
-        const formattedSessions = (sessions || []).map((s) => ({
-            name: s.id,
-            projectId,
-            metadata: {
-                displayName: s.name || "Untitled Session",
-                createTime: s.create_time,
-                position: s.position,
-            },
-        }));
+        const formattedSessions = [];
 
         const workflowIds = (workflows || []).map((w) => w.id);
         let elementMap = {};

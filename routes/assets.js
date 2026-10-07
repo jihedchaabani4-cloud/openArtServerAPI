@@ -1,8 +1,14 @@
 import { Router } from "express";
 import multer from "multer";
-import { workflowService, mediaIngestionService } from "../src/container.js";
+import { workflowService, mediaIngestionService, db, folderService } from "../src/container.js";
 import { requireAuth } from "../src/middleware/auth.js";
 import { createSizeLimitedMemoryStorage } from "../src/middleware/sizeLimitedStorage.js";
+import { assertOwns } from "../src/platform/security/ownership.js";
+import { toAssetDto } from "../src/domain/assetDto.js";
+import { AppError } from "../src/utils/AppError.js";
+import { createLogger } from "../src/infrastructure/logging/index.js";
+
+const routeLogger = createLogger("route:assets");
 
 const router = Router();
 router.use(requireAuth);
@@ -95,6 +101,48 @@ router.delete("/:id", async (req, res) => {
     } catch (err) {
         console.error("❌ [AssetsRoute] Delete error:", err.message);
         return res.status(err.statusCode || 500).json({ ok: false, error: err.message });
+    }
+});
+
+// ─── PATCH /api/assets/:assetId/folder ──────────────────────────────────────
+router.patch("/:assetId/folder", async (req, res, next) => {
+    try {
+        const { assetId } = req.params;
+        const userId = req.user?.id;
+        const rawFolderId = req.body?.folderId ?? req.body?.folder_id;
+
+        routeLogger.debug({ assetId, userId, folderId: rawFolderId }, "PATCH /api/assets/:assetId/folder");
+
+        // Normalize folderId: null, undefined, or "none" (case-insensitive) -> null
+        let targetFolderId = null;
+        if (rawFolderId !== null && rawFolderId !== undefined && String(rawFolderId).toLowerCase() !== "none") {
+            if (typeof rawFolderId !== "string" || !rawFolderId.trim()) {
+                return res.status(400).json({ ok: false, error: "Invalid folderId format" });
+            }
+            targetFolderId = rawFolderId.trim();
+        }
+
+        // 1. Assert asset ownership (returns 404 on missing or foreign asset)
+        const asset = await assertOwns("workflow", assetId, userId);
+
+        // 2. If targetFolderId is provided, validate folder is usable in this project
+        if (targetFolderId !== null) {
+            await folderService.assertFolderUsable(targetFolderId, userId, asset.project_id);
+        }
+
+        // 3. Update folder_id in DB scoped by user
+        const updated = await db.workflows.updateFolderId(assetId, targetFolderId, userId);
+
+        return res.status(200).json(toAssetDto(updated || { ...asset, folder_id: targetFolderId }));
+    } catch (err) {
+        if (err instanceof AppError) {
+            return res.status(err.statusCode).json({
+                ok: false,
+                errorCode: err.errorCode || "APP_ERROR",
+                message: err.message,
+            });
+        }
+        return next(err);
     }
 });
 

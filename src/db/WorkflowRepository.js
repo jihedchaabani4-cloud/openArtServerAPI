@@ -220,4 +220,26 @@ export class WorkflowRepository extends BaseRepository {
         if (error) throw error;
         return data;
     }
+
+    /**
+     * Updates folder_id on a workflow, scoped to its owner.
+     * @param {string} workflowId
+     * @param {string|null} folderId
+     * @param {string} userId
+     * @returns {Promise<Object>}
+     */
+    async updateFolderId(workflowId, folderId, userId) {
+        let query = this.client()
+            .from(this.tableName)
+            .update({ folder_id: folderId })
+            .eq("id", workflowId);
+
+        if (userId) {
+            query = query.eq("user_id", userId);
+        }
+
+        const { data, error } = await query.select().single();
+        if (error) throw error;
+        return data;
+    }
 }

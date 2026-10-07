@@ -15,7 +15,21 @@ export const patchWorkflow = async (req, res) => {
     controllerLogger.debug({ workflowId: cleanId, userId }, `PATCH /api/workflows/${cleanId}`);
 
     try {
-        const { display_name, name, primary_media_id, favorited, description, character_info } = req.body || {};
+        const body = req.body || {};
+
+        // Mass-assignment defense (F-T6 / D-16): reject attempts to modify folderId, projectId, or userId via generic workflow update
+        const forbiddenKeys = ["folderId", "folder_id", "projectId", "project_id", "userId", "user_id"];
+        for (const key of forbiddenKeys) {
+            if (body[key] !== undefined) {
+                return res.status(400).json({
+                    ok: false,
+                    code: "MASS_ASSIGNMENT_FORBIDDEN",
+                    message: `Updating '${key}' via generic workflow update is forbidden`,
+                });
+            }
+        }
+
+        const { display_name, name, primary_media_id, favorited, description, character_info } = body;
 
         let targetWorkflowId = cleanId;
         // Resolve media_id to its parent workflow_id if cleanId is not directly a workflow

@@ -114,7 +114,7 @@ export class WorkflowMediaService {
     /**
      * Detach a media item into its own independent workflow container.
      */
-    async detachMedia({ mediaId, projectId, sessionId, displayName, userId, req = null }) {
+    async detachMedia({ mediaId, projectId, displayName, userId, req = null }) {
         const traceId = randomUUID();
         const start = Date.now();
 
@@ -169,14 +169,13 @@ export class WorkflowMediaService {
 
             const currentWorkflowId = media.workflow_id;
             const inferredProjectId = projectId || media.project_id || media.workflow?.project_id;
-            const inferredSessionId = sessionId || media.workflow?.session_id;
             const inferredUserId = userId || media.user_id || media.workflow?.user_id || null;
             const newName = displayName || media.workflow?.display_name || "Detached media";
 
             // 1. Create new standalone workflow container
             const newWorkflow = await this.db.workflows.createWorkflow({
                 project_id: inferredProjectId,
-                session_id: inferredSessionId,
+                session_id: null,
                 user_id: inferredUserId,
                 display_name: newName,
                 variation_index: 0,

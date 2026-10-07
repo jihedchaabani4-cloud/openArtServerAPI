@@ -155,13 +155,12 @@ export const getWorkflowByMedia = async (req, res) => {
 // ── POST /api/workflows/detach-media ─────────────────────────────────────────
 export const detachMediaToNewWorkflow = async (req, res) => {
     try {
-        const { media_id, project_id, session_id, display_name } = req.body || {};
+        const { media_id, project_id, display_name } = req.body || {};
         const userId = req.user.id;
 
         const result = await workflowService.detachMedia({
             mediaId:     media_id,
             projectId:   project_id,
-            sessionId:   session_id,
             displayName: display_name,
             userId,
             req,

@@ -9,8 +9,8 @@ export const getAssets = async (req, res) => {
     try {
         const { project_id } = req.params;
         if (!project_id || project_id === "null") return res.json({ ok: true, data: [] });
-        const { session_id, limit, offset } = req.query;
-        const result = await generationService.getAssets(req.user.id, project_id, { sessionId: session_id, limit, offset });
+        const { limit, offset } = req.query;
+        const result = await generationService.getAssets(req.user.id, project_id, { limit, offset });
         res.json({ ok: true, ...result });
     } catch (err) {
         res.status(err.statusCode || 500).json({ ok: false, message: err.message });
@@ -19,8 +19,8 @@ export const getAssets = async (req, res) => {
 
 export const getUserLibrary = async (req, res) => {
     try {
-        const { project_id, session_id, limit, offset } = req.query;
-        const result = await generationService.getUserLibrary(req.user.id, { projectId: project_id, sessionId: session_id, limit, offset });
+        const { project_id, limit, offset } = req.query;
+        const result = await generationService.getUserLibrary(req.user.id, { projectId: project_id, limit, offset });
         res.json({ ok: true, ...result });
     } catch (err) {
         res.status(err.statusCode || 500).json({ ok: false, message: err.message });

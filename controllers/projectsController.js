@@ -59,20 +59,6 @@ export const create = async (req, res) => {
 
         if (error) throw error;
 
-        // 🚀 Automatically create an "Untitled" session for the new project
-        const { error: sessionError } = await supabase
-            .from("session")
-            .insert([{ 
-                name: "Untitled", 
-                project_id: data.id 
-            }]);
-
-        if (sessionError) {
-            console.error("Auto-session creation error:", sessionError);
-            // We don't necessarily want to fail the whole project creation if session fails,
-            // but for consistency we might. Let's just log it for now or throw if critical.
-        }
-
         res.json({ 
             ok: true, 
             data: { 

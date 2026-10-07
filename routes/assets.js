@@ -54,7 +54,6 @@ router.post("/upload", upload.single("file"), async (req, res) => {
             source: sourceInput,
             userId: req.user.id,
             projectId: req.body?.project_id || req.body?.projectId || null,
-            sessionId: req.body?.session_id || req.body?.sessionId || null,
             folderId: req.body?.folder_id ?? req.body?.folderId ?? null,
             displayName: req.file?.originalname || "Upload",
             purpose: "default",

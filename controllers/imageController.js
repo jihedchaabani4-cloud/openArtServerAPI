@@ -41,7 +41,6 @@ export async function generateImage(req, res) {
   try {
     const { prompt, model, references = [], parameters = {} } = req.body;
     const projectId = req.body.project_id || req.body.projectId || null;
-    const sessionId = req.body.session_id || req.body.sessionId || null;
 
     // ── Shape validation ─────────────────────────────────────────────────────
 
@@ -135,7 +134,7 @@ export async function generateImage(req, res) {
     await db.workflows.createWorkflow({
       id:            workflowId,
       project_id:    projectId,
-      session_id:    sessionId,
+      session_id:    null,
       display_name:  prompt.slice(0, 60),
       workflow_type: "GENERATION",
       folder_id:     validatedFolderId,
@@ -269,7 +268,7 @@ export async function generateImage(req, res) {
       mediaIds:     serverMediaIds,
       taskId,
       project_id:  projectId,
-      session_id:  sessionId,
+      session_id:  null,
       workflow:    { id: workflowId, primary_media_id: mediaId, media_ids: serverMediaIds, workflow_type: "GENERATION" },
     });
 

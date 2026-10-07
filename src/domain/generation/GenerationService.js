@@ -170,7 +170,7 @@ export class GenerationService {
      * Get paginated assets (media items) for a project.
      * Used by getAssets controller.
      */
-    async getAssets(userId, projectId, { sessionId, limit = 30, offset = 0 } = {}) {
+    async getAssets(userId, projectId, { limit = 30, offset = 0 } = {}) {
         const traceId = randomUUID();
         const start = Date.now();
 
@@ -194,7 +194,7 @@ export class GenerationService {
         }
 
         const items = await this.db.media.findByProjectPaginated(projectId, {
-            sessionId, limit: Number(limit), offset: Number(offset),
+            limit: Number(limit), offset: Number(offset),
         });
 
         log("getAssets", "success", { traceId, durationMs: Date.now() - start, userId, projectId, count: items.length });
@@ -205,7 +205,7 @@ export class GenerationService {
      * Get paginated user library (workflows + primary media + generation config).
      * Used by getUserLibrary controller.
      */
-    async getUserLibrary(userId, { projectId = null, sessionId = null, limit = 30, offset = 0 } = {}) {
+    async getUserLibrary(userId, { projectId = null, limit = 30, offset = 0 } = {}) {
         const traceId = randomUUID();
         const start = Date.now();
 
@@ -219,7 +219,7 @@ export class GenerationService {
         }
 
         const { workflows, total } = await this.db.workflows.findByProjectsPaginated(projectIds, {
-            sessionId, limit: parsedLimit, offset: parsedOffset,
+            limit: parsedLimit, offset: parsedOffset,
         });
 
         const data = await this.#buildLibraryPayload(workflows || []);

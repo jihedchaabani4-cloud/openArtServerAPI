@@ -85,7 +85,6 @@ export class MediaIngestionService {
             source,
             userId,
             projectId = null,
-            sessionId = null,
             workflowId = null,
             purpose = "default",
             stepId = null,
@@ -334,7 +333,6 @@ export class MediaIngestionService {
             // 6. Ensure Workflow container exists
             let targetWorkflowId = workflowId;
             let targetProjectId = projectId;
-            const targetSessionId = sessionId || null; // Only set if explicitly provided; NEVER auto-create!
             let containerWf = null;
 
             if (targetWorkflowId) {
@@ -374,10 +372,9 @@ export class MediaIngestionService {
                 }
 
                 // Auto-create an UPLOAD workflow container so media foreign key is satisfied
-                // session_id is targetSessionId (null if not provided by caller)
                 containerWf = await this.db.workflows.createWorkflow({
                     project_id: targetProjectId,
-                    session_id: targetSessionId,
+                    session_id: null,
                     display_name: displayName || originalName || "Ingested Asset",
                     workflow_type: "UPLOAD",
                     variation_index: null,

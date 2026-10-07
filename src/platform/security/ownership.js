@@ -247,6 +247,25 @@ export async function assertOwns(resourceType, id, userId) {
       break;
     }
 
+    case "folder": {
+      if (db.folders?.findOwned) {
+        const folder = await db.folders.findOwned(id, userId).catch(() => null);
+        if (folder) {
+          if (folder.project_id && db.projects?.findByUser) {
+            const matches = await db.projects.findByUser(userId, folder.project_id).catch(() => []);
+            if (matches?.length) {
+              resource = folder;
+              break;
+            }
+          } else {
+            resource = folder;
+            break;
+          }
+        }
+      }
+      break;
+    }
+
     default:
       throw new AppError(`Unsupported resource type for ownership check: ${resourceType}`, 500);
   }

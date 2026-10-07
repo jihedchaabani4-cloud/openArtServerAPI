@@ -17,6 +17,7 @@ import adminRouter       from '../../routes/admin.js';
 import v2WorkflowsRouter from '../../routes/v2/workflows.js';
 import elementRoutes     from '../../routes/elementRoutes.js';
 import mediaIngestRouter from '../../routes/mediaIngestRoutes.js';
+import foldersRouter     from '../../routes/folders.js';
 
 const router = express.Router();
 
@@ -30,6 +31,7 @@ router.use('/images',       imagesRouter);
 router.use('/video',        videoRouter);
 router.use('/characters',   charactersRouter);
 router.use('/projects',     projectsRouter);
+router.use('/folders',      foldersRouter);
 router.use('/sessions',     sessionsRouter);
 router.use('/models',       modelsRouter);
 router.use('/assets',       assetsRouter);

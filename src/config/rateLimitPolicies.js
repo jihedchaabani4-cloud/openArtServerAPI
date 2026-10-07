@@ -108,6 +108,14 @@ export const RATE_LIMIT_POLICIES = {
   inFlightUploadMemory: {
     maxBytes: Number(process.env.MAX_IN_FLIGHT_UPLOAD_BYTES) || 250 * 1024 * 1024,
   },
+
+  /** Folder write operations (POST, PATCH, DELETE) */
+  folderWrite: {
+    points:     Number(process.env.RATE_LIMIT_FOLDER_WRITE_POINTS) || 60,
+    duration:   Number(process.env.RATE_LIMIT_FOLDER_WRITE_DURATION) || 60,
+    keyBy:      "user",
+    failPolicy: "open",
+  },
 };
 
 

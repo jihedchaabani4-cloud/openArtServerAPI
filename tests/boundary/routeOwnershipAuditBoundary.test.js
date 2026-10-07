@@ -9,7 +9,7 @@ import apiRouter from "../../src/api/routes.js";
 import { extractRoutes } from "../../scripts/dump-routes.js";
 import { db, workflowService, projectReadService } from "../../src/container.js";
 import { supabase } from "../../lib/supabase.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "../../src/queue/redis.js";
 
 import { RunRepository } from "../../src/v2/runner/runRepository.js";
 
@@ -32,6 +32,7 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     try {
       await redisConnection?.quit().catch(() => redisConnection?.disconnect());
       await workerRedisConnection?.quit().catch(() => workerRedisConnection?.disconnect());
+      await rateLimitRedisConnection?.quit().catch(() => rateLimitRedisConnection?.disconnect());
     } catch {}
     if (server) {
       await new Promise((resolve) => server.close(resolve));
@@ -90,6 +91,8 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
   let origDevAuthBypass;
   let origRunRepoGetRun;
   let origDbCollectionItemsFindById;
+  let origDbFoldersFindOwned;
+  let origDbFoldersListByProject;
 
   let origSupabaseFrom;
 
@@ -212,6 +215,13 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
       origDbCollectionItemsFindById = db.collection_items.findById;
       db.collection_items.findById = async () => null;
     }
+
+    if (db?.folders) {
+      origDbFoldersFindOwned = db.folders.findOwned;
+      origDbFoldersListByProject = db.folders.listByProject;
+      db.folders.findOwned = async () => null;
+      db.folders.listByProject = async () => [];
+    }
   });
 
   afterEach(() => {
@@ -239,6 +249,10 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     }
     if (db?.collection_items && origDbCollectionItemsFindById) {
       db.collection_items.findById = origDbCollectionItemsFindById;
+    }
+    if (db?.folders) {
+      if (origDbFoldersFindOwned) db.folders.findOwned = origDbFoldersFindOwned;
+      if (origDbFoldersListByProject) db.folders.listByProject = origDbFoldersListByProject;
     }
     if (origRunRepoGetRun) {
       RunRepository.prototype.getRun = origRunRepoGetRun;
@@ -581,6 +595,34 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
   });
 
+  it("TEST R4-41: GET /api/projects/:projectId/folders for foreign project returns 404", async () => {
+    const res = await reqAlice(`/api/projects/${FOREIGN_PROJ_ID}/folders`);
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+  });
+
+  it("TEST R4-42: POST /api/projects/:projectId/folders for foreign project returns 404", async () => {
+    const res = await reqAlice(`/api/projects/${FOREIGN_PROJ_ID}/folders`, {
+      method: "POST",
+      body: JSON.stringify({ name: "Subfolder" }),
+    });
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+  });
+
+  it("TEST R4-43: PATCH /api/folders/:folderId for foreign folder returns 404", async () => {
+    const res = await reqAlice("/api/folders/00000000-0000-0000-0000-000000000088", {
+      method: "PATCH",
+      body: JSON.stringify({ name: "Hacked" }),
+    });
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+  });
+
+  it("TEST R4-44: DELETE /api/folders/:folderId for foreign folder returns 404", async () => {
+    const res = await reqAlice("/api/folders/00000000-0000-0000-0000-000000000088", {
+      method: "DELETE",
+    });
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+  });
+
   // ── PART 2: Generic Automated Test — Walks Dumped Route Table & Asserts 100% Foreign Refusal Coverage ──
 
   it("TEST R4-GENERIC: Every authenticated route touching a resource ID has an explicit foreign-refusal test asserting 404/403", () => {
@@ -596,6 +638,10 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
       "DELETE /api/characters/:characterId/media/:mediaId",
       "POST /api/characters/:characterId/sheet-media",
       "POST /api/characters/:characterId/upload",
+      "DELETE /api/folders/:folderId",
+      "PATCH /api/folders/:folderId",
+      "GET /api/projects/:projectId/folders",
+      "POST /api/projects/:projectId/folders",
       "DELETE /api/projects/:id",
       "PATCH /api/projects/:id",
       "DELETE /api/sessions/:id",

@@ -1,4 +1,5 @@
 import "dotenv/config";
+import "../container.js";
 import { Worker } from "bullmq";
 import { createClient } from "@supabase/supabase-js";
 import { workerRedisConnection, redisConnection } from "../queue/redis.js";

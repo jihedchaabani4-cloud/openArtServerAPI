@@ -13,10 +13,12 @@ const isTLS = redisUrl?.startsWith('rediss://') || redisUrl?.includes('upstash.i
 // ── Base options for Upstash Serverless Redis & BullMQ ───────────────────────
 const MAX_RECONNECT_ATTEMPTS = 20; // Stop retrying after 20 attempts (~60s total)
 
+const isTestEnv = process.env.NODE_ENV === "test";
+
 const BASE_OPTIONS = {
   maxRetriesPerRequest: null, // Required by BullMQ
   enableReadyCheck:     false,
-  lazyConnect:          false,
+  lazyConnect:          isTestEnv,
   enableOfflineQueue:   true,   // Allows ioredis to buffer commands during Upstash TCP reconnect
   keepAlive:            10_000, // Send TCP keep-alive packets to prevent Upstash idle disconnect
   pingInterval:         15_000, // Heartbeat PING every 15s to keep socket warm
@@ -42,8 +44,6 @@ export const redisConnection = redisUrl
 export const workerRedisConnection = redisUrl
   ? new Redis(redisUrl, BASE_OPTIONS)
   : new Redis({ host: redisHost, port: Number(redisPort), password: redisPassword || undefined, ...BASE_OPTIONS });
-
-const isTestEnv = process.env.NODE_ENV === "test";
 
 // ── Rate limiter connection (fail fast: no offline queue, strict command timeout) ─
 const RATE_LIMIT_BASE_OPTIONS = {

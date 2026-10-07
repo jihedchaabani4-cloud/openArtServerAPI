@@ -22,56 +22,62 @@ workerLogger.info({
 /**
  * 🎯 Dedicated UseCase & Node Execution Worker
  */
-export const useCaseWorker = new Worker(
-  USECASE_QUEUE_NAME,
-  wrapWorkerJob("usecase-worker", async (job) => {
-    const start = Date.now();
+export const useCaseWorker = process.env.NODE_ENV === "test"
+  ? { on: () => {}, close: async () => {} }
+  : new Worker(
+      USECASE_QUEUE_NAME,
+      wrapWorkerJob("usecase-worker", async (job) => {
+        const start = Date.now();
 
-    // ── Case 1: Full UseCase Execution Job ──────────────────────────────────
-    if (job.name === "run-usecase") {
-      const { useCaseId, input, userId, billingHoldId } = job.data;
-      workerLogger.debug({ useCaseId, userId }, `Processing UseCase "${useCaseId}" for user ${userId}`);
+        // ── Case 1: Full UseCase Execution Job ──────────────────────────────────
+        if (job.name === "run-usecase") {
+          const { useCaseId, input, userId, billingHoldId } = job.data;
+          workerLogger.debug({ useCaseId, userId }, `Processing UseCase "${useCaseId}" for user ${userId}`);
 
-      await useCaseService.executeQueuedUseCase({
-        useCaseId,
-        input,
-        userId,
-        billingHoldId,
-      });
-      return;
-    }
+          await useCaseService.executeQueuedUseCase({
+            useCaseId,
+            input,
+            userId,
+            billingHoldId,
+          });
+          return;
+        }
 
-    const { runId, nodeId } = job.data;
+        const { runId, nodeId } = job.data;
 
-    // ── Case 2: Individual Node Execution Job ───────────────────────────────
-    if (nodeId) {
-      workerLogger.debug({ runId, nodeId }, `Executing node "${nodeId}" for run ${runId}`);
-      await executeNodeJob(runId, nodeId);
-      await executeOrchestration(runId);
-    } else {
-      // ── Case 3: Workflow Orchestration Job ─────────────────────────────────
-      workerLogger.debug({ runId }, `Orchestrating run ${runId}`);
-      await executeOrchestration(runId);
-    }
-  }),
-  {
-    connection: workerRedisConnection,
-    concurrency: 10,
-    removeOnComplete: { count: 100 },
-    removeOnFail: { count: 500 }
-  }
-);
+        // ── Case 2: Individual Node Execution Job ───────────────────────────────
+        if (nodeId) {
+          workerLogger.debug({ runId, nodeId }, `Executing node "${nodeId}" for run ${runId}`);
+          await executeNodeJob(runId, nodeId);
+          await executeOrchestration(runId);
+        } else {
+          // ── Case 3: Workflow Orchestration Job ─────────────────────────────────
+          workerLogger.debug({ runId }, `Orchestrating run ${runId}`);
+          await executeOrchestration(runId);
+        }
+      }),
+      {
+        connection: workerRedisConnection,
+        concurrency: 10,
+        removeOnComplete: { count: 100 },
+        removeOnFail: { count: 500 }
+      }
+    );
 
-useCaseWorker.on("active", (job) => {
-  workerLogger.debug({ event: LogEvents.JOB_STARTED, jobId: job.id }, `Job #${job.id} activated on Redis`);
-});
+if (process.env.NODE_ENV !== "test") {
+  useCaseWorker.on("active", (job) => {
+    workerLogger.debug({ event: LogEvents.JOB_STARTED, jobId: job.id }, `Job #${job.id} activated on Redis`);
+  });
 
-useCaseWorker.on("completed", (job) => {
-  workerLogger.debug({ event: LogEvents.JOB_COMPLETED, jobId: job.id }, `Job #${job.id} marked as COMPLETED`);
-});
+  useCaseWorker.on("completed", (job) => {
+    workerLogger.debug({ event: LogEvents.JOB_COMPLETED, jobId: job.id }, `Job #${job.id} marked as COMPLETED`);
+  });
 
-useCaseWorker.on("failed", async (job, err) => {
-  workerLogger.error({ event: LogEvents.JOB_FAILED, jobId: job?.id, err }, `Job #${job?.id} FAILED: ${err.message}`);
+  useCaseWorker.on("failed", handleUseCaseWorkerFailure);
+}
+
+export async function handleUseCaseWorkerFailure(job, err) {
+  workerLogger.error({ event: LogEvents.JOB_FAILED, jobId: job?.id, err }, `Job #${job?.id} FAILED: ${err?.message}`);
 
   // ── Smart crash detection ─────────────────────────────────────────────────
   // executeQueuedUseCase adds `err.errorReport` when it catches normally.
@@ -95,7 +101,7 @@ useCaseWorker.on("failed", async (job, err) => {
   const billingHoldId = job?.data?.billingHoldId || job?.data?.input?.billing_hold_id;
   const workflowId    = job?.data?.input?.workflow_id;
 
-  // 1. Rollback credits
+  // 1. Rollback credits (idempotent: safe to run multiple times without duplicate refunds)
   if (billingHoldId) {
     await useCaseService.rollbackPreparedBilling(billingHoldId, {
       failedMessage: err?.message || "Worker crash",
@@ -125,6 +131,8 @@ useCaseWorker.on("failed", async (job, err) => {
       );
     });
   }
-});
+}
+
+useCaseWorker.on("failed", handleUseCaseWorkerFailure);
 
 export default useCaseWorker;

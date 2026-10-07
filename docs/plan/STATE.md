@@ -24,3 +24,7 @@ Next step: STOP (Phase P3 Complete)
 | F-T8 | DONE | 2f35084 | docs/plan/reports/F-T8.md |
 | F-T9 | DONE | f8640cf | docs/plan/reports/PHASE-P3-GATE.md |
 | P3-FIX | DONE | e5f6b6d | docs/plan/reports/PHASE-P3-GATE.md |
+| P3-ARCH-FOLDER | DONE | 9d9fa06 | docs/plan/reports/PHASE-P3-GATE.md |
+| P3-ARCH-WORKFLOW | DONE | d6832d9 | docs/plan/reports/PHASE-P3-GATE.md |
+| P3-ARCH-MEDIA-INGESTION | DONE | 0c1ee2f | docs/plan/reports/PHASE-P3-GATE.md |
+| P3-ARCH-GENERATION | DONE | bafd8d1 | docs/plan/reports/PHASE-P3-GATE.md |

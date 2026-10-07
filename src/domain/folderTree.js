@@ -18,7 +18,7 @@ export function indexChildren(folders = []) {
   const map = new Map();
   for (const folder of folders) {
     if (!folder) continue;
-    const parentKey = folder.parentId ?? null;
+    const parentKey = folder.parentId ?? folder.parent_id ?? null;
     const list = map.get(parentKey);
     if (list) {
       list.push(folder);
@@ -37,10 +37,10 @@ export function getAncestorIds(byId, folderId) {
 
   while (currentId) {
     const current = byId.get(currentId);
-    if (!current || !current.parentId) {
+    const parentId = current?.parentId ?? current?.parent_id;
+    if (!current || !parentId) {
       break;
     }
-    const parentId = current.parentId;
     if (visited.has(parentId) || parentId === currentId) {
       throw new Error("Cycle detected in stored data");
     }

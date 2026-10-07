@@ -1,0 +1,351 @@
+import { AppError } from "../../utils/AppError.js";
+import {
+  indexById,
+  indexChildren,
+  wouldCreateCycle,
+  wouldExceedDepth,
+  depthForNewChild,
+} from "../folderTree.js";
+
+/**
+ * Domain error class with structured status code and domain error code.
+ */
+export class FolderError extends AppError {
+  constructor(message, statusCode = 400, errorCode = "FOLDER_ERROR") {
+    super(message, statusCode);
+    this.name = "FolderError";
+    this.errorCode = errorCode;
+  }
+}
+
+/**
+ * Domain service enforcing business logic, hierarchical limits,
+ * cycle prevention, and empty-folder deletion rules for folders.
+ */
+export class FolderService {
+  constructor({
+    folderRepo,
+    maxDepth = Number(process.env.FOLDER_MAX_DEPTH || 3),
+    maxFoldersPerProject = Number(process.env.FOLDER_MAX_PER_PROJECT || 50),
+  } = {}) {
+    this.folderRepo = folderRepo;
+    this.maxDepth = Number.isFinite(maxDepth) && maxDepth > 0 ? maxDepth : 3;
+    this.maxFoldersPerProject =
+      Number.isFinite(maxFoldersPerProject) && maxFoldersPerProject > 0
+        ? maxFoldersPerProject
+        : 50;
+  }
+
+  /**
+   * Normalizes and validates folder name string.
+   */
+  _validateName(name) {
+    if (typeof name !== "string") {
+      throw new FolderError("Folder name must be a string", 400, "FOLDER_NAME_INVALID");
+    }
+    const trimmed = name.trim();
+    if (trimmed.length === 0 || trimmed.length > 100) {
+      throw new FolderError(
+        "Folder name must be between 1 and 100 characters",
+        400,
+        "FOLDER_NAME_INVALID"
+      );
+    }
+    return trimmed;
+  }
+
+  /**
+   * Maps raw database folder row to camelCase public Folder DTO.
+   */
+  _toFolderDto(folder, assetCount = 0) {
+    return {
+      id: folder.id,
+      projectId: folder.project_id,
+      parentId: folder.parent_id ?? null,
+      name: folder.name,
+      position: folder.position ?? 0,
+      assetCount,
+      createdAt: folder.created_at,
+      updatedAt: folder.updated_at,
+    };
+  }
+
+  /**
+   * Lists all folders in a project with direct asset counts.
+   */
+  async list({ projectId, userId }) {
+    if (!projectId || !userId) {
+      throw new FolderError("Project and User ID required", 400, "VALIDATION_ERROR");
+    }
+
+    const [folders, counts] = await Promise.all([
+      this.folderRepo.listByProject(projectId, userId),
+      this.folderRepo.countAssetsByFolder(projectId, userId),
+    ]);
+
+    const items = folders.map((f) => this._toFolderDto(f, counts[f.id] || 0));
+    return { items };
+  }
+
+  /**
+   * Creates a new folder within a project.
+   */
+  async create({ projectId, userId, parentId = null, name }) {
+    if (!projectId || !userId) {
+      throw new FolderError("Project and User ID required", 400, "VALIDATION_ERROR");
+    }
+
+    const cleanName = this._validateName(name);
+    const normalizedParentId = parentId || null;
+
+    // Check project total folder limit
+    const currentCount = await this.folderRepo.countByProject(projectId, userId);
+    if (currentCount >= this.maxFoldersPerProject) {
+      throw new FolderError(
+        `Project cannot exceed ${this.maxFoldersPerProject} folders`,
+        400,
+        "FOLDER_LIMIT_REACHED"
+      );
+    }
+
+    // Load existing folders for sibling and depth validation
+    const existingFolders = await this.folderRepo.listByProject(projectId, userId);
+    const byId = indexById(existingFolders);
+
+    // If parentId provided, verify it exists and is owned in this project
+    if (normalizedParentId) {
+      const parentFolder = byId.get(normalizedParentId);
+      if (!parentFolder) {
+        throw new FolderError("Parent folder not found", 404, "NOT_FOUND");
+      }
+
+      // Check depth limit
+      const targetDepth = depthForNewChild(byId, normalizedParentId);
+      if (targetDepth > this.maxDepth) {
+        throw new FolderError(
+          `Folder depth cannot exceed ${this.maxDepth}`,
+          400,
+          "FOLDER_DEPTH_EXCEEDED"
+        );
+      }
+    }
+
+    // Check sibling name uniqueness (case-insensitive)
+    const siblings = existingFolders.filter(
+      (f) => (f.parent_id || null) === normalizedParentId
+    );
+    const nameLower = cleanName.toLowerCase();
+    if (siblings.some((s) => s.name.toLowerCase() === nameLower)) {
+      throw new FolderError(
+        `Folder name "${cleanName}" already exists in this directory`,
+        409,
+        "FOLDER_NAME_TAKEN"
+      );
+    }
+
+    // Calculate position: largest sibling position + 1 (or 0)
+    const maxSiblingPos = siblings.reduce(
+      (max, s) => (s.position > max ? s.position : max),
+      -1
+    );
+    const position = maxSiblingPos + 1;
+
+    try {
+      const created = await this.folderRepo.create({
+        projectId,
+        userId,
+        parentId: normalizedParentId,
+        name: cleanName,
+        position,
+      });
+
+      return this._toFolderDto(created, 0);
+    } catch (err) {
+      if (err.code === "23505") {
+        throw new FolderError(
+          `Folder name "${cleanName}" already exists in this directory`,
+          409,
+          "FOLDER_NAME_TAKEN"
+        );
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Updates an existing folder (rename, move, reorder).
+   */
+  async update({ folderId, userId, patch = {} }) {
+    if (!folderId || !userId) {
+      throw new FolderError("Folder and User ID required", 400, "VALIDATION_ERROR");
+    }
+
+    const folder = await this.folderRepo.findOwned(folderId, userId);
+    if (!folder) {
+      throw new FolderError("Folder not found", 404, "NOT_FOUND");
+    }
+
+    const cleanPatch = {};
+
+    // 1. Rename validation
+    if (patch.name !== undefined) {
+      cleanPatch.name = this._validateName(patch.name);
+    }
+
+    // 2. Position reorder
+    if (patch.position !== undefined) {
+      if (!Number.isInteger(patch.position) || patch.position < 0) {
+        throw new FolderError("Position must be a non-negative integer", 400, "VALIDATION_ERROR");
+      }
+      cleanPatch.position = patch.position;
+    }
+
+    // 3. Move / parent change validation
+    const hasParentChange = patch.parentId !== undefined || patch.parent_id !== undefined;
+    const targetParentId = hasParentChange
+      ? (patch.parentId ?? patch.parent_id ?? null)
+      : folder.parent_id;
+
+    if (hasParentChange) {
+      cleanPatch.parentId = targetParentId;
+
+      if (targetParentId === folderId) {
+        throw new FolderError("Cannot move folder into itself", 400, "FOLDER_CYCLE");
+      }
+
+      const existingFolders = await this.folderRepo.listByProject(folder.project_id, userId);
+      const byId = indexById(existingFolders);
+      const children = indexChildren(existingFolders);
+
+      if (targetParentId !== null) {
+        const parentExists = byId.get(targetParentId);
+        if (!parentExists) {
+          throw new FolderError("Target parent folder not found", 404, "NOT_FOUND");
+        }
+      }
+
+      // Check cycles
+      if (wouldCreateCycle(byId, folderId, targetParentId)) {
+        throw new FolderError(
+          "Moving folder would create a parent-child cycle",
+          400,
+          "FOLDER_CYCLE"
+        );
+      }
+
+      // Check depth
+      if (wouldExceedDepth(byId, children, folderId, targetParentId, this.maxDepth)) {
+        throw new FolderError(
+          `Moving folder exceeds maximum allowed depth of ${this.maxDepth}`,
+          400,
+          "FOLDER_DEPTH_EXCEEDED"
+        );
+      }
+    }
+
+    // 4. Sibling uniqueness check under target parent
+    if (cleanPatch.name !== undefined || hasParentChange) {
+      const existingFolders = await this.folderRepo.listByProject(folder.project_id, userId);
+      const effectiveName = cleanPatch.name || folder.name;
+      const effectiveParent = targetParentId || null;
+      const nameLower = effectiveName.toLowerCase();
+
+      const conflictingSibling = existingFolders.find(
+        (f) =>
+          f.id !== folderId &&
+          (f.parent_id || null) === effectiveParent &&
+          f.name.toLowerCase() === nameLower
+      );
+
+      if (conflictingSibling) {
+        throw new FolderError(
+          `Folder name "${effectiveName}" already exists in the target directory`,
+          409,
+          "FOLDER_NAME_TAKEN"
+        );
+      }
+    }
+
+    try {
+      const updated = await this.folderRepo.updateOwned(folderId, userId, cleanPatch);
+      if (!updated) {
+        throw new FolderError("Folder not found", 404, "NOT_FOUND");
+      }
+      return this._toFolderDto(updated, 0);
+    } catch (err) {
+      if (err.code === "23505") {
+        throw new FolderError(
+          "Folder name already exists in target directory",
+          409,
+          "FOLDER_NAME_TAKEN"
+        );
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Deletes a folder if and only if it has zero sub-folders and zero assets.
+   */
+  async remove({ folderId, userId }) {
+    if (!folderId || !userId) {
+      throw new FolderError("Folder and User ID required", 400, "VALIDATION_ERROR");
+    }
+
+    const folder = await this.folderRepo.findOwned(folderId, userId);
+    if (!folder) {
+      throw new FolderError("Folder not found", 404, "NOT_FOUND");
+    }
+
+    const [childCount, assetCount] = await Promise.all([
+      this.folderRepo.countChildren(folderId, userId),
+      this.folderRepo.countAssetsIn(folderId, userId),
+    ]);
+
+    if (childCount + assetCount > 0) {
+      throw new FolderError(
+        "Cannot delete folder that contains sub-folders or assets",
+        409,
+        "FOLDER_NOT_EMPTY"
+      );
+    }
+
+    try {
+      const deleted = await this.folderRepo.deleteOwned(folderId, userId);
+      if (!deleted) {
+        throw new FolderError("Folder not found", 404, "NOT_FOUND");
+      }
+      return true;
+    } catch (err) {
+      if (err.code === "23503") {
+        throw new FolderError(
+          "Cannot delete folder that contains sub-folders or assets",
+          409,
+          "FOLDER_NOT_EMPTY"
+        );
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Validates that a folder exists, belongs to the user, and belongs to the specified project.
+   * Null folderId is accepted as valid (represents project root).
+   */
+  async assertFolderUsable(folderId, userId, projectId) {
+    if (folderId === null || folderId === undefined) {
+      return null;
+    }
+
+    const folder = await this.folderRepo.findOwnedInProject(folderId, projectId, userId);
+    if (!folder) {
+      throw new FolderError(
+        `Folder ${folderId} not found in project ${projectId}`,
+        404,
+        "NOT_FOUND"
+      );
+    }
+
+    return folder;
+  }
+}

@@ -1,8 +1,8 @@
 # STATE
 Current phase: P3    Current task: PREP-P3 Completed
 Updated: 2026-10-07
-Test status: 570 pass, 9 pre-existing fail, 0 regressions (total 579 tests across 108 suites)
-Next step: F-T4 (FolderService)
+Test status: 585 pass, 9 pre-existing fail, 0 regressions (total 594 tests across 109 suites)
+Next step: F-T5 (folder routes and controller)
 
 | Task | Status (TODO/DONE/BLOCKED/SKIPPED) | Commit | Report |
 |---|---|---|---|
@@ -17,7 +17,7 @@ Next step: F-T4 (FolderService)
 | F-T1 | DONE | fa92e8b | docs/plan/reports/F-T1.md |
 | F-T2 | DONE | ea47912 | docs/plan/reports/F-T2.md |
 | F-T3 | DONE | caf53ff | docs/plan/reports/F-T3.md |
-| F-T4 | TODO | | |
+| F-T4 | DONE | <SHA> | docs/plan/reports/F-T4.md |
 | F-T5 | TODO | | |
 | F-T6 | TODO | | |
 | F-T7 | TODO | | |

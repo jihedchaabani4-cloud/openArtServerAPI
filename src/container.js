@@ -35,6 +35,7 @@ import { ElementMediaService } from "#domain/element/ElementMediaService.js";
 import { ElementAnalysisService } from "#domain/element/ElementAnalysisService.js";
 import { ProjectReadService } from "#domain/project/ProjectReadService.js";
 import { GenerationService } from "#domain/generation/GenerationService.js";
+import { FolderService } from "./domain/folder/FolderService.js";
 import { WorkflowStorageGateway } from "./infrastructure/storage/workflowStorageGateway.js";
 
 import { UsageEventRepository } from "#platform/billing/UsageEventRepository.js";
@@ -241,4 +242,5 @@ export const elementService = new ElementService({
 
 export const projectReadService = new ProjectReadService({ db });
 export const generationService = new GenerationService({ db });
+export const folderService = new FolderService({ folderRepo: db.folders });
 

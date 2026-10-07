@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
+import { logger } from "../../runtime/logger.js";
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
@@ -20,8 +21,30 @@ export class RunRepository {
   static useMemoryFallback = false;
   static clientOverride = null;
 
+  constructor(options = {}) {
+    const fallbackRequested = options?.useMemoryFallback || RunRepository.useMemoryFallback;
+    if (fallbackRequested && process.env.NODE_ENV !== "test") {
+      logger.error({ module: "RUN_REPO", event: "memory_fallback_rejected" }, "In-memory fallback is prohibited outside NODE_ENV=test");
+      throw new Error("In-memory fallback is prohibited outside NODE_ENV=test");
+    }
+  }
+
+  _isMemoryMode() {
+    if (process.env.NODE_ENV !== "test") {
+      if (RunRepository.useMemoryFallback) {
+        throw new Error("In-memory fallback is prohibited outside NODE_ENV=test");
+      }
+      return false;
+    }
+    return Boolean(RunRepository.useMemoryFallback || !this.getClient());
+  }
+
   getClient() {
-    return RunRepository.clientOverride || supabaseAdmin;
+    const client = RunRepository.clientOverride || supabaseAdmin;
+    if (!client && process.env.NODE_ENV !== "test") {
+      throw new Error("Supabase client is required in non-test mode");
+    }
+    return client;
   }
 
   _normalizeRunRow(data) {
@@ -62,7 +85,7 @@ export class RunRepository {
 
     const client = this.getClient();
 
-    if (RunRepository.useMemoryFallback || !client) {
+    if (this._isMemoryMode()) {
       const data = {
         run_id: run.run_id || randomUUID(),
         workflow_id: run.workflow_id,
@@ -105,8 +128,12 @@ export class RunRepository {
 
       if (error) {
         if (error.code === "PGRST205") {
+          if (process.env.NODE_ENV !== "test") {
+            logger.error({ module: "RUN_REPO", err: error, event: "table_missing_fatal" }, "v2_workflow_runs table missing in non-test mode");
+            throw error;
+          }
           RunRepository.useMemoryFallback = true;
-          console.warn("⚠️ [RunRepository] v2_workflow_runs table not found in Supabase. Falling back to in-memory storage.");
+          logger.warn({ module: "RUN_REPO", event: "test_fallback" }, "v2_workflow_runs table not found in Supabase. Falling back to in-memory storage.");
           return this.createRun(run);
         }
         throw error;
@@ -114,8 +141,12 @@ export class RunRepository {
       return this._normalizeRunRow(data);
     } catch (err) {
       if (err.code === "PGRST205") {
+        if (process.env.NODE_ENV !== "test") {
+          logger.error({ module: "RUN_REPO", err, event: "table_missing_fatal" }, "v2_workflow_runs table missing in non-test mode");
+          throw err;
+        }
         RunRepository.useMemoryFallback = true;
-        console.warn("⚠️ [RunRepository] v2_workflow_runs table not found in Supabase. Falling back to in-memory storage.");
+        logger.warn({ module: "RUN_REPO", event: "test_fallback" }, "v2_workflow_runs table not found in Supabase. Falling back to in-memory storage.");
         return this.createRun(run);
       }
       throw err;
@@ -129,7 +160,7 @@ export class RunRepository {
    */
   async getRun(runId) {
     const client = this.getClient();
-    if (RunRepository.useMemoryFallback || !client) {
+    if (this._isMemoryMode()) {
       const run = memoryRuns.get(runId) || null;
       return this._normalizeRunRow(run);
     }
@@ -152,7 +183,7 @@ export class RunRepository {
    */
   async updateRun(runId, patch) {
     const client = this.getClient();
-    if (RunRepository.useMemoryFallback || !client) {
+    if (this._isMemoryMode()) {
       const current = memoryRuns.get(runId);
       if (!current) throw new Error(`Run ${runId} not found in memory`);
       const updated = {
@@ -186,7 +217,7 @@ export class RunRepository {
    */
   async createNodeRun(nodeRun) {
     const client = this.getClient();
-    if (RunRepository.useMemoryFallback || !client) {
+    if (this._isMemoryMode()) {
       const data = {
         run_id: nodeRun.run_id,
         node_id: nodeRun.node_id,
@@ -230,7 +261,7 @@ export class RunRepository {
    */
   async getNodeRun(runId, nodeId) {
     const client = this.getClient();
-    if (RunRepository.useMemoryFallback || !client) {
+    if (this._isMemoryMode()) {
       return memoryNodeRuns.get(`${runId}:${nodeId}`) || null;
     }
 
@@ -254,7 +285,7 @@ export class RunRepository {
    */
   async updateNodeRun(runId, nodeId, patch) {
     const client = this.getClient();
-    if (RunRepository.useMemoryFallback || !client) {
+    if (this._isMemoryMode()) {
       const key = `${runId}:${nodeId}`;
       const current = memoryNodeRuns.get(key);
       if (!current) throw new Error(`Node run ${key} not found in memory`);
@@ -285,7 +316,7 @@ export class RunRepository {
    */
   async listNodeRuns(runId) {
     const client = this.getClient();
-    if (RunRepository.useMemoryFallback || !client) {
+    if (this._isMemoryMode()) {
       const results = [];
       for (const [key, value] of memoryNodeRuns.entries()) {
         if (key.startsWith(`${runId}:`)) {

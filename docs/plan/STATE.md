@@ -6,7 +6,7 @@ Updated: 2026-10-07
 |---|---|---|---|
 | SETUP-1 | DONE | 1c52bff | docs/plan/reports/SETUP-1.md |
 | SETUP-2 | SKIPPED | | docs/plan/reports/SETUP-2.md |
-| D2.6 | DONE | | docs/plan/reports/D2.6.md |
+| D2.6 | DONE | f298c1a | docs/plan/reports/D2.6.md |
 | D3 | TODO | | |
 | SES0 | TODO | | |
 | GEN1 | TODO | | |

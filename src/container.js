@@ -215,6 +215,7 @@ export const mediaIngestionService = new MediaIngestionService({
     storageService,
     workflowAuthService: workflowService.authService,
     mediaService,
+    folderService,
 });
 
 export const characterService = new CharacterService({

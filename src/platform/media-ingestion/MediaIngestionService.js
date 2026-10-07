@@ -2,6 +2,15 @@
  * MediaIngestionService
  * Canonical Platform Orchestrator for Media Ingestion.
  * Implements: RAW SOURCE -> INGEST ONCE -> CANONICAL MEDIA -> USE MEDIA EVERYWHERE.
+ *
+ * Owns:
+ * - Ingestion of raw sources (Buffer, Base64, URL, existing media)
+ * - Media inspection, optimization (WebP), and storage upload
+ * - Workflow container creation & attachment
+ * - Project and folder usability validation for uploaded media
+ *
+ * Public methods:
+ * - ingest(options)
  */
 
 import { randomUUID } from "node:crypto";
@@ -22,12 +31,14 @@ export class MediaIngestionService {
      * @param {Object} deps.storageService       - StorageService instance
      * @param {Object} [deps.workflowAuthService] - WorkflowAuthorizationService instance
      * @param {Object} [deps.mediaService]       - Canonical MediaService instance
+     * @param {Object} [deps.folderService]      - FolderService instance
      */
-    constructor({ db, storageService, workflowAuthService = null, mediaService = null }) {
+    constructor({ db, storageService, workflowAuthService = null, mediaService = null, folderService = null }) {
         this.db = db;
         this.storageService = storageService;
         this.authService = workflowAuthService || new WorkflowAuthorizationService({ db });
         this.mediaService = mediaService || new MediaService({ db });
+        this.folderService = folderService;
     }
 
     _extFromMime(mime = "") {
@@ -97,6 +108,69 @@ export class MediaIngestionService {
                     traceId,
                     operation: "mediaIngest",
                 });
+            }
+
+            // Project ownership verification
+            if (projectId) {
+                if (this.db?.projects?.findByUser) {
+                    const projects = await this.db.projects.findByUser(userId, projectId);
+                    if (!projects || projects.length === 0) {
+                        throw new CrudServiceError(`Project ${projectId} not found`, {
+                            statusCode: 404,
+                            errorCode: "NOT_FOUND",
+                            traceId,
+                            operation: "mediaIngest",
+                        });
+                    }
+                } else if (this.db?.projects?.findById) {
+                    const record = await this.db.projects.findById(projectId);
+                    if (!record || record.user_id !== userId) {
+                        throw new CrudServiceError(`Project ${projectId} not found`, {
+                            statusCode: 404,
+                            errorCode: "NOT_FOUND",
+                            traceId,
+                            operation: "mediaIngest",
+                        });
+                    }
+                }
+            }
+
+            // Folder validation & usability verification
+            const rawFolderId = options.folderId ?? options.folder_id ?? null;
+            let validatedFolderId = null;
+
+            if (rawFolderId && rawFolderId !== "none") {
+                const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                if (typeof rawFolderId !== "string" || !rawFolderId.trim() || !UUID_REGEX.test(rawFolderId.trim())) {
+                    throw new CrudServiceError("folderId must be a valid UUID or null", {
+                        statusCode: 400,
+                        errorCode: "VALIDATION_ERROR",
+                        traceId,
+                        operation: "mediaIngest",
+                    });
+                }
+                if (!projectId) {
+                    throw new CrudServiceError("project_id is required when folderId is specified", {
+                        statusCode: 400,
+                        errorCode: "VALIDATION_ERROR",
+                        traceId,
+                        operation: "mediaIngest",
+                    });
+                }
+                if (this.folderService) {
+                    await this.folderService.assertFolderUsable(rawFolderId.trim(), userId, projectId);
+                } else if (this.db?.folders?.findOwnedInProject) {
+                    const folder = await this.db.folders.findOwnedInProject(rawFolderId.trim(), projectId, userId);
+                    if (!folder) {
+                        throw new CrudServiceError(`Folder ${rawFolderId} not found in project ${projectId}`, {
+                            statusCode: 404,
+                            errorCode: "NOT_FOUND",
+                            traceId,
+                            operation: "mediaIngest",
+                        });
+                    }
+                }
+                validatedFolderId = rawFolderId.trim();
             }
 
             // 1. Resolve source format
@@ -307,7 +381,7 @@ export class MediaIngestionService {
                     display_name: displayName || originalName || "Ingested Asset",
                     workflow_type: "UPLOAD",
                     variation_index: null,
-                    folder_id: options.folderId || null,
+                    folder_id: validatedFolderId,
                     user_id: userId,
                 });
                 targetWorkflowId = containerWf.id;

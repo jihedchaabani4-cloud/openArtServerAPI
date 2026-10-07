@@ -1,15 +1,12 @@
 import { Router } from "express";
 import multer from "multer";
-import { workflowService, mediaIngestionService, db, folderService } from "../src/container.js";
+import { workflowService, mediaIngestionService } from "../src/container.js";
 import { requireAuth } from "../src/middleware/auth.js";
 import { createSizeLimitedMemoryStorage } from "../src/middleware/sizeLimitedStorage.js";
-import { assertOwns } from "../src/platform/security/ownership.js";
-import { toAssetDto } from "../src/domain/assetDto.js";
 import { AppError } from "../src/utils/AppError.js";
 import { createLogger } from "../src/infrastructure/logging/index.js";
 
 const routeLogger = createLogger("route:assets");
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const router = Router();
 router.use(requireAuth);
@@ -48,27 +45,6 @@ router.post("/upload", upload.single("file"), async (req, res) => {
             });
         }
 
-        const userId    = req.user.id;
-        const projectId = req.body?.project_id || req.body?.projectId || null;
-        const sessionId = req.body?.session_id || req.body?.sessionId || null;
-        const rawFolderId = req.body?.folder_id || req.body?.folderId || null;
-
-        if (projectId) {
-            await assertOwns("project", projectId, userId);
-        }
-
-        let validatedFolderId = null;
-        if (rawFolderId && rawFolderId !== "none") {
-            if (typeof rawFolderId !== "string" || !rawFolderId.trim() || !UUID_REGEX.test(rawFolderId.trim())) {
-                return res.status(400).json({ ok: false, errorCode: "VALIDATION_ERROR", error: "folderId must be a valid UUID or null" });
-            }
-            if (!projectId) {
-                return res.status(400).json({ ok: false, errorCode: "VALIDATION_ERROR", error: "project_id is required when folderId is specified" });
-            }
-            await folderService.assertFolderUsable(rawFolderId.trim(), userId, projectId);
-            validatedFolderId = rawFolderId.trim();
-        }
-
         const sourceInput = req.file || req.body?.base64;
         if (!sourceInput) {
             return res.status(400).json({ ok: false, error: "No file or base64 provided." });
@@ -76,10 +52,10 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 
         const result = await mediaIngestionService.ingest({
             source: sourceInput,
-            userId,
-            projectId,
-            sessionId,
-            folderId: validatedFolderId,
+            userId: req.user.id,
+            projectId: req.body?.project_id || req.body?.projectId || null,
+            sessionId: req.body?.session_id || req.body?.sessionId || null,
+            folderId: req.body?.folder_id ?? req.body?.folderId ?? null,
             displayName: req.file?.originalname || "Upload",
             purpose: "default",
             req,
@@ -104,12 +80,17 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         if (err instanceof AppError) {
             return res.status(err.statusCode).json({
                 ok: false,
-                errorCode: err.errorCode || "APP_ERROR",
+                errorCode: err.errorCode || (err.statusCode === 404 ? "NOT_FOUND" : "APP_ERROR"),
                 message: err.message,
                 error: err.message,
             });
         }
-        return res.status(err.statusCode || 500).json({ ok: false, error: err.message });
+        return res.status(err.statusCode || 500).json({
+            ok: false,
+            errorCode: err.errorCode || (err.statusCode === 404 ? "NOT_FOUND" : "INTERNAL_ERROR"),
+            message: err.message,
+            error: err.message,
+        });
     }
 });
 
@@ -122,10 +103,10 @@ router.delete("/:id", async (req, res) => {
 
         const result = await workflowService.deleteMedia({ mediaId: id, userId, req });
 
-        console.log(`✅ [AssetsRoute] Deleted media:${id}`);
+        routeLogger.info({ mediaId: id }, "Deleted media");
         return res.json({ ok: true, ...result });
     } catch (err) {
-        console.error("❌ [AssetsRoute] Delete error:", err.message);
+        routeLogger.error({ err, mediaId: req.params.id }, "Delete error");
         return res.status(err.statusCode || 500).json({ ok: false, error: err.message });
     }
 });

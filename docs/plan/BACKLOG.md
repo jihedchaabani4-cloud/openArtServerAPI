@@ -1,31 +1,30 @@
 # Backlog
 
-## Pre-existing test failures cataloged during D2.6 baseline verification (commit 39a8c19)
+## Resolved in D3(4) (Ownership Test Suites Migration)
+> **Resolution Summary**: These 20 legacy tests previously failed with `401 !== 404` (or `401 !== 200`) because their test harnesses used `x-internal-secret` on non-allowlisted routes. In D3(4), their test harnesses were migrated to use standard mock JWT authentication (`Authorization: Bearer token-user-X`) with mock `supabase.auth.getUser`. All cross-tenant checks assert HTTP 404 with unrevealed response bodies, and legitimate owner checks assert HTTP 200. All 20 tests are now 100% PASSING.
 
-### High Severity (Ownership Test Suites)
-> **Cause Analysis**: These 20 legacy tests fail with `401 !== 404` (or `401 !== 200`) because their test harnesses send `x-internal-secret` and `x-user-id` (using legacy non-UUID identifiers such as `user-A`, `user-B`, `user-alice`) to routes outside the server-to-server allow-list (`/api/characters`, `/api/images/generated`, `/api/video/generated`, `/api/workflows/items`). Under D2.6 hardening, `auth.js` correctly blocks these requests with HTTP 401 at the authentication boundary before route controllers or ownership checks are reached.
-> **Cross-Tenant 404 Verification**: Cross-tenant 404 isolation for all of these route families is proven and 100% PASSING under legitimate JWT authentication in `tests/boundary/routeOwnershipAuditBoundary.test.js` (42/42 passing tests).
+- [RESOLVED in D3(4)] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 1: Character Sheet: User B on User A's character returns 404 and prevents sheet generation
+- [RESOLVED in D3(4)] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 2: Character Update: User B on User A's character returns 404 and prevents mutation
+- [RESOLVED in D3(4)] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 3: Character Delete: User B on User A's character returns 404 and prevents deletion
+- [RESOLVED in D3(4)] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 4: Element Read: User B on User A's element returns 404
+- [RESOLVED in D3(4)] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 5: Element Update: User B on User A's element returns 404 and prevents mutation
+- [RESOLVED in D3(4)] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 6: Element Delete: User B on User A's element returns 404 and prevents deletion
+- [RESOLVED in D3(4)] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 7: Element List: User B on User A's project returns 404
+- [RESOLVED in D3(4)] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 8: Character & Element: Legitimate owner User A operations succeed
+- [RESOLVED in D3(4)] tests/boundary/collectionItemOwnershipBoundary.test.js | TEST 1: Foreign user calling DELETE /api/workflows/items/:id gets 404 and item is NOT deleted
+- [RESOLVED in D3(4)] tests/boundary/collectionItemOwnershipBoundary.test.js | TEST 2: Owner calling DELETE /api/workflows/items/:id succeeds with 200
+- [RESOLVED in D3(4)] tests/boundary/collectionItemOwnershipBoundary.test.js | TEST 3: Foreign user calling PATCH /api/workflows/items/:id/like gets 404
+- [RESOLVED in D3(4)] tests/boundary/collectionItemOwnershipBoundary.test.js | TEST 4: Owner calling PATCH /api/workflows/items/:id/like succeeds with 200
+- [RESOLVED in D3(4)] tests/boundary/projectOwnershipBoundary.test.js | TEST 1: Image: User B using User A's projectId returns 404 and creates NO workflow/media/hold
+- [RESOLVED in D3(4)] tests/boundary/projectOwnershipBoundary.test.js | TEST 2: Video: User B using User A's projectId returns 404 and creates NO workflow/media/hold
+- [RESOLVED in D3(4)] tests/boundary/projectOwnershipBoundary.test.js | TEST 3: Image: Legitimate project owner (User A) using proj-user-A succeeds with 200
+- [RESOLVED in D3(4)] tests/boundary/projectOwnershipBoundary.test.js | TEST 4: Video: Legitimate project owner (User A) using proj-user-A succeeds with 200
+- [RESOLVED in D3(4)] tests/boundary/referenceAndMediaOwnershipBoundary.test.js | TEST 1: Image Gen: User B referencing User A's character returns 404 and prevents generation
+- [RESOLVED in D3(4)] tests/boundary/referenceAndMediaOwnershipBoundary.test.js | TEST 2: Image Gen: User B using User A's media as input_image returns 404 and prevents generation
+- [RESOLVED in D3(4)] tests/boundary/referenceAndMediaOwnershipBoundary.test.js | TEST 3: Video Gen: User B using User A's media as input_image or references returns 404 and prevents generation
+- [RESOLVED in D3(4)] tests/boundary/referenceAndMediaOwnershipBoundary.test.js | TEST 7: Legitimate Owner: User A referencing own character and media succeeds
 
-- [High] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 1: Character Sheet: User B on User A's character returns 404 and prevents sheet generation | Cause: harness sends internal secret to /api/characters; blocked by auth.js with 401 before ownership check
-- [High] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 2: Character Update: User B on User A's character returns 404 and prevents mutation | Cause: harness sends internal secret to /api/characters; blocked by auth.js with 401 before ownership check
-- [High] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 3: Character Delete: User B on User A's character returns 404 and prevents deletion | Cause: harness sends internal secret to /api/characters; blocked by auth.js with 401 before ownership check
-- [High] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 4: Element Read: User B on User A's element returns 404 | Cause: harness sends internal secret to /api/characters; blocked by auth.js with 401 before ownership check
-- [High] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 5: Element Update: User B on User A's element returns 404 and prevents mutation | Cause: harness sends internal secret to /api/characters; blocked by auth.js with 401 before ownership check
-- [High] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 6: Element Delete: User B on User A's element returns 404 and prevents deletion | Cause: harness sends internal secret to /api/characters; blocked by auth.js with 401 before ownership check
-- [High] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 7: Element List: User B on User A's project returns 404 | Cause: harness sends internal secret to /api/characters; blocked by auth.js with 401 before ownership check
-- [High] tests/boundary/characterAndElementOwnershipBoundary.test.js | TEST 8: Character & Element: Legitimate owner User A operations succeed | Cause: harness sends internal secret to /api/characters; blocked by auth.js with 401 before ownership check
-- [High] tests/boundary/collectionItemOwnershipBoundary.test.js | TEST 1: Foreign user calling DELETE /api/workflows/items/:id gets 404 and item is NOT deleted | Cause: harness sends internal secret to /api/workflows/items; blocked by auth.js with 401 before ownership check
-- [High] tests/boundary/collectionItemOwnershipBoundary.test.js | TEST 2: Owner calling DELETE /api/workflows/items/:id succeeds with 200 | Cause: harness sends internal secret to /api/workflows/items; blocked by auth.js with 401 before ownership check
-- [High] tests/boundary/collectionItemOwnershipBoundary.test.js | TEST 3: Foreign user calling PATCH /api/workflows/items/:id/like gets 404 | Cause: harness sends internal secret to /api/workflows/items; blocked by auth.js with 401 before ownership check
-- [High] tests/boundary/collectionItemOwnershipBoundary.test.js | TEST 4: Owner calling PATCH /api/workflows/items/:id/like succeeds with 200 | Cause: harness sends internal secret to /api/workflows/items; blocked by auth.js with 401 before ownership check
-- [High] tests/boundary/projectOwnershipBoundary.test.js | TEST 1: Image: User B using User A's projectId returns 404 and creates NO workflow/media/hold | Cause: harness sends internal secret to /api/images/generated; blocked by auth.js with 401 before ownership check
-- [High] tests/boundary/projectOwnershipBoundary.test.js | TEST 2: Video: User B using User A's projectId returns 404 and creates NO workflow/media/hold | Cause: harness sends internal secret to /api/video/generated; blocked by auth.js with 401 before ownership check
-- [High] tests/boundary/projectOwnershipBoundary.test.js | TEST 3: Image: Legitimate project owner (User A) using proj-user-A succeeds with 200 | Cause: harness sends internal secret to /api/images/generated; blocked by auth.js with 401 before ownership check
-- [High] tests/boundary/projectOwnershipBoundary.test.js | TEST 4: Video: Legitimate project owner (User A) using proj-user-A succeeds with 200 | Cause: harness sends internal secret to /api/video/generated; blocked by auth.js with 401 before ownership check
-- [High] tests/boundary/referenceAndMediaOwnershipBoundary.test.js | TEST 1: Image Gen: User B referencing User A's character returns 404 and prevents generation | Cause: harness sends internal secret to /api/images/generated; blocked by auth.js with 401 before ownership check
-- [High] tests/boundary/referenceAndMediaOwnershipBoundary.test.js | TEST 2: Image Gen: User B using User A's media as input_image returns 404 and prevents generation | Cause: harness sends internal secret to /api/images/generated; blocked by auth.js with 401 before ownership check
-- [High] tests/boundary/referenceAndMediaOwnershipBoundary.test.js | TEST 3: Video Gen: User B using User A's media as input_image or references returns 404 and prevents generation | Cause: harness sends internal secret to /api/video/generated; blocked by auth.js with 401 before ownership check
-- [High] tests/boundary/referenceAndMediaOwnershipBoundary.test.js | TEST 7: Legitimate Owner: User A referencing own character and media succeeds | Cause: harness sends internal secret to /api/images/generated; blocked by auth.js with 401 before ownership check
+## Remaining Pre-existing Failures (9 total)
 
 ### Medium Severity (Execution & Feature Flags)
 - [Medium] tests/boundary/v2WorkflowRunBoundary.test.js | TEST 1: Default config: POST /api/v2/workflows/run is disabled and returns 404 | Cause: dark v2 endpoint route mounting/behavior mismatch

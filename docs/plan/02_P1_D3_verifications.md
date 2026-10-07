@@ -97,12 +97,16 @@ To know "imports container.js" follow the import chain from the entry file (open
 
 ### D3(4): ownership tests assert 404 only
 
+**Extra instruction for D3(4)**:
+The 29 failing tests are the known pre-existing baseline (see `BACKLOG.md`). The 20 failing tests in `characterAndElementOwnership`, `projectOwnership`, `referenceAndMediaOwnership` and `collectionItemOwnership` fail because their harness sends `x-internal-secret` to routes that are no longer allowed (401). In D3(4), migrate those 4 suites to authenticate with a mock JWT/user (test-only change, no production code change for that), keep their cross-tenant assertions at exactly 404, and make sure the "legitimate owner -> 200" cases pass. Report before/after fail counts. Any failure that is not in the baseline list is a regression.
+
 **Steps**
 1. Find the tests: `rg -n "R4-GENERIC|assertOwns|ownership" tests/ test/ __tests__/` and the helper files.
 2. Find places that accept 403: `rg -n "403|Forbidden|oneOf|\[403, ?404\]|toBeOneOf|anyOf" <those test files>`.
 3. Change each assertion so cross-tenant access must be exactly 404 (assert the status AND that the response body does not reveal the record's data).
 4. If a test now fails, a route really returns 403 for cross-tenant (or 500). That is a real bug: find where (`rg -n "403" src/routes src/middleware src/controllers`), fix it to return 404 (consistent with `assertOwns`), keep the failing test as the proof.
-5. Report: list of changed assertions (`file:line`), and any route that was fixed.
+5. In addition to step 3-4, migrate the 4 legacy test suites (`characterAndElementOwnership`, `projectOwnership`, `referenceAndMediaOwnership`, `collectionItemOwnership`) from `x-internal-secret` to mock JWT/user authentication. Keep cross-tenant assertions at exactly 404 and legitimate owner assertions at 200.
+6. Report: list of changed assertions (`file:line`), route fixes if any, and before/after fail counts.
 
 ### D3(5): repository methods without a `user_id` filter
 

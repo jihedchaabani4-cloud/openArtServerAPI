@@ -4,31 +4,42 @@ import express from "express";
 import http from "node:http";
 import workflowsRouter from "../../routes/workflows.js";
 import { db } from "../../src/container.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+import { supabase } from "../../lib/supabase.js";
 
 describe("RC1.1-R2 — Collection Items Ownership & Generic Delete Helpers Boundary Tests", () => {
   let server;
   let baseUrl;
   let activeUserId = "user-alice";
+  let origGetUser;
 
   // Spies and original mocks
   let originalCollectionItems;
   let deletedItemIds = [];
 
-  const testSecret = "configured-valid-test-secret-at-least-32-chars";
-  let origSecret;
-
   after(async () => {
-    process.env.INTERNAL_SECRET = origSecret;
-    try {
-      await redisConnection?.quit().catch(() => redisConnection?.disconnect());
-      await workerRedisConnection?.quit().catch(() => workerRedisConnection?.disconnect());
-    } catch {}
+    supabase.auth.getUser = origGetUser;
+    await Promise.allSettled([
+      rateLimitRedisConnection?.quit().catch(() => rateLimitRedisConnection?.disconnect()),
+      redisConnection?.quit().catch(() => redisConnection?.disconnect()),
+      workerRedisConnection?.quit().catch(() => workerRedisConnection?.disconnect()),
+    ]);
+    if (server) {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 
   before(async () => {
-    origSecret = process.env.INTERNAL_SECRET;
-    process.env.INTERNAL_SECRET = testSecret;
+    origGetUser = supabase.auth.getUser;
+    supabase.auth.getUser = async (token) => {
+      if (token === "token-user-alice") {
+        return { data: { user: { id: "user-alice" } }, error: null };
+      }
+      if (token === "token-user-bob") {
+        return { data: { user: { id: "user-bob" } }, error: null };
+      }
+      return { data: { user: null }, error: new Error("Invalid token") };
+    };
 
     const app = express();
     app.use(express.json());
@@ -44,12 +55,6 @@ describe("RC1.1-R2 — Collection Items Ownership & Generic Delete Helpers Bound
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     const { port } = server.address();
     baseUrl = `http://127.0.0.1:${port}`;
-  });
-
-  after(async () => {
-    if (server) {
-      await new Promise((resolve) => server.close(resolve));
-    }
   });
 
   beforeEach(() => {
@@ -85,8 +90,7 @@ describe("RC1.1-R2 — Collection Items Ownership & Generic Delete Helpers Bound
     const res = await fetch(`${baseUrl}/api/workflows/items/item-bob-1`, {
       method: "DELETE",
       headers: {
-        "x-internal-secret": testSecret,
-        "x-user-id": activeUserId,
+        "Authorization": `Bearer token-${activeUserId}`,
       },
     });
 
@@ -104,8 +108,7 @@ describe("RC1.1-R2 — Collection Items Ownership & Generic Delete Helpers Bound
     const res = await fetch(`${baseUrl}/api/workflows/items/item-alice-1`, {
       method: "DELETE",
       headers: {
-        "x-internal-secret": testSecret,
-        "x-user-id": activeUserId,
+        "Authorization": `Bearer token-${activeUserId}`,
       },
     });
 
@@ -122,8 +125,7 @@ describe("RC1.1-R2 — Collection Items Ownership & Generic Delete Helpers Bound
     const res = await fetch(`${baseUrl}/api/workflows/items/item-bob-1/like`, {
       method: "PATCH",
       headers: {
-        "x-internal-secret": testSecret,
-        "x-user-id": activeUserId,
+        "Authorization": `Bearer token-${activeUserId}`,
       },
     });
 
@@ -140,8 +142,7 @@ describe("RC1.1-R2 — Collection Items Ownership & Generic Delete Helpers Bound
     const res = await fetch(`${baseUrl}/api/workflows/items/item-alice-1/like`, {
       method: "PATCH",
       headers: {
-        "x-internal-secret": testSecret,
-        "x-user-id": activeUserId,
+        "Authorization": `Bearer token-${activeUserId}`,
       },
     });
 

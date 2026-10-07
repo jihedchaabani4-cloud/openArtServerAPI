@@ -5,12 +5,13 @@ import http from "node:http";
 import imagesRouter from "../../routes/images.js";
 import videoRouter from "../../routes/video.js";
 import { db, useCaseService } from "../../src/container.js";
+import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+import { supabase } from "../../lib/supabase.js";
 
 describe("Project Ownership Security & Boundary Tests (Task T2a)", () => {
   let server;
   let baseUrl;
-  const testSecret = "test-internal-secret-phase0";
-  const originalSecret = process.env.INTERNAL_SECRET;
+  let origGetUser;
 
   // Spies and original methods
   let originalFindByUser;
@@ -23,7 +24,12 @@ describe("Project Ownership Security & Boundary Tests (Task T2a)", () => {
   let enqueueCalls = [];
 
   before(async () => {
-    process.env.INTERNAL_SECRET = testSecret;
+    origGetUser = supabase.auth.getUser;
+    supabase.auth.getUser = async (token) => {
+      if (token === "token-user-A") return { data: { user: { id: "user-A" } }, error: null };
+      if (token === "token-user-B") return { data: { user: { id: "user-B" } }, error: null };
+      return { data: { user: null }, error: new Error("Invalid token") };
+    };
 
     const app = express();
     app.use(express.json());
@@ -43,11 +49,15 @@ describe("Project Ownership Security & Boundary Tests (Task T2a)", () => {
   });
 
   after(async () => {
-    process.env.INTERNAL_SECRET = originalSecret;
+    supabase.auth.getUser = origGetUser;
+    await Promise.allSettled([
+      rateLimitRedisConnection?.quit().catch(() => rateLimitRedisConnection?.disconnect()),
+      redisConnection?.quit().catch(() => redisConnection?.disconnect()),
+      workerRedisConnection?.quit().catch(() => workerRedisConnection?.disconnect()),
+    ]);
     if (server) {
       await new Promise((resolve) => server.close(resolve));
     }
-    setTimeout(() => process.exit(0), 100);
   });
 
   beforeEach(() => {
@@ -113,8 +123,7 @@ describe("Project Ownership Security & Boundary Tests (Task T2a)", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-internal-secret": testSecret,
-        "x-user-id": "user-B",
+        "Authorization": "Bearer token-user-B",
       },
       body: JSON.stringify({
         prompt: "A beautiful sunrise in the mountains",
@@ -139,8 +148,7 @@ describe("Project Ownership Security & Boundary Tests (Task T2a)", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-internal-secret": testSecret,
-        "x-user-id": "user-B",
+        "Authorization": "Bearer token-user-B",
       },
       body: JSON.stringify({
         prompt: "A cinematic drone shot flying over a forest",
@@ -165,8 +173,7 @@ describe("Project Ownership Security & Boundary Tests (Task T2a)", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-internal-secret": testSecret,
-        "x-user-id": "user-A",
+        "Authorization": "Bearer token-user-A",
       },
       body: JSON.stringify({
         prompt: "A majestic lion on a cliff",
@@ -189,8 +196,7 @@ describe("Project Ownership Security & Boundary Tests (Task T2a)", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-internal-secret": testSecret,
-        "x-user-id": "user-A",
+        "Authorization": "Bearer token-user-A",
       },
       body: JSON.stringify({
         prompt: "A running stream in a forest",

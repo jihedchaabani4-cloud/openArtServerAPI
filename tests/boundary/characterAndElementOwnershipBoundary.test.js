@@ -5,6 +5,8 @@ import http from "node:http";
 import charactersRouter from "../../routes/characters.js";
 import elementRoutes from "../../routes/elementRoutes.js";
 import { db, characterService, elementService } from "../../src/container.js";
+import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+import { supabase } from "../../lib/supabase.js";
 
 // @covers POST /api/characters/:characterId/generate-sheet
 // @covers PATCH /api/characters/:characterId
@@ -17,8 +19,7 @@ import { db, characterService, elementService } from "../../src/container.js";
 describe("Character and Element Ownership Security & Boundary Tests (Task T2b)", () => {
   let server;
   let baseUrl;
-  const testSecret = "test-internal-secret-phase0";
-  const originalSecret = process.env.INTERNAL_SECRET;
+  let origGetUser;
 
   // Stored state for test database doubles
   let mockCharacters;
@@ -32,7 +33,12 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
   let originalDbProjects;
 
   before(async () => {
-    process.env.INTERNAL_SECRET = testSecret;
+    origGetUser = supabase.auth.getUser;
+    supabase.auth.getUser = async (token) => {
+      if (token === "token-user-A") return { data: { user: { id: "user-A" } }, error: null };
+      if (token === "token-user-B") return { data: { user: { id: "user-B" } }, error: null };
+      return { data: { user: null }, error: new Error("Invalid token") };
+    };
 
     const app = express();
     app.use(express.json());
@@ -52,11 +58,15 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
   });
 
   after(async () => {
-    process.env.INTERNAL_SECRET = originalSecret;
+    supabase.auth.getUser = origGetUser;
+    await Promise.allSettled([
+      rateLimitRedisConnection?.quit().catch(() => rateLimitRedisConnection?.disconnect()),
+      redisConnection?.quit().catch(() => redisConnection?.disconnect()),
+      workerRedisConnection?.quit().catch(() => workerRedisConnection?.disconnect()),
+    ]);
     if (server) {
       await new Promise((resolve) => server.close(resolve));
     }
-    setTimeout(() => process.exit(0), 100);
   });
 
   beforeEach(() => {
@@ -172,8 +182,7 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-internal-secret": testSecret,
-        "x-user-id": "user-B",
+        "Authorization": "Bearer token-user-B",
       },
       body: JSON.stringify({ prompt: "Malicious modification" }),
     });
@@ -190,8 +199,7 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        "x-internal-secret": testSecret,
-        "x-user-id": "user-B",
+        "Authorization": "Bearer token-user-B",
       },
       body: JSON.stringify({ name: "Hacked Name", description: "Hacked description" }),
     });
@@ -205,8 +213,7 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
     const res = await fetch(`${baseUrl}/api/characters/char-user-A`, {
       method: "DELETE",
       headers: {
-        "x-internal-secret": testSecret,
-        "x-user-id": "user-B",
+        "Authorization": "Bearer token-user-B",
       },
     });
 
@@ -220,8 +227,7 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
     const res = await fetch(`${baseUrl}/api/v2/elements/elem-user-A`, {
       method: "GET",
       headers: {
-        "x-internal-secret": testSecret,
-        "x-user-id": "user-B",
+        "Authorization": "Bearer token-user-B",
       },
     });
 
@@ -233,8 +239,7 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        "x-internal-secret": testSecret,
-        "x-user-id": "user-B",
+        "Authorization": "Bearer token-user-B",
       },
       body: JSON.stringify({ name: "Hacked Sword", description: "Stolen sword" }),
     });
@@ -248,8 +253,7 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
     const res = await fetch(`${baseUrl}/api/v2/elements/elem-user-A`, {
       method: "DELETE",
       headers: {
-        "x-internal-secret": testSecret,
-        "x-user-id": "user-B",
+        "Authorization": "Bearer token-user-B",
       },
     });
 
@@ -261,8 +265,7 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
     const res = await fetch(`${baseUrl}/api/v2/elements/project/proj-user-A`, {
       method: "GET",
       headers: {
-        "x-internal-secret": testSecret,
-        "x-user-id": "user-B",
+        "Authorization": "Bearer token-user-B",
       },
     });
 
@@ -277,8 +280,7 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        "x-internal-secret": testSecret,
-        "x-user-id": "user-A",
+        "Authorization": "Bearer token-user-A",
       },
       body: JSON.stringify({ name: "Hero A Updated" }),
     });
@@ -289,8 +291,7 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
     const elemRes = await fetch(`${baseUrl}/api/v2/elements/elem-user-A`, {
       method: "GET",
       headers: {
-        "x-internal-secret": testSecret,
-        "x-user-id": "user-A",
+        "Authorization": "Bearer token-user-A",
       },
     });
     assert.strictEqual(elemRes.status, 200);

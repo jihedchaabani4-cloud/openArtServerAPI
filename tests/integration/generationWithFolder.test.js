@@ -227,6 +227,25 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
       assert.equal(workflows.length, 1);
       assert.equal(workflows[0].folder_id, "00000000-0000-4000-8000-000000000001");
     });
+
+    it("accepts valid collection_id and source on upload as alias for folder_id", async () => {
+      const res = await fetch(`${baseUrl}/api/assets/upload`, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer token-user-A",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          source: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+          project_id: "proj-A",
+          collection_id: "00000000-0000-4000-8000-000000000001",
+        }),
+      });
+
+      assert.equal(res.status, 200);
+      assert.equal(workflows.length, 1);
+      assert.equal(workflows[0].folder_id, "00000000-0000-4000-8000-000000000001");
+    });
   });
 
   describe("Worker Resiliency: deleted folder fallback", () => {

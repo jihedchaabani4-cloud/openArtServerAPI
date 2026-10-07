@@ -45,7 +45,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
             });
         }
 
-        const sourceInput = req.file || req.body?.base64;
+        const sourceInput = req.file || req.body?.source || req.body?.base64;
         if (!sourceInput) {
             return res.status(400).json({ ok: false, error: "No file or base64 provided." });
         }
@@ -54,7 +54,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
             source: sourceInput,
             userId: req.user.id,
             projectId: req.body?.project_id || req.body?.projectId || null,
-            folderId: req.body?.folder_id ?? req.body?.folderId ?? null,
+            folderId: req.body?.folder_id ?? req.body?.folderId ?? req.body?.collection_id ?? req.body?.collectionId ?? null,
             displayName: req.file?.originalname || "Upload",
             purpose: "default",
             req,

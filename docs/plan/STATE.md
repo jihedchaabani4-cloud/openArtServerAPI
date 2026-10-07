@@ -1,8 +1,8 @@
 # STATE
-Current phase: P2    Current task: GEN1
+Current phase: P2    Current task: NAM0
 Updated: 2026-10-07
 Test status: 517 pass, 9 pre-existing fail, 0 regressions (total 526 tests across 105 suites)
-Next step: GEN1 skipped (scope missing), proceeding to NAM0
+Next step: NAM0 skipped (scope missing), proceeding to DM1
 
 | Task | Status (TODO/DONE/BLOCKED/SKIPPED) | Commit | Report |
 |---|---|---|---|
@@ -11,8 +11,8 @@ Next step: GEN1 skipped (scope missing), proceeding to NAM0
 | D2.6 | DONE | 15623c7 | docs/plan/reports/D2.6.md |
 | D3 | DONE | 9a186c6 | docs/plan/reports/D3.md |
 | SES0 | DONE | 9082c91 | docs/plan/reports/SES0.md |
-| GEN1 | SKIPPED | | docs/plan/escalations/GEN1-scope.md |
-| NAM0 | TODO | | |
+| GEN1 | SKIPPED | 04ea421 | docs/plan/escalations/GEN1-scope.md |
+| NAM0 | SKIPPED | | docs/plan/escalations/NAM0-scope.md |
 | DM1 | TODO | | |
 | F-T1 | TODO | | |
 | F-T2 | TODO | | |

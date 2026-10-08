@@ -42,7 +42,7 @@ No table, column, route, class, or public response shape is renamed or removed.
 | WM-T3 Compatibility reads | DONE | `07c5a67` | `docs/plan/reports/WM-T3.md` |
 | WM-T4 Domain role migration | DONE | `bc03041` | `docs/plan/reports/WM-T4.md` |
 | WM-T5 Delete and orphan rules | DONE | `f8151bd` | `docs/plan/reports/WM-T5.md` |
-| WM-GATE Phase gate | DONE | this commit | `docs/plan/reports/PHASE-WM-GATE.md` |
+| WM-GATE Phase gate | DONE | `aee5af2` | `docs/plan/reports/PHASE-WM-GATE.md` |
 
 Rules for future agents:
 

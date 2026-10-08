@@ -9,6 +9,9 @@
 import { randomUUID } from "node:crypto";
 import { assertMediaUsable } from "../../../lib/mediaGuards.js";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
+import { createLogger } from "../../infrastructure/logging/index.js";
+
+const logger = createLogger("database");
 
 export class WorkflowMediaService {
     /**
@@ -269,44 +272,55 @@ export class WorkflowMediaService {
 
             const mediaRec = await this.db.media.findById(mediaId, "id, workflow_id, url");
 
-            // 1. Delete generation_config_reference links
+            // 1. Unlink workflow_media relation rows FIRST (before any delete).
+            //    This keeps the relation table consistent and lets countLinksForMedia
+            //    return the accurate remaining-links count in step 3.
+            if (this.db.workflowMedia?.unlink) {
+                await this.db.workflowMedia.unlink({ mediaId }).catch((unlinkErr) => {
+                    logger.warn({ mediaId, message: unlinkErr.message }, "deleteMedia: workflowMedia.unlink notice");
+                });
+            }
+
+            // 2. Delete generation_config_reference links
             try {
                 await this.db.media.client()
                     .from("generation_config_reference")
                     .delete()
                     .eq("ref_media_id", mediaId);
             } catch (refErr) {
-                console.warn(`⚠️ [WorkflowMediaService] Delete ref links notice:`, refErr.message);
+                logger.warn({ mediaId, message: refErr.message }, "deleteMedia: delete ref links notice");
             }
 
-            // 2. Delete media record
+            // 3. Orphan check: count remaining workflow_media links AFTER unlinking.
+            //    If still linked to other workflows the file is shared → do NOT delete storage.
+            const remainingLinks = this.db.workflowMedia?.countLinksForMedia
+                ? await this.db.workflowMedia.countLinksForMedia(mediaId).catch(() => 0)
+                : 0;
+            const isOrphan = remainingLinks === 0;
+
+            // 4. Delete media record
             const deleted = await this.db.media.deleteById(mediaId);
 
-            // 3. Clean up storage file
-            if (mediaRec?.url) {
-                try {
-                    await this.storageService.deleteByUrl(mediaRec.url);
-                } catch (err) {
-                    console.warn(`⚠️ [WorkflowMediaService] storage delete notice:`, err.message);
-                }
+            // 5. Delete storage file only if this media is now a true orphan
+            if (isOrphan && mediaRec?.url) {
+                await this.storageService.deleteByUrl(mediaRec.url).catch((storageErr) => {
+                    logger.warn({ mediaId, url: mediaRec.url, message: storageErr.message }, "deleteMedia: storage delete notice");
+                });
             }
 
             let workflowDeleted = false;
             let nextPrimaryMediaId = null;
 
-            // 4. Check remaining media on workflow
+            // 6. Check remaining media on the legacy workflow container
             if (mediaRec?.workflow_id) {
                 const remainingMedia = await this.db.media.findByWorkflow(mediaRec.workflow_id).catch(() => []);
 
                 if (!remainingMedia || remainingMedia.length === 0) {
                     // Empty workflow: delete workflow container
-                    try {
-                        await this.db.workflows.deleteById(mediaRec.workflow_id);
-                        workflowDeleted = true;
-                        console.log(`🧹 [WorkflowMediaService] Empty workflow ${mediaRec.workflow_id} cleaned up.`);
-                    } catch (wfErr) {
-                        console.warn(`⚠️ [WorkflowMediaService] Delete workflow notice:`, wfErr.message);
-                    }
+                    await this.db.workflows.deleteById(mediaRec.workflow_id).catch((wfErr) => {
+                        logger.warn({ workflowId: mediaRec.workflow_id, message: wfErr.message }, "deleteMedia: delete workflow notice");
+                    });
+                    workflowDeleted = true;
                 } else {
                     const workflowRecord = await this.db.workflows.findById(mediaRec.workflow_id, "primary_media_id").catch(() => null);
                     if (workflowRecord?.primary_media_id === mediaId) {

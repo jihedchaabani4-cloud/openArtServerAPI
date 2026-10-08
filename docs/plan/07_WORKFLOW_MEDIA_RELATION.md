@@ -41,7 +41,7 @@ No table, column, route, class, or public response shape is renamed or removed.
 | WM-T2 Dual-write new media relations | DONE | this commit | `docs/plan/reports/WM-T2.md` |
 | WM-T3 Compatibility reads | DONE | this commit | `docs/plan/reports/WM-T3.md` |
 | WM-T4 Domain role migration | DONE | this commit | `docs/plan/reports/WM-T4.md` |
-| WM-T5 Delete and orphan rules | TODO | | |
+| WM-T5 Delete and orphan rules | DONE | this commit | `docs/plan/reports/WM-T5.md` |
 | WM-GATE Phase gate | TODO | | |
 
 Rules for future agents:
@@ -161,12 +161,12 @@ Acceptance:
 
 ## Task WM-T5: Delete And Orphan Rules
 
-Status: TODO
+Status: DONE
 
 Files:
 
 - `src/platform/workflow/WorkflowMediaService.js`
-- `src/platform/security/ownership.js`
+- `tests/unit/workflowMediaDeleteOrphan.test.js`
 
 Steps:
 
@@ -177,10 +177,10 @@ Steps:
 
 Acceptance:
 
-- [ ] Shared media survives deleting one workflow relation.
-- [ ] Cross-tenant media access remains 404.
-- [ ] Physical file deletion happens only for true orphans.
-- [ ] Relation delete happens before true orphan cleanup.
+- [x] Shared media survives deleting one workflow relation.
+- [x] Cross-tenant media access remains 404.
+- [x] Physical file deletion happens only for true orphans.
+- [x] Relation delete happens before true orphan cleanup.
 
 ## Phase Gate
 

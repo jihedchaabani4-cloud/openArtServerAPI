@@ -55,10 +55,11 @@ SELECT
     WHEN m.step_id = 'upload' THEN 'original'
     WHEN m.step_id = 'character_sheet' THEN 'sheet'
     WHEN m.step_id = 'character_detail' THEN 'detail'
-    WHEN m.step_id = 'element_sheet' THEN 'sheet'
-    WHEN m.step_id = 'element_reference' THEN 'reference'
+    WHEN m.step_id IN ('element_sheet', 'element_reference') THEN 'detail'
     WHEN m.step_id = 'CAE' AND w.workflow_type = 'UPLOAD' THEN 'original'
-    WHEN m.step_id = 'CAE' AND w.workflow_type IN ('CHARACTER', 'CHARACTER_SHEET', 'ELEMENT', 'ELEMENT_SHEET') THEN 'sheet'
+    WHEN m.step_id = 'CAE' AND w.workflow_type IN ('CHARACTER', 'CHARACTER_SHEET') THEN 'sheet'
+    WHEN m.step_id = 'CAE' AND w.workflow_type IN ('ELEMENT', 'ELEMENT_SHEET') THEN 'detail'
+    WHEN w.workflow_type IN ('ELEMENT', 'ELEMENT_SHEET') THEN 'detail'
     ELSE 'output'
   END AS role,
   COALESCE(m.create_time, now())

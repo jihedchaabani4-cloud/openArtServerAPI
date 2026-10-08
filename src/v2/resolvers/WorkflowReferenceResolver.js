@@ -203,6 +203,8 @@ export async function resolveAsElement(workflowId, userId = null) {
       }
     }
 
+    const allUrls = [...urls].filter(Boolean);
+
     return {
       workflowId,
       entityType:    "element",
@@ -210,8 +212,12 @@ export async function resolveAsElement(workflowId, userId = null) {
       name:          cleanEntityName(elem.name, "Element"),
       description:   elem.description || null,
       visualTraits:  extractTraits(elem, ["element_type"]),
-      imageUrls:     [...urls].filter(Boolean),
+      imageUrls:     allUrls,
+      detailImages:  allUrls,
+      sheetImages:   [],
       referenceTags: [],
+      sheetTags:     [],
+      detailTags:    [],
     };
   } catch (err) {
     dbLogger.warn({ workflowId, message: err.message }, "element resolve failed");

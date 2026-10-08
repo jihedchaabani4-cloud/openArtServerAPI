@@ -1,8 +1,9 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { db } from "../../src/container.js";
-import { resolveAsCharacter } from "../../src/v2/resolvers/WorkflowReferenceResolver.js";
+import { resolveAsCharacter, resolveAsElement } from "../../src/v2/resolvers/WorkflowReferenceResolver.js";
 import { CharacterMediaService } from "../../src/domain/character/CharacterMediaService.js";
+import { elementRepository } from "../../src/db/ElementRepository.js";
 
 describe("workflow_media role-based domain resolution", () => {
   const originals = {};
@@ -135,5 +136,45 @@ describe("workflow_media role-based domain resolution", () => {
 
     assert.equal(result.ok, true);
     assert.equal(deleted, true);
+  });
+
+  it("resolveAsElement marks all images as detailImages and returns empty sheetImages", async () => {
+    originals.resolveRecord = elementRepository.resolveRecord;
+    elementRepository.resolveRecord = async () => ({
+      id: "elem-1",
+      workflow_id: "elem-wf-1",
+      name: "Cyber Sword",
+      description: "A glowing katana",
+      element_type: "weapon",
+    });
+    db.media = {
+      findByWorkflow: async () => [
+        {
+          id: "m-1",
+          workflow_id: "elem-wf-1",
+          url: "https://cdn.example.com/sword-angle1.png",
+          mediaRole: "detail",
+        },
+        {
+          id: "m-2",
+          workflow_id: "elem-wf-1",
+          url: "https://cdn.example.com/sword-angle2.png",
+          mediaRole: "detail",
+        },
+      ],
+    };
+
+    try {
+      const resolved = await resolveAsElement("elem-1");
+      assert.deepEqual(resolved.detailImages, [
+        "https://cdn.example.com/sword-angle1.png",
+        "https://cdn.example.com/sword-angle2.png",
+      ]);
+      assert.deepEqual(resolved.sheetImages, []);
+    } finally {
+      if (originals.resolveRecord) {
+        elementRepository.resolveRecord = originals.resolveRecord;
+      }
+    }
   });
 });

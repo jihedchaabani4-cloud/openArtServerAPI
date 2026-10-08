@@ -10,13 +10,14 @@ describe("workflow media role inference", () => {
     assert.equal(inferWorkflowMediaRole({ stepId: "CAE", workflowType: "UPLOAD" }), "original");
   });
 
-  it("maps character and element sheet/detail/reference step ids to canonical roles", () => {
+  it("maps character and element step ids to canonical roles (element has detail only, no sheet)", () => {
     assert.equal(inferWorkflowMediaRole({ stepId: "character_sheet" }), "sheet");
     assert.equal(inferWorkflowMediaRole({ stepId: "character_detail" }), "detail");
-    assert.equal(inferWorkflowMediaRole({ stepId: "element_sheet" }), "sheet");
-    assert.equal(inferWorkflowMediaRole({ stepId: "element_reference" }), "reference");
+    assert.equal(inferWorkflowMediaRole({ stepId: "element_sheet" }), "detail");
+    assert.equal(inferWorkflowMediaRole({ stepId: "element_reference" }), "detail");
     assert.equal(inferWorkflowMediaRole({ stepId: "CAE", workflowType: "CHARACTER_SHEET" }), "sheet");
-    assert.equal(inferWorkflowMediaRole({ stepId: "CAE", workflowType: "ELEMENT_SHEET" }), "sheet");
+    assert.equal(inferWorkflowMediaRole({ stepId: "CAE", workflowType: "ELEMENT_SHEET" }), "detail");
+    assert.equal(inferWorkflowMediaRole({ stepId: "anything", workflowType: "ELEMENT" }), "detail");
   });
 
   it("accepts explicit valid roles and falls back to output", () => {

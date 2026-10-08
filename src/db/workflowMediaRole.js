@@ -25,15 +25,21 @@ export function inferWorkflowMediaRole({ role, stepId, step_id, workflowType, wo
     if (normalizedStep === "upload") return "original";
     if (normalizedStep === "character_sheet") return "sheet";
     if (normalizedStep === "character_detail") return "detail";
-    if (normalizedStep === "element_sheet") return "sheet";
-    if (normalizedStep === "element_reference") return "reference";
+    if (normalizedStep === "element_sheet" || normalizedStep === "element_reference") return "detail";
     if (normalizedStep === "image_generation" || normalizedStep === "video_generation") return "output";
 
     if (normalizedStep === "CAE") {
         if (normalizedType === "UPLOAD") return "original";
-        if (["CHARACTER", "CHARACTER_SHEET", "ELEMENT", "ELEMENT_SHEET"].includes(normalizedType)) {
+        if (["CHARACTER", "CHARACTER_SHEET"].includes(normalizedType)) {
             return "sheet";
         }
+        if (["ELEMENT", "ELEMENT_SHEET"].includes(normalizedType)) {
+            return "detail";
+        }
+    }
+
+    if (["ELEMENT", "ELEMENT_SHEET"].includes(normalizedType)) {
+        return "detail";
     }
 
     return "output";

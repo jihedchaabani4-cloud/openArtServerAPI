@@ -1,4 +1,7 @@
 import { BaseRepository } from "./BaseRepository.js";
+import { createLogger } from "../infrastructure/logging/index.js";
+
+const mediaRepositoryLogger = createLogger("media_repository");
 
 export class MediaRepository extends BaseRepository {
     constructor() {
@@ -33,6 +36,41 @@ export class MediaRepository extends BaseRepository {
     }
 
     async findByWorkflow(workflow_id) {
+        const relationResult = await this.client()
+            .from("workflow_media")
+            .select(`
+                workflow_id,
+                role,
+                created_at,
+                media:media_id (*)
+            `)
+            .eq("workflow_id", workflow_id)
+            .order("created_at", { ascending: true });
+
+        if (!relationResult.error && Array.isArray(relationResult.data) && relationResult.data.length > 0) {
+            return relationResult.data
+                .map((row) => {
+                    const media = Array.isArray(row.media) ? row.media[0] : row.media;
+                    if (!media) return null;
+                    return {
+                        ...media,
+                        workflow_id: row.workflow_id,
+                        workflowId: row.workflow_id,
+                        role: row.role,
+                        mediaRole: row.role,
+                        workflow_media_created_at: row.created_at,
+                    };
+                })
+                .filter(Boolean);
+        }
+
+        if (relationResult.error) {
+            mediaRepositoryLogger.warn(
+                { workflowId: workflow_id, message: relationResult.error.message },
+                "workflow_media lookup failed; falling back to legacy media.workflow_id"
+            );
+        }
+
         const { data, error } = await this.client()
             .from(this.tableName)
             .select("*")
@@ -81,7 +119,10 @@ export class MediaRepository extends BaseRepository {
             .maybeSingle();
 
         if (error) {
-            console.warn(`[MediaRepository] Failed findMediaByIdOrWorkflow for ${id}:`, error.message);
+            mediaRepositoryLogger.warn(
+                { mediaOrWorkflowId: id, message: error.message },
+                "findMediaByIdOrWorkflow failed"
+            );
             return null;
         }
         return data;

@@ -1,5 +1,8 @@
 import { BaseRepository } from "./BaseRepository.js";
 import { supabase } from "../../lib/supabase.js";
+import { createLogger } from "../infrastructure/logging/index.js";
+
+const workflowRepositoryLogger = createLogger("workflow_repository");
 
 export class WorkflowRepository extends BaseRepository {
     constructor() {
@@ -119,7 +122,10 @@ export class WorkflowRepository extends BaseRepository {
             .maybeSingle();
         
         if (wfErr) {
-            console.error(`❌ [WorkflowRepo] Error fetching workflow ${workflow_id}:`, wfErr);
+            workflowRepositoryLogger.error(
+                { workflowId: workflow_id, message: wfErr.message },
+                "Error fetching workflow primary media pointer"
+            );
             return null;
         }
 
@@ -132,7 +138,39 @@ export class WorkflowRepository extends BaseRepository {
             if (!mErr && media) return media;
         }
 
-        // 2. Fallback: find first media created for this workflow
+        // 2. Fallback: relation rows created by workflow_media rollout
+        const { data: relationRow, error: relationErr } = await this.client()
+            .from("workflow_media")
+            .select(`
+                workflow_id,
+                role,
+                created_at,
+                media:media_id (id, url, generation_config_id)
+            `)
+            .eq("workflow_id", workflow_id)
+            .order("created_at", { ascending: true })
+            .limit(1)
+            .maybeSingle();
+
+        if (!relationErr) {
+            const relationMedia = Array.isArray(relationRow?.media) ? relationRow.media[0] : relationRow?.media;
+            if (relationMedia) {
+                return {
+                    ...relationMedia,
+                    workflow_id,
+                    workflowId: workflow_id,
+                    role: relationRow.role,
+                    mediaRole: relationRow.role,
+                };
+            }
+        } else {
+            workflowRepositoryLogger.warn(
+                { workflowId: workflow_id, message: relationErr.message },
+                "workflow_media primary fallback failed; using legacy media.workflow_id"
+            );
+        }
+
+        // 3. Fallback: find first media created for this workflow
         const { data: firstMedia, error: fErr } = await this.client()
             .from("media")
             .select("id, url, generation_config_id")
@@ -142,7 +180,10 @@ export class WorkflowRepository extends BaseRepository {
             .maybeSingle();
 
         if (fErr) {
-            console.error(`❌ [WorkflowRepo] Error fetching fallback media for wf ${workflow_id}:`, fErr);
+            workflowRepositoryLogger.error(
+                { workflowId: workflow_id, message: fErr.message },
+                "Error fetching legacy fallback media"
+            );
         }
 
         return firstMedia || null;

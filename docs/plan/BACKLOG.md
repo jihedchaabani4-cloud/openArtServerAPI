@@ -32,6 +32,7 @@
 ## Workflow Media Follow-ups
 - [Medium] src/db/workflowMediaLinker.js | relation write failures are warning-only during additive rollout; revisit after migration 009 is deployed everywhere | found during WM-T2
 - [Medium] src/db/MediaRepository.js | WM-T3 must make read paths prefer workflow_media while preserving legacy response fields | found during WM-T2
+- [Medium] src/v2/resolvers/WorkflowReferenceResolver.js | WM-T4 must migrate character/element/reference resolution to prefer role fields while retaining step_id compatibility | found during WM-T3
 
 ## Remaining Pre-existing Failures (9 total)
 

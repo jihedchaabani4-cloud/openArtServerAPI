@@ -39,7 +39,7 @@ No table, column, route, class, or public response shape is renamed or removed.
 |---|---|---|---|
 | WM-T1 Add relation schema and repository foundation | DONE | this commit | `docs/plan/reports/WM-T1.md` |
 | WM-T2 Dual-write new media relations | DONE | this commit | `docs/plan/reports/WM-T2.md` |
-| WM-T3 Compatibility reads | TODO | | |
+| WM-T3 Compatibility reads | DONE | this commit | `docs/plan/reports/WM-T3.md` |
 | WM-T4 Domain role migration | TODO | | |
 | WM-T5 Delete and orphan rules | TODO | | |
 | WM-GATE Phase gate | TODO | | |
@@ -111,7 +111,7 @@ Acceptance:
 
 ## Task WM-T3: Compatibility Reads
 
-Status: TODO
+Status: DONE
 
 Files:
 
@@ -129,10 +129,10 @@ Steps:
 
 Acceptance:
 
-- [ ] Old frontend continues to work.
-- [ ] New role information is available.
-- [ ] Primary media fallback uses relation rows before legacy rows.
-- [ ] Legacy rows without `workflow_media` still appear via fallback.
+- [x] Old frontend continues to work.
+- [x] New role information is available.
+- [x] Primary media fallback uses relation rows before legacy rows.
+- [x] Legacy rows without `workflow_media` still appear via fallback.
 
 ## Task WM-T4: Domain Role Migration
 

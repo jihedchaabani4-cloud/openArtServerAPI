@@ -1,8 +1,8 @@
 # STATE
-Current phase: WM    Current task: WM-T3
+Current phase: WM    Current task: WM-T4
 Updated: 2026-10-08
-Test status: 666 pass, 9 pre-existing fail, 0 known WM regressions (total 675 tests across 147 suites)
-Next step: Continue WM-T3 compatibility reads (waiting for the human or next agent)
+Test status: 669 pass, 9 pre-existing fail, 0 known WM regressions (total 678 tests across 148 suites)
+Next step: Continue WM-T4 domain role migration (waiting for the human or next agent)
 
 | Task | Status (TODO/DONE/BLOCKED/SKIPPED) | Commit | Report |
 |---|---|---|---|
@@ -31,7 +31,7 @@ Next step: Continue WM-T3 compatibility reads (waiting for the human or next age
 | FINAL | DONE | cd5a018 | docs/plan/FINAL.md |
 | WM-T1 | DONE | this commit | docs/plan/reports/WM-T1.md |
 | WM-T2 | DONE | this commit | docs/plan/reports/WM-T2.md |
-| WM-T3 | TODO | | |
+| WM-T3 | DONE | this commit | docs/plan/reports/WM-T3.md |
 | WM-T4 | TODO | | |
 | WM-T5 | TODO | | |
 | WM-GATE | TODO | | |

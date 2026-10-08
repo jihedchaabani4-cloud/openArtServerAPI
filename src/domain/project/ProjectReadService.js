@@ -195,14 +195,37 @@ export class ProjectReadService {
         });
 
         const workflowMap = new Map((workflows || []).map((w) => [w.id, w]));
+        const workflowMediaRelationByMediaId = new Map();
+
+        if (workflowIds.length > 0) {
+            const { data: relationRows, error: relationErr } = await supabase
+                .from("workflow_media")
+                .select("workflow_id, media_id, role, created_at")
+                .in("workflow_id", workflowIds);
+
+            if (relationErr) {
+                projectLogger.warn(
+                    { event: "project_read.workflow_media_query_warn", err: relationErr.message },
+                    "Workflow media relation query warning"
+                );
+            } else {
+                for (const row of relationRows || []) {
+                    if (row?.media_id) workflowMediaRelationByMediaId.set(row.media_id, row);
+                }
+            }
+        }
 
         const formattedMedia = (mediaItems || []).map((m) => {
             const config = m.generation_config;
             const refs = (config?.references || []).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
             const isVideo = m.url && /\.(mp4|webm|mov)$/i.test(m.url);
-            const wf = workflowMap.get(m.workflow_id);
+            const relation = workflowMediaRelationByMediaId.get(m.id);
+            const mediaWorkflowId = relation?.workflow_id || m.workflow_id;
+            const mediaRole = relation?.role || null;
+            const wf = workflowMap.get(mediaWorkflowId);
             const isUpload = !m.generation_config_id ||
                              wf?.workflow_type === "UPLOAD" ||
+                             mediaRole === "original" ||
                              config?.generation_type === "UPLOAD" ||
                              m.step_id === "CAE" ||
                              m.step_id === "upload";
@@ -237,10 +260,12 @@ export class ProjectReadService {
                 status: normalizeMediaStatus(m.status, m.url),
                 error: m.error_message || null,
                 projectId,
-                workflowId: m.workflow_id,
-                workflow_id: m.workflow_id,
+                workflowId: mediaWorkflowId,
+                workflow_id: mediaWorkflowId,
                 folder_id: wf?.folder_id || null,
                 folderId: wf?.folder_id || null,
+                role: mediaRole,
+                mediaRole,
                 step_id: m.step_id,
                 workflowStepId: m.step_id || (isUpload ? "upload" : "GEN"),
                 create_time: m.create_time,
@@ -301,7 +326,7 @@ export class ProjectReadService {
                                   seed: config.seed ?? null,
                                   prompt: config.prompt || "",
                                   modelNameType: config.model || "",
-                                  workflowId: m.workflow_id,
+                                  workflowId: mediaWorkflowId,
                                   aspectRatio: config.aspect_ratio || resolvedRatio,
                                   url: m.url,
                               }

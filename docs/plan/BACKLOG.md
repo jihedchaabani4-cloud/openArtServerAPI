@@ -48,3 +48,5 @@
 - [Low] tests/boundary/promptOptimizationBoundary.test.js | TEST 3: Identity & Billing: forwards authenticated userId to promptService | Cause: test sends internal secret to prompt route; blocked by auth.js with 401
 - [Low] tests/boundary/promptOptimizationBoundary.test.js | TEST 5: Rate Limiting: blocks requests exceeding limit with 429 and Retry-After | Cause: test sends internal secret to prompt route; blocked by auth.js with 401
 - [Low] tests/boundary/uploadHardeningD25Boundary.test.js | /health endpoint exposes redis readiness status without crashing | Cause: legacy D2.5 assertion expects data.redis in /health, which was cleanly moved to /ready in D2.6 (Decision D-10)
+- [Low] src/domain/element/ElementMediaService.js | `resolveAsElement` returns all media URLs without role-based sheet/reference separation; could add role-based split in future | found during WM-T4
+- [Low] src/platform/workflow/WorkflowServiceBase.js:280,291,298 | pre-existing `console.warn` calls should be migrated to structured logger | found during WM-T4

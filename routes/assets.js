@@ -124,7 +124,8 @@ router.patch("/:assetId/folder", async (req, res, next) => {
     try {
         const { assetId } = req.params;
         const userId = req.user?.id;
-        const rawFolderId = req.body?.folderId ?? req.body?.folder_id;
+        const body = req.body || {};
+        const rawFolderId = body.folderId !== undefined ? body.folderId : (body.folder_id !== undefined ? body.folder_id : null);
 
         routeLogger.debug({ assetId, userId, folderId: rawFolderId }, "PATCH /api/assets/:assetId/folder");
 

@@ -77,6 +77,25 @@ export class MediaService {
                 ...extra,
             });
 
+            if (mediaRecord?.id && this.db.workflowMedia?.linkMedia) {
+                try {
+                    await this.db.workflowMedia.linkMedia({
+                        workflowId,
+                        mediaId: mediaRecord.id,
+                        stepId,
+                    });
+                } catch (linkErr) {
+                    crudOperationLog({
+                        traceId,
+                        operation: "createMedia:linkWorkflowMedia",
+                        status: "warning",
+                        mediaId: mediaRecord.id,
+                        workflowId,
+                        message: linkErr.message,
+                    });
+                }
+            }
+
             crudOperationLog({
                 traceId,
                 operation: "createMedia:success",
@@ -112,7 +131,12 @@ export class MediaService {
         try {
             return await this.db.media.findById(mediaId, columns);
         } catch (err) {
-            console.warn(`[MediaService] findById warning for ${mediaId}:`, err.message);
+            crudOperationLog({
+                operation: "findById",
+                status: "warning",
+                mediaId,
+                message: err.message,
+            });
             return null;
         }
     }
@@ -128,7 +152,12 @@ export class MediaService {
         try {
             return await this.db.media.findByIds(mediaIds);
         } catch (err) {
-            console.warn(`[MediaService] findByIds warning:`, err.message);
+            crudOperationLog({
+                operation: "findByIds",
+                status: "warning",
+                count: mediaIds.length,
+                message: err.message,
+            });
             return [];
         }
     }
@@ -144,7 +173,12 @@ export class MediaService {
         try {
             return await this.db.media.findByWorkflow(workflowId);
         } catch (err) {
-            console.warn(`[MediaService] findByWorkflow warning for ${workflowId}:`, err.message);
+            crudOperationLog({
+                operation: "findByWorkflow",
+                status: "warning",
+                workflowId,
+                message: err.message,
+            });
             return [];
         }
     }

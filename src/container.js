@@ -15,6 +15,7 @@ import { ProjectRepository }          from "#db/ProjectRepository.js";
 import { BatchRepository }            from "#db/BatchRepository.js";
 import { WorkflowRepository }         from "#db/WorkflowRepository.js";
 import { MediaRepository }            from "#db/MediaRepository.js";
+import { WorkflowMediaRepository }     from "#db/WorkflowMediaRepository.js";
 import { GenerationConfigRepository } from "#db/GenerationConfigRepository.js";
 import { DnaRepository }              from "#db/DnaRepository.js";
 import { CharacterRepository }        from "#db/CharacterRepository.js";
@@ -97,7 +98,7 @@ export function assertSecurityConfiguredForEnvironment() {
  * Enforce that production environments must use Redis for rate limiting,
  * unless explicitly exempted for single-instance staging via ALLOW_IN_MEMORY_RATE_LIMIT=true.
  */
-export function assertRateLimitConfiguredForEnvironment() {
+export function assertRateLimitConfiguredForEnvironment(logger = systemLogger) {
     const isProd = isProductionEnvironment();
     if (!isProd) return;
 
@@ -109,12 +110,9 @@ export function assertRateLimitConfiguredForEnvironment() {
     }
 
     if (allowMemory) {
-        systemLogger.warn(
+        logger.warn(
             { event: "security.rate_limit_memory_warning" },
             "CRITICAL SECURITY WARNING: RATE_LIMIT_STORE is running in 'memory' mode in production. Rate limits will NOT be shared across instances! Allowed only via ALLOW_IN_MEMORY_RATE_LIMIT=true."
-        );
-        console.warn(
-            "⚠️ CRITICAL SECURITY WARNING: RATE_LIMIT_STORE is running in 'memory' mode in production. Rate limits will NOT be shared across instances! Allowed only via ALLOW_IN_MEMORY_RATE_LIMIT=true."
         );
         return;
     }
@@ -176,6 +174,7 @@ export const db = {
     batches:   new BatchRepository(),     // table: batch
     workflows: new WorkflowRepository(),  // table: workflow
     media:     new MediaRepository(),     // table: media
+    workflowMedia: new WorkflowMediaRepository(), // table: workflow_media
     configs:   new GenerationConfigRepository(), // tables: generation_config + generation_config_reference
     dna:        new DnaRepository(),       // table: dna
     characters: new CharacterRepository(), // Dedicated Character Domain Repository

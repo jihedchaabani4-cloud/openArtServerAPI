@@ -129,17 +129,16 @@ describe("RC1.2-S2 — NODE_ENV and Rate Limit Fail-Safe Boundary Tests", () => 
       process.env.ALLOW_IN_MEMORY_RATE_LIMIT = "true";
 
       let warned = false;
-      const origWarn = console.warn;
-      console.warn = (...args) => {
-        warned = true;
+      const logger = {
+        warn(payload, message) {
+          warned = payload?.event === "security.rate_limit_memory_warning"
+            && typeof message === "string"
+            && message.includes("CRITICAL SECURITY WARNING");
+        },
       };
 
-      try {
-        assert.doesNotThrow(() => assertRateLimitConfiguredForEnvironment());
-        assert.equal(warned, true, "Loud warning must be logged when memory rate limit escape is active");
-      } finally {
-        console.warn = origWarn;
-      }
+      assert.doesNotThrow(() => assertRateLimitConfiguredForEnvironment(logger));
+      assert.equal(warned, true, "Loud structured warning must be logged when memory rate limit escape is active");
     });
 
     it("TEST 12: in development mode, memory rate limit store boots without warning or error", () => {

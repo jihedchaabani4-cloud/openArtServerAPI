@@ -3,6 +3,7 @@ import { db, useCaseService, folderService } from "../src/container.js";
 import { createLogger } from "../src/infrastructure/logging/index.js";
 import { resolveMediaMetadata } from "../src/platform/media/mediaMetadataResolver.js";
 import { assertOwns, assertOwnsAny } from "../src/platform/security/ownership.js";
+import { linkWorkflowMediaForCreatedRow } from "../src/db/workflowMediaLinker.js";
 
 const controllerLogger = createLogger("video-controller");
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -161,6 +162,13 @@ export async function generateVideo(req, res) {
         height:      mediaMeta.height,
         status:      "processing",
       });
+      await linkWorkflowMediaForCreatedRow(db, {
+        workflowId,
+        mediaId: id,
+        stepId: "video_generation",
+        workflowType: "GENERATION",
+        operation: "generateVideo:linkWorkflowMedia",
+      });
       serverMediaIds.push(id);
     }
     mediaId = serverMediaIds[0];
@@ -289,4 +297,3 @@ export async function generateVideo(req, res) {
     });
   }
 }
-

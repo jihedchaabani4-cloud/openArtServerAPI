@@ -15,6 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
 import { resolveMediaMetadata } from "../../platform/media/mediaMetadataResolver.js";
+import { linkWorkflowMediaForCreatedRow } from "../../db/workflowMediaLinker.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -100,6 +101,13 @@ export class ElementMediaService {
                     height: meta.height,
                     status: "success",
                 });
+                await linkWorkflowMediaForCreatedRow(this.db, {
+                    workflowId,
+                    mediaId: mediaRecord?.id,
+                    stepId,
+                    workflowType: isPrimary ? "ELEMENT_SHEET" : "ELEMENT",
+                    operation: "ingestElementSources:linkWorkflowMedia",
+                });
             }
 
             if (mediaRecord) {
@@ -112,7 +120,14 @@ export class ElementMediaService {
 
         if (primaryMedia && this.db.workflows?.updatePrimaryMedia) {
             await this.db.workflows.updatePrimaryMedia(workflowId, primaryMedia.id).catch((err) => {
-                console.warn(`⚠️ [ElementMediaService] updatePrimaryMedia warning:`, err.message);
+                crudOperationLog({
+                    traceId,
+                    operation: "ingestElementSources:updatePrimaryMedia",
+                    status: "warning",
+                    workflowId,
+                    mediaId: primaryMedia.id,
+                    message: err.message,
+                });
             });
         }
 
@@ -191,6 +206,13 @@ export class ElementMediaService {
                     height: meta.height,
                     status: "success",
                 });
+                await linkWorkflowMediaForCreatedRow(this.db, {
+                    workflowId: wfId,
+                    mediaId: mediaRecord?.id,
+                    stepId: "element_reference",
+                    workflowType: "ELEMENT",
+                    operation: "addReferenceMedia:linkWorkflowMedia",
+                });
             }
 
             // Sync element.source_images array
@@ -200,7 +222,14 @@ export class ElementMediaService {
                     await this.db.elements.update(element.id, {
                         source_images: [...existingImages, mediaRecord.id],
                     }).catch((err) => {
-                        console.warn(`⚠️ [ElementMediaService] Failed to sync source_images:`, err.message);
+                        crudOperationLog({
+                            traceId,
+                            operation: "addReferenceMedia:syncSourceImages",
+                            status: "warning",
+                            elementId,
+                            mediaId: mediaRecord.id,
+                            message: err.message,
+                        });
                     });
                 }
             }
@@ -347,6 +376,13 @@ export class ElementMediaService {
                     width: meta.width,
                     height: meta.height,
                     status: "success",
+                });
+                await linkWorkflowMediaForCreatedRow(this.db, {
+                    workflowId: wfId,
+                    mediaId: mediaRecord?.id,
+                    stepId: "element_sheet",
+                    workflowType: "ELEMENT_SHEET",
+                    operation: "setSheetMedia:linkWorkflowMedia",
                 });
             }
 

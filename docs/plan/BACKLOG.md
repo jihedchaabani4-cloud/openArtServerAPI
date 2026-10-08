@@ -29,6 +29,10 @@
 - [High] src/platform/security/ownership.js | Route ownership audit covers only URL parameters (:id), not IDs provided in JSON request bodies (e.g. folderId, projectId, sessionId). Protection for body IDs relies on manual service/controller checks | found during P3 audit
 - [High] routes/assets.js:52 (POST /upload) | session_id parameter in request body is forwarded directly to MediaIngestionService / WorkflowRepository.createWorkflow without ownership or project scoping checks, allowing potential cross-tenant / IDOR session linkage | found during P3 audit
 
+## Workflow Media Follow-ups
+- [Medium] src/db/workflowMediaLinker.js | relation write failures are warning-only during additive rollout; revisit after migration 009 is deployed everywhere | found during WM-T2
+- [Medium] src/db/MediaRepository.js | WM-T3 must make read paths prefer workflow_media while preserving legacy response fields | found during WM-T2
+
 ## Remaining Pre-existing Failures (9 total)
 
 ### Medium Severity (Execution & Feature Flags)

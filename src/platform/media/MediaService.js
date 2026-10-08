@@ -12,6 +12,7 @@
 
 import { randomUUID } from "node:crypto";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
+import { linkWorkflowMediaForCreatedRow } from "../../db/workflowMediaLinker.js";
 
 export class MediaService {
     /**
@@ -77,24 +78,12 @@ export class MediaService {
                 ...extra,
             });
 
-            if (mediaRecord?.id && this.db.workflowMedia?.linkMedia) {
-                try {
-                    await this.db.workflowMedia.linkMedia({
-                        workflowId,
-                        mediaId: mediaRecord.id,
-                        stepId,
-                    });
-                } catch (linkErr) {
-                    crudOperationLog({
-                        traceId,
-                        operation: "createMedia:linkWorkflowMedia",
-                        status: "warning",
-                        mediaId: mediaRecord.id,
-                        workflowId,
-                        message: linkErr.message,
-                    });
-                }
-            }
+            await linkWorkflowMediaForCreatedRow(this.db, {
+                workflowId,
+                mediaId: mediaRecord?.id,
+                stepId,
+                operation: "createMedia:linkWorkflowMedia",
+            });
 
             crudOperationLog({
                 traceId,

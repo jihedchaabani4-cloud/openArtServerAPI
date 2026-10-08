@@ -8,6 +8,7 @@
 import { randomUUID } from "node:crypto";
 import { llmService } from "#platform/ai/LLMService.js";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
+import { linkWorkflowMediaForCreatedRow } from "../../db/workflowMediaLinker.js";
 
 const CHARACTER_GENERATOR_SYSTEM_PROMPT = `
 You are an elite haute-couture AI Art Director and Master Character Designer for high-budget cinematic films and editorial fashion houses.
@@ -75,8 +76,21 @@ export class CharacterGenerationService {
                     width: 1344,
                     height: 768,
                 });
+                await linkWorkflowMediaForCreatedRow(this.db, {
+                    workflowId: characterId,
+                    mediaId: placeholderMedia?.id,
+                    stepId: "character_sheet",
+                    workflowType: "CHARACTER",
+                    operation: "enqueueSheetGeneration:linkWorkflowMedia",
+                });
             } catch (mediaErr) {
-                console.warn(`⚠️ [CharacterGenerationService] placeholder media notice:`, mediaErr.message);
+                crudOperationLog({
+                    traceId,
+                    operation: "enqueueSheetGeneration:placeholderMedia",
+                    status: "warning",
+                    characterId,
+                    message: mediaErr.message,
+                });
             }
 
             const mediaId = placeholderMedia?.id || null;
@@ -118,7 +132,13 @@ export class CharacterGenerationService {
                     taskId = prepared.executionId || prepared.workflowRunId || characterId;
                 } catch (serviceErr) {
                     if (serviceErr.code === "INSUFFICIENT_CREDITS" || serviceErr.code === "BILLING_HOLD_REQUIRED") {
-                        console.warn(`⚠️ [CharacterGenerationService] Credit notice: ${serviceErr.message}`);
+                        crudOperationLog({
+                            traceId,
+                            operation: "enqueueSheetGeneration:credit",
+                            status: "warning",
+                            characterId,
+                            message: serviceErr.message,
+                        });
                         hasSufficientCredits = false;
                         creditErrorMsg = serviceErr.message;
                         if (placeholderMedia?.id && this.db?.media) {

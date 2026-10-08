@@ -38,7 +38,7 @@ No table, column, route, class, or public response shape is renamed or removed.
 | Task | Status | Commit | Report |
 |---|---|---|---|
 | WM-T1 Add relation schema and repository foundation | DONE | this commit | `docs/plan/reports/WM-T1.md` |
-| WM-T2 Dual-write new media relations | TODO | | |
+| WM-T2 Dual-write new media relations | DONE | this commit | `docs/plan/reports/WM-T2.md` |
 | WM-T3 Compatibility reads | TODO | | |
 | WM-T4 Domain role migration | TODO | | |
 | WM-T5 Delete and orphan rules | TODO | | |
@@ -84,7 +84,7 @@ Acceptance:
 
 ## Task WM-T2: Dual-Write New Media Relations
 
-Status: TODO
+Status: DONE
 
 Files:
 
@@ -101,13 +101,13 @@ Steps:
 
 Acceptance:
 
-- [ ] Search every `db.media.createMedia` caller and list it in the task report.
-- [ ] New media rows keep old fields and also get a relation row.
-- [ ] Generated media writes create `workflow_media` rows.
-- [ ] Upload media writes create `workflow_media` rows.
-- [ ] Character media writes create `workflow_media` rows.
-- [ ] Element media writes create `workflow_media` rows.
-- [ ] No frontend/API response shape changes.
+- [x] Search every `db.media.createMedia` caller and list it in the task report.
+- [x] New media rows keep old fields and also get a relation row.
+- [x] Generated media writes create `workflow_media` rows.
+- [x] Upload media writes create `workflow_media` rows.
+- [x] Character media writes create `workflow_media` rows.
+- [x] Element media writes create `workflow_media` rows.
+- [x] No frontend/API response shape changes.
 
 ## Task WM-T3: Compatibility Reads
 

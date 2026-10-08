@@ -7,6 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
 import { resolveMediaMetadata } from "../../platform/media/mediaMetadataResolver.js";
+import { linkWorkflowMediaForCreatedRow } from "../../db/workflowMediaLinker.js";
 
 export class CharacterMediaService {
     /**
@@ -101,9 +102,8 @@ export class CharacterMediaService {
                     const newMediaId = randomUUID();
                     const ext = this._resolveExtension(file.mimetype);
                     const storagePath = this.storageService.paths.characterSheet(safeUserId, characterId, newMediaId, ext);
-                    console.log(`📡 [CharacterMediaService] Uploading sheet file to storage: ${storagePath}`);
+                    crudOperationLog({ traceId, operation: "uploadSheetMedia:storageUpload", status: "ok", characterId });
                     resolvedUrl = await this.storageService.upload(storagePath, file.buffer);
-                    console.log(`✅ [CharacterMediaService] Sheet file uploaded: ${resolvedUrl}`);
                 }
                 // Fallback Case B: Base64 data URL
                 else if (imageUrl && imageUrl.startsWith("data:")) {
@@ -114,9 +114,8 @@ export class CharacterMediaService {
                         ? "webp"
                         : "jpg";
                     const storagePath = this.storageService.paths.characterSheet(safeUserId, characterId, newMediaId, ext);
-                    console.log(`📡 [CharacterMediaService] Uploading sheet base64 to storage: ${storagePath}`);
+                    crudOperationLog({ traceId, operation: "uploadSheetMedia:storageUpload", status: "ok", characterId });
                     resolvedUrl = await this.storageService.upload(storagePath, imageUrl);
-                    console.log(`✅ [CharacterMediaService] Sheet base64 uploaded: ${resolvedUrl}`);
                 }
                 // Fallback Case C: Existing Media ID from project library
                 else if (mediaId) {
@@ -143,7 +142,13 @@ export class CharacterMediaService {
                         const storagePath = this.storageService.paths.characterSheet(safeUserId, characterId, newMediaId, "jpg");
                         resolvedUrl = await this.storageService.uploadFromUrl(storagePath, imageUrl);
                     } catch (urlErr) {
-                        console.warn(`⚠️ [CharacterMediaService] uploadFromUrl fallback: ${urlErr.message}`);
+                        crudOperationLog({
+                            traceId,
+                            operation: "uploadSheetMedia:uploadFromUrl",
+                            status: "warning",
+                            characterId,
+                            message: urlErr.message,
+                        });
                         resolvedUrl = imageUrl;
                     }
                 }
@@ -175,6 +180,13 @@ export class CharacterMediaService {
                     status: "success",
                     error_message: null,
                 });
+                await linkWorkflowMediaForCreatedRow(this.db, {
+                    workflowId: wf.id,
+                    mediaId: mediaRow?.id,
+                    stepId: "character_sheet",
+                    workflowType: wf.workflow_type || "CHARACTER",
+                    operation: "uploadSheetMedia:linkWorkflowMedia",
+                });
             }
 
             // 2. Clean up any failed media placeholders
@@ -186,7 +198,14 @@ export class CharacterMediaService {
 
             // 3. Update workflow: set primary_media_id (workflow table has primary_media_id column)
             await this.db.workflows.updatePrimaryMedia(wf.id, mediaRow.id).catch((err) => {
-                console.warn(`⚠️ [CharacterMediaService] updatePrimaryMedia notice:`, err.message);
+                crudOperationLog({
+                    traceId,
+                    operation: "uploadSheetMedia:updatePrimaryMedia",
+                    status: "warning",
+                    characterId,
+                    mediaId: mediaRow.id,
+                    message: err.message,
+                });
             });
 
             // 4. Update characters table status
@@ -284,9 +303,8 @@ export class CharacterMediaService {
                     const newMediaId = randomUUID();
                     const ext = this._resolveExtension(file.mimetype);
                     const storagePath = this.storageService.paths.characterDetail(safeUserId, characterId, newMediaId, ext);
-                    console.log(`📡 [CharacterMediaService] Uploading detail file to storage: ${storagePath}`);
+                    crudOperationLog({ traceId, operation: "uploadDetailMedia:storageUpload", status: "ok", characterId });
                     resolvedUrl = await this.storageService.upload(storagePath, file.buffer);
-                    console.log(`✅ [CharacterMediaService] Detail file uploaded: ${resolvedUrl}`);
                 }
                 // Fallback Case B: Base64 data URL
                 else if (imageUrl && imageUrl.startsWith("data:")) {
@@ -297,9 +315,8 @@ export class CharacterMediaService {
                         ? "webp"
                         : "jpg";
                     const storagePath = this.storageService.paths.characterDetail(safeUserId, characterId, newMediaId, ext);
-                    console.log(`📡 [CharacterMediaService] Uploading detail base64 to storage: ${storagePath}`);
+                    crudOperationLog({ traceId, operation: "uploadDetailMedia:storageUpload", status: "ok", characterId });
                     resolvedUrl = await this.storageService.upload(storagePath, imageUrl);
-                    console.log(`✅ [CharacterMediaService] Detail base64 uploaded: ${resolvedUrl}`);
                 }
                 // Fallback Case C: Existing Media ID from library
                 else if (mediaId) {
@@ -326,7 +343,13 @@ export class CharacterMediaService {
                         const storagePath = this.storageService.paths.characterDetail(safeUserId, characterId, newMediaId, "jpg");
                         resolvedUrl = await this.storageService.uploadFromUrl(storagePath, imageUrl);
                     } catch (urlErr) {
-                        console.warn(`⚠️ [CharacterMediaService] uploadFromUrl fallback: ${urlErr.message}`);
+                        crudOperationLog({
+                            traceId,
+                            operation: "uploadDetailMedia:uploadFromUrl",
+                            status: "warning",
+                            characterId,
+                            message: urlErr.message,
+                        });
                         resolvedUrl = imageUrl;
                     }
                 }
@@ -348,6 +371,13 @@ export class CharacterMediaService {
                 height: resolvedHeight,
                 status: "success",
                 error_message: null,
+            });
+            await linkWorkflowMediaForCreatedRow(this.db, {
+                workflowId: wf.id,
+                mediaId: mediaRow?.id,
+                stepId: "character_detail",
+                workflowType: wf.workflow_type || "CHARACTER",
+                operation: "uploadDetailMedia:linkWorkflowMedia",
             });
 
             crudOperationLog({
@@ -397,7 +427,14 @@ export class CharacterMediaService {
 
             if (mediaRec?.url) {
                 await this.storageService.deleteByUrl(mediaRec.url).catch((err) => {
-                    console.warn(`⚠️ [CharacterMediaService] removeDetailMedia storage delete notice:`, err.message);
+                    crudOperationLog({
+                        traceId,
+                        operation: "removeDetailMedia:storageDelete",
+                        status: "warning",
+                        characterId,
+                        mediaId,
+                        message: err.message,
+                    });
                 });
             }
 

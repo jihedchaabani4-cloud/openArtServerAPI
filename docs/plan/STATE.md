@@ -1,8 +1,8 @@
 # STATE
-Current phase: WM    Current task: WM-T2
+Current phase: WM    Current task: WM-T3
 Updated: 2026-10-08
-Test status: 662 pass, 9 pre-existing fail, 0 known WM regressions (total 671 tests across 146 suites)
-Next step: Continue WM-T2 dual-write coverage (waiting for the human or next agent)
+Test status: 666 pass, 9 pre-existing fail, 0 known WM regressions (total 675 tests across 147 suites)
+Next step: Continue WM-T3 compatibility reads (waiting for the human or next agent)
 
 | Task | Status (TODO/DONE/BLOCKED/SKIPPED) | Commit | Report |
 |---|---|---|---|
@@ -30,7 +30,7 @@ Next step: Continue WM-T2 dual-write coverage (waiting for the human or next age
 | P3-ARCH-GENERATION | DONE | bafd8d1 | docs/plan/reports/PHASE-P3-GATE.md |
 | FINAL | DONE | cd5a018 | docs/plan/FINAL.md |
 | WM-T1 | DONE | this commit | docs/plan/reports/WM-T1.md |
-| WM-T2 | TODO | | |
+| WM-T2 | DONE | this commit | docs/plan/reports/WM-T2.md |
 | WM-T3 | TODO | | |
 | WM-T4 | TODO | | |
 | WM-T5 | TODO | | |

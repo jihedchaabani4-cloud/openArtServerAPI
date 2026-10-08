@@ -1,5 +1,9 @@
 import { GenerationError } from "../errors/GenerationErrors.js";
 import { supabase } from "../../lib/supabase.js";
+import { createLogger } from "../infrastructure/logging/index.js";
+import { linkWorkflowMediaForCreatedRow } from "./workflowMediaLinker.js";
+
+const workflowMediaOpsLogger = createLogger("workflow-media-ops");
 
 async function safe(fn) {
     try {
@@ -26,9 +30,8 @@ export async function markMediaFailed(db, media_id, error) {
         message = error;
     }
 
-    // Always log the technical error to console for dev logging
     if (error?.message) {
-        console.error(`[markMediaFailed] Technical Details (${media_id}):`, error.message);
+        workflowMediaOpsLogger.error({ mediaId: media_id, message: error.message }, "markMediaFailed technical details");
     }
 
     return markMediaStatus(db, media_id, "failed", message);
@@ -48,6 +51,13 @@ export async function createWorkflowWithMedia(
         ...mediaData,
         ...(initialStatus ? { status: initialStatus } : {}),
         workflow_id: workflow.id,
+    });
+    await linkWorkflowMediaForCreatedRow(db, {
+        workflowId: workflow.id,
+        mediaId: media?.id,
+        stepId: mediaData.step_id,
+        workflowType: workflowData.workflow_type,
+        operation: "createWorkflowWithMedia:linkWorkflowMedia",
     });
 
     if (setAsPrimary) {
@@ -87,7 +97,10 @@ export async function createWorkflowWithMediaAtomic(db, { workflowData, mediaDat
                 error.code === "42883"    ||
                 (error.message && error.message.includes("create_workflow_with_placeholder_media"))
             ) {
-                console.warn("[workflowMediaOps] RPC not found — falling back to sequential inserts.");
+                workflowMediaOpsLogger.warn(
+                    { code: error.code },
+                    "RPC not found; falling back to sequential workflow/media inserts"
+                );
                 return createWorkflowWithMedia(db, {
                     workflowData,
                     mediaData,
@@ -105,7 +118,10 @@ export async function createWorkflowWithMediaAtomic(db, { workflowData, mediaDat
         };
     } catch (err) {
         // If anything unexpected happens at network level, fall back
-        console.warn("[workflowMediaOps] RPC error — falling back to sequential inserts:", err.message);
+        workflowMediaOpsLogger.warn(
+            { message: err.message },
+            "RPC error; falling back to sequential workflow/media inserts"
+        );
         return createWorkflowWithMedia(db, {
             workflowData,
             mediaData,
@@ -127,6 +143,12 @@ export async function appendMediaToWorkflow(
         ...mediaData,
         ...(initialStatus ? { status: initialStatus } : {}),
         workflow_id,
+    });
+    await linkWorkflowMediaForCreatedRow(db, {
+        workflowId: workflow_id,
+        mediaId: media?.id,
+        stepId: mediaData.step_id,
+        operation: "appendMediaToWorkflow:linkWorkflowMedia",
     });
 
     if (setAsPrimary) {

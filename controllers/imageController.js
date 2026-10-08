@@ -7,6 +7,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 
 import { resolveMediaMetadata } from "../src/platform/media/mediaMetadataResolver.js";
 import { assertOwns, assertOwnsAny } from "../src/platform/security/ownership.js";
+import { linkWorkflowMediaForCreatedRow } from "../src/db/workflowMediaLinker.js";
 
 /**
  * POST /api/images/generated
@@ -159,6 +160,13 @@ export async function generateImage(req, res) {
         height:      mediaMeta.height,
         status:      "processing",
       });
+      await linkWorkflowMediaForCreatedRow(db, {
+        workflowId,
+        mediaId: id,
+        stepId: "image_generation",
+        workflowType: "GENERATION",
+        operation: "generateImage:linkWorkflowMedia",
+      });
       serverMediaIds.push(id);
     }
     mediaId = serverMediaIds[0];
@@ -292,5 +300,4 @@ export async function generateImage(req, res) {
     });
   }
 }
-
 

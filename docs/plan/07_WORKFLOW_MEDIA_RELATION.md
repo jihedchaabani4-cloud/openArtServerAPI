@@ -37,12 +37,12 @@ No table, column, route, class, or public response shape is renamed or removed.
 
 | Task | Status | Commit | Report |
 |---|---|---|---|
-| WM-T1 Add relation schema and repository foundation | DONE | this commit | `docs/plan/reports/WM-T1.md` |
-| WM-T2 Dual-write new media relations | DONE | this commit | `docs/plan/reports/WM-T2.md` |
-| WM-T3 Compatibility reads | DONE | this commit | `docs/plan/reports/WM-T3.md` |
-| WM-T4 Domain role migration | DONE | this commit | `docs/plan/reports/WM-T4.md` |
-| WM-T5 Delete and orphan rules | DONE | this commit | `docs/plan/reports/WM-T5.md` |
-| WM-GATE Phase gate | TODO | | |
+| WM-T1 Add relation schema and repository foundation | DONE | `3c83431` | `docs/plan/reports/WM-T1.md` |
+| WM-T2 Dual-write new media relations | DONE | `55ac2c9` | `docs/plan/reports/WM-T2.md` |
+| WM-T3 Compatibility reads | DONE | `07c5a67` | `docs/plan/reports/WM-T3.md` |
+| WM-T4 Domain role migration | DONE | `bc03041` | `docs/plan/reports/WM-T4.md` |
+| WM-T5 Delete and orphan rules | DONE | `f8151bd` | `docs/plan/reports/WM-T5.md` |
+| WM-GATE Phase gate | DONE | this commit | `docs/plan/reports/PHASE-WM-GATE.md` |
 
 Rules for future agents:
 
@@ -183,9 +183,8 @@ Acceptance:
 - [x] Relation delete happens before true orphan cleanup.
 
 ## Phase Gate
-
-- [ ] New tests pass.
-- [ ] Full `npm test` is run and reported.
-- [ ] Sensitive-value scan on staged diff prints no real credentials.
-- [ ] Migration was not applied to a real database.
-- [ ] Task checklist above has commit SHAs for completed tasks.
+- [x] New tests pass.
+- [x] Full `npm test` is run and reported.
+- [x] Sensitive-value scan on staged diff prints no real credentials.
+- [x] Migration was not applied to a real database.
+- [x] Task checklist above has commit SHAs for completed tasks.

@@ -1,8 +1,8 @@
 # STATE
-Current phase: WM    Current task: WM-T4
+Current phase: WM (COMPLETED)    Current task: WM-GATE
 Updated: 2026-10-08
-Test status: 669 pass, 9 pre-existing fail, 0 known WM regressions (total 678 tests across 148 suites)
-Next step: Continue WM-T4 domain role migration (waiting for the human or next agent)
+Test status: 676 pass, 9 pre-existing fail, 0 regressions (total 685 tests across 150 suites)
+Next step: Apply migration 009 on real DB; phase WM is complete (waiting for the human)
 
 | Task | Status (TODO/DONE/BLOCKED/SKIPPED) | Commit | Report |
 |---|---|---|---|
@@ -29,9 +29,9 @@ Next step: Continue WM-T4 domain role migration (waiting for the human or next a
 | P3-ARCH-MEDIA-INGESTION | DONE | 0c1ee2f | docs/plan/reports/PHASE-P3-GATE.md |
 | P3-ARCH-GENERATION | DONE | bafd8d1 | docs/plan/reports/PHASE-P3-GATE.md |
 | FINAL | DONE | cd5a018 | docs/plan/FINAL.md |
-| WM-T1 | DONE | this commit | docs/plan/reports/WM-T1.md |
-| WM-T2 | DONE | this commit | docs/plan/reports/WM-T2.md |
-| WM-T3 | DONE | this commit | docs/plan/reports/WM-T3.md |
-| WM-T4 | TODO | | |
-| WM-T5 | TODO | | |
-| WM-GATE | TODO | | |
+| WM-T1 | DONE | 3c83431 | docs/plan/reports/WM-T1.md |
+| WM-T2 | DONE | 55ac2c9 | docs/plan/reports/WM-T2.md |
+| WM-T3 | DONE | 07c5a67 | docs/plan/reports/WM-T3.md |
+| WM-T4 | DONE | bc03041 | docs/plan/reports/WM-T4.md |
+| WM-T5 | DONE | f8151bd | docs/plan/reports/WM-T5.md |
+| WM-GATE | DONE | this commit | docs/plan/reports/PHASE-WM-GATE.md |

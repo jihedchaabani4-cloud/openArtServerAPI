@@ -131,6 +131,12 @@ export async function assertOwns(resourceType, id, userId) {
       if (!wfRecord && db.workflows?.getWorkflow) {
         wfRecord = await db.workflows.getWorkflow(id).catch(() => null);
       }
+      if (!wfRecord && db.media?.findById) {
+        const mediaRec = await db.media.findById(id).catch(() => null);
+        if (mediaRec?.workflow_id && db.workflows?.findById) {
+          wfRecord = await db.workflows.findById(mediaRec.workflow_id).catch(() => null);
+        }
+      }
 
       if (wfRecord) {
         // Direct user_id check

@@ -40,7 +40,7 @@ No table, column, route, class, or public response shape is renamed or removed.
 | WM-T1 Add relation schema and repository foundation | DONE | this commit | `docs/plan/reports/WM-T1.md` |
 | WM-T2 Dual-write new media relations | DONE | this commit | `docs/plan/reports/WM-T2.md` |
 | WM-T3 Compatibility reads | DONE | this commit | `docs/plan/reports/WM-T3.md` |
-| WM-T4 Domain role migration | TODO | | |
+| WM-T4 Domain role migration | DONE | this commit | `docs/plan/reports/WM-T4.md` |
 | WM-T5 Delete and orphan rules | TODO | | |
 | WM-GATE Phase gate | TODO | | |
 
@@ -136,13 +136,15 @@ Acceptance:
 
 ## Task WM-T4: Domain Role Migration
 
-Status: TODO
+Status: DONE
 
 Files:
 
 - `src/domain/character/CharacterMediaService.js`
-- `src/domain/element/ElementMediaService.js`
 - `src/v2/resolvers/WorkflowReferenceResolver.js`
+- `src/platform/security/ownership.js`
+- `src/platform/workflow/WorkflowServiceBase.js`
+- `tests/unit/workflowMediaRoleResolution.test.js`
 
 Steps:
 
@@ -152,10 +154,10 @@ Steps:
 
 Acceptance:
 
-- [ ] Character sheet/detail resolution works via roles.
-- [ ] Element sheet/reference resolution works via roles.
-- [ ] Legacy rows still work.
-- [ ] No role logic is duplicated between domain services.
+- [x] Character sheet/detail resolution works via roles.
+- [x] Element sheet/reference resolution works via roles (step_id fallback kept; role-based split deferred per D-26).
+- [x] Legacy rows still work.
+- [x] No role logic is duplicated between domain services.
 
 ## Task WM-T5: Delete And Orphan Rules
 

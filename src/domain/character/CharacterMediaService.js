@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
 import { resolveMediaMetadata } from "../../platform/media/mediaMetadataResolver.js";
 import { linkWorkflowMediaForCreatedRow } from "../../db/workflowMediaLinker.js";
+import { inferWorkflowMediaRole } from "../../db/workflowMediaRole.js";
 
 export class CharacterMediaService {
     /**
@@ -156,7 +157,13 @@ export class CharacterMediaService {
 
             // 1. Check for existing sheet media on this workflow
             const existingMedia = await this.db.media.findByWorkflow(wf.id).catch(() => []);
-            const sheetMedia = existingMedia.find((m) => m.step_id === "character_sheet" || m.step_id === "CAE");
+            const sheetMedia = existingMedia.find((m) => (
+                inferWorkflowMediaRole({
+                    role: m.mediaRole || m.role,
+                    stepId: m.step_id,
+                    workflowType: wf.workflow_type || "CHARACTER",
+                }) === "sheet"
+            ));
 
             let mediaRow;
             if (sheetMedia) {
@@ -413,8 +420,15 @@ export class CharacterMediaService {
         crudOperationLog({ traceId, operation: "removeDetailMedia", characterId, mediaId });
 
         try {
-            const mediaRec = await this.db.media.findById(mediaId, "id, url, step_id, workflow_id").catch(() => null);
-            if (mediaRec && mediaRec.step_id !== "character_detail") {
+            const mediaRec = await this.db.media.findById(mediaId, "id, url, step_id, workflow_id, role, mediaRole").catch(() => null);
+            const mediaRole = mediaRec
+                ? inferWorkflowMediaRole({
+                    role: mediaRec.mediaRole || mediaRec.role,
+                    stepId: mediaRec.step_id,
+                    workflowType: "CHARACTER",
+                })
+                : null;
+            if (mediaRec && mediaRole !== "detail") {
                 throw new CrudServiceError("Cannot delete non-detail media with removeDetailMedia", {
                     statusCode: 400,
                     errorCode: "INVALID_OPERATION",

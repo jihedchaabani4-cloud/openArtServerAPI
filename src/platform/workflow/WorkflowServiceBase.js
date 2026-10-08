@@ -454,8 +454,19 @@ export class WorkflowService {
             targetFolderId = folderId.trim();
         }
 
+        let targetWorkflowId = String(assetId || "").replace(/^workflows\//, "").trim();
+
+        // Resolve media_id to its parent workflow_id if targetWorkflowId is a media record
+        const wfExists = await this.db.workflows?.findById(targetWorkflowId).catch(() => null);
+        if (!wfExists && this.db.media?.findById) {
+            const mediaRecord = await this.db.media.findById(targetWorkflowId).catch(() => null);
+            if (mediaRecord?.workflow_id) {
+                targetWorkflowId = mediaRecord.workflow_id;
+            }
+        }
+
         // 1. Assert asset ownership (returns 404 on missing or foreign asset)
-        const asset = await assertOwns("workflow", assetId, userId);
+        const asset = await assertOwns("workflow", targetWorkflowId, userId);
 
         // 2. If targetFolderId is provided, validate folder is usable in this project
         if (targetFolderId !== null) {
@@ -473,7 +484,7 @@ export class WorkflowService {
 
         // 3. Update folder_id in DB scoped by user and project
         try {
-            const updated = await this.db.workflows.updateFolderId(assetId, targetFolderId, userId, asset.project_id);
+            const updated = await this.db.workflows.updateFolderId(targetWorkflowId, targetFolderId, userId, asset.project_id);
             return toAssetDto(updated || { ...asset, folder_id: targetFolderId });
         } catch (dbErr) {
             if (dbErr.code === "23503" || dbErr.code === "PGRST116" || dbErr.statusCode === 404) {

@@ -12,6 +12,7 @@ import { db } from "../../container.js";
 import { elementRepository } from "../../db/ElementRepository.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
 import { assertOwns, assertOwnsAny } from "../../platform/security/ownership.js";
+import { inferWorkflowMediaRole } from "../../db/workflowMediaRole.js";
 
 const dbLogger = createLogger("database");
 
@@ -104,7 +105,12 @@ export async function resolveAsCharacter(workflowId, userId = null) {
         for (const m of mediaList) {
           if (m?.url && typeof m.url === "string" && m.url.startsWith("http")) {
             const cleanUrl = m.url.trim();
-            if (m.step_id === "character_detail") {
+            const mediaRole = inferWorkflowMediaRole({
+              role: m.mediaRole || m.role,
+              stepId: m.step_id,
+              workflowType: WORKFLOW_TYPES.CHARACTER_SHEET,
+            });
+            if (mediaRole === "detail") {
               detailUrls.add(cleanUrl);
             } else {
               sheetUrls.add(cleanUrl);
@@ -132,7 +138,7 @@ export async function resolveAsCharacter(workflowId, userId = null) {
       detailTags:    [],
     };
   } catch (err) {
-    console.warn(`[WorkflowReferenceResolver] character resolve failed for ${workflowId}:`, err.message);
+    dbLogger.warn({ workflowId, message: err.message }, "character resolve failed");
     return null;
   }
 }
@@ -208,7 +214,7 @@ export async function resolveAsElement(workflowId, userId = null) {
       referenceTags: [],
     };
   } catch (err) {
-    console.warn(`[WorkflowReferenceResolver] element resolve failed for ${workflowId}:`, err.message);
+    dbLogger.warn({ workflowId, message: err.message }, "element resolve failed");
     return null;
   }
 }
@@ -250,7 +256,7 @@ export async function resolveAsMedia(workflowId, userId = null) {
       referenceTags: [],
     };
   } catch (err) {
-    console.warn(`[WorkflowReferenceResolver] media resolve failed for ${workflowId}:`, err.message);
+    dbLogger.warn({ workflowId, message: err.message }, "media resolve failed");
     return null;
   }
 }
@@ -271,7 +277,7 @@ export async function resolveWorkflowReference(workflowId, userId = null) {
 
   // 1. Direct HTTP URLs are rejected — caller must pass workflow IDs only
   if (id.startsWith("http://") || id.startsWith("https://")) {
-    console.warn(`[WorkflowReferenceResolver] Direct URL "${id.slice(0, 60)}" rejected. Callers must pass workflow IDs.`);
+    dbLogger.warn({ workflowId: id.slice(0, 60) }, "Direct URL rejected; callers must pass workflow IDs");
     return null;
   }
 
@@ -295,16 +301,16 @@ export async function resolveWorkflowReference(workflowId, userId = null) {
         case WORKFLOW_TYPES.UPLOAD:
           return resolveAsMedia(id, userId);
         default:
-          console.warn(`[WorkflowReferenceResolver] unsupported workflow_type "${wf.workflow_type}" for ${id}`);
+          dbLogger.warn({ workflowId: id, workflowType: wf.workflow_type }, "unsupported workflow_type");
           return null;
       }
     }
   } catch (err) {
-    console.warn(`[WorkflowReferenceResolver] workflow lookup error for ${id}:`, err.message);
+    dbLogger.warn({ workflowId: id, message: err.message }, "workflow lookup error");
   }
 
   // 3. Fallback: Entity table resolution (if ID is direct entity/media PK)
-  console.warn(`[WorkflowReferenceResolver] "${id}" not in workflow table — trying entity tables`);
+  dbLogger.warn({ workflowId: id }, "not in workflow table; trying entity tables");
 
   const [charResult, elemResult, mediaResult] = await Promise.allSettled([
     resolveAsCharacter(id, userId),
@@ -316,7 +322,7 @@ export async function resolveWorkflowReference(workflowId, userId = null) {
   if (elemResult.status  === "fulfilled" && elemResult.value)  return elemResult.value;
   if (mediaResult.status === "fulfilled" && mediaResult.value) return mediaResult.value;
 
-  console.warn(`[WorkflowReferenceResolver] "${id}" not found in any entity table — discarded`);
+  dbLogger.warn({ workflowId: id }, "not found in any entity table; discarded");
   return null;
 }
 
@@ -381,4 +387,3 @@ export async function resolvePrimaryMediaUrl(workflowId, userId = null) {
 }
 
 export default resolveWorkflowReference;
-

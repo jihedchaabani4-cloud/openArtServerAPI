@@ -40,12 +40,16 @@ export const createProjectFolder = async (req, res, next) => {
 
   controllerLogger.debug({ projectId, userId, name, parentId }, "POST /api/projects/:projectId/folders");
 
+  const resolvedName = (name === undefined || name === null)
+    ? "Untitled collection"
+    : name;
+
   try {
     const folder = await folderService.create({
       projectId,
       userId,
       parentId: parentId || null,
-      name,
+      name: resolvedName,
     });
     return res.status(201).json(folder);
   } catch (err) {

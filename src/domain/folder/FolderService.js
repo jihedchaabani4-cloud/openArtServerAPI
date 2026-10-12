@@ -133,7 +133,8 @@ export class FolderService {
       }
     }
 
-    const cleanName = this._validateName(name);
+    const resolvedName = (name === undefined || name === null) ? "Untitled collection" : name;
+    let cleanName = this._validateName(resolvedName);
     const normalizedParentId = parentId || null;
 
     // Check project total folder limit
@@ -172,13 +173,24 @@ export class FolderService {
     const siblings = existingFolders.filter(
       (f) => (f.parent_id || null) === normalizedParentId
     );
-    const nameLower = cleanName.toLowerCase();
-    if (siblings.some((s) => s.name.toLowerCase() === nameLower)) {
-      throw new FolderError(
-        `Folder name "${cleanName}" already exists in this directory`,
-        409,
-        "FOLDER_NAME_TAKEN"
-      );
+
+    // If default name or starts with "Untitled collection", auto-increment if duplicate exists
+    if (name === undefined || name === null || cleanName.toLowerCase().startsWith("untitled collection")) {
+      let candidate = cleanName;
+      let counter = 2;
+      while (siblings.some((s) => s.name.toLowerCase() === candidate.toLowerCase())) {
+        candidate = `Untitled collection ${counter++}`;
+      }
+      cleanName = candidate;
+    } else {
+      const nameLower = cleanName.toLowerCase();
+      if (siblings.some((s) => s.name.toLowerCase() === nameLower)) {
+        throw new FolderError(
+          `Folder name "${cleanName}" already exists in this directory`,
+          409,
+          "FOLDER_NAME_TAKEN"
+        );
+      }
     }
 
     // Calculate position: largest sibling position + 1 (or 0)

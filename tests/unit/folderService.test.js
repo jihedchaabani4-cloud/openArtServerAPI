@@ -326,6 +326,24 @@ describe("FolderService Business Rules & Error Scenarios (Task F-T4)", () => {
       assert.equal(created.position, 2); // Previous roots had 0 and 1
     });
 
+    it("create defaults to 'Untitled collection' when name is omitted or undefined", async () => {
+      const created1 = await service.create({
+        projectId: "proj-2",
+        userId: "user-1",
+        parentId: null,
+      });
+
+      assert.equal(created1.name, "Untitled collection");
+
+      const created2 = await service.create({
+        projectId: "proj-2",
+        userId: "user-1",
+        parentId: null,
+      });
+
+      assert.equal(created2.name, "Untitled collection 2");
+    });
+
     it("update renames folder successfully", async () => {
       const updated = await service.update({
         folderId: "f-root-2",

@@ -91,7 +91,7 @@ export const updateFolder = async (req, res, next) => {
 
 /**
  * DELETE /api/folders/:folderId
- * Deletes an empty folder (returns 409 if containing subfolders or assets).
+ * Deletes the folder, its descendant folders, and workflows in that tree.
  */
 export const deleteFolder = async (req, res, next) => {
   const { folderId } = req.params;

@@ -4,6 +4,8 @@
  * - Setting and switching primary media for a workflow
  * - Detaching media variations into independent workflow containers
  * - Deleting single media records and cascading cleanup to storage and workflows
+ * - Releasing workflow relations without deleting still-linked media
+ * - Deleting orphan media that no longer belongs to any workflow
  */
 
 import { randomUUID } from "node:crypto";
@@ -232,6 +234,84 @@ export class WorkflowMediaService {
     }
 
     /**
+     * Deletes a media row, its generation_config_reference rows, and its storage object.
+     */
+    async _deleteOrphanMedia(media) {
+        if (!media?.id) return false;
+
+        try {
+            await this.db.media.client()
+                .from("generation_config_reference")
+                .delete()
+                .eq("ref_media_id", media.id);
+        } catch (refErr) {
+            logger.warn({ mediaId: media.id, message: refErr.message }, "orphan media: delete ref links notice");
+        }
+
+        await this.db.media.deleteById(media.id);
+
+        if (media.url) {
+            await this.storageService.deleteByUrl(media.url).catch((storageErr) => {
+                logger.warn(
+                    { mediaId: media.id, url: media.url, message: storageErr.message },
+                    "orphan media: storage delete notice"
+                );
+            });
+        }
+
+        return true;
+    }
+
+    /**
+     * Removes every workflow_media link for a workflow. Does not delete the workflow.
+     * Media that still belongs to another workflow is kept (legacy workflow_id is re-pointed).
+     * Media with no remaining workflow is deleted (row + storage).
+     */
+    async releaseWorkflowMedia({ workflowId }) {
+        if (!workflowId) {
+            return { unlinkedMediaIds: [], deletedOrphanIds: [] };
+        }
+
+        const mediaItems = await this.db.media.findByWorkflow(workflowId).catch(() => []);
+        const unlinkedMediaIds = [...new Set(mediaItems.map((m) => m.id).filter(Boolean))];
+
+        if (this.db.workflowMedia?.unlinkByWorkflow) {
+            await this.db.workflowMedia.unlinkByWorkflow(workflowId);
+        }
+
+        const deletedOrphanIds = [];
+
+        for (const media of mediaItems) {
+            if (!media?.id) continue;
+
+            const remainingLinks = this.db.workflowMedia?.countLinksForMedia
+                ? await this.db.workflowMedia.countLinksForMedia(media.id).catch(() => 0)
+                : 0;
+
+            if (remainingLinks > 0) {
+                if (media.workflow_id === workflowId && this.db.workflowMedia?.findByMedia) {
+                    const links = await this.db.workflowMedia.findByMedia(media.id).catch(() => []);
+                    const nextWorkflowId = links.find((row) => row.workflow_id && row.workflow_id !== workflowId)?.workflow_id;
+                    if (nextWorkflowId) {
+                        await this.db.media.updateFields(media.id, { workflow_id: nextWorkflowId }).catch((err) => {
+                            logger.warn(
+                                { mediaId: media.id, nextWorkflowId, message: err.message },
+                                "releaseWorkflowMedia: re-point workflow_id notice"
+                            );
+                        });
+                    }
+                }
+                continue;
+            }
+
+            await this._deleteOrphanMedia(media);
+            deletedOrphanIds.push(media.id);
+        }
+
+        return { unlinkedMediaIds, deletedOrphanIds };
+    }
+
+    /**
      * Delete a single media record, clean up its storage file, and update workflow status.
      */
     async deleteMedia({ mediaId, userId, req = null }) {
@@ -273,11 +353,13 @@ export class WorkflowMediaService {
             const mediaRec = await this.db.media.findById(mediaId, "id, workflow_id, url");
 
             // 1. Unlink workflow_media relation rows FIRST (before any delete).
-            //    This keeps the relation table consistent and lets countLinksForMedia
-            //    return the accurate remaining-links count in step 3.
             if (this.db.workflowMedia?.unlink) {
                 await this.db.workflowMedia.unlink({ mediaId }).catch((unlinkErr) => {
                     logger.warn({ mediaId, message: unlinkErr.message }, "deleteMedia: workflowMedia.unlink notice");
+                });
+            } else if (this.db.workflowMedia?.unlinkByMedia) {
+                await this.db.workflowMedia.unlinkByMedia(mediaId).catch((unlinkErr) => {
+                    logger.warn({ mediaId, message: unlinkErr.message }, "deleteMedia: workflowMedia.unlinkByMedia notice");
                 });
             }
 
@@ -325,7 +407,9 @@ export class WorkflowMediaService {
                     const workflowRecord = await this.db.workflows.findById(mediaRec.workflow_id, "primary_media_id").catch(() => null);
                     if (workflowRecord?.primary_media_id === mediaId) {
                         nextPrimaryMediaId = remainingMedia[0]?.id || null;
-                        await this.db.workflows.updatePrimaryMedia(mediaRec.workflow_id, nextPrimaryMediaId).catch(() => null);
+                        if (this.db.workflows?.updatePrimaryMedia) {
+                            await this.db.workflows.updatePrimaryMedia(mediaRec.workflow_id, nextPrimaryMediaId).catch(() => null);
+                        }
                     }
                 }
             }

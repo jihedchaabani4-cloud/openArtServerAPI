@@ -154,17 +154,18 @@ describe("RC1.4-D2.5 — Upload Hardening & Security Follow-up Boundary Tests", 
     });
   });
 
-  // ── (c) Redis readiness log level and /health output ───────────────────────────
-  describe("(c) Redis readiness in /health", () => {
-    it("/health endpoint exposes redis readiness status without crashing", async () => {
+  // ── (c) Redis readiness in /ready and /health liveness (D2.6) ───────────────────────────
+  describe("(c) Health liveness and readiness probes", () => {
+    it("/health endpoint returns liveness and /ready exposes redis readiness", async () => {
       const res = await fetch(`${baseUrl}/health`);
       assert.equal(res.status, 200);
       const data = await res.json();
-      assert.ok(data.redis, "Response must include redis status");
-      assert.ok(data.redis.rateLimit, "Must include rateLimit redis status");
-      assert.ok(data.redis.queue, "Must include queue redis status");
-      assert.equal(typeof data.redis.rateLimit.ready, "boolean");
-      assert.equal(typeof data.redis.queue.ready, "boolean");
+      assert.equal(data.ok, true, "Response must include liveness status");
+
+      const readyRes = await fetch(`${baseUrl}/ready`);
+      assert.ok([200, 503].includes(readyRes.status), "/ready must return 200 or 503");
+      const readyData = await readyRes.json();
+      assert.equal(typeof readyData.ready, "boolean", "Must include boolean readiness status");
     });
   });
 

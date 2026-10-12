@@ -321,6 +321,25 @@ export class WorkflowRepository extends BaseRepository {
      * @param {Object|null} [options.cursor=null] - { createTime, id }
      * @returns {Promise<Object[]>}
      */
+    /**
+     * Lists workflow ids in the given folders, scoped to one project.
+     * FolderService uses this only through WorkflowService.
+     */
+    async listIdsByFolderIds({ folderIds, projectId, userId } = {}) {
+        if (!projectId || !userId || !Array.isArray(folderIds) || folderIds.length === 0) {
+            return [];
+        }
+
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("id")
+            .eq("project_id", projectId)
+            .in("folder_id", folderIds);
+
+        if (error) throw error;
+        return (data || []).map((row) => row.id).filter(Boolean);
+    }
+
     async listProjectAssets(projectId, { folderIds = null, folderIdNull = false, limit = 50, cursor = null } = {}) {
         let query = this.client()
             .from(this.tableName)

@@ -5,10 +5,12 @@ import http from "node:http";
 import imagesRouter from "../../routes/images.js";
 import { db, useCaseService } from "../../src/container.js";
 import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+import { supabase } from "../../lib/supabase.js";
 
 describe("RC1.1-R3 — Count Parameter Current Server Behavior Test", () => {
   let server;
   let baseUrl;
+  let origGetUser;
   const testSecret = "configured-valid-test-secret-at-least-32-chars";
   let origSecret;
 
@@ -22,6 +24,7 @@ describe("RC1.1-R3 — Count Parameter Current Server Behavior Test", () => {
   let origProjectsFindByUser;
 
   after(async () => {
+    supabase.auth.getUser = origGetUser;
     process.env.INTERNAL_SECRET = origSecret;
     try {
       await redisConnection?.quit().catch(() => redisConnection?.disconnect());
@@ -35,6 +38,14 @@ describe("RC1.1-R3 — Count Parameter Current Server Behavior Test", () => {
   before(async () => {
     origSecret = process.env.INTERNAL_SECRET;
     process.env.INTERNAL_SECRET = testSecret;
+    origGetUser = supabase.auth.getUser;
+    supabase.auth.getUser = async (token) => {
+      if (token && token.startsWith("token-")) {
+        const userId = token.replace("token-", "");
+        return { data: { user: { id: userId } }, error: null };
+      }
+      return { data: { user: null }, error: new Error("Invalid token") };
+    };
 
     const app = express();
     app.use(express.json());
@@ -101,8 +112,7 @@ describe("RC1.1-R3 — Count Parameter Current Server Behavior Test", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-internal-secret": testSecret,
-        "x-user-id": "user-test",
+        "Authorization": "Bearer token-user-test",
       },
       body: JSON.stringify({
         prompt: "A beautiful landscape",
@@ -126,8 +136,7 @@ describe("RC1.1-R3 — Count Parameter Current Server Behavior Test", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-internal-secret": testSecret,
-        "x-user-id": "user-test",
+        "Authorization": "Bearer token-user-test",
       },
       body: JSON.stringify({
         prompt: "A beautiful landscape",
@@ -155,8 +164,7 @@ describe("RC1.1-R3 — Count Parameter Current Server Behavior Test", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-internal-secret": testSecret,
-          "x-user-id": "user-test",
+          "Authorization": "Bearer token-user-test",
         },
         body: JSON.stringify({
           prompt: `Test image for ${model}`,

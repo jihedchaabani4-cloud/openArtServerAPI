@@ -370,16 +370,16 @@ In `docs/release/frontend-changes-needed.md` add a section "Folders" with:
 7. Moving an asset: use the dedicated route; `folderId: null` means "back to the project root".
 8. Clarify for the UI: opening a folder shows direct assets only; offer a "include sub-folders" toggle that sets `includeDescendants=true`.
 
-### 7.10 Explicitly out of scope for P3 (do not build, only note in BACKLOG.md)
+### 7.10 Explicitly out of scope for P3 (Status: Completed by user)
 
-- The Global library: Home, My generations (all assets of the user across projects), My elements, My favorites (needs a `favorites` table). Nullable `project_id` is an open product question (D-04).
-- Sharing and collaboration (`project_members`).
-- Merging Characters and Elements into one concept with a `type` (two separate services today).
-- Many-to-many folders and tags.
-- Element import across projects (when built later: COPY, not reference, D-05).
-- Redesigning asset versions (media rows). Only if SES0 proves versions are missing, and then as a separate proposal.
-- Renaming `workflow` to `asset` (table, columns, repository, routes). Later, as its own project (D-21). Only the BACKLOG entry `RENAME-LATER` is created.
-- Enforcing `NOT NULL` on the asset `user_id` (later migration, after verifying the backfill).
+- [x] The Global library: Home, My generations (all assets of the user across projects), My elements, My favorites.
+- [ ] Sharing and collaboration (`project_members`).
+- [ ] Merging Characters and Elements into one concept with a `type`.
+- [ ] Many-to-many folders and tags.
+- [x] Element import across projects.
+- [x] Asset versions and media relation (Completed via Phase WM: `workflow_media`).
+- [ ] Renaming `workflow` to `asset` (Deferred as BACKLOG `RENAME-LATER`).
+- [x] Enforcing `NOT NULL` / populating `user_id` on workflows.
 
 ---
 

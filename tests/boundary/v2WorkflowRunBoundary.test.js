@@ -4,10 +4,12 @@ import express from "express";
 import http from "node:http";
 import v2WorkflowsRouter from "../../routes/v2/workflows.js";
 import { RunRepository } from "../../src/v2/runner/runRepository.js";
+import { supabase } from "../../lib/supabase.js";
 
 describe("V2 Workflow Run Security & Boundary Tests (Task T3)", () => {
   let server;
   let baseUrl;
+  let origGetUser;
   const testSecret = "test-internal-secret-phase0-t3";
   const originalSecret = process.env.INTERNAL_SECRET;
   const originalFlag = process.env.ENABLE_V2_WORKFLOW_RUN_ENDPOINT;
@@ -18,6 +20,14 @@ describe("V2 Workflow Run Security & Boundary Tests (Task T3)", () => {
 
   before(async () => {
     process.env.INTERNAL_SECRET = testSecret;
+    origGetUser = supabase.auth.getUser;
+    supabase.auth.getUser = async (token) => {
+      if (token && token.startsWith("token-")) {
+        const userId = token.replace("token-", "");
+        return { data: { user: { id: userId } }, error: null };
+      }
+      return { data: { user: null }, error: new Error("Invalid token") };
+    };
 
     const app = express();
     app.use(express.json());
@@ -36,6 +46,7 @@ describe("V2 Workflow Run Security & Boundary Tests (Task T3)", () => {
   });
 
   after(async () => {
+    supabase.auth.getUser = origGetUser;
     process.env.INTERNAL_SECRET = originalSecret;
     if (originalFlag !== undefined) {
       process.env.ENABLE_V2_WORKFLOW_RUN_ENDPOINT = originalFlag;
@@ -67,8 +78,7 @@ describe("V2 Workflow Run Security & Boundary Tests (Task T3)", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-internal-secret": testSecret,
-        "x-user-id": "user-attacker",
+        "Authorization": "Bearer token-user-attacker",
       },
       body: JSON.stringify({
         workflow_id: "image-generation-v1",
@@ -91,8 +101,7 @@ describe("V2 Workflow Run Security & Boundary Tests (Task T3)", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-internal-secret": testSecret,
-        "x-user-id": "user-admin",
+        "Authorization": "Bearer token-user-admin",
       },
       body: JSON.stringify({
         workflow_id: "non-existent-workflow",
@@ -124,8 +133,7 @@ describe("V2 Workflow Run Security & Boundary Tests (Task T3)", () => {
     const res = await fetch(`${baseUrl}/api/v2/workflows/runs/run-owned-by-user-A`, {
       method: "GET",
       headers: {
-        "x-internal-secret": testSecret,
-        "x-user-id": "user-B", // DIFFERENT USER!
+        "Authorization": "Bearer token-user-B", // DIFFERENT USER!
       },
     });
 

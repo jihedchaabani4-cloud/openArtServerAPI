@@ -5,16 +5,26 @@ import http from "node:http";
 import promptRouter from "../../routes/prompt.js";
 import { RATE_LIMIT_POLICIES } from "../../src/config/rateLimitPolicies.js";
 import { promptService } from "../../src/container.js";
+import { supabase } from "../../lib/supabase.js";
 
 describe("Prompt Optimization Security & Boundary Tests (Task T1)", () => {
   let server;
   let baseUrl;
+  let origGetUser;
   const testSecret = "test-internal-secret-phase0";
   const originalSecret = process.env.INTERNAL_SECRET;
   let originalOptimizePrompt;
 
   before(async () => {
     process.env.INTERNAL_SECRET = testSecret;
+    origGetUser = supabase.auth.getUser;
+    supabase.auth.getUser = async (token) => {
+      if (token && token.startsWith("token-")) {
+        const userId = token.replace("token-", "");
+        return { data: { user: { id: userId } }, error: null };
+      }
+      return { data: { user: null }, error: new Error("Invalid token") };
+    };
 
     const app = express();
     app.use(express.json());
@@ -33,6 +43,7 @@ describe("Prompt Optimization Security & Boundary Tests (Task T1)", () => {
   });
 
   after(async () => {
+    supabase.auth.getUser = origGetUser;
     process.env.INTERNAL_SECRET = originalSecret;
     if (server) {
       await new Promise((resolve) => server.close(resolve));
@@ -94,8 +105,7 @@ describe("Prompt Optimization Security & Boundary Tests (Task T1)", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-internal-secret": testSecret,
-        "x-user-id": "user-test-777",
+        "Authorization": "Bearer token-user-test-777",
       },
       body: JSON.stringify({ prompt: "A cinematic portrait" }),
     });
@@ -152,8 +162,7 @@ describe("Prompt Optimization Security & Boundary Tests (Task T1)", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-internal-secret": testSecret,
-          "x-user-id": rateLimitedUser,
+          "Authorization": `Bearer token-${rateLimitedUser}`,
         },
         body: JSON.stringify({ prompt: `Prompt request ${i}` }),
       });
@@ -165,8 +174,7 @@ describe("Prompt Optimization Security & Boundary Tests (Task T1)", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-internal-secret": testSecret,
-        "x-user-id": rateLimitedUser,
+        "Authorization": `Bearer token-${rateLimitedUser}`,
       },
       body: JSON.stringify({ prompt: "Exceeded prompt" }),
     });

@@ -5,6 +5,8 @@ import {
   wouldCreateCycle,
   wouldExceedDepth,
   depthForNewChild,
+  collectDescendantIds,
+  getDepth,
 } from "../folderTree.js";
 
 /**
@@ -28,6 +30,7 @@ export class FolderError extends AppError {
  *   - create({ projectId, userId, parentId, name })
  *   - update({ folderId, userId, patch })
  *   - remove({ folderId, userId })
+ *   - setWorkflowService(workflowService)
  *   - assertFolderUsable(folderId, userId, projectId)
  *   - validateAndAssertUsable(folderId, userId, projectId)
  */
@@ -35,16 +38,26 @@ export class FolderService {
   constructor({
     folderRepo,
     projectRepo = null,
+    workflowService = null,
     maxDepth = Number(process.env.FOLDER_MAX_DEPTH || 3),
     maxFoldersPerProject = Number(process.env.FOLDER_MAX_PER_PROJECT || 50),
   } = {}) {
     this.folderRepo = folderRepo;
     this.projectRepo = projectRepo;
+    this.workflowService = workflowService;
     this.maxDepth = Number.isFinite(maxDepth) && maxDepth > 0 ? maxDepth : 3;
     this.maxFoldersPerProject =
       Number.isFinite(maxFoldersPerProject) && maxFoldersPerProject > 0
         ? maxFoldersPerProject
         : 50;
+  }
+
+  /**
+   * Late-bind WorkflowService to avoid a constructor cycle
+   * (WorkflowService already depends on FolderService for moveToFolder).
+   */
+  setWorkflowService(workflowService) {
+    this.workflowService = workflowService || null;
   }
 
   /**
@@ -310,7 +323,8 @@ export class FolderService {
   }
 
   /**
-   * Deletes a folder if and only if it has zero sub-folders and zero assets.
+   * Deletes a folder, every descendant folder, and every workflow in that tree.
+   * Workflow deletion is owned by WorkflowService (unlink media, then delete orphan media).
    */
   async remove({ folderId, userId }) {
     if (!folderId || !userId) {
@@ -322,29 +336,36 @@ export class FolderService {
       throw new FolderError("Folder not found", 404, "NOT_FOUND");
     }
 
-    const [childCount, assetCount] = await Promise.all([
-      this.folderRepo.countChildren(folderId, userId),
-      this.folderRepo.countAssetsIn(folderId, userId),
-    ]);
+    const projectFolders = await this.folderRepo.listByProject(folder.project_id, userId);
+    const byId = indexById(projectFolders);
+    const children = indexChildren(projectFolders);
+    const treeIds = [...collectDescendantIds(children, folderId)];
 
-    if (childCount + assetCount > 0) {
-      throw new FolderError(
-        "Cannot delete folder that contains sub-folders or assets",
-        409,
-        "FOLDER_NOT_EMPTY"
-      );
+    if (this.workflowService?.deleteWorkflowsInFolders) {
+      await this.workflowService.deleteWorkflowsInFolders({
+        folderIds: treeIds,
+        userId,
+        projectId: folder.project_id,
+      });
     }
 
+    const deepestFirst = treeIds
+      .slice()
+      .sort((a, b) => getDepth(byId, b) - getDepth(byId, a));
+
     try {
-      const deleted = await this.folderRepo.deleteOwned(folderId, userId);
-      if (!deleted) {
-        throw new FolderError("Folder not found", 404, "NOT_FOUND");
+      for (const id of deepestFirst) {
+        const deleted = await this.folderRepo.deleteOwned(id, userId);
+        if (!deleted && id === folderId) {
+          throw new FolderError("Folder not found", 404, "NOT_FOUND");
+        }
       }
       return true;
     } catch (err) {
+      if (err instanceof FolderError) throw err;
       if (err.code === "23503") {
         throw new FolderError(
-          "Cannot delete folder that contains sub-folders or assets",
+          "Cannot delete folder that still has dependent rows",
           409,
           "FOLDER_NOT_EMPTY"
         );

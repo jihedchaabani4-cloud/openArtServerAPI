@@ -204,6 +204,7 @@ export const useCaseService = new UseCaseService({ walletService, pricingService
 // ─── Domain & Platform Services ──────────────────────────────────────────────
 export const folderService = new FolderService({ folderRepo: db.folders, projectRepo: db.projects });
 export const workflowService = new WorkflowLifecycleService({ db, storageService, folderService });
+folderService.setWorkflowService(workflowService);
 export const workflowMediaService = workflowService.mediaService;
 export const mediaService = new MediaService({ db });
 

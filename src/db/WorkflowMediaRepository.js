@@ -116,6 +116,24 @@ export class WorkflowMediaRepository extends BaseRepository {
         if (error) throw error;
     }
 
+    async unlinkByWorkflow(workflowId) {
+        if (!workflowId) return;
+        const { error } = await this.client()
+            .from(this.tableName)
+            .delete()
+            .eq("workflow_id", workflowId);
+        if (error) throw error;
+    }
+
+    async unlinkByMedia(mediaId) {
+        if (!mediaId) return;
+        const { error } = await this.client()
+            .from(this.tableName)
+            .delete()
+            .eq("media_id", mediaId);
+        if (error) throw error;
+    }
+
     async countLinksForMedia(mediaId) {
         if (!mediaId) return 0;
         const { count, error } = await this.client()

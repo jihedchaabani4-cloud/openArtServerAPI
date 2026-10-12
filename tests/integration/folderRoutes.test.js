@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import express from "express";
 import http from "node:http";
 import apiRouter from "../../src/api/routes.js";
-import { db } from "../../src/container.js";
+import { db, folderService } from "../../src/container.js";
 import { supabase } from "../../lib/supabase.js";
 import { setLimiterForTest, resetLimitersForTest } from "../../src/middleware/rateLimit.js";
 import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "../../src/queue/redis.js";
@@ -14,6 +14,7 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
   let server;
   let baseUrl;
   let origGetUser;
+  let origWorkflowService;
 
   // In-memory data store for the test suite
   let projects = [];
@@ -21,6 +22,7 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
   let workflows = [];
 
   before(async () => {
+    origWorkflowService = folderService.workflowService;
     origGetUser = supabase.auth.getUser;
     supabase.auth.getUser = async (token) => {
       if (token === "token-user-A") {
@@ -50,6 +52,7 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
   });
 
   after(async () => {
+    folderService.setWorkflowService(origWorkflowService);
     supabase.auth.getUser = origGetUser;
     try {
       await redisConnection?.quit().catch(() => redisConnection?.disconnect());
@@ -186,6 +189,17 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
     db.folders.countAssetsIn = async (folderId, userId) => {
       return workflows.filter((wf) => wf.folder_id === folderId).length;
     };
+
+    folderService.setWorkflowService({
+      deleteWorkflowsInFolders: async ({ folderIds }) => {
+        const removed = workflows.filter((wf) => folderIds.includes(wf.folder_id));
+        workflows = workflows.filter((wf) => !folderIds.includes(wf.folder_id));
+        return {
+          workflow_ids: removed.map((wf) => wf.id),
+          count: removed.length,
+        };
+      },
+    });
   });
 
   describe("Authentication & Boundary Hardening", () => {
@@ -318,16 +332,16 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
       assert.equal(data.parentId, null);
     });
 
-    it("Scenario 6: refuses deleting non-empty folder (409 FOLDER_NOT_EMPTY)", async () => {
-      // f-root-A1 has sub-folder and workflow asset
+    it("Scenario 6: cascade-deletes folder, sub-folders, and workflows (204)", async () => {
       const res = await fetch(`${baseUrl}/api/folders/f-root-A1`, {
         method: "DELETE",
         headers: { Authorization: "Bearer token-user-A" },
       });
 
-      assert.equal(res.status, 409);
-      const data = await res.json();
-      assert.equal(data.errorCode, "FOLDER_NOT_EMPTY");
+      assert.equal(res.status, 204);
+      assert.equal(folders.some((f) => f.id === "f-root-A1"), false);
+      assert.equal(folders.some((f) => f.id === "f-sub-A1"), false);
+      assert.equal(workflows.some((wf) => wf.folder_id === "f-root-A1"), false);
     });
 
     it("Scenario 5: deletes empty folder successfully (204 No Content)", async () => {

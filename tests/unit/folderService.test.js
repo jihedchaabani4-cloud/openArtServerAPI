@@ -240,18 +240,36 @@ describe("FolderService Business Rules & Error Scenarios (Task F-T4)", () => {
       );
     });
 
-    it("throws FOLDER_NOT_EMPTY when deleting folder with sub-folders or assets", async () => {
-      // f-root-1 has child f-child-1 and assets
-      await assert.rejects(
-        async () => {
-          await service.remove({ folderId: "f-root-1", userId: "user-1" });
+    it("cascades delete of sub-folders and workflows when removing a folder", async () => {
+      const deletedWorkflowIds = [];
+      service = new FolderService({
+        folderRepo: mockRepo,
+        maxDepth: 3,
+        maxFoldersPerProject: 5,
+        workflowService: {
+          deleteWorkflowsInFolders: async ({ folderIds, userId, projectId }) => {
+            const removed = workflowsInDb.filter(
+              (wf) =>
+                folderIds.includes(wf.folder_id) &&
+                wf.project_id === projectId
+            );
+            for (const wf of removed) {
+              deletedWorkflowIds.push(wf.id);
+            }
+            workflowsInDb = workflowsInDb.filter((wf) => !removed.includes(wf));
+            return { workflow_ids: deletedWorkflowIds, count: deletedWorkflowIds.length };
+          },
         },
-        (err) => {
-          assert.equal(err.errorCode, "FOLDER_NOT_EMPTY");
-          assert.equal(err.statusCode, 409);
-          return true;
-        }
-      );
+      });
+
+      const res = await service.remove({ folderId: "f-root-1", userId: "user-1" });
+      assert.equal(res, true);
+      assert.equal(foldersInDb.some((f) => f.id === "f-root-1"), false);
+      assert.equal(foldersInDb.some((f) => f.id === "f-child-1"), false);
+      assert.equal(foldersInDb.some((f) => f.id === "f-leaf-1"), false);
+      assert.equal(foldersInDb.some((f) => f.id === "f-root-2"), true);
+      assert.deepEqual(deletedWorkflowIds.sort(), ["wf-1", "wf-2", "wf-3"]);
+      assert.equal(workflowsInDb.some((wf) => wf.folder_id === "f-root-1"), false);
     });
 
     it("throws NOT_FOUND when updating or removing an unknown or foreign folder", async () => {

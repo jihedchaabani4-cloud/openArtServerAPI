@@ -59,7 +59,7 @@ export class ProjectReadService {
             throw new CrudServiceError("Project not found", { statusCode: 404, errorCode: "PROJECT_NOT_FOUND" });
         }
 
-        if (projectData.user_id && projectData.user_id !== userId) {
+        if (!projectData.user_id || projectData.user_id !== userId) {
             const isDev = (process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) && process.env.NODE_ENV !== "production";
             if (!isDev) {
                 crudOperationLog({
@@ -414,7 +414,7 @@ export class ProjectReadService {
             .eq("id", mediaId)
             .single();
 
-        if (error || !media || (media.project?.user_id && media.project?.user_id !== userId)) return false;
+        if (error || !media || !media.project?.user_id || media.project?.user_id !== userId) return false;
         return true;
     }
 }

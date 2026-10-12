@@ -12,12 +12,10 @@ const systemLogger = createLogger("system");
 
 // ─── Repositories ───────────────────────────────────────────────────────────
 import { ProjectRepository }          from "#db/ProjectRepository.js";
-import { BatchRepository }            from "#db/BatchRepository.js";
 import { WorkflowRepository }         from "#db/WorkflowRepository.js";
 import { MediaRepository }            from "#db/MediaRepository.js";
 import { WorkflowMediaRepository }     from "#db/WorkflowMediaRepository.js";
 import { GenerationConfigRepository } from "#db/GenerationConfigRepository.js";
-import { DnaRepository }              from "#db/DnaRepository.js";
 import { CharacterRepository }        from "#db/CharacterRepository.js";
 import { ElementRepository }          from "#db/ElementRepository.js";
 import { FolderRepository }           from "#db/FolderRepository.js";
@@ -171,12 +169,10 @@ if (failedOpsService) {
 // ─── DB (new 7-table schema) ─────────────────────────────────────────────────
 export const db = {
     projects:  new ProjectRepository(),   // table: project
-    batches:   new BatchRepository(),     // table: batch
     workflows: new WorkflowRepository(),  // table: workflow
     media:     new MediaRepository(),     // table: media
     workflowMedia: new WorkflowMediaRepository(), // table: workflow_media
     configs:   new GenerationConfigRepository(), // tables: generation_config + generation_config_reference
-    dna:        new DnaRepository(),       // table: dna
     characters: new CharacterRepository(), // Dedicated Character Domain Repository
     elements:   new ElementRepository(),   // Dedicated Element Domain Repository
     folders:    new FolderRepository(),    // Dedicated Folders Domain Repository

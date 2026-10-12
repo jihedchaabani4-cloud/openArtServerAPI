@@ -288,7 +288,7 @@ export class ProjectReadService {
                               asset_id: ref.ref_media_id,
                               role: ref.input_type || "IMAGE_INPUT_TYPE_BASE_IMAGE",
                           })),
-                          dna: config.dna && config.dna.length > 0 ? config.dna[0] : null,
+                          dna: null,
                       }
                     : null,
                 mediaMetadata: {

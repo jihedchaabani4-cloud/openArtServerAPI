@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "../../lib/supabase.js";
-import { DnaRepository } from "./DnaRepository.js";
+import { BaseRepository } from "./BaseRepository.js";
 
 /**
  * CharacterRepository — Dedicated Repository for Characters.
@@ -8,28 +8,16 @@ import { DnaRepository } from "./DnaRepository.js";
  * Overrides client() to use supabaseAdmin so all operations bypass RLS.
  * This is correct for server-side service operations.
  */
-export class CharacterRepository extends DnaRepository {
+export class CharacterRepository extends BaseRepository {
+    constructor() {
+        super("characters");
+    }
+
     /**
      * Override: use service-role client so character writes bypass RLS.
      */
     client() {
         return supabaseAdmin;
-    }
-
-    // ── Existing methods ─────────────────────────────────────────────────────
-
-    async getCharacterByWorkflowId(workflowId) {
-        return this.getByWorkflowId(workflowId);
-    }
-
-    async createCharacter({ generation_config_id, name, description = null, traits = {} }) {
-        return this.createDna({
-            generation_config_id,
-            name,
-            type: "CHARACTER",
-            description,
-            traits,
-        });
     }
 
     // ── New CRUD operations ──────────────────────────────────────────────────

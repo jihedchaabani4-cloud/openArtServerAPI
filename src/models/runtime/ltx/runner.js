@@ -86,9 +86,12 @@ function mapParameters(binding, payload) {
   }
   delete mapped.aspect_ratio;
 
-  // 4. Ensure duration is numeric
-  if (mapped.duration !== undefined && mapped.duration !== null) {
-    mapped.duration = Number(mapped.duration);
+  // 4. Ensure duration is numeric and defaulted to 8
+  if (mapped.duration !== undefined && mapped.duration !== null && mapped.duration !== "") {
+    const num = Number(mapped.duration);
+    mapped.duration = !isNaN(num) && num > 0 ? num : 8;
+  } else {
+    mapped.duration = 8;
   }
 
   // 5. Ensure fps is numeric

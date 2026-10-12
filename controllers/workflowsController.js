@@ -45,8 +45,8 @@ export const deleteWorkflow = async (req, res) => {
         return res.json({
             ok: true,
             deleted_workflow_id: result.workflowId,
-            deleted_media_count: result.deletedMediaCount,
-            storage_failures:    result.storageFailures.length,
+            deleted_media_count: result.deletedMediaCount || 0,
+            storage_failures:    result.storageFailures?.length || 0,
         });
     } catch (err) {
         return res.status(err.statusCode || 500).json({ ok: false, message: err.message });

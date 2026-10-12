@@ -1,4 +1,18 @@
-import { db } from "../../container.js";
+let _db = null;
+export function setDb(dbInstance) {
+  _db = dbInstance;
+}
+async function getDb() {
+  if (_db) return _db;
+  try {
+    const container = await import("../../container.js");
+    _db = container.db;
+  } catch {
+    _db = {};
+  }
+  return _db || {};
+}
+
 import { supabase } from "../../../lib/supabase.js";
 import { AppError } from "../../utils/AppError.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
@@ -21,6 +35,7 @@ function capitalize(str) {
  * @returns {Promise<Object>} The resolved resource record
  */
 export async function assertOwns(resourceType, id, userId) {
+  const db = await getDb();
   if (!id) {
     throw new AppError(`${resourceType} ID is required`, 400);
   }

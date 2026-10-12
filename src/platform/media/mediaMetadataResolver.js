@@ -105,9 +105,11 @@ export function calculateAspectRatio(width, height) {
  * @param {object} input - Can contain { aspect_ratio, ratio, width, height, resolution, parameters }
  * @returns {{ aspect_ratio: string, width: number, height: number }}
  */
-export function resolveMediaMetadata(input = {}) {
+export function resolveMediaMetadata(input = {}, defaultRatio = "1:1") {
   if (!input || typeof input !== "object") {
-    return { aspect_ratio: "1:1", width: 1024, height: 1024 };
+    const ratioTable = DIMENSION_TIERS[defaultRatio] || DIMENSION_TIERS["1:1"];
+    const dims = ratioTable["default"] || { width: 1024, height: 1024 };
+    return { aspect_ratio: defaultRatio, width: dims.width, height: dims.height };
   }
 
   const params = (input.parameters && typeof input.parameters === "object")
@@ -131,7 +133,7 @@ export function resolveMediaMetadata(input = {}) {
     if (explicitWidth && explicitHeight) {
       resolvedRatio = calculateAspectRatio(explicitWidth, explicitHeight);
     } else {
-      resolvedRatio = "1:1";
+      resolvedRatio = defaultRatio;
     }
   }
 

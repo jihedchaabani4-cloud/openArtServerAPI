@@ -13,6 +13,7 @@
     "input_image": true,
     "last_frame": true,
     "duration": true,
+    "aspect_ratio": true,
     "resolution": true,
     "fps": true,
     "generate_audio": true,
@@ -41,6 +42,12 @@
       "values": ["6", "8", "10"],
       "default": "8",
       "description": "Video duration in seconds."
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": ["16:9", "9:16"],
+      "default": "16:9",
+      "description": "Video aspect ratio."
     },
     "resolution": {
       "type": "string",

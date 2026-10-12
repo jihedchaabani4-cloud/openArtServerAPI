@@ -147,7 +147,7 @@ export async function generateVideo(req, res) {
     controllerLogger.info({ workflowId, projectId, outputCount }, `Video Workflow created: ${workflowId}`);
 
     // ── 2. Create Media placeholder(s) ───────────────────────────────────────
-    const mediaMeta = resolveMediaMetadata({ parameters, ...req.body });
+    const mediaMeta = resolveMediaMetadata({ parameters, ...req.body }, "16:9");
     serverMediaIds = [];
 
     for (let i = 0; i < outputCount; i++) {

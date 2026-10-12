@@ -84,6 +84,7 @@ function mapParameters(binding, payload) {
   if (mapped.resolution) {
     mapped.resolution = resolveResolution(mapped.resolution, payload.aspect_ratio || mapped.aspect_ratio);
   }
+  delete mapped.aspect_ratio;
 
   // 4. Ensure duration is numeric
   if (mapped.duration !== undefined && mapped.duration !== null) {

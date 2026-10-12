@@ -17,6 +17,9 @@
     "duration": {
       "providerField": "duration"
     },
+    "aspect_ratio": {
+      "providerField": "aspect_ratio"
+    },
     "resolution": {
       "providerField": "resolution",
       "transform": "resolutionToWxH"

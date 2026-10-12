@@ -97,12 +97,7 @@ export class ProjectReadService {
                     id, step_id, url, width, height, create_time, status, error_message,
                     workflow_id, generation_config_id,
                     generation_config (
-                        id, prompt, model, aspect_ratio, generation_type, seed, visibility,
-                        dna:dna ( id, name, type, description, traits ),
-                        references:generation_config_reference!generation_config_reference_generation_config_id_fkey (
-                            id, position, input_type, ref_media_id,
-                            ref_media:media ( id, url, width, height )
-                        )
+                        id, prompt, model, aspect_ratio, generation_type, seed, visibility
                     )
                 `)
                 .eq("project_id", projectId)
@@ -110,8 +105,19 @@ export class ProjectReadService {
         ]);
 
         const workflows = workflowsResult || [];
-        const mediaItems = mediaResult.data || [];
-        if (mediaResult.error) projectLogger.error({ event: "project_read.media_query_error", err: mediaResult.error.message }, "Media query error");
+        let mediaItems = mediaResult.data || [];
+        if (mediaResult.error) {
+            projectLogger.error({ event: "project_read.media_query_error", err: mediaResult.error.message }, "Media query error");
+            // Resilience fallback: query media directly without relation joins
+            const fallbackResult = await supabase
+                .from("media")
+                .select("id, step_id, url, width, height, create_time, status, error_message, workflow_id, generation_config_id")
+                .eq("project_id", projectId)
+                .order("create_time", { ascending: false });
+            if (fallbackResult.data) {
+                mediaItems = fallbackResult.data;
+            }
+        }
 
         const formattedSessions = [];
 

@@ -13,7 +13,10 @@ import { randomUUID } from "node:crypto";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
 import { CharacterMediaService } from "./CharacterMediaService.js";
 import { CharacterGenerationService } from "./CharacterGenerationService.js";
-import { assertOwns } from "../../platform/security/ownership.js";
+import { assertOwns, assertOwnsAny, toMediaIdList } from "../../platform/security/ownership.js";
+import { createLogger } from "../../infrastructure/logging/index.js";
+
+const logger = createLogger("character-service");
 
 export class CharacterService {
     /**
@@ -75,31 +78,38 @@ export class CharacterService {
                 });
             }
 
-            if (userId) {
-                await assertOwns("project", projectId, userId);
+            if (!userId) {
+                throw new CrudServiceError("userId is required", {
+                    statusCode: 401,
+                    errorCode: "UNAUTHORIZED",
+                    traceId,
+                    operation: "createCharacter",
+                });
+            }
+
+            await assertOwns("project", projectId, userId);
+
+            // Enforce ownership across all references before creating any DB records
+            const sanitizedReferences = toMediaIdList(references);
+            for (const refId of sanitizedReferences) {
+                if (!refId.startsWith("http")) {
+                    await assertOwnsAny(["character", "media", "element", "workflow"], refId.trim(), userId);
+                }
             }
 
             const characterId = workflowId || randomUUID();
             const charName = name?.trim() || prompt?.slice(0, 40) || "Untitled Character";
             const charPrompt = (prompt || description)?.trim() || charName;
 
-            // Resolve userId — fallback to project owner if not provided or anonymous
-            const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-            let safeUserId = userId;
-            if (!safeUserId || !UUID_REGEX.test(safeUserId)) {
-                const proj = await this.db.projects.findById(projectId).catch(() => null);
-                if (proj?.user_id) safeUserId = proj.user_id;
-            }
-
             // 1. Create workflow container row FIRST to satisfy Foreign Key constraint
             await this.db.workflows.createWorkflow({
                 id: characterId,
                 project_id: projectId,
-                user_id: safeUserId,
+                user_id: userId,
                 workflow_type: "CHARACTER_SHEET",
                 display_name: charName,
             }).catch(async (wfErr) => {
-                console.warn(`⚠️ [CharacterService] createWorkflow container notice:`, wfErr.message);
+                logger.warn({ wfErr: wfErr.message }, `[CharacterService] createWorkflow container notice: ${wfErr.message}`);
                 await this.db.workflows.updateFields(characterId, {
                     display_name: charName,
                     project_id: projectId,
@@ -112,7 +122,7 @@ export class CharacterService {
                 id: characterId,
                 workflow_id: characterId,
                 project_id: projectId,
-                user_id: safeUserId,
+                user_id: userId,
                 name: charName,
                 title: charName,
                 description: charPrompt,
@@ -121,12 +131,7 @@ export class CharacterService {
             };
 
             const char = await this.db.characters.upsert(upsertPayload).catch(async (err) => {
-                console.error(`❌ [CharacterService] createCharacter upsert error:`, err.message);
-                const proj = await this.db.projects.findById(projectId).catch(() => null);
-                if (proj?.user_id && proj.user_id !== safeUserId) {
-                    upsertPayload.user_id = proj.user_id;
-                    return this.db.characters.upsert(upsertPayload).catch(() => null);
-                }
+                logger.error({ err: err.message }, `[CharacterService] createCharacter upsert error: ${err.message}`);
                 return null;
             });
 
@@ -137,7 +142,7 @@ export class CharacterService {
                     file,
                     imageUrl,
                     projectId,
-                    userId: safeUserId,
+                    userId,
                 });
 
                 crudOperationLog({
@@ -165,9 +170,9 @@ export class CharacterService {
             const genResult = await this.generationService.enqueueSheetGeneration({
                 characterId,
                 prompt: charPrompt,
-                references,
+                references: sanitizedReferences,
                 projectId,
-                userId: safeUserId,
+                userId,
                 name: charName,
             });
 
@@ -412,10 +417,22 @@ export class CharacterService {
      * Generate or regenerate turnaround sheet
      */
     async generateCharacterSheet({ characterId, prompt, references, projectId, userId }) {
-        if (userId) {
-            await assertOwns("character", characterId, userId);
-            if (projectId) {
-                await assertOwns("project", projectId, userId);
+        if (!userId) {
+            throw new CrudServiceError("userId is required", {
+                statusCode: 401,
+                errorCode: "UNAUTHORIZED",
+            });
+        }
+
+        await assertOwns("character", characterId, userId);
+        if (projectId) {
+            await assertOwns("project", projectId, userId);
+        }
+
+        const sanitizedReferences = toMediaIdList(references);
+        for (const refId of sanitizedReferences) {
+            if (!refId.startsWith("http")) {
+                await assertOwnsAny(["character", "media", "element", "workflow"], refId.trim(), userId);
             }
         }
 
@@ -438,7 +455,7 @@ export class CharacterService {
         return await this.generationService.enqueueSheetGeneration({
             characterId,
             prompt: effectivePrompt,
-            references: Array.isArray(references) ? references : [],
+            references: sanitizedReferences,
             projectId: targetProjectId,
             userId,
             name: charName,

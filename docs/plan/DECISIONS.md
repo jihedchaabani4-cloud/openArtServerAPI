@@ -30,8 +30,11 @@
 | D-26 | Cascade delete policy | Keep role-based split / cascade delete deferred per phase 7 specifications |
 | D-27 | Frontend move | Asset move contract across frontend/backend folders |
 | D-28 | Media parameter string-vs-array normalization | Keep `schemaValidator.js` tolerance for strings to avoid breaking existing clients; normalize at the boundary via shared helper `toMediaIdList(value)` (`string -> [string]`, `array -> array`, `{ workflow_id, id } -> [id]`, else `[]`) in both controller ownership checks and V2 node media resolution |
+| D-29 | Character reference boundary ownership & normalization | Normalize character `references` with `toMediaIdList` and enforce `assertOwnsAny(["character", "media", "element", "workflow"], refId, userId)` at the HTTP boundary before workflow/character/media row creation or billing holds. Fail-closed on missing/malformed `userId` without falling back to project owner |
 
 D-14 | 2026-10-07 | Question: Spec Kit usage | Options: SPEC_KIT=ON, SPEC_KIT=OFF | Chosen: SPEC_KIT=OFF | Reason: Prompt explicitly set SPEC_KIT=OFF; Spec Kit is already installed, using the task cards of the phase files as spec
 D-28 | 2026-10-16 | Question: How to close ownership gap when clients send string/object instead of array for media parameters | Options: Strict 400 in schemaValidator vs boundary normalization via `toMediaIdList` | Chosen: Boundary normalization via `toMediaIdList` | Reason: Preserves backward compatibility for non-frontend API clients that pass single media IDs as strings while ensuring every media parameter shape undergoes `assertOwnsAny` before workflow/media/billing creation and resolves identically in V2 nodes
+D-29 | 2026-10-16 | Question: How to close cross-tenant reference and fallback identity gap in CharacterService | Options: Allow background worker silent drop vs strict 404 at boundary | Chosen: Strict 404 at boundary with `toMediaIdList` and `assertOwnsAny` | Reason: Matches imageController.js / videoController.js security parity and complies with core project rule: cross-tenant access returns 404, never creates database records or credit holds
+
 
 

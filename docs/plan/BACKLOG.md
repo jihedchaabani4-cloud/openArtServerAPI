@@ -33,7 +33,7 @@
 
 ## Workflow Media & Schema Follow-ups
 - [Medium] validator accepts string for array parameters; decide strict 400 vs tolerance after checking real API clients (`src/models/schema/schemaValidator.js:127-149`) | found during OWN-IMG-2
-- [Medium] src/domain/character/CharacterService.js:441 & src/domain/character/CharacterGenerationService.js:108 | `references: Array.isArray(references) ? references : []` drops non-array `references` and does not run `assertOwnsAny` on `references` before enqueueing `character-sheet-v1` | found during OWN-IMG-2 sweep
+- [RESOLVED in OWN-CHAR-1] src/domain/character/CharacterService.js:441 & src/domain/character/CharacterGenerationService.js:108 | `references` normalization and `assertOwnsAny` boundary ownership check added to `createCharacter` and `generateCharacterSheet` (Decision D-29)
 - [Low] src/v2/nodes/safety/NodeSafetyService.js:109,153 | `Array.isArray(inputs.images)` and `Array.isArray(inputs.references)` only accept arrays for internal V2 LLM / PromptBuilder node inputs | found during OWN-IMG-2 sweep
 - [Medium] src/db/workflowMediaLinker.js | relation write failures are warning-only during additive rollout; revisit after migration 009 is deployed everywhere | found during WM-T2
 - [Medium] src/db/MediaRepository.js | WM-T3 must make read paths prefer workflow_media while preserving legacy response fields | found during WM-T2

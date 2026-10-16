@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { llmService } from "#platform/ai/LLMService.js";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
 import { linkWorkflowMediaForCreatedRow } from "../../db/workflowMediaLinker.js";
+import { toMediaIdList } from "../../platform/security/ownership.js";
 
 const CHARACTER_GENERATOR_SYSTEM_PROMPT = `
 You are an elite haute-couture AI Art Director and Master Character Designer for high-budget cinematic films and editorial fashion houses.
@@ -105,7 +106,7 @@ export class CharacterGenerationService {
                 serverMediaIds,
                 serverProjectId: projectId,
                 prompt: charPrompt,
-                references: Array.isArray(references) ? references : [],
+                references: toMediaIdList(references),
                 characters: [{ name: charName, description: charPrompt }],
             };
 

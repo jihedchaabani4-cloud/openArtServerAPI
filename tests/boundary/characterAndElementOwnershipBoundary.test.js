@@ -26,11 +26,18 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
   let mockElements;
   let mockWorkflows;
   let mockProjects;
+  let mockMedia;
 
   let originalDbCharacters;
   let originalDbElements;
   let originalDbWorkflows;
   let originalDbProjects;
+  let originalDbMedia;
+
+  let workflowCreationCalls = [];
+  let characterUpsertCalls = [];
+  let mediaCreationCalls = [];
+  let enqueueCalls = [];
 
   before(async () => {
     origGetUser = supabase.auth.getUser;
@@ -70,14 +77,20 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
   });
 
   beforeEach(() => {
+    workflowCreationCalls = [];
+    characterUpsertCalls = [];
+    mediaCreationCalls = [];
+    enqueueCalls = [];
+
     mockProjects = [
       { id: "proj-user-A", user_id: "user-A" },
       { id: "proj-user-B", user_id: "user-B" },
     ];
 
     mockWorkflows = [
-      { id: "char-A-wf", project_id: "proj-user-A", display_name: "Hero A" },
-      { id: "elem-A-wf", project_id: "proj-user-A", display_name: "Sword A" },
+      { id: "char-A-wf", project_id: "proj-user-A", user_id: "user-A", display_name: "Hero A" },
+      { id: "elem-A-wf", project_id: "proj-user-A", user_id: "user-A", display_name: "Sword A" },
+      { id: "elem-B-wf", project_id: "proj-user-B", user_id: "user-B", display_name: "Shield B" },
     ];
 
     mockCharacters = [
@@ -95,9 +108,37 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
       {
         id: "elem-user-A",
         workflow_id: "elem-A-wf",
+        project_id: "proj-user-A",
+        user_id: "user-A",
         name: "Sword A",
         description: "User A's magical sword",
         element_type: "object",
+      },
+      {
+        id: "elem-user-B",
+        workflow_id: "elem-B-wf",
+        project_id: "proj-user-B",
+        user_id: "user-B",
+        name: "Shield B",
+        description: "User B's shield",
+        element_type: "object",
+      },
+    ];
+
+    mockMedia = [
+      {
+        id: "media-user-A",
+        workflow_id: "char-A-wf",
+        project_id: "proj-user-A",
+        user_id: "user-A",
+        url: "https://cdn.example.com/user-a-media.png",
+      },
+      {
+        id: "media-user-B",
+        workflow_id: "elem-B-wf",
+        project_id: "proj-user-B",
+        user_id: "user-B",
+        url: "https://cdn.example.com/user-b-media.png",
       },
     ];
 
@@ -106,6 +147,7 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
     originalDbCharacters = { ...db.characters };
     originalDbElements = { ...db.elements };
     originalDbWorkflows = { ...db.workflows };
+    originalDbMedia = { ...db.media };
 
     // Set up mock repository doubles
     db.projects.findByUser = async (userId, projectId = null) => {
@@ -113,6 +155,13 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
     };
     db.projects.findById = async (id) => mockProjects.find((p) => p.id === id) || null;
 
+    db.workflows.createWorkflow = async (data) => {
+      workflowCreationCalls.push(data);
+      const wf = { ...data, create_time: new Date().toISOString() };
+      mockWorkflows.push(wf);
+      return wf;
+    };
+    db.workflows.findById = async (id) => mockWorkflows.find((w) => w.id === id) || null;
     db.workflows.getWorkflow = async (id) => mockWorkflows.find((w) => w.id === id) || null;
     db.workflows.updateFields = async (id, fields) => {
       const wf = mockWorkflows.find((w) => w.id === id);
@@ -125,6 +174,12 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
       return true;
     };
 
+    db.characters.upsert = async (data) => {
+      characterUpsertCalls.push(data);
+      const char = { ...data };
+      mockCharacters.push(char);
+      return char;
+    };
     db.characters.findByCharacterId = async (id) =>
       mockCharacters.find((c) => c.id === id || c.workflow_id === id) || null;
     db.characters.updateCharacterFields = async (id, fields) => {
@@ -156,15 +211,31 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
       return mockElements.filter((e) => wfs.includes(e.workflow_id));
     };
 
+    if (db.media) {
+      db.media.createMedia = async (data) => {
+        mediaCreationCalls.push(data);
+        return { id: "mock-media-id", ...data };
+      };
+      db.media.findByWorkflow = async (wfId) => mockMedia.filter((m) => m.workflow_id === wfId);
+      db.media.findById = async (id) => mockMedia.find((m) => m.id === id) || null;
+      db.media.findMediaByIdOrWorkflow = async (id) => mockMedia.find((m) => m.id === id || m.workflow_id === id) || null;
+    }
+
     // Stub workflowService delete on characterService if present
     if (characterService.workflowService) {
       characterService.workflowService.deleteWorkflow = async () => true;
     }
     if (characterService.generationService) {
-      characterService.generationService.enqueueSheetGeneration = async () => ({
-        success: true,
-        workflowId: "mock-sheet-wf",
-      });
+      characterService.generationService.enqueueSheetGeneration = async (params) => {
+        enqueueCalls.push(params);
+        return {
+          taskId: "mock-task-id",
+          status: "processing",
+          needsCredits: false,
+          message: "Initiated",
+          placeholderMedia: { id: "media-placeholder-id", status: "processing" },
+        };
+      };
     }
   });
 
@@ -173,6 +244,7 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
     Object.assign(db.characters, originalDbCharacters);
     Object.assign(db.elements, originalDbElements);
     Object.assign(db.workflows, originalDbWorkflows);
+    if (originalDbMedia) Object.assign(db.media, originalDbMedia);
   });
 
   // ── CHARACTER TESTS ─────────────────────────────────────────────────────────
@@ -258,7 +330,7 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
     });
 
     assert.strictEqual(res.status, 404, `Expected HTTP 404 for unowned element delete but got ${res.status}`);
-    assert.strictEqual(mockElements.length, 1, "Element must not be deleted");
+    assert.strictEqual(mockElements.some((e) => e.id === "elem-user-A"), true, "Element must not be deleted");
   });
 
   it("TEST 7: Element List: User B on User A's project returns 404", async () => {
@@ -295,5 +367,145 @@ describe("Character and Element Ownership Security & Boundary Tests (Task T2b)",
       },
     });
     assert.strictEqual(elemRes.status, 200);
+  });
+
+  // ── NEW CHARACTER BOUNDARY OWNERSHIP TESTS (OWN-CHAR-1) ──────────────────────
+
+  it("TEST 9 (OWN-CHAR-1): Character Create: User B using User A's character in references returns 404 and creates 0 records", async () => {
+    workflowCreationCalls = [];
+    characterUpsertCalls = [];
+    enqueueCalls = [];
+
+    const res = await fetch(`${baseUrl}/api/characters/create`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer token-user-B",
+      },
+      body: JSON.stringify({
+        project_id: "proj-user-B",
+        name: "Malicious Hero",
+        prompt: "Stealing User A's character",
+        references: ["char-user-A"],
+      }),
+    });
+
+    assert.strictEqual(res.status, 404, `Expected HTTP 404 for unowned reference character but got ${res.status}`);
+    const body = await res.json();
+    assert.strictEqual(body.ok, false);
+    assert.strictEqual(workflowCreationCalls.length, 0, "No workflow container must be created on foreign reference");
+    assert.strictEqual(characterUpsertCalls.length, 0, "No character record must be created on foreign reference");
+    assert.strictEqual(enqueueCalls.length, 0, "No generation job must be enqueued on foreign reference");
+  });
+
+  it("TEST 10 (OWN-CHAR-1): Character Create: User B using User A's media or element in references returns 404", async () => {
+    workflowCreationCalls = [];
+    characterUpsertCalls = [];
+    enqueueCalls = [];
+
+    // Reference User A's element
+    const resElem = await fetch(`${baseUrl}/api/characters/create`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer token-user-B",
+      },
+      body: JSON.stringify({
+        project_id: "proj-user-B",
+        name: "Malicious Hero 2",
+        references: ["elem-user-A"],
+      }),
+    });
+
+    assert.strictEqual(resElem.status, 404, `Expected HTTP 404 for unowned reference element but got ${resElem.status}`);
+    assert.strictEqual(workflowCreationCalls.length, 0, "No workflow created");
+    assert.strictEqual(characterUpsertCalls.length, 0, "No character created");
+
+    // Reference User A's media (sent as string instead of array)
+    const resMedia = await fetch(`${baseUrl}/api/characters/create`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer token-user-B",
+      },
+      body: JSON.stringify({
+        project_id: "proj-user-B",
+        name: "Malicious Hero 3",
+        references: "media-user-A",
+      }),
+    });
+
+    assert.strictEqual(resMedia.status, 404, `Expected HTTP 404 for unowned reference media string but got ${resMedia.status}`);
+    assert.strictEqual(workflowCreationCalls.length, 0, "No workflow created");
+  });
+
+  it("TEST 11 (OWN-CHAR-1): Character Create: User B using User A's projectId returns 404", async () => {
+    workflowCreationCalls = [];
+    characterUpsertCalls = [];
+    enqueueCalls = [];
+
+    const res = await fetch(`${baseUrl}/api/characters/create`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer token-user-B",
+      },
+      body: JSON.stringify({
+        project_id: "proj-user-A",
+        name: "Hijack Project",
+        prompt: "Hijacking User A's project",
+      }),
+    });
+
+    assert.strictEqual(res.status, 404, `Expected HTTP 404 for foreign project but got ${res.status}`);
+    assert.strictEqual(workflowCreationCalls.length, 0);
+    assert.strictEqual(characterUpsertCalls.length, 0);
+  });
+
+  it("TEST 12 (OWN-CHAR-1): Character Sheet Regen: Legitimate owner User A regenerating with foreign reference returns 404", async () => {
+    enqueueCalls = [];
+
+    const res = await fetch(`${baseUrl}/api/characters/char-user-A/generate-sheet`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer token-user-A",
+      },
+      body: JSON.stringify({
+        references: ["elem-user-B"],
+      }),
+    });
+
+    assert.strictEqual(res.status, 404, `Expected HTTP 404 when regenerating sheet with foreign reference but got ${res.status}`);
+    assert.strictEqual(enqueueCalls.length, 0, "No sheet generation job must be enqueued with unowned references");
+  });
+
+  it("TEST 13 (OWN-CHAR-1): Legitimate Owner: User A creating character with owned references succeeds and normalizes string to array", async () => {
+    workflowCreationCalls = [];
+    characterUpsertCalls = [];
+    enqueueCalls = [];
+
+    // Create with string reference "char-user-A"
+    const res = await fetch(`${baseUrl}/api/characters/create`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer token-user-A",
+      },
+      body: JSON.stringify({
+        project_id: "proj-user-A",
+        name: "Legit Hero A",
+        prompt: "A legitimate character",
+        references: "char-user-A",
+      }),
+    });
+
+    assert.strictEqual(res.status, 200, `Expected HTTP 200 for legitimate owner but got ${res.status}`);
+    const body = await res.json();
+    assert.strictEqual(body.ok, true);
+    assert.strictEqual(workflowCreationCalls.length, 1);
+    assert.strictEqual(characterUpsertCalls.length, 1);
+    assert.strictEqual(enqueueCalls.length, 1);
+    assert.deepStrictEqual(enqueueCalls[0].references, ["char-user-A"], "String reference must be normalized to array");
   });
 });

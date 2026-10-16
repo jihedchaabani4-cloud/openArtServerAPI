@@ -280,5 +280,133 @@ describe("Workflow ID resolution to media relation in Character & Element servic
     assert.equal(deleteByIdAndWorkflowCalled, false, "Must NOT delete media row when linked from another workflow");
     assert.equal(storageDeleteCalled, false, "Must NOT delete storage file when linked from another workflow");
   });
+
+  it("CharacterMediaService.uploadDetailMedia rejects cross-user asset reference with 404", async () => {
+    const mockVictimMedia = {
+      id: "media-victim-999",
+      workflow_id: "wf-victim-999",
+      user_id: "victim-user",
+      project_id: "proj-1",
+      url: "https://storage.example.com/victim.png",
+      status: "success",
+    };
+
+    const mockDb = {
+      workflows: {
+        getWorkflow: async (id) => {
+          if (id === "char-wf-1") return { id: "char-wf-1", project_id: "proj-1", user_id: "user-1", workflow_type: "CHARACTER" };
+          if (id === "wf-victim-999") return { id: "wf-victim-999", user_id: "victim-user", project_id: "proj-1", primary_media_id: "media-victim-999" };
+          return null;
+        },
+      },
+      media: {
+        findById: async (id) => (id === "media-victim-999" ? mockVictimMedia : null),
+        findMediaByIdOrWorkflow: async (id) => (id === "wf-victim-999" ? mockVictimMedia : null),
+      },
+    };
+
+    const service = new CharacterMediaService({ db: mockDb, storageService: {} });
+
+    await assert.rejects(
+      async () => {
+        await service.uploadDetailMedia({
+          characterId: "char-wf-1",
+          mediaId: "wf-victim-999",
+          projectId: "proj-1",
+          userId: "user-1",
+        });
+      },
+      (err) => {
+        assert.equal(err.statusCode, 404);
+        return true;
+      }
+    );
+  });
+
+  it("CharacterMediaService.uploadDetailMedia rejects cross-project asset reference with 404", async () => {
+    const mockOtherProjMedia = {
+      id: "media-other-proj-888",
+      workflow_id: "wf-other-proj-888",
+      user_id: "user-1",
+      project_id: "proj-OTHER",
+      url: "https://storage.example.com/other.png",
+      status: "success",
+    };
+
+    const mockDb = {
+      workflows: {
+        getWorkflow: async (id) => {
+          if (id === "char-wf-1") return { id: "char-wf-1", project_id: "proj-1", user_id: "user-1", workflow_type: "CHARACTER" };
+          if (id === "wf-other-proj-888") return { id: "wf-other-proj-888", user_id: "user-1", project_id: "proj-OTHER", primary_media_id: "media-other-proj-888" };
+          return null;
+        },
+      },
+      media: {
+        findById: async (id) => (id === "media-other-proj-888" ? mockOtherProjMedia : null),
+        findMediaByIdOrWorkflow: async (id) => (id === "wf-other-proj-888" ? mockOtherProjMedia : null),
+      },
+    };
+
+    const service = new CharacterMediaService({ db: mockDb, storageService: {} });
+
+    await assert.rejects(
+      async () => {
+        await service.uploadDetailMedia({
+          characterId: "char-wf-1",
+          mediaId: "wf-other-proj-888",
+          projectId: "proj-1",
+          userId: "user-1",
+        });
+      },
+      (err) => {
+        assert.equal(err.statusCode, 404);
+        return true;
+      }
+    );
+  });
+
+  it("ElementMediaService.addReferenceMedia rejects cross-user and cross-project asset references with 404", async () => {
+    const mockVictimMedia = {
+      id: "media-victim-777",
+      workflow_id: "wf-victim-777",
+      user_id: "victim-user",
+      project_id: "proj-1",
+      url: "https://storage.example.com/victim2.png",
+      status: "success",
+    };
+
+    const mockDb = {
+      elements: {
+        resolveRecord: async (id) => ({ id, workflow_id: "elem-wf-1", project_id: "proj-1" }),
+      },
+      workflows: {
+        getWorkflow: async (id) => {
+          if (id === "wf-victim-777") return { id: "wf-victim-777", user_id: "victim-user", project_id: "proj-1", primary_media_id: "media-victim-777" };
+          return null;
+        },
+      },
+      media: {
+        findById: async (id) => (id === "media-victim-777" ? mockVictimMedia : null),
+        findMediaByIdOrWorkflow: async (id) => (id === "wf-victim-777" ? mockVictimMedia : null),
+      },
+    };
+
+    const service = new ElementMediaService({ db: mockDb, storageService: {} });
+
+    await assert.rejects(
+      async () => {
+        await service.addReferenceMedia({
+          elementId: "11111111-1111-4111-8111-111111111111",
+          mediaId: "wf-victim-777",
+          projectId: "proj-1",
+          userId: "user-1",
+        });
+      },
+      (err) => {
+        assert.equal(err.statusCode, 404);
+        return true;
+      }
+    );
+  });
 });
 

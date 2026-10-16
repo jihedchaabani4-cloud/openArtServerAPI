@@ -83,7 +83,10 @@ export class CharacterMediaService {
 
             // Direct Asset/Workflow ID resolution to media relation
             if (mediaId) {
-                const sourceMedia = await this._resolveSourceMedia(mediaId);
+                const sourceMedia = await this._resolveSourceMedia(mediaId, {
+                    userId: safeUserId,
+                    projectId: effectiveProjectId,
+                });
                 if (sourceMedia) {
                     if (this.db?.workflowMedia?.linkMedia) {
                         await this.db.workflowMedia.linkMedia({
@@ -106,7 +109,15 @@ export class CharacterMediaService {
                     });
                     await this.db.characters.updateCharacterFields(characterId, {
                         status: "completed",
-                    }).catch(() => null);
+                    }).catch((err) => {
+                        crudOperationLog({
+                            traceId,
+                            operation: "uploadSheetMedia:updateCharacterFields",
+                            status: "warning",
+                            characterId,
+                            message: err?.message,
+                        });
+                    });
 
                     crudOperationLog({
                         traceId,
@@ -171,7 +182,7 @@ export class CharacterMediaService {
                 }
                 // Fallback Case C: Existing Media ID from project library
                 else if (mediaId) {
-                    const sourceMedia = await this._resolveSourceMedia(mediaId);
+                    const sourceMedia = await this._resolveSourceMedia(mediaId, { userId: safeUserId, projectId: effectiveProjectId });
                     if (sourceMedia && sourceMedia.url) {
                         resolvedUrl = sourceMedia.url;
                         resolvedWidth = sourceMedia.width || 1344;
@@ -341,7 +352,10 @@ export class CharacterMediaService {
 
             // Direct Asset/Workflow ID resolution to media relation
             if (mediaId) {
-                const sourceMedia = await this._resolveSourceMedia(mediaId);
+                const sourceMedia = await this._resolveSourceMedia(mediaId, {
+                    userId: safeUserId,
+                    projectId: effectiveProjectId,
+                });
                 if (sourceMedia) {
                     if (this.db?.workflowMedia?.linkMedia) {
                         await this.db.workflowMedia.linkMedia({
@@ -414,7 +428,7 @@ export class CharacterMediaService {
                 }
                 // Fallback Case C: Existing Media ID from library
                 else if (mediaId) {
-                    const sourceMedia = await this._resolveSourceMedia(mediaId);
+                    const sourceMedia = await this._resolveSourceMedia(mediaId, { userId: safeUserId, projectId: effectiveProjectId });
                     if (sourceMedia && sourceMedia.url) {
                         resolvedUrl = sourceMedia.url;
                         resolvedWidth = sourceMedia.width;
@@ -581,23 +595,53 @@ export class CharacterMediaService {
     }
 
     /**
-     * Internal helper to find source media across media and workflow tables
+     * Internal helper to find source media across media and workflow tables,
+     * enforcing tenant (user) and project boundary isolation.
      */
-    async _resolveSourceMedia(mediaId) {
+    async _resolveSourceMedia(mediaId, { userId = null, projectId = null } = {}) {
+        if (!mediaId) return null;
         let sourceMedia = await this.db.media.findById(mediaId).catch(() => null);
-        if (!sourceMedia) {
+        let sourceWf = null;
+        if (!sourceMedia && this.db.media.findMediaByIdOrWorkflow) {
             sourceMedia = await this.db.media.findMediaByIdOrWorkflow(mediaId).catch(() => null);
         }
-        if (!sourceMedia) {
+        if (!sourceMedia && this.db.media.findByWorkflow) {
             const wfMedia = await this.db.media.findByWorkflow(mediaId).catch(() => []);
             sourceMedia = wfMedia.find((m) => m.url && m.status !== "failed") || wfMedia[0] || null;
         }
-        if (!sourceMedia) {
-            const sourceWf = await this.db.workflows.getWorkflow(mediaId).catch(() => null);
-            if (sourceWf?.primary_media_id) {
+        if (this.db.workflows?.getWorkflow) {
+            sourceWf = await this.db.workflows.getWorkflow(mediaId).catch(() => null);
+            if (!sourceMedia && sourceWf?.primary_media_id) {
                 sourceMedia = await this.db.media.findById(sourceWf.primary_media_id).catch(() => null);
             }
         }
+        if (!sourceMedia) return null;
+
+        // Ensure parent workflow context is loaded if sourceMedia itself is missing user/project
+        if (!sourceWf && sourceMedia.workflow_id && this.db.workflows?.getWorkflow) {
+            sourceWf = await this.db.workflows.getWorkflow(sourceMedia.workflow_id).catch(() => null);
+        }
+
+        // Ownership verification (cross-tenant)
+        const ownerUserId = sourceMedia.user_id || sourceWf?.user_id;
+        if (userId && userId !== "anonymous" && ownerUserId && ownerUserId !== userId) {
+            throw new CrudServiceError("Media not found", {
+                statusCode: 404,
+                errorCode: "MEDIA_NOT_FOUND",
+                mediaId,
+            });
+        }
+
+        // Project boundary verification (cross-project)
+        const ownerProjectId = sourceMedia.project_id || sourceWf?.project_id;
+        if (projectId && ownerProjectId && ownerProjectId !== projectId) {
+            throw new CrudServiceError("Media not found", {
+                statusCode: 404,
+                errorCode: "MEDIA_NOT_FOUND",
+                mediaId,
+            });
+        }
+
         return sourceMedia;
     }
 }

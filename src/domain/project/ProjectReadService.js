@@ -203,6 +203,8 @@ export class ProjectReadService {
         const workflowMap = new Map((workflows || []).map((w) => [w.id, w]));
         const workflowMediaRelationByMediaId = new Map();
 
+        const relationsByMediaId = new Map();
+
         if (workflowIds.length > 0) {
             const { data: relationRows, error: relationErr } = await supabase
                 .from("workflow_media")
@@ -216,18 +218,26 @@ export class ProjectReadService {
                 );
             } else {
                 for (const row of relationRows || []) {
-                    if (row?.media_id) workflowMediaRelationByMediaId.set(row.media_id, row);
+                    if (row?.media_id) {
+                        workflowMediaRelationByMediaId.set(row.media_id, row);
+                        if (!relationsByMediaId.has(row.media_id)) {
+                            relationsByMediaId.set(row.media_id, []);
+                        }
+                        relationsByMediaId.get(row.media_id).push(row);
+                    }
                 }
             }
         }
 
-        const formattedMedia = (mediaItems || []).map((m) => {
+        const formattedMedia = [];
+        for (const m of mediaItems || []) {
             const config = m.generation_config;
             const refs = (config?.references || []).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
             const isVideo = m.url && /\.(mp4|webm|mov)$/i.test(m.url);
-            const relation = workflowMediaRelationByMediaId.get(m.id);
-            const mediaWorkflowId = relation?.workflow_id || m.workflow_id;
-            const mediaRole = relation?.role || null;
+            const mRelations = relationsByMediaId.get(m.id) || [];
+            const primaryRelation = mRelations.find((r) => r.workflow_id === m.workflow_id) || mRelations[0] || null;
+            const mediaWorkflowId = primaryRelation?.workflow_id || m.workflow_id;
+            const mediaRole = primaryRelation?.role || null;
             const wf = workflowMap.get(mediaWorkflowId);
             const isUpload = !m.generation_config_id ||
                              wf?.workflow_type === "UPLOAD" ||
@@ -353,9 +363,29 @@ export class ProjectReadService {
                 width: resolvedWidth,
                 height: resolvedHeight,
             };
+            formattedMedia.push(mediaObject);
 
-            return mediaObject;
-        });
+            for (const otherRel of mRelations) {
+                if (otherRel.workflow_id && otherRel.workflow_id !== mediaWorkflowId) {
+                    const linkedWf = workflowMap.get(otherRel.workflow_id);
+                    const linkedStepId = otherRel.role === "detail"
+                        ? "character_detail"
+                        : (otherRel.role === "sheet" ? "character_sheet" : m.step_id);
+
+                    formattedMedia.push({
+                        ...mediaObject,
+                        workflowId: otherRel.workflow_id,
+                        workflow_id: otherRel.workflow_id,
+                        folder_id: linkedWf?.folder_id || null,
+                        folderId: linkedWf?.folder_id || null,
+                        role: otherRel.role,
+                        mediaRole: otherRel.role,
+                        step_id: linkedStepId,
+                        workflowStepId: linkedStepId,
+                    });
+                }
+            }
+        }
 
         crudOperationLog({
             operation,

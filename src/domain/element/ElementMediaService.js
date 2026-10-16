@@ -178,6 +178,48 @@ export class ElementMediaService {
             const effectiveProjectId = projectId || element?.project_id || null;
             const safeUserId = userId || "anonymous";
 
+            // Direct Asset/Workflow ID resolution to media relation
+            if (mediaId) {
+                const sourceMedia = await this._resolveSourceMedia(mediaId);
+                if (sourceMedia) {
+                    if (this.db?.workflowMedia?.linkMedia) {
+                        await this.db.workflowMedia.linkMedia({
+                            workflowId: wfId,
+                            mediaId: sourceMedia.id,
+                            role: "detail",
+                            stepId: "element_reference",
+                            workflowType: "ELEMENT",
+                        });
+                    }
+                    if (element) {
+                        const existingImages = Array.isArray(element.source_images) ? element.source_images : [];
+                        if (!existingImages.includes(sourceMedia.id)) {
+                            await this.db.elements.update(element.id, {
+                                source_images: [...existingImages, sourceMedia.id],
+                            }).catch(() => null);
+                        }
+                    }
+                    crudOperationLog({
+                        traceId,
+                        operation: "addReferenceMedia",
+                        status: "ok",
+                        durationMs: Date.now() - start,
+                        elementId,
+                        mediaId: sourceMedia.id,
+                    });
+                    return {
+                        ok: true,
+                        media: {
+                            ...sourceMedia,
+                            workflow_id: wfId,
+                            workflowId: wfId,
+                            role: "detail",
+                            mediaRole: "detail",
+                        },
+                    };
+                }
+            }
+
             let mediaRecord = null;
             let resolvedUrl = typeof inputSource === "string" ? inputSource : null;
 
@@ -421,5 +463,27 @@ export class ElementMediaService {
             });
             throw err;
         }
+    }
+
+    /**
+     * Internal helper to find source media across media and workflow tables
+     */
+    async _resolveSourceMedia(mediaId) {
+        if (!mediaId) return null;
+        let sourceMedia = await this.db.media.findById(mediaId).catch(() => null);
+        if (!sourceMedia && this.db.media.findMediaByIdOrWorkflow) {
+            sourceMedia = await this.db.media.findMediaByIdOrWorkflow(mediaId).catch(() => null);
+        }
+        if (!sourceMedia && this.db.media.findByWorkflow) {
+            const wfMedia = await this.db.media.findByWorkflow(mediaId).catch(() => []);
+            sourceMedia = wfMedia.find((m) => m.url && m.status !== "failed") || wfMedia[0] || null;
+        }
+        if (!sourceMedia && this.db.workflows?.getWorkflow) {
+            const sourceWf = await this.db.workflows.getWorkflow(mediaId).catch(() => null);
+            if (sourceWf?.primary_media_id) {
+                sourceMedia = await this.db.media.findById(sourceWf.primary_media_id).catch(() => null);
+            }
+        }
+        return sourceMedia;
     }
 }

@@ -81,6 +81,57 @@ export class CharacterMediaService {
             let resolvedWidth = 1344;
             let resolvedHeight = 768;
 
+            // Direct Asset/Workflow ID resolution to media relation
+            if (mediaId) {
+                const sourceMedia = await this._resolveSourceMedia(mediaId);
+                if (sourceMedia) {
+                    if (this.db?.workflowMedia?.linkMedia) {
+                        await this.db.workflowMedia.linkMedia({
+                            workflowId: wf.id,
+                            mediaId: sourceMedia.id,
+                            role: "sheet",
+                            stepId: "character_sheet",
+                            workflowType: wf.workflow_type || "CHARACTER",
+                        });
+                    }
+                    await this.db.workflows.updatePrimaryMedia(wf.id, sourceMedia.id).catch((err) => {
+                        crudOperationLog({
+                            traceId,
+                            operation: "uploadSheetMedia:updatePrimaryMedia",
+                            status: "warning",
+                            characterId,
+                            mediaId: sourceMedia.id,
+                            message: err.message,
+                        });
+                    });
+                    await this.db.characters.updateCharacterFields(characterId, {
+                        status: "completed",
+                    }).catch(() => null);
+
+                    crudOperationLog({
+                        traceId,
+                        operation: "uploadSheetMedia",
+                        status: "ok",
+                        durationMs: Date.now() - start,
+                        characterId,
+                        mediaId: sourceMedia.id,
+                    });
+
+                    return {
+                        media: {
+                            ...sourceMedia,
+                            workflow_id: wf.id,
+                            workflowId: wf.id,
+                            role: "sheet",
+                            mediaRole: "sheet",
+                            step_id: "character_sheet",
+                        },
+                        ok: true,
+                        url: sourceMedia.url,
+                    };
+                }
+            }
+
             // Ingestion via Canonical MediaIngestionService
             if (this.mediaIngestionService) {
                 const source = file || mediaId || imageUrl;
@@ -288,6 +339,42 @@ export class CharacterMediaService {
             let resolvedWidth = null;
             let resolvedHeight = null;
 
+            // Direct Asset/Workflow ID resolution to media relation
+            if (mediaId) {
+                const sourceMedia = await this._resolveSourceMedia(mediaId);
+                if (sourceMedia) {
+                    if (this.db?.workflowMedia?.linkMedia) {
+                        await this.db.workflowMedia.linkMedia({
+                            workflowId: wf.id,
+                            mediaId: sourceMedia.id,
+                            role: "detail",
+                            stepId: "character_detail",
+                            workflowType: wf.workflow_type || "CHARACTER",
+                        });
+                    }
+                    crudOperationLog({
+                        traceId,
+                        operation: "uploadDetailMedia",
+                        status: "ok",
+                        durationMs: Date.now() - start,
+                        characterId,
+                        newMediaId: sourceMedia.id,
+                    });
+                    return {
+                        ok: true,
+                        media: {
+                            ...sourceMedia,
+                            workflow_id: wf.id,
+                            workflowId: wf.id,
+                            role: "detail",
+                            mediaRole: "detail",
+                            step_id: "character_detail",
+                        },
+                        url: sourceMedia.url,
+                    };
+                }
+            }
+
             // Ingestion via Canonical MediaIngestionService
             if (this.mediaIngestionService) {
                 const source = file || mediaId || imageUrl;
@@ -420,6 +507,8 @@ export class CharacterMediaService {
         crudOperationLog({ traceId, operation: "removeDetailMedia", characterId, mediaId });
 
         try {
+            const wf = await this.db.workflows?.getWorkflow?.(characterId).catch(() => null);
+            const resolvedWfId = wf?.id || characterId;
             const mediaRec = await this.db.media.findById(mediaId, "id, url, step_id, workflow_id, role, mediaRole").catch(() => null);
             const mediaRole = mediaRec
                 ? inferWorkflowMediaRole({
@@ -428,7 +517,7 @@ export class CharacterMediaService {
                     workflowType: "CHARACTER",
                 })
                 : null;
-            if (mediaRec && mediaRole !== "detail") {
+            if (mediaRec && mediaRole && mediaRole !== "detail") {
                 throw new CrudServiceError("Cannot delete non-detail media with removeDetailMedia", {
                     statusCode: 400,
                     errorCode: "INVALID_OPERATION",
@@ -437,19 +526,35 @@ export class CharacterMediaService {
                 });
             }
 
-            await this.db.media.deleteByIdAndWorkflow(mediaId, characterId);
+            if (this.db?.workflowMedia?.unlink) {
+                await this.db.workflowMedia.unlink({
+                    workflowId: resolvedWfId,
+                    mediaId,
+                    role: "detail",
+                }).catch(() => null);
+            }
 
-            if (mediaRec?.url) {
-                await this.storageService.deleteByUrl(mediaRec.url).catch((err) => {
-                    crudOperationLog({
-                        traceId,
-                        operation: "removeDetailMedia:storageDelete",
-                        status: "warning",
-                        characterId,
-                        mediaId,
-                        message: err.message,
+            const isOriginalToWorkflow = mediaRec?.workflow_id === resolvedWfId;
+            let remainingLinks = 0;
+            if (this.db?.workflowMedia?.countLinksForMedia) {
+                remainingLinks = await this.db.workflowMedia.countLinksForMedia(mediaId).catch(() => 0);
+            }
+
+            if (isOriginalToWorkflow && remainingLinks === 0) {
+                await this.db.media.deleteByIdAndWorkflow(mediaId, resolvedWfId);
+
+                if (mediaRec?.url) {
+                    await this.storageService.deleteByUrl(mediaRec.url).catch((err) => {
+                        crudOperationLog({
+                            traceId,
+                            operation: "removeDetailMedia:storageDelete",
+                            status: "warning",
+                            characterId,
+                            mediaId,
+                            message: err.message,
+                        });
                     });
-                });
+                }
             }
 
             crudOperationLog({

@@ -145,7 +145,8 @@ export async function deleteCharacter(req, res) {
 export async function addMediaToCharacter(req, res) {
     try {
         const { characterId } = req.params;
-        const { mediaId, imageUrl } = req.body || {};
+        const mediaId = req.body?.mediaId || req.body?.workflowId || req.body?.workflow_id;
+        const imageUrl = req.body?.imageUrl;
         const projectId = req.body?.projectId || req.body?.project_id || req.query?.projectId || req.query?.project_id;
         const userId = req.user.id;
         const file = req.file;
@@ -191,7 +192,8 @@ export async function removeMediaFromCharacter(req, res) {
 export async function setCharacterSheetMedia(req, res) {
     try {
         const { characterId } = req.params;
-        const { mediaId, imageUrl } = req.body || {};
+        const mediaId = req.body?.mediaId || req.body?.workflowId || req.body?.workflow_id;
+        const imageUrl = req.body?.imageUrl;
         const projectId = req.body?.projectId || req.body?.project_id || req.query?.projectId || req.query?.project_id;
         const userId = req.user.id;
         const file = req.file;
@@ -224,7 +226,7 @@ export async function uploadCharacterMedia(req, res) {
         const userId = req.user.id;
         const file = req.file;
         const imageUrl = req.body?.imageUrl;
-        const mediaId = req.body?.mediaId;
+        const mediaId = req.body?.mediaId || req.body?.workflowId || req.body?.workflow_id;
 
         const result = type === "detail"
             ? await characterService.addMediaToCharacter({ characterId, mediaId, imageUrl, file, projectId, userId })

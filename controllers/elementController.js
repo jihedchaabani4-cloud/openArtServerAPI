@@ -178,7 +178,8 @@ export async function addImageToElement(req, res) {
     const op      = "POST /api/v2/elements/:id/images";
 
     try {
-        const { imageUrl, mediaId } = req.body;
+        const imageUrl = req.body?.imageUrl;
+        const mediaId = req.body?.mediaId || req.body?.workflowId || req.body?.workflow_id;
         const projectId = req.body.projectId || req.body.project_id;
         const userId = req.user?.id || req.body.userId;
         const file   = req.file;

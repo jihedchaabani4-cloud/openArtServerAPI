@@ -7,7 +7,7 @@ Baseline `npm test` before: PASS (698/698 pass across 152 suites)   After: PASS 
 ## What changed (REUSED / EXTENDED / CREATED)
 
 - EXTENDED `src/platform/security/ownership.js`
-  — Added exported shared helper `toMediaIdList(value)` (Decision `D-26`): normalizes any string, object (`{ workflow_id, workflowId, id, media_id, mediaId, url }`), or array of strings/objects into a flat array of non-empty trimmed strings, returning `[]` for anything else.
+  — Added exported shared helper `toMediaIdList(value)` (Decision `D-28`): normalizes any string, object (`{ workflow_id, workflowId, id, media_id, mediaId, url }`), or array of strings/objects into a flat array of non-empty trimmed strings, returning `[]` for anything else.
 - EXTENDED `controllers/imageController.js`
   — Used `toMediaIdList(references)` for top-level `references` sanitization.
   — Used `toMediaIdList(parameters[field])` across all media parameter keys (`input_image`, `image_url`, `mask`, `last_frame`, `input_video`, `images`, `reference_images`, `reference_videos`) to enforce `assertOwnsAny(["workflow", "media"], mediaRefId, userId)` before workflow/media/billing creation.
@@ -20,7 +20,7 @@ Baseline `npm test` before: PASS (698/698 pass across 152 suites)   After: PASS 
   — Used `toMediaIdList(resolvedParams.images)` during node media URL resolution so string, object, and array shapes resolve identically.
 - EXTENDED `tests/boundary/referenceAndMediaOwnershipBoundary.test.js`
   — Added `TESTS 8–13` covering cross-tenant string, array, and object shapes for `images`, `reference_images`, `reference_videos`, `input_image`, `last_frame`, `input_video`, top-level `references`, legitimate owner string/array normalization, and `toMediaIdList` unit checks.
-- EXTENDED `docs/plan/DECISIONS.md` (`D-26`), `docs/plan/BACKLOG.md`, `docs/plan/STATE.md`.
+- EXTENDED `docs/plan/DECISIONS.md` (`D-28`), `docs/plan/BACKLOG.md`, `docs/plan/STATE.md`.
 
 ---
 

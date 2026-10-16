@@ -2,11 +2,22 @@ import { randomUUID } from "node:crypto";
 import { db, useCaseService, folderService } from "../src/container.js";
 import { createLogger } from "../src/infrastructure/logging/index.js";
 import { resolveMediaMetadata } from "../src/platform/media/mediaMetadataResolver.js";
-import { assertOwns, assertOwnsAny } from "../src/platform/security/ownership.js";
+import { assertOwns, assertOwnsAny, toMediaIdList } from "../src/platform/security/ownership.js";
 import { linkWorkflowMediaForCreatedRow } from "../src/db/workflowMediaLinker.js";
 
 const controllerLogger = createLogger("video-controller");
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MEDIA_PARAM_KEYS = [
+  "input_image",
+  "image_url",
+  "mask",
+  "last_frame",
+  "input_video",
+  "images",
+  "reference_images",
+  "reference_videos",
+];
+const ARRAY_MEDIA_PARAM_KEYS = ["images", "reference_images", "reference_videos"];
 
 /**
  * POST /api/video/generated
@@ -66,18 +77,14 @@ export async function generateVideo(req, res) {
 
     // references must be workflow IDs only — no raw URLs
     const sanitizedReferences = [];
-    if (Array.isArray(references)) {
-      for (const ref of references) {
-        const id = (typeof ref === "string" ? ref.trim()
-          : (ref?.workflow_id || ref?.workflowId || ref?.id || "")).trim();
-        if (id.startsWith("http://") || id.startsWith("https://")) {
-          return res.status(400).json({
-            ok: false,
-            message: "Direct URLs are not permitted in references. Use workflow IDs only.",
-          });
-        }
-        if (id) sanitizedReferences.push(id);
+    for (const id of toMediaIdList(references)) {
+      if (id.startsWith("http://") || id.startsWith("https://")) {
+        return res.status(400).json({
+          ok: false,
+          message: "Direct URLs are not permitted in references. Use workflow IDs only.",
+        });
       }
+      sanitizedReferences.push(id);
     }
 
     // parameters values must also be workflow IDs — not raw URLs
@@ -108,17 +115,10 @@ export async function generateVideo(req, res) {
 
     // ── 0c. Enforce Input Media Ownership ────────────────────────────────────
     if (parameters && typeof parameters === "object") {
-      for (const field of ["input_image", "last_frame", "input_video"]) {
-        const val = parameters[field];
-        if (typeof val === "string" && val.trim() && !val.trim().startsWith("http")) {
-          await assertOwnsAny(["workflow", "media"], val.trim(), userId);
-        }
-      }
-      if (Array.isArray(parameters.images)) {
-        for (const img of parameters.images) {
-          const imgId = typeof img === "string" ? img : (img?.workflow_id || img?.id);
-          if (typeof imgId === "string" && !imgId.trim().startsWith("http")) {
-            await assertOwnsAny(["workflow", "media"], imgId.trim(), userId);
+      for (const field of MEDIA_PARAM_KEYS) {
+        for (const mediaRefId of toMediaIdList(parameters[field])) {
+          if (!mediaRefId.startsWith("http")) {
+            await assertOwnsAny(["workflow", "media"], mediaRefId, userId);
           }
         }
       }
@@ -177,6 +177,11 @@ export async function generateVideo(req, res) {
 
     // ── 3. Prepare UseCase runtime input ─────────────────────────────────────
     const resolvedParams = (parameters && typeof parameters === "object") ? { ...parameters } : {};
+    for (const arrayKey of ARRAY_MEDIA_PARAM_KEYS) {
+      if (resolvedParams[arrayKey] !== undefined && resolvedParams[arrayKey] !== null) {
+        resolvedParams[arrayKey] = toMediaIdList(resolvedParams[arrayKey]);
+      }
+    }
     if (mediaMeta?.aspect_ratio) {
       resolvedParams.aspect_ratio = resolvedParams.aspect_ratio || mediaMeta.aspect_ratio;
     }

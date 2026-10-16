@@ -1,8 +1,8 @@
 # STATE
-Current phase: Phase 6 (OWN-IMG)    Current task: OWN-IMG-1
+Current phase: Phase 6 (OWN-IMG)    Current task: OWN-IMG-2
 Updated: 2026-10-16
-Test status: 676 pass, 9 pre-existing fail, 0 regressions (total 685 tests across 150 suites)
-Next step: Execute OWN-IMG-2 boundary normalization fix and pass all new ownership boundary tests
+Test status: 704 pass, 0 fail (total 704 tests across 152 suites)
+Next step: Phase 6 (OWN-IMG) complete
 
 | Task | Status (TODO/DONE/BLOCKED/SKIPPED) | Commit | Report |
 |---|---|---|---|
@@ -35,5 +35,7 @@ Next step: Execute OWN-IMG-2 boundary normalization fix and pass all new ownersh
 | WM-T4 | DONE | bc03041 | docs/plan/reports/WM-T4.md |
 | WM-T5 | DONE | f8151bd | docs/plan/reports/WM-T5.md |
 | WM-GATE | DONE | aee5af2 | docs/plan/reports/PHASE-WM-GATE.md |
-| OWN-IMG-1 | DONE | this commit | docs/plan/reports/OWN-IMG-1.md |
+| OWN-IMG-1 | DONE | 1e09d6f | docs/plan/reports/OWN-IMG-1.md |
+| OWN-IMG-2 | DONE | this commit | docs/plan/reports/OWN-IMG-2.md |
+
 

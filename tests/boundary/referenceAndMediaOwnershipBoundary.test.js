@@ -7,6 +7,8 @@ import videoRouter from "../../routes/video.js";
 import { db, useCaseService } from "../../src/container.js";
 import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
 import { supabase } from "../../lib/supabase.js";
+import { resetLimitersForTest } from "../../src/middleware/rateLimit.js";
+import { toMediaIdList } from "../../src/platform/security/ownership.js";
 import {
   resolveWorkflowReference,
   resolveWorkflowReferences,
@@ -39,6 +41,7 @@ describe("Reference and Media Ownership Security & Boundary Tests (Task T2c)", (
   let enqueueCalls = [];
 
   before(async () => {
+    process.env.NODE_ENV = process.env.NODE_ENV || "test";
     origGetUser = supabase.auth.getUser;
     supabase.auth.getUser = async (token) => {
       if (token === "token-user-A") return { data: { user: { id: "user-A" } }, error: null };
@@ -372,4 +375,224 @@ describe("Reference and Media Ownership Security & Boundary Tests (Task T2c)", (
     assert.strictEqual(workflowCreationCalls.length, 1, "Workflow created for legitimate owner");
     assert.strictEqual(enqueueCalls.length, 1, "Job enqueued for legitimate owner");
   });
+
+  // ── TEST 8 (OWN-IMG-1): Image Gen - parameters.images as a STRING with User A's ID ──
+  it("TEST 8 (OWN-IMG-1): Image Gen: parameters.images as a STRING with User A's ID returns 404 and creates no records/holds", async () => {
+    const res = await fetch(`${baseUrl}/api/images/generated`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer token-user-B",
+      },
+      body: JSON.stringify({
+        prompt: "Use another user's image via string",
+        model: "nanobana_pro",
+        project_id: "proj-user-B",
+        parameters: {
+          images: "media-user-A",
+        },
+      }),
+    });
+
+    const body = await res.json();
+    assert.strictEqual(res.status, 404, `Expected 404, got ${res.status}: ${JSON.stringify(body)}`);
+    assert.strictEqual(workflowCreationCalls.length, 0, "No workflow should be created");
+    assert.strictEqual(mediaCreationCalls.length, 0, "No media placeholder should be created");
+    assert.strictEqual(enqueueCalls.length, 0, "No credit hold / job enqueue should happen");
+    assert.ok(!JSON.stringify(body).includes("cdn.example.com"), "Response body must not reveal record URL");
+    assert.ok(!JSON.stringify(body).includes("proj-user-A"), "Response body must not reveal owner project");
+  });
+
+  // ── TEST 9 (OWN-IMG-1): Image Gen - parameters.images as an ARRAY and [{ workflow_id }] ──
+  it("TEST 9 (OWN-IMG-1): Image Gen: parameters.images as ARRAY, [{ workflow_id }], and { workflow_id } with User A's ID returns 404", async () => {
+    const shapes = [
+      ["media-user-A"],
+      [{ workflow_id: "wf-user-A" }],
+      { workflow_id: "wf-user-A" },
+    ];
+
+    for (const imagesShape of shapes) {
+      if (process.env.NODE_ENV === "test") resetLimitersForTest();
+      const res = await fetch(`${baseUrl}/api/images/generated`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer token-user-B",
+        },
+        body: JSON.stringify({
+          prompt: "Use another user's image",
+          model: "nanobana_pro",
+          project_id: "proj-user-B",
+          parameters: {
+            images: imagesShape,
+          },
+        }),
+      });
+
+      const body = await res.json();
+      assert.strictEqual(
+        res.status,
+        404,
+        `Shape ${JSON.stringify(imagesShape)} expected 404, got ${res.status}: ${JSON.stringify(body)}`
+      );
+      assert.strictEqual(workflowCreationCalls.length, 0, "No workflow should be created");
+      assert.strictEqual(mediaCreationCalls.length, 0, "No media should be created");
+      assert.strictEqual(enqueueCalls.length, 0, "No job should be enqueued");
+    }
+  });
+
+  // ── TEST 10 (OWN-IMG-1): Image Gen - other media keys (reference_images, input_image as array, top-level references as string) ──
+  it("TEST 10 (OWN-IMG-1): Image Gen: reference_images (string/array), input_image (array/object), and top-level references (string) with User A's ID return 404", async () => {
+    const payloads = [
+      { parameters: { reference_images: "wf-user-A" } },
+      { parameters: { reference_images: ["wf-user-A"] } },
+      { parameters: { input_image: ["media-user-A"] } },
+      { parameters: { input_image: { workflow_id: "wf-user-A" } } },
+      { references: "char-user-A" },
+    ];
+
+    for (const extra of payloads) {
+      if (process.env.NODE_ENV === "test") resetLimitersForTest();
+      const res = await fetch(`${baseUrl}/api/images/generated`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer token-user-B",
+        },
+        body: JSON.stringify({
+          prompt: "Cross-tenant media key check",
+          model: "nanobana_pro",
+          project_id: "proj-user-B",
+          ...extra,
+        }),
+      });
+
+      const body = await res.json();
+      assert.strictEqual(
+        res.status,
+        404,
+        `Payload ${JSON.stringify(extra)} expected 404, got ${res.status}: ${JSON.stringify(body)}`
+      );
+      assert.strictEqual(workflowCreationCalls.length, 0, "No workflow should be created");
+      assert.strictEqual(mediaCreationCalls.length, 0, "No media should be created");
+      assert.strictEqual(enqueueCalls.length, 0, "No job should be enqueued");
+    }
+  });
+
+  // ── TEST 11 (OWN-IMG-1): Video Gen - all media keys across string, array, and object shapes ──
+  it("TEST 11 (OWN-IMG-1): Video Gen: images, reference_images, reference_videos, input_image, last_frame, input_video (string/array/object) with User A's ID return 404", async () => {
+    const payloads = [
+      { parameters: { images: "wf-user-A" } },
+      { parameters: { images: ["wf-user-A"] } },
+      { parameters: { images: [{ workflow_id: "wf-user-A" }] } },
+      { parameters: { images: { workflow_id: "wf-user-A" } } },
+      { parameters: { reference_images: "wf-user-A" } },
+      { parameters: { reference_images: ["wf-user-A"] } },
+      { parameters: { reference_videos: "wf-user-A" } },
+      { parameters: { reference_videos: ["wf-user-A"] } },
+      { parameters: { last_frame: "wf-user-A" } },
+      { parameters: { last_frame: ["wf-user-A"] } },
+      { parameters: { input_video: "wf-user-A" } },
+      { parameters: { input_video: ["wf-user-A"] } },
+      { references: "char-user-A" },
+    ];
+
+    for (const extra of payloads) {
+      if (process.env.NODE_ENV === "test") resetLimitersForTest();
+      const res = await fetch(`${baseUrl}/api/video/generated`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer token-user-B",
+        },
+        body: JSON.stringify({
+          prompt: "Animate cross-tenant media",
+          model: "wan_3_0",
+          project_id: "proj-user-B",
+          ...extra,
+        }),
+      });
+
+      const body = await res.json();
+      assert.strictEqual(
+        res.status,
+        404,
+        `Video payload ${JSON.stringify(extra)} expected 404, got ${res.status}: ${JSON.stringify(body)}`
+      );
+      assert.strictEqual(workflowCreationCalls.length, 0, "No video workflow should be created");
+      assert.strictEqual(mediaCreationCalls.length, 0, "No video media should be created");
+      assert.strictEqual(enqueueCalls.length, 0, "No video job should be enqueued");
+    }
+  });
+
+  // ── TEST 12 (OWN-IMG-1): Legitimate Owner (User A) with string and array images succeeds ──
+  it("TEST 12 (OWN-IMG-1): Legitimate Owner: User A with parameters.images as a STRING and as an ARRAY both return 200", async () => {
+    // 12a. String images
+    const resStr = await fetch(`${baseUrl}/api/images/generated`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer token-user-A",
+      },
+      body: JSON.stringify({
+        prompt: "Legitimate owner with string images",
+        model: "nanobana_pro",
+        project_id: "proj-user-A",
+        parameters: {
+          images: "media-user-A",
+        },
+      }),
+    });
+    const bodyStr = await resStr.json();
+    assert.strictEqual(resStr.status, 200, `Expected 200 for string images, got ${resStr.status}: ${JSON.stringify(bodyStr)}`);
+    assert.deepStrictEqual(
+      enqueueCalls[0]?.input?.parameters?.images,
+      ["media-user-A"],
+      "String parameters.images must be normalized to array ['media-user-A'] at boundary"
+    );
+
+    // 12b. Array images
+    const resArr = await fetch(`${baseUrl}/api/images/generated`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer token-user-A",
+      },
+      body: JSON.stringify({
+        prompt: "Legitimate owner with array images",
+        model: "nanobana_pro",
+        project_id: "proj-user-A",
+        parameters: {
+          images: ["media-user-A"],
+        },
+      }),
+    });
+    const bodyArr = await resArr.json();
+    assert.strictEqual(resArr.status, 200, `Expected 200 for array images, got ${resArr.status}: ${JSON.stringify(bodyArr)}`);
+    assert.deepStrictEqual(
+      enqueueCalls[1]?.input?.parameters?.images,
+      ["media-user-A"],
+      "Array parameters.images stays ['media-user-A']"
+    );
+  });
+
+  // ── TEST 13 (OWN-IMG-2): Shared helper toMediaIdList normalizes string, array, object, and invalid inputs ──
+  it("TEST 13 (OWN-IMG-2): toMediaIdList normalizes strings, arrays, objects, and ignores empty/non-media values", () => {
+    assert.deepStrictEqual(toMediaIdList("media-user-A"), ["media-user-A"]);
+    assert.deepStrictEqual(toMediaIdList("  wf-user-A  "), ["wf-user-A"]);
+    assert.deepStrictEqual(toMediaIdList(["media-user-A", { workflow_id: "wf-user-A" }, { id: "id-3" }]), [
+      "media-user-A",
+      "wf-user-A",
+      "id-3",
+    ]);
+    assert.deepStrictEqual(toMediaIdList({ workflow_id: "wf-user-A" }), ["wf-user-A"]);
+    assert.deepStrictEqual(toMediaIdList(""), []);
+    assert.deepStrictEqual(toMediaIdList(null), []);
+    assert.deepStrictEqual(toMediaIdList(undefined), []);
+    assert.deepStrictEqual(toMediaIdList(42), []);
+  });
 });
+
+
+
+

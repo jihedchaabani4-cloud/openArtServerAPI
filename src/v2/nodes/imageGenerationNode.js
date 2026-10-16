@@ -1,6 +1,7 @@
 import { run } from "../../models/index.js";
 import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 import { resolvePrimaryMediaUrl } from "../resolvers/WorkflowReferenceResolver.js";
+import { toMediaIdList } from "../../platform/security/ownership.js";
 
 /**
  * Image Generation Node — Pure Pass-Through
@@ -63,10 +64,10 @@ export async function executeImageGeneration(inputs, ctx) {
     resolvedParams.input_image = resolvedUrl;
   }
 
-  if (Array.isArray(resolvedParams.images)) {
+  if (resolvedParams.images !== undefined && resolvedParams.images !== null) {
+    const imageList = toMediaIdList(resolvedParams.images);
     resolvedParams.images = await Promise.all(
-      resolvedParams.images.map(async (item) => {
-        const idOrUrl = typeof item === "string" ? item : (item?.workflow_id || item?.id || item?.url);
+      imageList.map(async (idOrUrl) => {
         if (typeof idOrUrl === "string" && !idOrUrl.startsWith("http")) {
           const resolved = await resolvePrimaryMediaUrl(idOrUrl, userId);
           return resolved || idOrUrl;

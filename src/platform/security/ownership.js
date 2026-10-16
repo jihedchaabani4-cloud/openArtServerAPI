@@ -328,3 +328,48 @@ export async function assertOwnsAny(resourceTypes, id, userId) {
   throw new AppError("Reference not found", 404);
 }
 
+/**
+ * Normalizes any media or reference parameter value (string, object, or array of strings/objects)
+ * into a flat array of non-empty trimmed string IDs/URLs (Decision D-26).
+ *
+ * Used by both controller ownership checks and V2 generation node resolvers so that no shape
+ * can bypass ownership verification and still be resolved downstream.
+ *
+ * @param {unknown} value
+ * @returns {string[]}
+ */
+export function toMediaIdList(value) {
+  if (value === null || value === undefined) return [];
+
+  const extractSingle = (item) => {
+    if (typeof item === "string") {
+      return item.trim();
+    }
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      const candidate =
+        item.workflow_id ||
+        item.workflowId ||
+        item.id ||
+        item.media_id ||
+        item.mediaId ||
+        item.url ||
+        "";
+      return typeof candidate === "string" ? candidate.trim() : "";
+    }
+    return "";
+  };
+
+  if (Array.isArray(value)) {
+    const out = [];
+    for (const entry of value) {
+      const id = extractSingle(entry);
+      if (id) out.push(id);
+    }
+    return out;
+  }
+
+  const single = extractSingle(value);
+  return single ? [single] : [];
+}
+
+

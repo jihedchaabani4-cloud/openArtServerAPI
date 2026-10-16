@@ -25,14 +25,20 @@
 - [RESOLVED in D3(4)] tests/boundary/referenceAndMediaOwnershipBoundary.test.js | TEST 7: Legitimate Owner: User A referencing own character and media succeeds
 
 ## High Severity
+- [RESOLVED in phase6(OWN-IMG-2)] controllers/imageController.js:115, controllers/videoController.js:117, src/v2/nodes/imageGenerationNode.js:66, src/v2/nodes/videoGenerationNode.js:101 | Media parameter ownership gap when `parameters.images`, `reference_images`, `reference_videos`, `input_image`, `last_frame`, `input_video`, or top-level `references` is sent as a string or object instead of an array | Fixed via shared `toMediaIdList(value)` helper (Decision D-26)
+- [High] controllers/imageController.js:86-93,118 & controllers/videoController.js:85-92,120 & src/v2/nodes/imageGenerationNode.js:69 & src/v2/nodes/videoGenerationNode.js:104 | Values starting with `http://` or `https://` inside array/object media parameters (`parameters.images = ["https://..."]` or `[{ url: "https://..." }]`) bypass top-level string URL check (400) and ownership check (`!mediaRefId.startsWith("http")`) and are forwarded to upstream AI providers without a host allow-list | found during OWN-IMG-1 (read-only per prompt)
 - [High] src/domain/project/ProjectReadService.js:62 | lets projects with user_id NULL be read by any user (assertOwns rejects, but ProjectReadService check is permissive) | found during PREP-P3
 - [High] src/platform/security/ownership.js | Route ownership audit covers only URL parameters (:id), not IDs provided in JSON request bodies (e.g. folderId, projectId, sessionId). Protection for body IDs relies on manual service/controller checks | found during P3 audit
 - [High] routes/assets.js:52 (POST /upload) | session_id parameter in request body is forwarded directly to MediaIngestionService / WorkflowRepository.createWorkflow without ownership or project scoping checks, allowing potential cross-tenant / IDOR session linkage | found during P3 audit
 
-## Workflow Media Follow-ups
+## Workflow Media & Schema Follow-ups
+- [Medium] validator accepts string for array parameters; decide strict 400 vs tolerance after checking real API clients (`src/models/schema/schemaValidator.js:127-149`) | found during OWN-IMG-2
+- [Medium] src/domain/character/CharacterService.js:441 & src/domain/character/CharacterGenerationService.js:108 | `references: Array.isArray(references) ? references : []` drops non-array `references` and does not run `assertOwnsAny` on `references` before enqueueing `character-sheet-v1` | found during OWN-IMG-2 sweep
+- [Low] src/v2/nodes/safety/NodeSafetyService.js:109,153 | `Array.isArray(inputs.images)` and `Array.isArray(inputs.references)` only accept arrays for internal V2 LLM / PromptBuilder node inputs | found during OWN-IMG-2 sweep
 - [Medium] src/db/workflowMediaLinker.js | relation write failures are warning-only during additive rollout; revisit after migration 009 is deployed everywhere | found during WM-T2
 - [Medium] src/db/MediaRepository.js | WM-T3 must make read paths prefer workflow_media while preserving legacy response fields | found during WM-T2
 - [Medium] src/v2/resolvers/WorkflowReferenceResolver.js | WM-T4 must migrate character/element/reference resolution to prefer role fields while retaining step_id compatibility | found during WM-T3
+
 
 ## Remaining Pre-existing Failures (9 total)
 

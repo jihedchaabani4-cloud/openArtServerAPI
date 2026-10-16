@@ -6,8 +6,20 @@ const controllerLogger = createLogger("controller");
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 import { resolveMediaMetadata } from "../src/platform/media/mediaMetadataResolver.js";
-import { assertOwns, assertOwnsAny } from "../src/platform/security/ownership.js";
+import { assertOwns, assertOwnsAny, toMediaIdList } from "../src/platform/security/ownership.js";
 import { linkWorkflowMediaForCreatedRow } from "../src/db/workflowMediaLinker.js";
+
+const MEDIA_PARAM_KEYS = [
+  "input_image",
+  "image_url",
+  "mask",
+  "last_frame",
+  "input_video",
+  "images",
+  "reference_images",
+  "reference_videos",
+];
+const ARRAY_MEDIA_PARAM_KEYS = ["images", "reference_images", "reference_videos"];
 
 /**
  * POST /api/images/generated
@@ -67,18 +79,14 @@ export async function generateImage(req, res) {
 
     // references must be workflow IDs only — no raw URLs
     const sanitizedReferences = [];
-    if (Array.isArray(references)) {
-      for (const ref of references) {
-        const id = (typeof ref === "string" ? ref.trim()
-          : (ref?.workflow_id || ref?.workflowId || ref?.id || "")).trim();
-        if (id.startsWith("http://") || id.startsWith("https://")) {
-          return res.status(400).json({
-            ok: false,
-            message: "Direct image URLs are not permitted in references. Use workflow IDs only.",
-          });
-        }
-        if (id) sanitizedReferences.push(id);
+    for (const id of toMediaIdList(references)) {
+      if (id.startsWith("http://") || id.startsWith("https://")) {
+        return res.status(400).json({
+          ok: false,
+          message: "Direct image URLs are not permitted in references. Use workflow IDs only.",
+        });
       }
+      sanitizedReferences.push(id);
     }
 
     // parameters values must also be workflow IDs — not raw URLs
@@ -109,14 +117,10 @@ export async function generateImage(req, res) {
 
     // ── 0c. Enforce Input Media Ownership ────────────────────────────────────
     if (parameters && typeof parameters === "object") {
-      if (parameters.input_image && typeof parameters.input_image === "string" && !parameters.input_image.startsWith("http")) {
-        await assertOwnsAny(["workflow", "media"], parameters.input_image.trim(), userId);
-      }
-      if (Array.isArray(parameters.images)) {
-        for (const img of parameters.images) {
-          const imgId = typeof img === "string" ? img : (img?.workflow_id || img?.id);
-          if (typeof imgId === "string" && !imgId.startsWith("http")) {
-            await assertOwnsAny(["workflow", "media"], imgId.trim(), userId);
+      for (const field of MEDIA_PARAM_KEYS) {
+        for (const mediaRefId of toMediaIdList(parameters[field])) {
+          if (!mediaRefId.startsWith("http")) {
+            await assertOwnsAny(["workflow", "media"], mediaRefId, userId);
           }
         }
       }
@@ -176,6 +180,11 @@ export async function generateImage(req, res) {
     // ── 3. Prepare UseCase runtime input ─────────────────────────────────────
     // Only workflow-level fields at root. All model-specific params are in `parameters`.
     const resolvedParams = (parameters && typeof parameters === "object") ? { ...parameters } : {};
+    for (const arrayKey of ARRAY_MEDIA_PARAM_KEYS) {
+      if (resolvedParams[arrayKey] !== undefined && resolvedParams[arrayKey] !== null) {
+        resolvedParams[arrayKey] = toMediaIdList(resolvedParams[arrayKey]);
+      }
+    }
     if (mediaMeta?.aspect_ratio) {
       resolvedParams.aspect_ratio = resolvedParams.aspect_ratio || mediaMeta.aspect_ratio;
     }

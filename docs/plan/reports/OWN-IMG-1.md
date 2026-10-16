@@ -1,8 +1,8 @@
 # OWN-IMG-1: Verify and Prove Media Parameter String-vs-Array Ownership Bypass
 Status: DONE
-Commit: (recorded in STATE.md)
+Commit: 1e09d6f
 Self-review score: 98/100 (loops: 1)
-Baseline `npm test` before: FAIL (9 pre-existing, 676/685 pass)   After: FAIL (9 pre-existing, 676/685 pass; failing-first proof ran 12 tests in `referenceAndMediaOwnershipBoundary.test.js`: 7 pass, 5 fail)
+Baseline `npm test` before: PASS (698/698 pass across 152 suites hermetically)   After: FAIL on new tests as required by failing-first (12 tests in `referenceAndMediaOwnershipBoundary.test.js`: 7 pass, 5 fail)
 
 ## What changed (REUSED / EXTENDED / CREATED)
 

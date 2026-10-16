@@ -1,8 +1,8 @@
 # STATE
-Current phase: WM (COMPLETED)    Current task: WM-GATE
-Updated: 2026-10-08
+Current phase: Phase 6 (OWN-IMG)    Current task: OWN-IMG-1
+Updated: 2026-10-16
 Test status: 676 pass, 9 pre-existing fail, 0 regressions (total 685 tests across 150 suites)
-Next step: Apply migration 009 on real DB; phase WM is complete (waiting for the human)
+Next step: Execute OWN-IMG-2 boundary normalization fix and pass all new ownership boundary tests
 
 | Task | Status (TODO/DONE/BLOCKED/SKIPPED) | Commit | Report |
 |---|---|---|---|
@@ -34,4 +34,6 @@ Next step: Apply migration 009 on real DB; phase WM is complete (waiting for the
 | WM-T3 | DONE | 07c5a67 | docs/plan/reports/WM-T3.md |
 | WM-T4 | DONE | bc03041 | docs/plan/reports/WM-T4.md |
 | WM-T5 | DONE | f8151bd | docs/plan/reports/WM-T5.md |
-| WM-GATE | DONE | this commit | docs/plan/reports/PHASE-WM-GATE.md |
+| WM-GATE | DONE | aee5af2 | docs/plan/reports/PHASE-WM-GATE.md |
+| OWN-IMG-1 | DONE | this commit | docs/plan/reports/OWN-IMG-1.md |
+

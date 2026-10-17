@@ -1,9 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
+import { WorkflowMediaService, sanitizeStoragePath } from "../../src/platform/workflow/WorkflowMediaService.js";
 import { ElementService } from "../../src/domain/element/ElementService.js";
+import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
 import { ElementRepository } from "../../src/db/ElementRepository.js";
 import { CharacterService } from "../../src/domain/character/CharacterService.js";
+import { CharacterMediaService } from "../../src/domain/character/CharacterMediaService.js";
 
 /**
  * WM-T5 & B4a: Delete, orphan rules, and sidecar preservation.
@@ -488,5 +490,179 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
     const oldWfUpdate = fieldUpdates.find((u) => u.wfId === "wf-gen-1");
     assert.ok(oldWfUpdate, "Old workflow primary_media_id must be updated when detaching pinned media");
     assert.equal(oldWfUpdate.fields.primary_media_id, null, "Old workflow primary_media_id must be nullified, never auto-promoted");
+  });
+
+  it("Test 1 (B4c): reference-counted unlinking in ElementMediaService.removeReferenceMedia and CharacterMediaService.removeDetailMedia deletes DB row and storage ONLY when countLinksForMedia === 0", async () => {
+    const elemUnlinkCalls = [];
+    const elemDeletedIds = [];
+    const elemStorageDeletes = [];
+    const elemOrder = [];
+
+    let elemLinkCount = 1; // Shared at first
+    const elemMediaService = new ElementMediaService({
+      db: {
+        elements: {
+          resolveRecord: async () => ({
+            id: "11111111-1111-4111-8111-111111111111",
+            workflow_id: "wf-elem-ref",
+            source_images: ["m-elem-ref-1", "m-elem-ref-2"],
+          }),
+          update: async () => ({}),
+        },
+        workflows: {
+          findById: async () => ({ id: "wf-elem-ref", primary_media_id: "m-elem-ref-1" }),
+          updatePrimaryMedia: async () => ({}),
+        },
+        media: {
+          findById: async (id) => ({ id, url: `https://cdn.example.com/${id}.png` }),
+          deleteById: async (id) => {
+            elemOrder.push("deleteById");
+            elemDeletedIds.push(id);
+          },
+        },
+        workflowMedia: {
+          unlink: async (args) => {
+            elemOrder.push("unlink");
+            elemUnlinkCalls.push(args);
+          },
+          countLinksForMedia: async () => elemLinkCount,
+        },
+      },
+      storageService: {
+        deleteByUrl: async (url) => {
+          elemOrder.push("deleteByUrl");
+          elemStorageDeletes.push(url);
+        },
+      },
+    });
+
+    // Case A: Shared media (countLinksForMedia = 1) -> unlinks, does NOT delete media row or storage
+    await elemMediaService.removeReferenceMedia({
+      elementId: "11111111-1111-4111-8111-111111111111",
+      mediaId: "m-elem-ref-1",
+      userId: "user-1",
+    });
+    assert.equal(elemUnlinkCalls.length, 1);
+    assert.deepEqual(elemDeletedIds, [], "Must NOT delete media row when remainingLinks > 0");
+    assert.deepEqual(elemStorageDeletes, [], "Must NOT delete storage file when remainingLinks > 0");
+
+    // Case B: Orphaned media (countLinksForMedia = 0) -> unlinks, deletes media row FIRST, then deletes storage
+    elemLinkCount = 0;
+    elemOrder.length = 0;
+    await elemMediaService.removeReferenceMedia({
+      elementId: "11111111-1111-4111-8111-111111111111",
+      mediaId: "m-elem-ref-2",
+      userId: "user-1",
+    });
+    assert.deepEqual(elemDeletedIds, ["m-elem-ref-2"]);
+    assert.deepEqual(elemStorageDeletes, ["https://cdn.example.com/m-elem-ref-2.png"]);
+    assert.deepEqual(elemOrder, ["unlink", "deleteById", "deleteByUrl"], "Storage delete must run post-DB-delete");
+
+    // Case C: CharacterMediaService.removeDetailMedia with countLinksForMedia = 0 and db.media.deleteById
+    const charOrder = [];
+    const charMediaService = new CharacterMediaService({
+      db: {
+        workflows: {
+          getWorkflow: async (id) => ({ id, primary_media_id: "m-char-det-1" }),
+          updatePrimaryMedia: async () => ({}),
+        },
+        media: {
+          findById: async (id) => ({ id, url: "https://cdn.example.com/char-det-1.png", step_id: "character_detail", role: "detail" }),
+          deleteById: async () => { charOrder.push("deleteById"); },
+        },
+        workflowMedia: {
+          findByMedia: async () => [{ workflow_id: "wf-char-1", media_id: "m-char-det-1", role: "detail" }],
+          unlink: async () => { charOrder.push("unlink"); },
+          countLinksForMedia: async () => 0,
+        },
+      },
+      storageService: {
+        deleteByUrl: async () => { charOrder.push("deleteByUrl"); },
+      },
+    });
+
+    await charMediaService.removeDetailMedia({
+      characterId: "wf-char-1",
+      mediaId: "m-char-det-1",
+      userId: "user-1",
+    });
+    assert.deepEqual(charOrder, ["unlink", "deleteById", "deleteByUrl"]);
+  });
+
+  it("Test 2 (B4c): scanOrphanMediaDryRun lists candidate orphan media IDs and sanitized storage paths without performing deletions", async () => {
+    let deleteByIdCalled = false;
+    let deleteByUrlCalled = false;
+
+    const candidateMedia = [
+      {
+        id: "m-linked-1",
+        url: "https://project.supabase.co/storage/v1/object/sign/bucket/u1/linked.png?token=secret-jwt-linked",
+        project_id: "proj-1",
+      },
+      {
+        id: "m-orphan-1",
+        url: "https://project.supabase.co/storage/v1/object/sign/bucket/u1/orphan-1.png?token=secret-jwt-orphan-1&sig=xyz",
+        project_id: "proj-1",
+      },
+      {
+        id: "m-orphan-2",
+        url: "character-sheets/u1/c1/orphan-2.png?token=secret-jwt-orphan-2",
+        project_id: "proj-1",
+      },
+    ];
+
+    const service = new WorkflowMediaService({
+      db: {
+        media: {
+          listAll: async () => candidateMedia,
+          deleteById: async () => { deleteByIdCalled = true; },
+        },
+        workflowMedia: {
+          countLinksForMedia: async (mediaId) => (mediaId === "m-linked-1" ? 2 : 0),
+        },
+      },
+      storageService: {
+        deleteByUrl: async () => { deleteByUrlCalled = true; },
+      },
+      authService: {},
+    });
+
+    const report = await service.scanOrphanMediaDryRun({ projectId: "proj-1" });
+
+    assert.equal(report.dryRun, true);
+    assert.equal(report.count, 2);
+    assert.deepEqual(report.orphanMediaIds, ["m-orphan-1", "m-orphan-2"]);
+    assert.deepEqual(report.orphanStoragePaths, [
+      "/storage/v1/object/sign/bucket/u1/orphan-1.png",
+      "character-sheets/u1/c1/orphan-2.png",
+    ]);
+    for (const p of report.orphanStoragePaths) {
+      assert.equal(p.includes("token="), false, "Sanitized storage path must never contain signed URL tokens");
+      assert.equal(p.includes("secret-jwt"), false, "Sanitized storage path must never leak signed URL secrets");
+    }
+    assert.equal(deleteByIdCalled, false, "Dry-run sweep must NEVER delete media DB rows");
+    assert.equal(deleteByUrlCalled, false, "Dry-run sweep must NEVER delete storage binaries");
+  });
+
+  it("Test 3 (B4c): sanitizeStoragePath strips signed URL query tokens and storage deletion errors never leak signed URLs", async () => {
+    const signedUrl = "https://project.supabase.co/storage/v1/object/sign/media-bucket/user-1/img.png?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secret&Expires=1999999999";
+    const sanitized = sanitizeStoragePath(signedUrl);
+
+    assert.equal(sanitized, "/storage/v1/object/sign/media-bucket/user-1/img.png");
+    assert.equal(sanitized.includes("token="), false);
+    assert.equal(sanitized.includes("eyJ"), false);
+
+    const { service } = makeService({
+      mediaRec: { id: "media-signed-err", url: signedUrl },
+      countLinks: 0,
+    });
+    service.storageService = {
+      deleteByUrl: async () => {
+        throw new Error("Storage bucket temporarily unavailable");
+      },
+    };
+
+    const res = await service.deleteMedia({ mediaId: "media-signed-err", userId: "user-1" });
+    assert.equal(res.deleted, true);
   });
 });

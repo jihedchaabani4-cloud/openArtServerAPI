@@ -562,9 +562,13 @@ export class CharacterMediaService {
             }
 
             if (remainingLinks === 0) {
-                await this.db.media.deleteByIdAndWorkflow(mediaId, resolvedWfId);
+                if (this.db.media?.deleteByIdAndWorkflow) {
+                    await this.db.media.deleteByIdAndWorkflow(mediaId, resolvedWfId);
+                } else if (this.db.media?.deleteById) {
+                    await this.db.media.deleteById(mediaId);
+                }
 
-                if (mediaRec?.url) {
+                if (mediaRec?.url && this.storageService?.deleteByUrl) {
                     await this.storageService.deleteByUrl(mediaRec.url).catch((err) => {
                         crudOperationLog({
                             traceId,

@@ -330,36 +330,65 @@ export class ElementMediaService {
                 });
             }
 
-            // 1. Delete media record via workflowService or direct db
-            if (this.workflowService?.deleteMedia) {
-                await this.workflowService.deleteMedia({ mediaId, userId, req });
-            } else {
-                const mediaRec = await this.db.media.findById(mediaId).catch(() => null);
-                if (mediaRec?.url && this.storageService) {
-                    await this.storageService.deleteByUrl(mediaRec.url).catch(() => null);
-                }
-                await this.db.media.deleteById(mediaId);
-                if (elementId && this.db.workflows) {
-                    const elemRec = await this.db.elements?.resolveRecord?.(elementId).catch(() => null);
-                    const wfId = elemRec?.workflow_id || elementId;
-                    const wfRec = await this.db.workflows.findById?.(wfId, "primary_media_id").catch(() => null);
-                    if (wfRec?.primary_media_id === mediaId) {
-                        if (this.db.workflows.updatePrimaryMedia) {
-                            await this.db.workflows.updatePrimaryMedia(wfId, null).catch(() => null);
-                        } else if (this.db.workflows.updateFields) {
-                            await this.db.workflows.updateFields(wfId, { primary_media_id: null }).catch(() => null);
-                        }
+            const element = elementId && this.db.elements
+                ? await this.db.elements.resolveRecord(elementId).catch(() => null)
+                : null;
+            const wfId = element?.workflow_id || elementId || null;
+
+            // 1. Unlink workflow_media relation for this element workflow
+            if (this.db?.workflowMedia?.unlink) {
+                await this.db.workflowMedia.unlink(
+                    wfId ? { workflowId: wfId, mediaId } : { mediaId }
+                ).catch(() => null);
+            }
+
+            // 2. If this reference was pinned as primary_media_id on the workflow, nullify it
+            if (wfId && this.db?.workflows) {
+                const wfRec = await this.db.workflows.findById?.(wfId, "primary_media_id").catch(() => null);
+                if (wfRec?.primary_media_id === mediaId) {
+                    if (this.db.workflows.updatePrimaryMedia) {
+                        await this.db.workflows.updatePrimaryMedia(wfId, null).catch(() => null);
+                    } else if (this.db.workflows.updateFields) {
+                        await this.db.workflows.updateFields(wfId, { primary_media_id: null }).catch(() => null);
                     }
                 }
             }
 
-            // 2. Remove mediaId from element.source_images
-            if (elementId && this.db.elements) {
-                const element = await this.db.elements.resolveRecord(elementId).catch(() => null);
-                if (element && Array.isArray(element.source_images)) {
-                    const filtered = element.source_images.filter((id) => id !== mediaId);
-                    await this.db.elements.update(element.id, { source_images: filtered }).catch(() => null);
+            // 3. Reference-counted orphan check: delete DB row and storage ONLY when 0 links remain
+            let remainingLinks = 0;
+            if (this.db?.workflowMedia?.countLinksForMedia) {
+                remainingLinks = await this.db.workflowMedia.countLinksForMedia(mediaId).catch(() => 0);
+            }
+
+            if (remainingLinks === 0) {
+                if (this.workflowService?.deleteMedia && !this.db?.workflowMedia?.countLinksForMedia) {
+                    await this.workflowService.deleteMedia({ mediaId, userId, req });
+                } else {
+                    const mediaRec = await this.db.media?.findById?.(mediaId).catch(() => null);
+                    if (this.db.media?.deleteById) {
+                        await this.db.media.deleteById(mediaId);
+                    } else if (this.db.media?.deleteByIdAndWorkflow) {
+                        await this.db.media.deleteByIdAndWorkflow(mediaId, wfId);
+                    }
+                    if (mediaRec?.url && this.storageService?.deleteByUrl) {
+                        await this.storageService.deleteByUrl(mediaRec.url).catch((err) => {
+                            crudOperationLog({
+                                traceId,
+                                operation: "removeReferenceMedia:storageDelete",
+                                status: "warning",
+                                elementId,
+                                mediaId,
+                                message: err.message,
+                            });
+                        });
+                    }
                 }
+            }
+
+            // 4. Remove mediaId from element.source_images
+            if (element && Array.isArray(element.source_images)) {
+                const filtered = element.source_images.filter((id) => id !== mediaId);
+                await this.db.elements.update(element.id, { source_images: filtered }).catch(() => null);
             }
 
             crudOperationLog({

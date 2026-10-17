@@ -301,7 +301,11 @@ export class WorkflowMediaService {
         if (media.url) {
             await this.storageService.deleteByUrl(media.url).catch((storageErr) => {
                 logger.warn(
-                    { mediaId: media.id, url: media.url, message: storageErr.message },
+                    {
+                        mediaId: media.id,
+                        storagePath: sanitizeStoragePath(media.url),
+                        message: storageErr.message,
+                    },
                     "orphan media: storage delete notice"
                 );
             });
@@ -351,6 +355,67 @@ export class WorkflowMediaService {
         }
 
         return { unlinkedMediaIds, deletedOrphanIds };
+    }
+
+    /**
+     * Dry-run review utility that inspects candidate media rows against `workflow_media`
+     * and lists candidate orphan media IDs and sanitized storage paths without performing any deletions.
+     *
+     * Safety gate: Strictly read-only (`dryRun: true`). Never mutates DB or storage.
+     */
+    async scanOrphanMediaDryRun({ projectId = null, limit = 500 } = {}) {
+        let candidates = [];
+
+        if (typeof this.db.media?.listAll === "function") {
+            candidates = await this.db.media.listAll({ projectId, limit }).catch(() => []);
+        } else if (projectId && typeof this.db.media?.findByProject === "function") {
+            const res = await this.db.media.findByProject(projectId, { limit }).catch(() => []);
+            candidates = Array.isArray(res) ? res : (res?.data || []);
+        } else if (typeof this.db.media?.client === "function") {
+            let query = this.db.media.client()
+                .from("media")
+                .select("id, url, project_id");
+            if (projectId) {
+                query = query.eq("project_id", projectId);
+            }
+            if (limit) {
+                query = query.limit(limit);
+            }
+            const { data } = await query;
+            candidates = data || [];
+        }
+
+        const orphanMediaIds = [];
+        const orphanStoragePaths = [];
+
+        for (const media of candidates) {
+            if (!media?.id) continue;
+
+            let linkCount = 0;
+            if (typeof this.db.workflowMedia?.countLinksForMedia === "function") {
+                linkCount = await this.db.workflowMedia.countLinksForMedia(media.id).catch(() => 0);
+            } else if (typeof this.db.workflowMedia?.findByMedia === "function") {
+                const links = await this.db.workflowMedia.findByMedia(media.id).catch(() => []);
+                linkCount = Array.isArray(links) ? links.length : 0;
+            }
+
+            if (linkCount === 0) {
+                orphanMediaIds.push(media.id);
+                if (media.url) {
+                    const cleanPath = sanitizeStoragePath(media.url);
+                    if (cleanPath) {
+                        orphanStoragePaths.push(cleanPath);
+                    }
+                }
+            }
+        }
+
+        return {
+            dryRun: true,
+            orphanMediaIds,
+            orphanStoragePaths,
+            count: orphanMediaIds.length,
+        };
     }
 
     /**
@@ -432,7 +497,14 @@ export class WorkflowMediaService {
             // 5. Delete storage file only if this media is now a true orphan
             if (isOrphan && mediaRec?.url) {
                 await this.storageService.deleteByUrl(mediaRec.url).catch((storageErr) => {
-                    logger.warn({ mediaId, url: mediaRec.url, message: storageErr.message }, "deleteMedia: storage delete notice");
+                    logger.warn(
+                        {
+                            mediaId,
+                            storagePath: sanitizeStoragePath(mediaRec.url),
+                            message: storageErr.message,
+                        },
+                        "deleteMedia: storage delete notice"
+                    );
                 });
             }
 
@@ -540,6 +612,25 @@ export class WorkflowMediaService {
 
         return false;
     }
+}
+
+/**
+ * Strips query parameters, hash fragments, and host origins from a storage URL
+ * so that signed tokens (`?token=...`) are never leaked in logs or dry-run reports.
+ */
+export function sanitizeStoragePath(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== "string") return "";
+    const trimmed = rawUrl.trim();
+    if (!trimmed) return "";
+    try {
+        if (/^https?:\/\//i.test(trimmed)) {
+            const parsed = new URL(trimmed);
+            return parsed.pathname || "";
+        }
+    } catch {
+        // Fallback to query/hash stripping below
+    }
+    return trimmed.split(/[?#]/)[0];
 }
 
 export default WorkflowMediaService;

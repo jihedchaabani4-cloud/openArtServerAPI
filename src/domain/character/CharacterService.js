@@ -455,7 +455,8 @@ export class CharacterService {
         const targetWfId = wf?.id || existingChar?.workflow_id || characterId;
 
         return await this.generationService.enqueueSheetGeneration({
-            characterId: targetWfId,
+            characterId,
+            workflowId: targetWfId,
             prompt: effectivePrompt,
             references: sanitizedReferences,
             projectId: targetProjectId,

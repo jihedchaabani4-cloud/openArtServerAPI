@@ -8,6 +8,7 @@ import { executeOrchestration } from "../v2/runner/workflowRunner.js";
 import { bootstrapV2 } from "../v2/bootstrap.js";
 import { wrapWorkerJob } from "../infrastructure/logging/workerLogger.js";
 import { createLogger, LogEvents } from "../infrastructure/logging/index.js";
+import { failWorkflowPendingMedia } from "../platform/media/MediaLifecycleService.js";
 
 const workerLogger = createLogger("worker");
 
@@ -100,7 +101,6 @@ export async function handleUseCaseWorkerFailure(job, err) {
 
   const billingHoldId = job?.data?.billingHoldId || job?.data?.input?.billing_hold_id;
   const workflowId    = job?.data?.input?.workflow_id || job?.data?.serverContext?.workflowId || job?.data?.input?.serverWorkflowId;
-  const directMediaId = job?.data?.serverContext?.mediaIds?.[0] || job?.data?.input?.serverMediaIds?.[0] || job?.data?.input?.media_id;
 
   // 1. Rollback credits (idempotent: safe to run multiple times without duplicate refunds)
   if (billingHoldId) {
@@ -115,24 +115,28 @@ export async function handleUseCaseWorkerFailure(job, err) {
     });
   }
 
-  // 2. Update media status → "failed"
-  if (directMediaId && db?.media) {
-    await db.media.updateMedia(directMediaId, {
-      status: "failed",
-      error_message: "Generation failed unexpectedly. Your credits have been refunded.",
-    }).catch(() => {});
+  // 2. Mark ALL direct media for the job and all workflow pending media as failed
+  const failMessage = "Generation failed unexpectedly. Your credits have been refunded.";
+
+  const directMediaIds = [
+    ...(Array.isArray(job?.data?.serverContext?.mediaIds) ? job.data.serverContext.mediaIds : []),
+    ...(Array.isArray(job?.data?.input?.serverMediaIds) ? job.data.input.serverMediaIds : []),
+    ...(job?.data?.input?.media_id ? [job.data.input.media_id] : []),
+  ].filter(Boolean);
+
+  const uniqueDirectMediaIds = [...new Set(directMediaIds)];
+
+  if (db?.media) {
+    for (const mediaId of uniqueDirectMediaIds) {
+      await db.media.updateMedia(mediaId, {
+        status: "failed",
+        error_message: failMessage,
+      }).catch(() => {});
+    }
   }
 
   if (workflowId && db?.media) {
-    await db.media.findByWorkflow(workflowId).then((list) => {
-      const pending = list?.find((m) => m.status === "processing" || m.status === "pending");
-      if (pending?.id && pending.id !== directMediaId) {
-        return db.media.updateMedia(pending.id, {
-          status: "failed",
-          error_message: "Generation failed unexpectedly. Your credits have been refunded.",
-        });
-      }
-    }).catch((dbErr) => {
+    await failWorkflowPendingMedia(db, workflowId, failMessage).catch((dbErr) => {
       workerLogger.error(
         { jobId: job?.id, workflowId, err: dbErr.message },
         `[Worker] Media status update failed for workflow ${workflowId} — manual review required.`

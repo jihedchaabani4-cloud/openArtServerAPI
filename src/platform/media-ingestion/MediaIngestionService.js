@@ -411,7 +411,7 @@ export class MediaIngestionService {
             const effectiveRole =
                 purpose === "character_detail" ? "detail" :
                 purpose === "character_sheet" ? "sheet" :
-                purpose === "element_sheet" ? "sheet" :
+                purpose === "element_sheet" ? "detail" :
                 purpose === "element_reference" ? "detail" :
                 "original";
 

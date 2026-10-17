@@ -11,10 +11,6 @@ import { createWorkflowWithMediaAtomic } from "../../src/db/workflowMediaOps.js"
 import { failWorkflowPendingMedia } from "../../src/platform/media/MediaLifecycleService.js";
 import { supabase } from "../../lib/supabase.js";
 import { setDb } from "../../src/platform/security/ownership.js";
-import {
-  setFallbackWorkflowMediaRepo,
-  resetFallbackWorkflowMediaRepo,
-} from "../../src/db/workflowMediaLinker.js";
 import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
 
 describe("Sheet Generation real service layer tests — workflow_media integrity", () => {
@@ -27,7 +23,6 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
   afterEach(() => {
     supabase.rpc = originalRpc;
     setDb(null);
-    resetFallbackWorkflowMediaRepo();
   });
 
   it("1. Character Sheet Generation path: links workflow_media on success and fails closed on link error", async () => {
@@ -132,7 +127,8 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
     await assert.rejects(
       async () => {
         await failingCharGenService.enqueueSheetGeneration({
-          characterId: "char-wf-fail-1",
+          characterId: "char-1",
+          workflowId: "char-wf-fail-1",
           prompt: "Epic rogue",
           projectId: "proj-100",
           userId: "user-100",
@@ -142,12 +138,53 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
       /Simulated foreign key constraint violation|Failed to link/
     );
 
-    // Verify no orphaned media remains in "processing" status without a link
+    // C. Fail-closed on linkMedia returning null:
+    // createMediaInWorkflow must NOT mask null with a synthetic object.
+    let enqueueCallCount = 0;
+    const trackedUseCaseService = {
+      prepareAndEnqueue: async ({ executionId }) => {
+        enqueueCallCount++;
+        return { executionId, workflowRunId: executionId };
+      },
+    };
+
+    const nullLinkDb = {
+      ...realDb,
+      workflowMedia: {
+        linkMedia: async () => null,
+      },
+    };
+
+    const nullLinkCharGenService = new CharacterGenerationService({
+      db: nullLinkDb,
+      useCaseService: trackedUseCaseService,
+    });
+
+    await assert.rejects(
+      async () => {
+        await nullLinkCharGenService.enqueueSheetGeneration({
+          characterId: "char-null-1",
+          workflowId: "char-wf-null-1",
+          prompt: "Epic wizard",
+          projectId: "proj-100",
+          userId: "user-100",
+          name: "Wizard",
+        });
+      },
+      /Failed to link placeholder media/
+    );
+
+    assert.equal(enqueueCallCount, 0, "Job must NOT be enqueued into BullMQ when link returns null");
+
+    // Verify placeholder media was marked failed and never remained in processing
     const allMedia = Array.from(mediaTable.values());
     const orphanedProcessing = allMedia.filter(
       (m) => m.status === "processing" && !workflowMediaTable.some((wm) => wm.media_id === m.id)
     );
     assert.equal(orphanedProcessing.length, 0, "No media should remain in 'processing' without a workflow_media link");
+
+    const failedPlaceholder = allMedia.find((m) => m.step_id === "character_sheet" && m.status === "failed");
+    assert.ok(failedPlaceholder, "Failed placeholder media must be marked with status 'failed'");
   });
 
   it("2. createWorkflowWithMediaAtomic path: links workflow_media when RPC returns and allows failWorkflowPendingMedia cleanup", async () => {
@@ -284,42 +321,22 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
         },
         resolveRecord: async (id) => elementTable.get(id) || { id, workflow_id: id },
       },
-    };
-
-    // Spy on workflow_media links via the fallback workflowMedia repository
-    setFallbackWorkflowMediaRepo({
-      linkMedia: async ({ workflowId, mediaId, role, stepId }) => {
-        const link = {
-          workflow_id: workflowId,
-          media_id: mediaId,
-          role: role || (stepId === "element_sheet" ? "detail" : "detail"),
-        };
-        workflowMediaTable.push(link);
-        return link;
+      workflowMedia: {
+        linkMedia: async ({ workflowId, mediaId, role, stepId }) => {
+          const link = {
+            workflow_id: workflowId,
+            media_id: mediaId,
+            role: role || (stepId === "element_sheet" ? "detail" : "detail"),
+          };
+          workflowMediaTable.push(link);
+          return link;
+        },
       },
-    });
+    };
 
     const elementMediaService = new ElementMediaService({
       db: dbWithoutWorkflowMedia,
       storageService: {},
-      mediaIngestionService: {
-        ingest: async ({ workflowId, stepId, source }) => {
-          const media = await dbWithoutWorkflowMedia.media.createMedia({
-            project_id: "proj-1",
-            step_id: stepId,
-            url: typeof source === "string" ? source : "https://cdn.example.com/element.png",
-            status: "success",
-          });
-          const { createMediaInWorkflow } = await import("../../src/db/workflowMediaLinker.js");
-          await createMediaInWorkflow(dbWithoutWorkflowMedia, {
-            workflowId,
-            mediaId: media.id,
-            stepId,
-            workflowType: "ELEMENT_SHEET",
-          });
-          return { media, url: media.url };
-        },
-      },
     });
 
     const elementService = new ElementService({
@@ -328,24 +345,20 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
       analysisService: { analyzeElement: async () => ({}) },
     });
 
-    try {
-      const created = await elementService.createElement({
-        name: "Magic Sword",
-        sourceImages: ["https://cdn.example.com/sword-sheet.png"],
-        projectId: "proj-1",
-        userId: "user-1",
-        element_type: "object",
-      });
+    const created = await elementService.createElement({
+      name: "Magic Sword",
+      sourceImages: ["https://cdn.example.com/sword-sheet.png"],
+      projectId: "proj-1",
+      userId: "user-1",
+      element_type: "object",
+    });
 
-      assert.ok(created.element, "Element must be created");
-      assert.ok(created.element.primary_media_id, "primary_media_id must be set");
+    assert.ok(created.element, "Element must be created");
+    assert.ok(created.element.primary_media_id, "primary_media_id must be set");
 
-      const links = workflowMediaTable.filter((wm) => wm.media_id === created.element.primary_media_id);
-      assert.equal(links.length, 1, "Element sheet media must have a link in workflow_media");
-      assert.equal(links[0].role, "detail", "Element sheet role in workflow_media must be 'detail'");
-    } finally {
-      resetFallbackWorkflowMediaRepo();
-    }
+    const links = workflowMediaTable.filter((wm) => wm.media_id === created.element.primary_media_id);
+    assert.equal(links.length, 1, "Element sheet media must have a link in workflow_media");
+    assert.equal(links[0].role, "detail", "Element sheet role in workflow_media must be 'detail'");
   });
 
   it("4. WorkflowMediaRepository production fail-closed: throws if in-memory mode attempted outside test or if DB client not wired", async () => {
@@ -399,21 +412,121 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
     mediaTable.set(targetMediaId, { id: targetMediaId, status: "processing" });
 
     const origRollbackPreparedBilling = useCaseService.rollbackPreparedBilling;
-    const origDbMedia = db.media;
+    const { WalletService } = await import("../../src/platform/billing/WalletService.js");
 
-    // Simulate real WalletService idempotent rollback behavior:
-    // If the hold was already rolled back (status === "FAILED"), subsequent calls are no-ops
-    let holdStatus = "PENDING";
-    useCaseService.rollbackPreparedBilling = async (holdId, meta) => {
-      if (holdStatus === "FAILED") {
-        // Idempotent: already refunded, do not double refund
-        return { status: "FAILED", holdId, alreadyRefunded: true };
-      }
-      holdStatus = "FAILED";
-      actualRefundCount++;
-      return { status: "FAILED", holdId, alreadyRefunded: false };
+    // Part A: Real WalletService rollbackFallback and rollbackHoldIdempotent tests
+    const walletsTable = new Map();
+    const transactionsTable = new Map();
+
+    const mockSupabase = {
+      from: (tableName) => {
+        if (tableName === "wallets") {
+          return {
+            select: () => ({
+              eq: (col, val) => ({
+                single: async () => {
+                  const row = walletsTable.get(val);
+                  return row ? { data: { ...row }, error: null } : { data: null, error: { message: "Wallet not found" } };
+                },
+                maybeSingle: async () => {
+                  const row = walletsTable.get(val);
+                  return { data: row ? { ...row } : null, error: null };
+                },
+              }),
+            }),
+            update: (patch) => ({
+              eq: async (col, val) => {
+                const existing = walletsTable.get(val);
+                if (existing) {
+                  const updated = { ...existing, ...patch };
+                  walletsTable.set(val, updated);
+                  return { data: updated, error: null };
+                }
+                return { data: null, error: { message: "Wallet not found" } };
+              },
+            }),
+          };
+        }
+
+        if (tableName === "transactions") {
+          return {
+            select: (cols) => ({
+              eq: (col, val) => ({
+                maybeSingle: async () => {
+                  for (const tx of transactionsTable.values()) {
+                    if (tx[col] === val) return { data: { ...tx }, error: null };
+                  }
+                  return { data: null, error: null };
+                },
+                single: async () => {
+                  for (const tx of transactionsTable.values()) {
+                    if (tx[col] === val) return { data: { ...tx }, error: null };
+                  }
+                  return { data: null, error: { message: "Not found" } };
+                },
+              }),
+            }),
+            update: (patch) => ({
+              eq: (col1, val1) => ({
+                eq: (col2, val2) => ({
+                  select: () => ({
+                    single: async () => {
+                      const tx = transactionsTable.get(val1);
+                      // Atomic optimistic lock: col2 ("status") must equal val2 ("PENDING")
+                      if (tx && tx[col2] === val2) {
+                        const updated = { ...tx, ...patch };
+                        transactionsTable.set(val1, updated);
+                        return { data: updated, error: null };
+                      }
+                      return { data: null, error: { message: "Conflict or already modified" } };
+                    },
+                  }),
+                }),
+              }),
+            }),
+          };
+        }
+
+        throw new Error(`Unexpected table: ${tableName}`);
+      },
+      rpc: async () => ({ data: null, error: { message: "RPC not found in test mode", code: "PGRST202" } }),
     };
 
+    const walletService = new WalletService("https://placeholder.supabase.co", "placeholder-key");
+    walletService.supabase = mockSupabase;
+    const walletId = "wallet-real-test-1";
+    const refId = "hold-ref-real-1";
+    walletsTable.set(walletId, { id: walletId, user_id: "user-1", balance: 50 });
+    transactionsTable.set("tx-1", {
+      id: "tx-1",
+      wallet_id: walletId,
+      reference_id: refId,
+      amount: 10,
+      status: "PENDING",
+      type: "HOLD",
+    });
+
+    // 1. Initial rollback: refunds 10 credits and updates status to FAILED
+    const res1 = await walletService.rollbackFallback(refId);
+    assert.equal(res1.status, "FAILED", "Status must be updated to FAILED");
+    assert.equal(walletsTable.get(walletId).balance, 60, "Balance must increase from 50 to 60");
+
+    // 2. Second rollback (retry / crash then timeout): must be idempotent no-op
+    const res2 = await walletService.rollbackFallback(refId);
+    assert.equal(res2.status, "FAILED", "Status remains FAILED");
+    assert.equal(walletsTable.get(walletId).balance, 60, "Balance must remain 60 without duplicate credit");
+
+    // 3. rollbackHoldIdempotent: safe across retries
+    const res3 = await walletService.rollbackHoldIdempotent(refId);
+    assert.equal(res3.status, "FAILED");
+    assert.equal(walletsTable.get(walletId).balance, 60, "Balance remains 60");
+
+    // Part B: Worker crash handler failure recovery marks ALL direct media failed
+    const targetMediaId2 = "media-crash-idem-2";
+    mediaTable.set(targetMediaId, { id: targetMediaId, status: "processing" });
+    mediaTable.set(targetMediaId2, { id: targetMediaId2, status: "processing" });
+
+    const origDbMedia = db.media;
     db.media = {
       updateMedia: async (id, patch) => {
         const existing = mediaTable.get(id) || { id };
@@ -421,38 +534,25 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
         mediaTable.set(id, updated);
         return updated;
       },
-      findByWorkflow: async () => [], // Simulates unlinked media (empty relation)
+      findByWorkflow: async () => [],
     };
 
-    const mockJob = {
-      id: "job-crash-101",
+    const mockMultiMediaJob = {
+      id: "job-crash-multi-1",
       data: {
-        billingHoldId: "hold-idem-test-1",
-        input: {
-          workflow_id: "wf-crash-101",
-          media_id: targetMediaId,
-        },
+        billingHoldId: refId,
         serverContext: {
-          workflowId: "wf-crash-101",
-          mediaIds: [targetMediaId],
+          workflowId: "wf-crash-multi-1",
+          mediaIds: [targetMediaId, targetMediaId2],
         },
       },
     };
 
     try {
-      // First crash invocation (e.g. unhandled crash in worker)
-      await handleUseCaseWorkerFailure(mockJob, new Error("Simulated unhandled worker crash"));
-
-      assert.equal(actualRefundCount, 1, "Credits must be refunded on initial crash");
-      assert.equal(mediaTable.get(targetMediaId).status, "failed", "Direct media must be marked failed");
-
-      // Second crash invocation (e.g. retry failure or reservation reaper timeout)
-      await handleUseCaseWorkerFailure(mockJob, new Error("Simulated retry failure / timeout"));
-
-      assert.equal(actualRefundCount, 1, "Credits must NOT be refunded a second time (idempotent)");
-      assert.equal(mediaTable.get(targetMediaId).status, "failed", "Direct media remains failed");
+      await handleUseCaseWorkerFailure(mockMultiMediaJob, new Error("Crash"));
+      assert.equal(mediaTable.get(targetMediaId).status, "failed", "First media must be marked failed");
+      assert.equal(mediaTable.get(targetMediaId2).status, "failed", "ALL media in mediaIds must be marked failed");
     } finally {
-      useCaseService.rollbackPreparedBilling = origRollbackPreparedBilling;
       db.media = origDbMedia;
       await useCaseWorker?.close?.().catch(() => {});
       await redisConnection?.quit().catch(() => redisConnection?.disconnect());

@@ -6,10 +6,47 @@
  *
  * Safety:
  *   100% READ-ONLY. Never modifies or deletes any database record.
+ *   Paginates PostgREST requests in batches of 1000 to avoid truncation.
  */
 
 import "dotenv/config";
 import { supabaseAdmin, supabase } from "../lib/supabase.js";
+
+const PAGE_SIZE = 1000;
+
+async function fetchAll(client, table, columns, orderBy = null) {
+  const rows = [];
+  let from = 0;
+
+  while (true) {
+    let query = client
+      .from(table)
+      .select(columns)
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (orderBy) {
+      query = query.order(orderBy, { ascending: false });
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      throw new Error(`Failed to query ${table} [range ${from}..${from + PAGE_SIZE - 1}]: ${error.message}`);
+    }
+
+    if (!data || data.length === 0) {
+      break;
+    }
+
+    rows.push(...data);
+    if (data.length < PAGE_SIZE) {
+      break;
+    }
+
+    from += PAGE_SIZE;
+  }
+
+  return rows;
+}
 
 async function runCheck() {
   const client = supabaseAdmin || supabase;
@@ -20,31 +57,25 @@ async function runCheck() {
 
   console.log("Checking database integrity: media rows without workflow_media link...\n");
 
-  // 1. Fetch all media rows
-  const { data: mediaRows, error: mediaErr } = await client
-    .from("media")
-    .select("id, project_id, step_id, status, url, create_time")
-    .order("create_time", { ascending: false });
+  // 1. Fetch all media rows (paginated)
+  const mediaRows = await fetchAll(
+    client,
+    "media",
+    "id, project_id, step_id, status, url, create_time",
+    "create_time"
+  );
 
-  if (mediaErr) {
-    console.error("Failed to query media table:", mediaErr.message);
-    process.exit(1);
-  }
+  // 2. Fetch all workflow_media links (paginated)
+  const wmRows = await fetchAll(
+    client,
+    "workflow_media",
+    "workflow_id, media_id, role"
+  );
 
-  // 2. Fetch all workflow_media links
-  const { data: wmRows, error: wmErr } = await client
-    .from("workflow_media")
-    .select("workflow_id, media_id, role");
-
-  if (wmErr) {
-    console.error("Failed to query workflow_media table:", wmErr.message);
-    process.exit(1);
-  }
-
-  const linkedMediaIds = new Set((wmRows || []).map((r) => r.media_id));
+  const linkedMediaIds = new Set(wmRows.map((r) => r.media_id));
 
   // 3. Find unlinked rows
-  const unlinked = (mediaRows || []).filter((m) => !linkedMediaIds.has(m.id));
+  const unlinked = mediaRows.filter((m) => !linkedMediaIds.has(m.id));
 
   if (unlinked.length === 0) {
     console.log("✅ INTEGRITY CHECK PASSED: 0 unlinked media rows found.");

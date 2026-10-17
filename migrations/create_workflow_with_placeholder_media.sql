@@ -64,21 +64,6 @@ BEGIN
     SET primary_media_id = v_media_id
     WHERE id = v_workflow_id;
 
-    -- 3.1. Link in public.workflow_media table (canonical relation)
-    INSERT INTO workflow_media (workflow_id, media_id, role)
-    VALUES (
-        v_workflow_id,
-        v_media_id,
-        CASE
-            WHEN p_step_id = 'character_sheet' THEN 'sheet'
-            WHEN p_step_id = 'character_detail' THEN 'detail'
-            WHEN p_step_id IN ('element_sheet', 'element_reference') THEN 'detail'
-            WHEN p_step_id = 'upload' THEN 'original'
-            ELSE 'output'
-        END
-    )
-    ON CONFLICT (workflow_id, media_id, role) DO NOTHING;
-
     -- 4. Return both IDs to the caller
     RETURN jsonb_build_object(
         'workflow_id', v_workflow_id,

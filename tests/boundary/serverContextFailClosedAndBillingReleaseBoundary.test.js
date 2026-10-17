@@ -581,7 +581,9 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
 
       db.workflowMedia = {
         linkMedia: async ({ workflowId, mediaId, role }) => {
-          dbRelationRows.push({ workflow_id: workflowId, media_id: mediaId, role });
+          const row = { workflow_id: workflowId, media_id: mediaId, role };
+          dbRelationRows.push(row);
+          return row;
         },
       };
 
@@ -701,7 +703,9 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
 
       db.workflowMedia = {
         linkMedia: async ({ workflowId, mediaId, role }) => {
-          dbRelationRows.push({ workflow_id: workflowId, media_id: mediaId, role });
+          const row = { workflow_id: workflowId, media_id: mediaId, role };
+          dbRelationRows.push(row);
+          return row;
         },
       };
 

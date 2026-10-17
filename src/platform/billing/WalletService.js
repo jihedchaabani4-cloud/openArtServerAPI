@@ -324,6 +324,29 @@ export class WalletService {
   }
 
   /**
+   * Safe when BullMQ retries, crashes, or times out: if the hold was already rolled back, this is a no-op.
+   */
+  async rollbackHoldIdempotent(referenceId, extraMetadata = null) {
+    if (!referenceId) return;
+    try {
+      return await this.rollback(referenceId, extraMetadata);
+    } catch (err) {
+      const { data: tx } = await this.supabase
+        .from("transactions")
+        .select("status")
+        .eq("reference_id", referenceId)
+        .maybeSingle();
+      if (tx?.status === "FAILED") {
+        if (extraMetadata && typeof extraMetadata === "object") {
+          await this._mergeTransactionMetadata(referenceId, extraMetadata).catch(() => {});
+        }
+        return { status: "FAILED", reference_id: referenceId };
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Extends the TTL of an active PENDING reservation (heartbeat).
    *
    * @param {string} referenceId - The hold reference ID

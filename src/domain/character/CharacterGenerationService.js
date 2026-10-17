@@ -46,16 +46,17 @@ export class CharacterGenerationService {
      * Prepare input, reserve credits, and dispatch background UseCase job
      * for generating the 3-view turnaround sheet.
      */
-    async enqueueSheetGeneration({ characterId, prompt, references = [], projectId, userId, name }) {
+    async enqueueSheetGeneration({ characterId, workflowId, prompt, references = [], projectId, userId, name }) {
         const traceId = randomUUID();
         const start = Date.now();
+        const resolvedWorkflowId = workflowId || characterId;
 
-        crudOperationLog({ traceId, operation: "enqueueSheetGeneration", characterId });
+        crudOperationLog({ traceId, operation: "enqueueSheetGeneration", characterId, workflowId: resolvedWorkflowId });
 
         let placeholderMedia = null;
         try {
-            if (!characterId) {
-                throw new CrudServiceError("characterId is required", {
+            if (!characterId && !workflowId) {
+                throw new CrudServiceError("characterId or workflowId is required", {
                     statusCode: 400,
                     errorCode: "VALIDATION_ERROR",
                     traceId,
@@ -77,14 +78,14 @@ export class CharacterGenerationService {
                     height: 768,
                 });
                 const linkResult = await createMediaInWorkflow(this.db, {
-                    workflowId: characterId,
+                    workflowId: resolvedWorkflowId,
                     mediaId: placeholderMedia?.id,
                     stepId: "character_sheet",
                     workflowType: "CHARACTER",
                     operation: "enqueueSheetGeneration:linkWorkflowMedia",
                 });
                 if (!linkResult) {
-                    throw new Error(`Failed to link placeholder media ${placeholderMedia?.id} to workflow ${characterId}`);
+                    throw new Error(`Failed to link placeholder media ${placeholderMedia?.id} to workflow ${resolvedWorkflowId}`);
                 }
             } catch (mediaErr) {
                 if (placeholderMedia?.id && this.db?.media) {
@@ -98,6 +99,7 @@ export class CharacterGenerationService {
                     operation: "enqueueSheetGeneration:placeholderMedia",
                     status: "error",
                     characterId,
+                    workflowId: resolvedWorkflowId,
                     message: mediaErr.message,
                 });
                 throw mediaErr;
@@ -109,9 +111,9 @@ export class CharacterGenerationService {
             // 2. Prepare Direct UseCase Runtime Input with verified server-side targets
             const runtimeInput = {
                 project_id: projectId,
-                workflow_id: characterId,
+                workflow_id: resolvedWorkflowId,
                 media_id: mediaId,
-                serverWorkflowId: characterId,
+                serverWorkflowId: resolvedWorkflowId,
                 serverMediaIds,
                 serverProjectId: projectId,
                 prompt: charPrompt,

@@ -1,29 +1,18 @@
 import { crudOperationLog } from "../utils/crudOperationLog.js";
 import { WorkflowMediaRepository } from "./WorkflowMediaRepository.js";
 
-let fallbackRepo = null;
+let defaultRepo = null;
 
-export function setFallbackWorkflowMediaRepo(repo) {
-    fallbackRepo = repo;
-}
-
-export function resetFallbackWorkflowMediaRepo() {
-    fallbackRepo = null;
-}
-
-export function getFallbackWorkflowMediaRepo() {
-    if (!fallbackRepo) {
-        fallbackRepo = new WorkflowMediaRepository();
+function getDefaultRepo() {
+    if (!defaultRepo) {
+        defaultRepo = new WorkflowMediaRepository();
     }
-    return fallbackRepo;
+    return defaultRepo;
 }
 
 async function resolveWorkflowMediaRepo(db) {
     if (db?.workflowMedia?.linkMedia) {
         return db.workflowMedia;
-    }
-    if (fallbackRepo) {
-        return fallbackRepo;
     }
     try {
         const container = await import("../container.js");
@@ -33,7 +22,7 @@ async function resolveWorkflowMediaRepo(db) {
     } catch {
         // Ignore container load failures in isolated environments
     }
-    return getFallbackWorkflowMediaRepo();
+    return getDefaultRepo();
 }
 
 /**
@@ -105,11 +94,7 @@ export async function createMediaInWorkflow(firstArg, secondArg, thirdArg, fourt
             ...(resolvedStepId ? { stepId: resolvedStepId } : {}),
             ...(workflowType || workflow_type ? { workflowType: workflowType || workflow_type } : {}),
         });
-        return res || {
-            workflow_id: resolvedWorkflowId,
-            media_id: resolvedMediaId,
-            role: role || "output",
-        };
+        return res || null;
     } catch (err) {
         crudOperationLog({
             operation,

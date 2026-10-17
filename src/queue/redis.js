@@ -20,8 +20,8 @@ const BASE_OPTIONS = {
   enableReadyCheck:     false,
   lazyConnect:          isTestEnv,
   enableOfflineQueue:   true,   // Allows ioredis to buffer commands during Upstash TCP reconnect
-  keepAlive:            isTestEnv ? 0 : 10_000, // Send TCP keep-alive packets to prevent Upstash idle disconnect
-  pingInterval:         isTestEnv ? 0 : 15_000, // Heartbeat PING every 15s to keep socket warm
+  keepAlive:            10_000, // Send TCP keep-alive packets to prevent Upstash idle disconnect
+  pingInterval:         15_000, // Heartbeat PING every 15s to keep socket warm
   connectTimeout:       10_000,
   retryStrategy(times) {
     // Stop retrying after max attempts — prevents quota drain on Upstash plan limits

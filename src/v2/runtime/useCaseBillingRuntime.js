@@ -127,6 +127,8 @@ export class UseCaseBillingRuntime {
     let result;
     if (this.billingGateway) {
       result = await this.billingGateway.rollback(reservationOrRef);
+    } else if (typeof this.walletService?.rollbackHoldIdempotent === "function") {
+      result = await this.walletService.rollbackHoldIdempotent(referenceId, extraMetadata);
     } else if (typeof this.walletService?.rollback === "function") {
       result = await this.walletService.rollback(referenceId, extraMetadata);
     } else if (typeof this.walletService?.release === "function") {

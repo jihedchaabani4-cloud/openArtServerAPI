@@ -408,11 +408,20 @@ export class MediaIngestionService {
                 purpose === "element_reference" ? "element_reference" :
                 "upload"
             );
+            const effectiveRole =
+                purpose === "character_detail" ? "detail" :
+                purpose === "character_sheet" ? "sheet" :
+                purpose === "element_sheet" ? "sheet" :
+                purpose === "element_reference" ? "detail" :
+                "original";
+
             const mediaRecord = await this.mediaService.createMedia({
                 workflowId: targetWorkflowId,
                 projectId: targetProjectId,
                 generationConfigId: null,
                 stepId: effectiveStepId,
+                role: effectiveRole,
+                workflowType: containerWf ? "UPLOAD" : undefined,
                 url: publicUrl,
                 width: finalWidth,
                 height: finalHeight,

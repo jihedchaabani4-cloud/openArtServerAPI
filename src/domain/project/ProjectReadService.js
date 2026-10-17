@@ -201,6 +201,11 @@ export class ProjectReadService {
         });
 
         const workflowMap = new Map((workflows || []).map((w) => [w.id, w]));
+        const workflowsByPrimaryMediaId = new Map(
+            (workflows || [])
+                .filter((w) => w?.primary_media_id)
+                .map((w) => [w.primary_media_id, w])
+        );
         const workflowMediaRelationByMediaId = new Map();
 
         const relationsByMediaId = new Map();
@@ -236,8 +241,17 @@ export class ProjectReadService {
             const isVideo = m.url && /\.(mp4|webm|mov)$/i.test(m.url);
             const mRelations = relationsByMediaId.get(m.id) || [];
             const primaryRelation = mRelations[0] || null;
-            const mediaWorkflowId = primaryRelation?.workflow_id || null;
-            const mediaRole = primaryRelation?.role || null;
+            let mediaWorkflowId = primaryRelation?.workflow_id || null;
+            let mediaRole = primaryRelation?.role || null;
+
+            if (!mediaWorkflowId) {
+                const owningWf = workflowsByPrimaryMediaId.get(m.id);
+                if (owningWf) {
+                    mediaWorkflowId = owningWf.id;
+                    mediaRole = owningWf.workflow_type === "UPLOAD" ? "original" : "output";
+                }
+            }
+
             const wf = workflowMap.get(mediaWorkflowId);
             const isUpload = !m.generation_config_id ||
                              wf?.workflow_type === "UPLOAD" ||
@@ -387,6 +401,24 @@ export class ProjectReadService {
             }
         }
 
+        const mediaByWfId = new Map();
+        for (const item of formattedMedia) {
+            const wId = item.workflowId || item.workflow_id;
+            if (wId) {
+                if (!mediaByWfId.has(wId)) mediaByWfId.set(wId, []);
+                mediaByWfId.get(wId).push(item);
+            }
+        }
+
+        const workflowsWithItems = formattedWorkflows.map((wf) => {
+            const items = mediaByWfId.get(wf.id) || [];
+            return {
+                ...wf,
+                items,
+                media: items,
+            };
+        });
+
         crudOperationLog({
             operation,
             status: "ok",
@@ -400,7 +432,7 @@ export class ProjectReadService {
             projectName,
             projectId,
             sessions: formattedSessions,
-            workflows: formattedWorkflows,
+            workflows: workflowsWithItems,
             media: formattedMedia,
             elements: elementsList,
             characters: charactersList,

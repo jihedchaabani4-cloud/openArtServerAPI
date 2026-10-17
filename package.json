@@ -25,6 +25,7 @@
     },
     "scripts": {
         "test": "node --import ./tests/setup-env.js --test \"tests/**/*.test.js\"",
+        "check:integrity": "node scripts/check-media-integrity.js",
         "models:validate": "node scripts/validate-all-configs.js",
         "start": "node index.js",
         "start:worker": "node src/workers/worker.js",

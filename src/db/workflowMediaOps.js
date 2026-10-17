@@ -113,6 +113,14 @@ export async function createWorkflowWithMediaAtomic(db, { workflowData, mediaDat
             throw error;
         }
 
+        await createMediaInWorkflow(db, {
+            workflowId: data.workflow_id,
+            mediaId: data.media_id,
+            stepId: mediaData?.step_id,
+            workflowType: workflowData?.workflow_type,
+            operation: "createWorkflowWithMediaAtomic:linkWorkflowMedia",
+        });
+
         // RPC returns { workflow_id, media_id } as JSONB
         return {
             workflow: { id: data.workflow_id },

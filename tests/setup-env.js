@@ -24,8 +24,10 @@ process.env.HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || "placeholde
 // Hermetic In-Memory Storage & Run Repository Mocking
 const { supabase, supabaseAdmin } = await import("../lib/supabase.js");
 const { RunRepository } = await import("../src/v2/runner/runRepository.js");
+const { WorkflowMediaRepository } = await import("../src/db/WorkflowMediaRepository.js");
 
 RunRepository.useMemoryFallback = true;
+WorkflowMediaRepository.useMemoryFallback = true;
 
 const inMemoryStorage = new Map();
 const mockStorageBucket = {

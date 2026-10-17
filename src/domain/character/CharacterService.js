@@ -452,8 +452,10 @@ export class CharacterService {
             }).catch(() => null);
         }
 
+        const targetWfId = wf?.id || existingChar?.workflow_id || characterId;
+
         return await this.generationService.enqueueSheetGeneration({
-            characterId,
+            characterId: targetWfId,
             prompt: effectivePrompt,
             references: sanitizedReferences,
             projectId: targetProjectId,

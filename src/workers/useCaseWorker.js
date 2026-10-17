@@ -99,7 +99,8 @@ export async function handleUseCaseWorkerFailure(job, err) {
   );
 
   const billingHoldId = job?.data?.billingHoldId || job?.data?.input?.billing_hold_id;
-  const workflowId    = job?.data?.input?.workflow_id;
+  const workflowId    = job?.data?.input?.workflow_id || job?.data?.serverContext?.workflowId || job?.data?.input?.serverWorkflowId;
+  const directMediaId = job?.data?.serverContext?.mediaIds?.[0] || job?.data?.input?.serverMediaIds?.[0] || job?.data?.input?.media_id;
 
   // 1. Rollback credits (idempotent: safe to run multiple times without duplicate refunds)
   if (billingHoldId) {
@@ -115,10 +116,17 @@ export async function handleUseCaseWorkerFailure(job, err) {
   }
 
   // 2. Update media status → "failed"
+  if (directMediaId && db?.media) {
+    await db.media.updateMedia(directMediaId, {
+      status: "failed",
+      error_message: "Generation failed unexpectedly. Your credits have been refunded.",
+    }).catch(() => {});
+  }
+
   if (workflowId && db?.media) {
     await db.media.findByWorkflow(workflowId).then((list) => {
       const pending = list?.find((m) => m.status === "processing" || m.status === "pending");
-      if (pending?.id) {
+      if (pending?.id && pending.id !== directMediaId) {
         return db.media.updateMedia(pending.id, {
           status: "failed",
           error_message: "Generation failed unexpectedly. Your credits have been refunded.",

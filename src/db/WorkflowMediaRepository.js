@@ -1,9 +1,27 @@
 import { BaseRepository } from "./BaseRepository.js";
 import { inferWorkflowMediaRole } from "./workflowMediaRole.js";
 
+const memoryWorkflowMedia = [];
+
 export class WorkflowMediaRepository extends BaseRepository {
+    static useMemoryFallback = false;
+
+    static clearMemory() {
+        memoryWorkflowMedia.length = 0;
+    }
+
     constructor() {
         super("workflow_media");
+    }
+
+    _isMemoryMode() {
+        if (process.env.NODE_ENV !== "test") {
+            if (WorkflowMediaRepository.useMemoryFallback) {
+                throw new Error("In-memory fallback is prohibited outside NODE_ENV=test");
+            }
+            return false;
+        }
+        return Boolean(WorkflowMediaRepository.useMemoryFallback);
     }
 
     /**
@@ -16,6 +34,25 @@ export class WorkflowMediaRepository extends BaseRepository {
         if (!resolvedWorkflowId || !resolvedMediaId) return null;
 
         const resolvedRole = inferWorkflowMediaRole({ role, stepId, step_id, workflowType, workflow_type });
+
+        if (this._isMemoryMode()) {
+            const idx = memoryWorkflowMedia.findIndex(
+                (m) => m.workflow_id === resolvedWorkflowId && m.media_id === resolvedMediaId && m.role === resolvedRole
+            );
+            const row = {
+                workflow_id: resolvedWorkflowId,
+                media_id: resolvedMediaId,
+                role: resolvedRole,
+                created_at: new Date().toISOString(),
+            };
+            if (idx >= 0) {
+                memoryWorkflowMedia[idx] = row;
+            } else {
+                memoryWorkflowMedia.push(row);
+            }
+            return row;
+        }
+
         const { data, error } = await this.client()
             .from(this.tableName)
             .upsert({
@@ -45,6 +82,18 @@ export class WorkflowMediaRepository extends BaseRepository {
             role: resolvedRole,
         }));
 
+        if (this._isMemoryMode()) {
+            return rows.map((r) => {
+                const idx = memoryWorkflowMedia.findIndex(
+                    (m) => m.workflow_id === r.workflow_id && m.media_id === r.media_id && m.role === r.role
+                );
+                const row = { ...r, created_at: new Date().toISOString() };
+                if (idx >= 0) memoryWorkflowMedia[idx] = row;
+                else memoryWorkflowMedia.push(row);
+                return row;
+            });
+        }
+
         const { data, error } = await this.client()
             .from(this.tableName)
             .upsert(rows, { onConflict: "workflow_id,media_id,role" })
@@ -55,6 +104,17 @@ export class WorkflowMediaRepository extends BaseRepository {
 
     async findByWorkflow(workflowId) {
         if (!workflowId) return [];
+        if (this._isMemoryMode()) {
+            return memoryWorkflowMedia
+                .filter((m) => m.workflow_id === workflowId)
+                .map((row) => ({
+                    workflow_id: row.workflow_id,
+                    workflowId: row.workflow_id,
+                    role: row.role,
+                    mediaRole: row.role,
+                    workflow_media_created_at: row.created_at,
+                }));
+        }
         const { data, error } = await this.client()
             .from(this.tableName)
             .select(`

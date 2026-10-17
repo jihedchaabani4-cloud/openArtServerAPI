@@ -76,21 +76,31 @@ export class CharacterGenerationService {
                     width: 1344,
                     height: 768,
                 });
-                await createMediaInWorkflow(this.db, {
+                const linkResult = await createMediaInWorkflow(this.db, {
                     workflowId: characterId,
                     mediaId: placeholderMedia?.id,
                     stepId: "character_sheet",
                     workflowType: "CHARACTER",
                     operation: "enqueueSheetGeneration:linkWorkflowMedia",
                 });
+                if (!linkResult) {
+                    throw new Error(`Failed to link placeholder media ${placeholderMedia?.id} to workflow ${characterId}`);
+                }
             } catch (mediaErr) {
+                if (placeholderMedia?.id && this.db?.media) {
+                    await this.db.media.updateMedia(placeholderMedia.id, {
+                        status: "failed",
+                        error_message: mediaErr.message || "Failed to link workflow media",
+                    }).catch(() => {});
+                }
                 crudOperationLog({
                     traceId,
                     operation: "enqueueSheetGeneration:placeholderMedia",
-                    status: "warning",
+                    status: "error",
                     characterId,
                     message: mediaErr.message,
                 });
+                throw mediaErr;
             }
 
             const mediaId = placeholderMedia?.id || null;

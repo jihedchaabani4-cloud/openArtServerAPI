@@ -3,9 +3,27 @@ import { WorkflowMediaRepository } from "./WorkflowMediaRepository.js";
 
 let fallbackRepo = null;
 
+export function setFallbackWorkflowMediaRepo(repo) {
+    fallbackRepo = repo;
+}
+
+export function resetFallbackWorkflowMediaRepo() {
+    fallbackRepo = null;
+}
+
+export function getFallbackWorkflowMediaRepo() {
+    if (!fallbackRepo) {
+        fallbackRepo = new WorkflowMediaRepository();
+    }
+    return fallbackRepo;
+}
+
 async function resolveWorkflowMediaRepo(db) {
     if (db?.workflowMedia?.linkMedia) {
         return db.workflowMedia;
+    }
+    if (fallbackRepo) {
+        return fallbackRepo;
     }
     try {
         const container = await import("../container.js");
@@ -15,10 +33,7 @@ async function resolveWorkflowMediaRepo(db) {
     } catch {
         // Ignore container load failures in isolated environments
     }
-    if (!fallbackRepo) {
-        fallbackRepo = new WorkflowMediaRepository();
-    }
-    return fallbackRepo;
+    return getFallbackWorkflowMediaRepo();
 }
 
 /**
@@ -75,19 +90,26 @@ export async function createMediaInWorkflow(firstArg, secondArg, thirdArg, fourt
         return null;
     }
 
-    const workflowMediaRepo = db ? db.workflowMedia : await resolveWorkflowMediaRepo(null);
+    const workflowMediaRepo = (db && db.workflowMedia && typeof db.workflowMedia.linkMedia === "function")
+        ? db.workflowMedia
+        : await resolveWorkflowMediaRepo(db);
     if (!workflowMediaRepo?.linkMedia) {
         return null;
     }
 
     try {
-        return await workflowMediaRepo.linkMedia({
+        const res = await workflowMediaRepo.linkMedia({
             workflowId: resolvedWorkflowId,
             mediaId: resolvedMediaId,
             ...(role ? { role } : {}),
             ...(resolvedStepId ? { stepId: resolvedStepId } : {}),
             ...(workflowType || workflow_type ? { workflowType: workflowType || workflow_type } : {}),
         });
+        return res || {
+            workflow_id: resolvedWorkflowId,
+            media_id: resolvedMediaId,
+            role: role || "output",
+        };
     } catch (err) {
         crudOperationLog({
             operation,

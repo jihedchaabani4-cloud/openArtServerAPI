@@ -78,6 +78,7 @@ export class ElementRepository {
     }
 
     async findByWorkflowId(workflowId) {
+        if (!workflowId) return null;
         const { data, error } = await supabase
             .from("element")
             .select("*")
@@ -132,6 +133,7 @@ export class ElementRepository {
      * Resolve by element.id or workflow_id — tries both if the value is a UUID.
      */
     async resolveRecord(idOrWorkflowId) {
+        if (!idOrWorkflowId) return null;
         if (UUID_RE.test(String(idOrWorkflowId))) {
             return (
                 (await this.findById(idOrWorkflowId)) ||

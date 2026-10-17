@@ -16,12 +16,15 @@
 
 import { randomUUID } from "node:crypto";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
+import { createLogger } from "../../infrastructure/logging/index.js";
 import { ElementMediaService } from "./ElementMediaService.js";
 import { ElementAnalysisService } from "./ElementAnalysisService.js";
 import promptBuilderProService from "./promptBuilderProService.js";
 import elementRepository from "../../db/ElementRepository.js";
 import { WorkflowRepository } from "../../db/WorkflowRepository.js";
 import { MediaRepository } from "../../db/MediaRepository.js";
+
+const logger = createLogger("domain:element");
 
 // ─── Default repos (singleton fallbacks) ──────────────────────────────────────
 
@@ -131,7 +134,7 @@ export class ElementService {
             if (this.analysisService && storageUrls.length > 0) {
                 this.analysisService
                     .analyzeElement({ projectId, workflowId: workflow.id, imageUrls: storageUrls, elementName: name.trim(), elementType, userId: safeUserId })
-                    .catch((err) => console.warn("[ElementService] Background vision analysis error:", err.message));
+                    .catch((err) => logger.warn({ message: err.message }, "[ElementService] Background vision analysis error"));
             }
 
             crudOperationLog({ traceId, operation: "createElement:success", status: "ok", durationMs: Date.now() - start, elementId: element.id, workflowId: workflow.id });
@@ -176,7 +179,9 @@ export class ElementService {
 
             const enriched = await Promise.all(
                 elements.map(async (el) => {
-                    const primaryUrl = await this.db.workflows.getPrimaryMediaUrl(el.workflow_id).catch(() => null);
+                    const primaryUrl = el.workflow_id
+                        ? await this.db.workflows.getPrimaryMediaUrl(el.workflow_id).catch(() => null)
+                        : null;
                     return {
                         id:                   el.id,
                         name:                 el.name,
@@ -208,7 +213,9 @@ export class ElementService {
             const element = await this.db.elements.resolveRecord(id);
             if (!element) return null;
 
-            const mediaRecords     = await this.db.media.findByWorkflow(element.workflow_id).catch(() => []);
+            const mediaRecords     = element.workflow_id
+                ? await this.db.media.findByWorkflow(element.workflow_id).catch(() => [])
+                : [];
             const referenceImages  = mediaRecords.map((m) => m.url).filter(Boolean);
 
             crudOperationLog({ traceId, operation: "getElementById", status: "ok", elementId: id });
@@ -240,7 +247,9 @@ export class ElementService {
             }
             if (!element) return null;
 
-            const mediaRecords = await this.db.media.findByWorkflow(element.workflow_id).catch(() => []);
+            const mediaRecords = element.workflow_id
+                ? await this.db.media.findByWorkflow(element.workflow_id).catch(() => [])
+                : [];
 
             return {
                 name:              element.name,
@@ -251,7 +260,7 @@ export class ElementService {
                     : null,
             };
         } catch (err) {
-            console.error("[ElementService] getElementContextForPrompt error:", { nameOrId, projectId, message: err.message });
+            logger.error({ nameOrId, projectId, message: err.message }, "[ElementService] getElementContextForPrompt error");
             return null;
         }
     }
@@ -291,7 +300,7 @@ export class ElementService {
             const cleanName = String(allowedPatch.name).replace(/^@+/, "").trim();
             await this.db.workflows
                 .updateFields(existing.workflow_id, { display_name: cleanName })
-                .catch((err) => console.warn("[ElementService] sync workflow display_name warning:", err.message));
+                .catch((err) => logger.warn({ message: err.message }, "[ElementService] sync workflow display_name warning"));
         }
 
         crudOperationLog({ traceId, operation: "updateElement", status: "ok", durationMs: Date.now() - start, id });
@@ -309,16 +318,18 @@ export class ElementService {
 
         try {
             const element = await this.db.elements.resolveRecord(id);
-            const targetWorkflowId = element?.workflow_id || id;
+            const targetWorkflowId = element ? element.workflow_id : id;
 
             if (element) {
                 await this.db.elements.deleteById(element.id);
             }
 
-            if (this.workflowService) {
-                await this.workflowService.deleteWorkflow({ workflowId: targetWorkflowId, userId });
-            } else {
-                await this.db.workflows.deleteById(targetWorkflowId);
+            if (targetWorkflowId) {
+                if (this.workflowService) {
+                    await this.workflowService.deleteWorkflow({ workflowId: targetWorkflowId, userId });
+                } else {
+                    await this.db.workflows.deleteById(targetWorkflowId);
+                }
             }
 
             crudOperationLog({ traceId, operation: "deleteElement", status: "ok", durationMs: Date.now() - start, id });

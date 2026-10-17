@@ -435,11 +435,23 @@ export class WorkflowMediaService {
                 const remainingMedia = await this.db.media.findByWorkflow(wfId).catch(() => []);
 
                 if (!remainingMedia || remainingMedia.length === 0) {
-                    // Empty workflow: delete workflow container
-                    await this.db.workflows.deleteById(wfId).catch((wfErr) => {
-                        logger.warn({ workflowId: wfId, message: wfErr.message }, "deleteMedia: delete workflow notice");
-                    });
-                    workflowDeleted = true;
+                    const workflowRecord = await this.db.workflows?.findById
+                        ? await this.db.workflows.findById(wfId, "id, primary_media_id, workflow_type").catch(() => null)
+                        : null;
+                    const hasSidecar = await this._hasSidecarEntity(wfId, workflowRecord);
+
+                    if (hasSidecar) {
+                        // Preserve workflow container when a character or element sidecar is attached
+                        if (workflowRecord?.primary_media_id === mediaId && this.db.workflows?.updatePrimaryMedia) {
+                            await this.db.workflows.updatePrimaryMedia(wfId, null).catch(() => null);
+                        }
+                    } else {
+                        // Empty plain workflow: delete workflow container
+                        await this.db.workflows.deleteById(wfId).catch((wfErr) => {
+                            logger.warn({ workflowId: wfId, message: wfErr.message }, "deleteMedia: delete workflow notice");
+                        });
+                        workflowDeleted = true;
+                    }
                 } else {
                     const workflowRecord = await this.db.workflows.findById(wfId, "primary_media_id").catch(() => null);
                     if (workflowRecord?.primary_media_id === mediaId) {
@@ -477,6 +489,42 @@ export class WorkflowMediaService {
             });
             throw err;
         }
+    }
+
+    /**
+     * Checks whether a workflow container is referenced by a Character or Element sidecar entity,
+     * or is typed as a character/element workflow.
+     */
+    async _hasSidecarEntity(workflowId, workflowRecord = null) {
+        if (!workflowId) return false;
+
+        const wfType = String(workflowRecord?.workflow_type || "").toUpperCase();
+        if (
+            wfType === "CHARACTER" ||
+            wfType === "CHARACTER_SHEET" ||
+            wfType === "ELEMENT" ||
+            wfType === "ELEMENT_SHEET"
+        ) {
+            return true;
+        }
+
+        if (this.db.characters?.findByCharacterId) {
+            const char = await this.db.characters.findByCharacterId(workflowId).catch(() => null);
+            if (char) return true;
+        } else if (this.db.characters?.findByWorkflowId) {
+            const char = await this.db.characters.findByWorkflowId(workflowId).catch(() => null);
+            if (char) return true;
+        }
+
+        if (this.db.elements?.findByWorkflowId) {
+            const elem = await this.db.elements.findByWorkflowId(workflowId).catch(() => null);
+            if (elem) return true;
+        } else if (this.db.elements?.resolveRecord) {
+            const elem = await this.db.elements.resolveRecord(workflowId).catch(() => null);
+            if (elem) return true;
+        }
+
+        return false;
     }
 }
 

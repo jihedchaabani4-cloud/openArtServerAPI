@@ -15,7 +15,7 @@ describe("WorkflowMediaService delete and orphan rules (WM-T5)", () => {
 
   /** Build a minimal service under test with injectable spy stubs */
   function makeService({
-    mediaRec = { id: "media-1", workflow_id: "wf-1", url: "https://cdn.example.com/img.png" },
+    mediaRec = { id: "media-1", url: "https://cdn.example.com/img.png" },
     countLinks = 0,       // remaining links AFTER unlink
     authorised = true,
   } = {}) {
@@ -48,6 +48,7 @@ describe("WorkflowMediaService delete and orphan rules (WM-T5)", () => {
         updatePrimaryMedia: async (wfId, mid) => { calls.workflowUpdatePrimary.push({ wfId, mid }); return {}; },
       },
       workflowMedia: {
+        findByMedia: async () => [{ workflow_id: "wf-1", media_id: "media-1" }],
         unlink: async (args) => { calls.unlink.push(args); },
         countLinksForMedia: async () => countLinks,
       },
@@ -109,7 +110,7 @@ describe("WorkflowMediaService delete and orphan rules (WM-T5)", () => {
 
   it("unlink is called before deleteById (ordering guarantee)", async () => {
     const order = [];
-    const mediaRec = { id: "media-1", workflow_id: "wf-1", url: "https://cdn.example.com/img.png" };
+    const mediaRec = { id: "media-1", url: "https://cdn.example.com/img.png" };
 
     const db = {
       media: {
@@ -126,6 +127,7 @@ describe("WorkflowMediaService delete and orphan rules (WM-T5)", () => {
         updatePrimaryMedia: async () => ({}),
       },
       workflowMedia: {
+        findByMedia: async () => [{ workflow_id: "wf-1", media_id: "media-1" }],
         unlink: async () => { order.push("unlink"); },
         countLinksForMedia: async () => 0,
       },

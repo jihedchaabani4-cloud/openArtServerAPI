@@ -237,33 +237,41 @@ describe("Sibling Media Cleanup & Deadlock Boundary Tests (Task T8 / BUG-08)", (
   });
 
   it("TEST 4: MediaRepository.failPendingMediaByWorkflow constructs atomic SQL query with status filter", async () => {
-    let capturedTable = null;
+    const capturedTables = [];
     let capturedUpdates = null;
     let capturedEq = [];
     let capturedIn = [];
 
     const mockSupabase = {
       from: (table) => {
-        capturedTable = table;
+        capturedTables.push(table);
+        if (table === "workflow_media") {
+          return {
+            select: () => ({
+              eq: async (col, val) => {
+                capturedEq.push({ col, val });
+                return {
+                  data: [{ media_id: "m1" }, { media_id: "m2" }],
+                  error: null,
+                };
+              },
+            }),
+          };
+        }
         return {
           update: (fields) => {
             capturedUpdates = fields;
-            return {
-              eq: (col, val) => {
-                capturedEq.push({ col, val });
-                return {
-                  in: (inCol, inVals) => {
-                    capturedIn.push({ inCol, inVals });
-                    return {
-                      select: async () => ({
-                        data: [{ id: "m1", status: "failed" }, { id: "m2", status: "failed" }],
-                        error: null,
-                      }),
-                    };
-                  },
-                };
+            const chain = {
+              in: (inCol, inVals) => {
+                capturedIn.push({ inCol, inVals });
+                return chain;
               },
+              select: async () => ({
+                data: [{ id: "m1", status: "failed" }, { id: "m2", status: "failed" }],
+                error: null,
+              }),
             };
+            return chain;
           },
         };
       },
@@ -274,11 +282,14 @@ describe("Sibling Media Cleanup & Deadlock Boundary Tests (Task T8 / BUG-08)", (
 
     const result = await repo.failPendingMediaByWorkflow("wf-atomic-1", "Generation timed out");
 
-    assert.strictEqual(capturedTable, "media");
+    assert.deepStrictEqual(capturedTables, ["workflow_media", "media"]);
     assert.strictEqual(capturedUpdates.status, "failed");
     assert.strictEqual(capturedUpdates.error_message, "Generation timed out");
     assert.deepStrictEqual(capturedEq, [{ col: "workflow_id", val: "wf-atomic-1" }]);
-    assert.deepStrictEqual(capturedIn, [{ inCol: "status", inVals: ["processing", "pending"] }]);
+    assert.deepStrictEqual(capturedIn, [
+      { inCol: "id", inVals: ["m1", "m2"] },
+      { inCol: "status", inVals: ["processing", "pending"] },
+    ]);
     assert.strictEqual(result.length, 2);
   });
 });

@@ -9,6 +9,9 @@
  */
 
 import { supabase } from "../../lib/supabase.js";
+import { createLogger } from "../infrastructure/logging/index.js";
+
+const elementRepositoryLogger = createLogger("element_repository");
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -29,7 +32,7 @@ function normalizeGuidelines(value) {
 
 /**
  * Build a strict partial-update patch — only fields present in `updates` are included.
- * Allowed writable fields: name, description, guidelines, workflow_id, primary_media_id, element_type, source_images.
+ * Allowed writable fields: name, description, guidelines, workflow_id, element_type, source_images.
  */
 function buildPatch(updates = {}) {
     const patch = {};
@@ -53,9 +56,6 @@ function buildPatch(updates = {}) {
     }
     if (updates.workflow_id !== undefined) {
         patch.workflow_id = updates.workflow_id;
-    }
-    if (updates.primary_media_id !== undefined) {
-        patch.primary_media_id = updates.primary_media_id;
     }
 
     return patch;
@@ -178,7 +178,7 @@ export class ElementRepository {
 
         const { data, error } = await query.select();
         if (error) {
-            console.error(`[ElementRepository] update error for ${idOrWorkflowId}:`, error);
+            elementRepositoryLogger.error({ idOrWorkflowId, err: error }, "ElementRepository update error");
             throw error;
         }
         return data?.[0] || null;
@@ -205,7 +205,7 @@ export class ElementRepository {
 
         const { data, error } = await query.select();
         if (error) {
-            console.error(`[ElementRepository] deleteById error for ${idOrWorkflowId}:`, error);
+            elementRepositoryLogger.error({ idOrWorkflowId, err: error }, "ElementRepository deleteById error");
             throw error;
         }
         return data?.[0] || null;

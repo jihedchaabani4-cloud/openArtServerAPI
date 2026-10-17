@@ -7,7 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
 import { resolveMediaMetadata } from "../../platform/media/mediaMetadataResolver.js";
-import { linkWorkflowMediaForCreatedRow } from "../../db/workflowMediaLinker.js";
+import { createMediaInWorkflow } from "../../db/workflowMediaLinker.js";
 import { inferWorkflowMediaRole } from "../../db/workflowMediaRole.js";
 
 export class CharacterMediaService {
@@ -88,15 +88,14 @@ export class CharacterMediaService {
                     projectId: effectiveProjectId,
                 });
                 if (sourceMedia) {
-                    if (this.db?.workflowMedia?.linkMedia) {
-                        await this.db.workflowMedia.linkMedia({
-                            workflowId: wf.id,
-                            mediaId: sourceMedia.id,
-                            role: "sheet",
-                            stepId: "character_sheet",
-                            workflowType: wf.workflow_type || "CHARACTER",
-                        });
-                    }
+                    await createMediaInWorkflow(this.db, {
+                        workflowId: wf.id,
+                        mediaId: sourceMedia.id,
+                        role: "sheet",
+                        stepId: "character_sheet",
+                        workflowType: wf.workflow_type || "CHARACTER",
+                        operation: "uploadSheetMedia:linkWorkflowMedia",
+                    });
                     await this.db.workflows.updatePrimaryMedia(wf.id, sourceMedia.id).catch((err) => {
                         crudOperationLog({
                             traceId,
@@ -240,7 +239,6 @@ export class CharacterMediaService {
                 });
             } else {
                 mediaRow = await this.db.media.createMedia({
-                    workflow_id: wf.id,
                     project_id: wf.project_id || effectiveProjectId,
                     url: resolvedUrl,
                     step_id: "character_sheet",
@@ -249,7 +247,7 @@ export class CharacterMediaService {
                     status: "success",
                     error_message: null,
                 });
-                await linkWorkflowMediaForCreatedRow(this.db, {
+                await createMediaInWorkflow(this.db, {
                     workflowId: wf.id,
                     mediaId: mediaRow?.id,
                     stepId: "character_sheet",
@@ -357,15 +355,14 @@ export class CharacterMediaService {
                     projectId: effectiveProjectId,
                 });
                 if (sourceMedia) {
-                    if (this.db?.workflowMedia?.linkMedia) {
-                        await this.db.workflowMedia.linkMedia({
-                            workflowId: wf.id,
-                            mediaId: sourceMedia.id,
-                            role: "detail",
-                            stepId: "character_detail",
-                            workflowType: wf.workflow_type || "CHARACTER",
-                        });
-                    }
+                    await createMediaInWorkflow(this.db, {
+                        workflowId: wf.id,
+                        mediaId: sourceMedia.id,
+                        role: "detail",
+                        stepId: "character_detail",
+                        workflowType: wf.workflow_type || "CHARACTER",
+                        operation: "uploadDetailMedia:linkWorkflowMedia",
+                    });
                     crudOperationLog({
                         traceId,
                         operation: "uploadDetailMedia",
@@ -471,7 +468,6 @@ export class CharacterMediaService {
             resolvedHeight = meta.height;
 
             const mediaRow = await this.db.media.createMedia({
-                workflow_id: wf.id,
                 project_id: effectiveProjectId,
                 url: resolvedUrl,
                 step_id: "character_detail",
@@ -480,7 +476,7 @@ export class CharacterMediaService {
                 status: "success",
                 error_message: null,
             });
-            await linkWorkflowMediaForCreatedRow(this.db, {
+            await createMediaInWorkflow(this.db, {
                 workflowId: wf.id,
                 mediaId: mediaRow?.id,
                 stepId: "character_detail",
@@ -523,11 +519,15 @@ export class CharacterMediaService {
         try {
             const wf = await this.db.workflows?.getWorkflow?.(characterId).catch(() => null);
             const resolvedWfId = wf?.id || characterId;
-            const mediaRec = await this.db.media.findById(mediaId, "id, url, step_id, workflow_id, role, mediaRole").catch(() => null);
-            const mediaRole = mediaRec
+            const mediaRec = await this.db.media.findById(mediaId, "id, url, step_id").catch(() => null);
+            const wfLinks = this.db?.workflowMedia?.findByMedia
+                ? await this.db.workflowMedia.findByMedia(mediaId).catch(() => [])
+                : [];
+            const wfLink = wfLinks.find((r) => r.workflow_id === resolvedWfId);
+            const mediaRole = mediaRec || wfLink
                 ? inferWorkflowMediaRole({
-                    role: mediaRec.mediaRole || mediaRec.role,
-                    stepId: mediaRec.step_id,
+                    role: wfLink?.role || mediaRec?.mediaRole || mediaRec?.role,
+                    stepId: mediaRec?.step_id,
                     workflowType: "CHARACTER",
                 })
                 : null;
@@ -548,13 +548,12 @@ export class CharacterMediaService {
                 }).catch(() => null);
             }
 
-            const isOriginalToWorkflow = mediaRec?.workflow_id === resolvedWfId;
             let remainingLinks = 0;
             if (this.db?.workflowMedia?.countLinksForMedia) {
                 remainingLinks = await this.db.workflowMedia.countLinksForMedia(mediaId).catch(() => 0);
             }
 
-            if (isOriginalToWorkflow && remainingLinks === 0) {
+            if (remainingLinks === 0) {
                 await this.db.media.deleteByIdAndWorkflow(mediaId, resolvedWfId);
 
                 if (mediaRec?.url) {
@@ -617,9 +616,13 @@ export class CharacterMediaService {
         }
         if (!sourceMedia) return null;
 
-        // Ensure parent workflow context is loaded if sourceMedia itself is missing user/project
-        if (!sourceWf && sourceMedia.workflow_id && this.db.workflows?.getWorkflow) {
-            sourceWf = await this.db.workflows.getWorkflow(sourceMedia.workflow_id).catch(() => null);
+        // Ensure parent workflow context is loaded via workflow_media if sourceMedia itself is missing user/project
+        if (!sourceWf && this.db.workflowMedia?.findByMedia && this.db.workflows?.getWorkflow) {
+            const links = await this.db.workflowMedia.findByMedia(sourceMedia.id).catch(() => []);
+            const linkedWfId = links[0]?.workflow_id;
+            if (linkedWfId) {
+                sourceWf = await this.db.workflows.getWorkflow(linkedWfId).catch(() => null);
+            }
         }
 
         // Ownership verification (cross-tenant)

@@ -300,7 +300,12 @@ export class MediaIngestionService {
                     finalSizeBytes = optimized.data.length;
                     finalRatio = calculateAspectRatio(finalWidth, finalHeight);
                 } catch (optErr) {
-                    console.warn("[MediaIngestionService] 4K optimization fallback to original buffer:", optErr?.message);
+                    crudOperationLog({
+                        traceId,
+                        operation: "mediaIngest:optimize4k",
+                        status: "warning",
+                        message: optErr?.message,
+                    });
                 }
             }
 
@@ -382,7 +387,7 @@ export class MediaIngestionService {
                     targetProjectId = userProj?.id || null;
                 }
 
-                // Auto-create an UPLOAD workflow container so media foreign key is satisfied
+                // Auto-create an UPLOAD workflow container so workflow_media relation is linked
                 containerWf = await this.db.workflows.createWorkflow({
                     project_id: targetProjectId,
                     session_id: null,

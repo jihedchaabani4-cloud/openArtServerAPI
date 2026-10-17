@@ -26,6 +26,7 @@ after(async () => {
 
 describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Output Boundary Tests", () => {
   let origDbMedia;
+  let origDbWorkflowMedia;
   let origDbWorkflows;
   let origDbProjects;
   let origDbCharacters;
@@ -36,6 +37,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
 
   beforeEach(() => {
     origDbMedia = db.media;
+    origDbWorkflowMedia = db.workflowMedia;
     origDbWorkflows = db.workflows;
     origDbProjects = db.projects;
     origDbCharacters = db.characters;
@@ -63,6 +65,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
 
   afterEach(() => {
     db.media = origDbMedia;
+    db.workflowMedia = origDbWorkflowMedia;
     db.workflows = origDbWorkflows;
     db.projects = origDbProjects;
     db.characters = origDbCharacters;
@@ -339,6 +342,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
 
       const dbWorkflowsStore = new Map();
       const dbMediaStore = new Map();
+      const dbRelationRows = [];
 
       db.projects = {
         findById: async () => ({ id: "proj-ep-img", user_id: "user-ep-img" }),
@@ -351,13 +355,22 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         },
       };
 
+      db.workflowMedia = {
+        linkMedia: async ({ workflowId, mediaId, role }) => {
+          dbRelationRows.push({ workflow_id: workflowId, media_id: mediaId, role });
+        },
+      };
+
       db.media = {
         createMedia: async (m) => {
           dbMediaStore.set(m.id, { ...m });
           return m;
         },
         findById: async (id) => dbMediaStore.get(id),
-        findByWorkflow: async (wfId) => Array.from(dbMediaStore.values()).filter((m) => m.workflow_id === wfId),
+        findByWorkflow: async (wfId) => {
+          const linkedIds = new Set(dbRelationRows.filter((r) => r.workflow_id === wfId).map((r) => r.media_id));
+          return Array.from(dbMediaStore.values()).filter((m) => linkedIds.has(m.id));
+        },
         updateMedia: async (id, patch) => {
           const existing = dbMediaStore.get(id) || {};
           const updated = { ...existing, ...patch };
@@ -443,6 +456,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
       origContainerUcService.executeQueuedUseCase = testUcService.executeQueuedUseCase.bind(testUcService);
 
       const dbMediaStore = new Map();
+      const dbRelationRows = [];
 
       db.projects = {
         findById: async () => ({ id: "proj-ep-vid", user_id: "user-ep-vid" }),
@@ -452,13 +466,22 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         createWorkflow: async (wf) => wf,
       };
 
+      db.workflowMedia = {
+        linkMedia: async ({ workflowId, mediaId, role }) => {
+          dbRelationRows.push({ workflow_id: workflowId, media_id: mediaId, role });
+        },
+      };
+
       db.media = {
         createMedia: async (m) => {
           dbMediaStore.set(m.id, { ...m });
           return m;
         },
         findById: async (id) => dbMediaStore.get(id),
-        findByWorkflow: async (wfId) => Array.from(dbMediaStore.values()).filter((m) => m.workflow_id === wfId),
+        findByWorkflow: async (wfId) => {
+          const linkedIds = new Set(dbRelationRows.filter((r) => r.workflow_id === wfId).map((r) => r.media_id));
+          return Array.from(dbMediaStore.values()).filter((m) => linkedIds.has(m.id));
+        },
         updateMedia: async (id, patch) => {
           const existing = dbMediaStore.get(id) || {};
           const updated = { ...existing, ...patch };
@@ -538,6 +561,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
       origContainerUcService.executeQueuedUseCase = testUcService.executeQueuedUseCase.bind(testUcService);
 
       const dbMediaStore = new Map();
+      const dbRelationRows = [];
       const characterId = "char-sheet-target-123";
 
       db.projects = {
@@ -555,6 +579,12 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         updateCharacter: async (id, patch) => ({ id, ...patch }),
       };
 
+      db.workflowMedia = {
+        linkMedia: async ({ workflowId, mediaId, role }) => {
+          dbRelationRows.push({ workflow_id: workflowId, media_id: mediaId, role });
+        },
+      };
+
       db.media = {
         createMedia: async (m) => {
           const id = m.id || `media-${randomUUID()}`;
@@ -563,7 +593,10 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
           return record;
         },
         findById: async (id) => dbMediaStore.get(id),
-        findByWorkflow: async (wfId) => Array.from(dbMediaStore.values()).filter((m) => m.workflow_id === wfId),
+        findByWorkflow: async (wfId) => {
+          const linkedIds = new Set(dbRelationRows.filter((r) => r.workflow_id === wfId).map((r) => r.media_id));
+          return Array.from(dbMediaStore.values()).filter((m) => linkedIds.has(m.id));
+        },
         updateMedia: async (id, patch) => {
           const existing = dbMediaStore.get(id) || {};
           const updated = { ...existing, ...patch };
@@ -641,6 +674,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
       origContainerUcService.executeQueuedUseCase = testUcService.executeQueuedUseCase.bind(testUcService);
 
       const dbMediaStore = new Map();
+      const dbRelationRows = [];
       const generatedCharId = "char-new-" + randomUUID();
 
       db.projects = {
@@ -665,6 +699,12 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         updateCharacter: async (id, patch) => ({ id, ...patch }),
       };
 
+      db.workflowMedia = {
+        linkMedia: async ({ workflowId, mediaId, role }) => {
+          dbRelationRows.push({ workflow_id: workflowId, media_id: mediaId, role });
+        },
+      };
+
       db.media = {
         createMedia: async (m) => {
           const id = m.id || `media-${randomUUID()}`;
@@ -673,7 +713,10 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
           return record;
         },
         findById: async (id) => dbMediaStore.get(id),
-        findByWorkflow: async (wfId) => Array.from(dbMediaStore.values()).filter((m) => m.workflow_id === wfId),
+        findByWorkflow: async (wfId) => {
+          const linkedIds = new Set(dbRelationRows.filter((r) => r.workflow_id === wfId).map((r) => r.media_id));
+          return Array.from(dbMediaStore.values()).filter((m) => linkedIds.has(m.id));
+        },
         updateMedia: async (id, patch) => {
           const existing = dbMediaStore.get(id) || {};
           const updated = { ...existing, ...patch };

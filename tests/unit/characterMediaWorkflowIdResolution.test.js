@@ -10,7 +10,6 @@ describe("Workflow ID resolution to media relation in Character & Element servic
 
     const mockSourceMedia = {
       id: "media-uuid-456",
-      workflow_id: "wf-source-123",
       url: "https://storage.example.com/generated-shot.png",
       width: 1024,
       height: 1024,
@@ -35,6 +34,7 @@ describe("Workflow ID resolution to media relation in Character & Element servic
         },
       },
       workflowMedia: {
+        findByMedia: async (id) => (id === "media-uuid-456" ? [{ workflow_id: "wf-source-123", media_id: "media-uuid-456" }] : []),
         linkMedia: async (payload) => {
           linkedPayload = payload;
           return payload;
@@ -81,7 +81,6 @@ describe("Workflow ID resolution to media relation in Character & Element servic
 
     const mockSourceMedia = {
       id: "media-uuid-789",
-      workflow_id: "wf-sheet-source",
       url: "https://storage.example.com/character-sheet.png",
       width: 1344,
       height: 768,
@@ -115,6 +114,7 @@ describe("Workflow ID resolution to media relation in Character & Element servic
         },
       },
       workflowMedia: {
+        findByMedia: async (id) => (id === "media-uuid-789" ? [{ workflow_id: "wf-sheet-source", media_id: "media-uuid-789" }] : []),
         linkMedia: async (payload) => {
           linkedPayload = payload;
           return payload;
@@ -159,7 +159,6 @@ describe("Workflow ID resolution to media relation in Character & Element servic
 
     const mockSourceMedia = {
       id: "media-elem-source-456",
-      workflow_id: "wf-source-prop",
       url: "https://storage.example.com/prop.png",
       width: 1024,
       height: 1024,
@@ -187,6 +186,7 @@ describe("Workflow ID resolution to media relation in Character & Element servic
         createMedia: async () => ({ id: "fail" }),
       },
       workflowMedia: {
+        findByMedia: async (id) => (id === "media-elem-source-456" ? [{ workflow_id: "wf-source-prop", media_id: "media-elem-source-456" }] : []),
         linkMedia: async (payload) => {
           linkedPayload = payload;
           return payload;
@@ -236,7 +236,6 @@ describe("Workflow ID resolution to media relation in Character & Element servic
       media: {
         findById: async () => ({
           id: "media-uuid-456",
-          workflow_id: "wf-source-123", // Belongs to an external source workflow!
           role: "detail",
           mediaRole: "detail",
           step_id: "character_detail",
@@ -284,7 +283,6 @@ describe("Workflow ID resolution to media relation in Character & Element servic
   it("CharacterMediaService.uploadDetailMedia rejects cross-user asset reference with 404", async () => {
     const mockVictimMedia = {
       id: "media-victim-999",
-      workflow_id: "wf-victim-999",
       user_id: "victim-user",
       project_id: "proj-1",
       url: "https://storage.example.com/victim.png",
@@ -302,6 +300,9 @@ describe("Workflow ID resolution to media relation in Character & Element servic
       media: {
         findById: async (id) => (id === "media-victim-999" ? mockVictimMedia : null),
         findMediaByIdOrWorkflow: async (id) => (id === "wf-victim-999" ? mockVictimMedia : null),
+      },
+      workflowMedia: {
+        findByMedia: async (id) => (id === "media-victim-999" ? [{ workflow_id: "wf-victim-999", media_id: "media-victim-999" }] : []),
       },
     };
 
@@ -326,7 +327,6 @@ describe("Workflow ID resolution to media relation in Character & Element servic
   it("CharacterMediaService.uploadDetailMedia rejects cross-project asset reference with 404", async () => {
     const mockOtherProjMedia = {
       id: "media-other-proj-888",
-      workflow_id: "wf-other-proj-888",
       user_id: "user-1",
       project_id: "proj-OTHER",
       url: "https://storage.example.com/other.png",
@@ -344,6 +344,9 @@ describe("Workflow ID resolution to media relation in Character & Element servic
       media: {
         findById: async (id) => (id === "media-other-proj-888" ? mockOtherProjMedia : null),
         findMediaByIdOrWorkflow: async (id) => (id === "wf-other-proj-888" ? mockOtherProjMedia : null),
+      },
+      workflowMedia: {
+        findByMedia: async (id) => (id === "media-other-proj-888" ? [{ workflow_id: "wf-other-proj-888", media_id: "media-other-proj-888" }] : []),
       },
     };
 
@@ -368,7 +371,6 @@ describe("Workflow ID resolution to media relation in Character & Element servic
   it("ElementMediaService.addReferenceMedia rejects cross-user and cross-project asset references with 404", async () => {
     const mockVictimMedia = {
       id: "media-victim-777",
-      workflow_id: "wf-victim-777",
       user_id: "victim-user",
       project_id: "proj-1",
       url: "https://storage.example.com/victim2.png",
@@ -388,6 +390,9 @@ describe("Workflow ID resolution to media relation in Character & Element servic
       media: {
         findById: async (id) => (id === "media-victim-777" ? mockVictimMedia : null),
         findMediaByIdOrWorkflow: async (id) => (id === "wf-victim-777" ? mockVictimMedia : null),
+      },
+      workflowMedia: {
+        findByMedia: async (id) => (id === "media-victim-777" ? [{ workflow_id: "wf-victim-777", media_id: "media-victim-777" }] : []),
       },
     };
 

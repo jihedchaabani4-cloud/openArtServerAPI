@@ -14,13 +14,12 @@ export class MediaRepository extends BaseRepository {
      *
      * @param {string} step_id - "CAE" for init/upload | "CAM", "CAU"... for edits
      */
-    async createMedia({ workflow_id, project_id, generation_config_id, step_id, url, width, height, ...extra }) {
+    async createMedia({ workflow_id: _ignoredWorkflowId, project_id, generation_config_id, step_id, url, width, height, ...extra }) {
         const resolvedWidth = width ? Number(width) : 1024;
         const resolvedHeight = height ? Number(height) : 1024;
         const { data, error } = await this.client()
             .from(this.tableName)
             .insert({
-                workflow_id,
                 project_id,
                 generation_config_id,
                 step_id,
@@ -198,17 +197,22 @@ export class MediaRepository extends BaseRepository {
     }
 
     /**
-     * Deletes a media record by id AND workflow_id (scoped delete).
-     * Prevents accidental deletion of media belonging to a different workflow.
+     * Deletes a media record by id and unlinks its workflow_media association.
      * @param {string} mediaId
      * @param {string} workflowId
      */
     async deleteByIdAndWorkflow(mediaId, workflowId) {
+        if (workflowId) {
+            await this.client()
+                .from("workflow_media")
+                .delete()
+                .eq("workflow_id", workflowId)
+                .eq("media_id", mediaId);
+        }
         const { error } = await this.client()
             .from(this.tableName)
             .delete()
-            .eq("id", mediaId)
-            .eq("workflow_id", workflowId);
+            .eq("id", mediaId);
         if (error) throw error;
     }
 
@@ -257,13 +261,22 @@ export class MediaRepository extends BaseRepository {
      */
     async failPendingMediaByWorkflow(workflow_id, errorMessage = null) {
         if (!workflow_id) return [];
+        const { data: links, error: linkErr } = await this.client()
+            .from("workflow_media")
+            .select("media_id")
+            .eq("workflow_id", workflow_id);
+        if (linkErr) throw linkErr;
+
+        const mediaIds = [...new Set((links || []).map((row) => row.media_id).filter(Boolean))];
+        if (mediaIds.length === 0) return [];
+
         const { data, error } = await this.client()
             .from(this.tableName)
             .update({
                 status: "failed",
                 error_message: errorMessage || "Generation failed",
             })
-            .eq("workflow_id", workflow_id)
+            .in("id", mediaIds)
             .in("status", ["processing", "pending"])
             .select();
         if (error) throw error;

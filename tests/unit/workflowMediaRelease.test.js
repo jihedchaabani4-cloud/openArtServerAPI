@@ -5,8 +5,8 @@ import { WorkflowService } from "../../src/platform/workflow/WorkflowServiceBase
 
 function createHarness() {
   const mediaRows = [
-    { id: "m-exclusive", workflow_id: "wf-1", url: "https://cdn.example/exclusive.png" },
-    { id: "m-shared", workflow_id: "wf-1", url: "https://cdn.example/shared.png" },
+    { id: "m-exclusive", url: "https://cdn.example/exclusive.png" },
+    { id: "m-shared", url: "https://cdn.example/shared.png" },
   ];
   const relationRows = [
     { workflow_id: "wf-1", media_id: "m-exclusive", role: "output" },
@@ -28,9 +28,7 @@ function createHarness() {
         const linkedIds = new Set(
           relationRows.filter((r) => r.workflow_id === workflowId).map((r) => r.media_id)
         );
-        const fromRelation = mediaRows.filter((m) => linkedIds.has(m.id));
-        if (fromRelation.length) return fromRelation;
-        return mediaRows.filter((m) => m.workflow_id === workflowId);
+        return mediaRows.filter((m) => linkedIds.has(m.id));
       },
       findById: async (id) => mediaRows.find((m) => m.id === id) || null,
       updateFields: async (id, fields) => {
@@ -163,7 +161,10 @@ describe("Workflow media unlink vs delete", () => {
     assert.equal(harness.deletedMediaIds.includes("m-exclusive"), true);
     assert.equal(harness.deletedMediaIds.includes("m-shared"), false);
     assert.equal(harness.mediaRows.some((m) => m.id === "m-shared"), true);
-    assert.equal(harness.mediaRows.find((m) => m.id === "m-shared")?.workflow_id, "wf-2");
+    assert.equal(
+      harness.relationRows.some((r) => r.media_id === "m-shared" && r.workflow_id === "wf-2"),
+      true
+    );
     assert.equal(harness.relationRows.some((r) => r.workflow_id === "wf-1"), false);
     assert.equal(harness.deletedStorageUrls.includes("https://cdn.example/exclusive.png"), true);
     assert.equal(harness.deletedStorageUrls.includes("https://cdn.example/shared.png"), false);

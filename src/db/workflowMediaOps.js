@@ -1,7 +1,9 @@
 import { GenerationError } from "../errors/GenerationErrors.js";
 import { supabase } from "../../lib/supabase.js";
 import { createLogger } from "../infrastructure/logging/index.js";
-import { linkWorkflowMediaForCreatedRow } from "./workflowMediaLinker.js";
+import { createMediaInWorkflow, linkWorkflowMediaForCreatedRow } from "./workflowMediaLinker.js";
+
+export { createMediaInWorkflow, linkWorkflowMediaForCreatedRow };
 
 const workflowMediaOpsLogger = createLogger("workflow-media-ops");
 
@@ -47,12 +49,12 @@ export async function createWorkflowWithMedia(
     { workflowData, mediaData, setAsPrimary = true, initialStatus = null }
 ) {
     const workflow = await db.workflows.createWorkflow(workflowData);
+    const { workflow_id: _ignoredWfId, ...cleanMediaData } = mediaData || {};
     const media = await db.media.createMedia({
-        ...mediaData,
+        ...cleanMediaData,
         ...(initialStatus ? { status: initialStatus } : {}),
-        workflow_id: workflow.id,
     });
-    await linkWorkflowMediaForCreatedRow(db, {
+    await createMediaInWorkflow(db, {
         workflowId: workflow.id,
         mediaId: media?.id,
         stepId: mediaData.step_id,
@@ -139,12 +141,12 @@ export async function appendMediaToWorkflow(
     db,
     { workflow_id, mediaData, setAsPrimary = true, initialStatus = null }
 ) {
+    const { workflow_id: _ignoredWfId, ...cleanMediaData } = mediaData || {};
     const media = await db.media.createMedia({
-        ...mediaData,
+        ...cleanMediaData,
         ...(initialStatus ? { status: initialStatus } : {}),
-        workflow_id,
     });
-    await linkWorkflowMediaForCreatedRow(db, {
+    await createMediaInWorkflow(db, {
         workflowId: workflow_id,
         mediaId: media?.id,
         stepId: mediaData.step_id,

@@ -7,7 +7,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 
 import { resolveMediaMetadata } from "../src/platform/media/mediaMetadataResolver.js";
 import { assertOwns, assertOwnsAny, toMediaIdList } from "../src/platform/security/ownership.js";
-import { linkWorkflowMediaForCreatedRow } from "../src/db/workflowMediaLinker.js";
+import { createMediaInWorkflow } from "../src/db/workflowMediaLinker.js";
 
 const MEDIA_PARAM_KEYS = [
   "input_image",
@@ -156,7 +156,6 @@ export async function generateImage(req, res) {
       const id = randomUUID();
       await db.media.createMedia({
         id,
-        workflow_id: workflowId,
         project_id:  projectId,
         step_id:     "image_generation",
         url:         null,
@@ -164,7 +163,7 @@ export async function generateImage(req, res) {
         height:      mediaMeta.height,
         status:      "processing",
       });
-      await linkWorkflowMediaForCreatedRow(db, {
+      await createMediaInWorkflow(db, {
         workflowId,
         mediaId: id,
         stepId: "image_generation",

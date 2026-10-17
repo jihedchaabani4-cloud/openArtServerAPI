@@ -299,11 +299,11 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
 
   it("TEST 5: CharacterGenerationService.enqueueSheetGeneration creates placeholder and propagates its mediaId", async () => {
     let capturedMediaCreate = null;
+    let capturedWorkflowMediaLink = null;
     let capturedPrepare = null;
 
     const fakeMedia = {
       id: "media-char-placeholder-777",
-      workflow_id: "char-wf-888",
       project_id: "proj-111",
       step_id: "character_sheet",
       status: "processing",
@@ -314,6 +314,12 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
         createMedia: async (payload) => {
           capturedMediaCreate = payload;
           return fakeMedia;
+        },
+      },
+      workflowMedia: {
+        linkMedia: async (payload) => {
+          capturedWorkflowMediaLink = payload;
+          return payload;
         },
       },
     };
@@ -344,7 +350,8 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
 
     assert.ok(res);
     assert.ok(capturedMediaCreate, "Placeholder media must be created in DB");
-    assert.strictEqual(capturedMediaCreate.workflow_id, "char-wf-888");
+    assert.strictEqual(capturedMediaCreate.workflow_id, undefined, "workflow_id must NOT be written to media");
+    assert.strictEqual(capturedWorkflowMediaLink?.workflowId, "char-wf-888", "workflow_media relation must be created");
 
     assert.ok(capturedPrepare, "prepareAndEnqueue must be called");
     assert.strictEqual(capturedPrepare.input.media_id, "media-char-placeholder-777", "media_id must match placeholder media ID");

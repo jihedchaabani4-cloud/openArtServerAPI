@@ -8,7 +8,7 @@
 import { randomUUID } from "node:crypto";
 import { llmService } from "#platform/ai/LLMService.js";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
-import { linkWorkflowMediaForCreatedRow } from "../../db/workflowMediaLinker.js";
+import { createMediaInWorkflow } from "../../db/workflowMediaLinker.js";
 import { toMediaIdList } from "../../platform/security/ownership.js";
 
 const CHARACTER_GENERATOR_SYSTEM_PROMPT = `
@@ -69,7 +69,6 @@ export class CharacterGenerationService {
             // 1. Create placeholder media record so UI shows loading state immediately
             try {
                 placeholderMedia = await this.db.media.createMedia({
-                    workflow_id: characterId,
                     project_id: projectId,
                     step_id: "character_sheet",
                     status: "processing",
@@ -77,7 +76,7 @@ export class CharacterGenerationService {
                     width: 1344,
                     height: 768,
                 });
-                await linkWorkflowMediaForCreatedRow(this.db, {
+                await createMediaInWorkflow(this.db, {
                     workflowId: characterId,
                     mediaId: placeholderMedia?.id,
                     stepId: "character_sheet",

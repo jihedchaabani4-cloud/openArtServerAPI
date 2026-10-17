@@ -475,10 +475,10 @@ export class WorkflowService {
 
         // Resolve media_id to its parent workflow_id if targetWorkflowId is a media record
         const wfExists = await this.db.workflows?.findById(targetWorkflowId).catch(() => null);
-        if (!wfExists && this.db.media?.findById) {
-            const mediaRecord = await this.db.media.findById(targetWorkflowId).catch(() => null);
-            if (mediaRecord?.workflow_id) {
-                targetWorkflowId = mediaRecord.workflow_id;
+        if (!wfExists && this.db.workflowMedia?.findByMedia) {
+            const links = await this.db.workflowMedia.findByMedia(targetWorkflowId).catch(() => []);
+            if (links?.[0]?.workflow_id) {
+                targetWorkflowId = links[0].workflow_id;
             }
         }
 
@@ -540,10 +540,10 @@ export class WorkflowService {
 
         // Resolve media_id to its parent workflow_id if cleanId is not directly a workflow
         const wfExists = await this.db.workflows.findById(cleanId).catch(() => null);
-        if (!wfExists) {
-            const mediaRecord = await this.db.media.findById(cleanId).catch(() => null);
-            if (mediaRecord?.workflow_id) {
-                targetWorkflowId = mediaRecord.workflow_id;
+        if (!wfExists && this.db.workflowMedia?.findByMedia) {
+            const links = await this.db.workflowMedia.findByMedia(cleanId).catch(() => []);
+            if (links?.[0]?.workflow_id) {
+                targetWorkflowId = links[0].workflow_id;
             }
         }
 

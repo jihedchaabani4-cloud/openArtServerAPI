@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 import { assertMediaUsable } from "../../../lib/mediaGuards.js";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
+import { createMediaInWorkflow } from "../../db/workflowMediaLinker.js";
 
 const logger = createLogger("database");
 
@@ -26,6 +27,31 @@ export class WorkflowMediaService {
         this.db = db;
         this.storageService = storageService;
         this.authService = authService;
+    }
+
+    /**
+     * Link a media record to a workflow strictly in `public.workflow_media`.
+     */
+    async createMediaInWorkflow({ workflowId, workflow_id, mediaId, media_id, role, stepId, step_id, workflowType, workflow_type } = {}) {
+        return createMediaInWorkflow(this.db, {
+            workflowId,
+            workflow_id,
+            mediaId,
+            media_id,
+            role,
+            stepId,
+            step_id,
+            workflowType,
+            workflow_type,
+            operation: "WorkflowMediaService:createMediaInWorkflow",
+        });
+    }
+
+    /**
+     * Assign media to a workflow strictly via `public.workflow_media` (never updates `media.workflow_id`).
+     */
+    async assignMediaToWorkflow(params = {}) {
+        return this.createMediaInWorkflow(params);
     }
 
     /**
@@ -157,7 +183,7 @@ export class WorkflowMediaService {
 
             const { data: media, error: mediaErr } = await this.db.media.client()
                 .from("media")
-                .select("*, workflow:workflow!workflow_id(id, project_id, session_id, display_name)")
+                .select("*")
                 .eq("id", mediaId)
                 .single();
             if (mediaErr) throw mediaErr;
@@ -172,10 +198,18 @@ export class WorkflowMediaService {
                 });
             }
 
-            const currentWorkflowId = media.workflow_id;
-            const inferredProjectId = projectId || media.project_id || media.workflow?.project_id;
-            const inferredUserId = userId || media.user_id || media.workflow?.user_id || null;
-            const newName = displayName || media.workflow?.display_name || "Detached media";
+            let currentWorkflowId = null;
+            if (this.db.workflowMedia?.findByMedia) {
+                const links = await this.db.workflowMedia.findByMedia(mediaId).catch(() => []);
+                currentWorkflowId = links[0]?.workflow_id || null;
+            }
+            const currentWorkflow = currentWorkflowId && this.db.workflows?.findById
+                ? await this.db.workflows.findById(currentWorkflowId).catch(() => null)
+                : null;
+
+            const inferredProjectId = projectId || media.project_id || currentWorkflow?.project_id;
+            const inferredUserId = userId || media.user_id || currentWorkflow?.user_id || null;
+            const newName = displayName || currentWorkflow?.display_name || "Detached media";
 
             // 1. Create new standalone workflow container
             const newWorkflow = await this.db.workflows.createWorkflow({
@@ -187,9 +221,20 @@ export class WorkflowMediaService {
                 primary_media_id: null,
             });
 
-            // 2. Re-point media to the new workflow
+            // 2. Move workflow_media relation to the new workflow and sync project_id on media
+            if (currentWorkflowId && this.db.workflowMedia?.unlink) {
+                await this.db.workflowMedia.unlink({
+                    workflowId: currentWorkflowId,
+                    mediaId,
+                }).catch(() => null);
+            }
+            await createMediaInWorkflow(this.db, {
+                workflowId: newWorkflow.id,
+                mediaId,
+                stepId: media.step_id,
+                operation: "detachMedia:linkWorkflowMedia",
+            });
             await this.db.media.updateFields(mediaId, {
-                workflow_id: newWorkflow.id,
                 project_id: inferredProjectId,
             });
 
@@ -200,7 +245,7 @@ export class WorkflowMediaService {
 
             // 4. If this was the primary media of the old workflow, promote the next oldest media
             if (currentWorkflowId) {
-                const oldWf = await this.db.workflows.findById(currentWorkflowId, "primary_media_id");
+                const oldWf = currentWorkflow || await this.db.workflows.findById(currentWorkflowId, "primary_media_id");
                 if (oldWf?.primary_media_id === mediaId) {
                     const remaining = await this.db.media.findByWorkflow(currentWorkflowId);
                     const nextPrimary = remaining?.[0]?.id ?? null;
@@ -264,7 +309,7 @@ export class WorkflowMediaService {
 
     /**
      * Removes every workflow_media link for a workflow. Does not delete the workflow.
-     * Media that still belongs to another workflow is kept (legacy workflow_id is re-pointed).
+     * Media that still belongs to another workflow is kept.
      * Media with no remaining workflow is deleted (row + storage).
      */
     async releaseWorkflowMedia({ workflowId }) {
@@ -289,18 +334,6 @@ export class WorkflowMediaService {
                 : 0;
 
             if (remainingLinks > 0) {
-                if (media.workflow_id === workflowId && this.db.workflowMedia?.findByMedia) {
-                    const links = await this.db.workflowMedia.findByMedia(media.id).catch(() => []);
-                    const nextWorkflowId = links.find((row) => row.workflow_id && row.workflow_id !== workflowId)?.workflow_id;
-                    if (nextWorkflowId) {
-                        await this.db.media.updateFields(media.id, { workflow_id: nextWorkflowId }).catch((err) => {
-                            logger.warn(
-                                { mediaId: media.id, nextWorkflowId, message: err.message },
-                                "releaseWorkflowMedia: re-point workflow_id notice"
-                            );
-                        });
-                    }
-                }
                 continue;
             }
 
@@ -350,7 +383,11 @@ export class WorkflowMediaService {
                 });
             }
 
-            const mediaRec = await this.db.media.findById(mediaId, "id, workflow_id, url");
+            const mediaRec = await this.db.media.findById(mediaId, "id, url");
+            const existingLinks = this.db.workflowMedia?.findByMedia
+                ? await this.db.workflowMedia.findByMedia(mediaId).catch(() => [])
+                : [];
+            const affectedWorkflowIds = [...new Set(existingLinks.map((row) => row?.workflow_id).filter(Boolean))];
 
             // 1. Unlink workflow_media relation rows FIRST (before any delete).
             if (this.db.workflowMedia?.unlink) {
@@ -393,22 +430,22 @@ export class WorkflowMediaService {
             let workflowDeleted = false;
             let nextPrimaryMediaId = null;
 
-            // 6. Check remaining media on the legacy workflow container
-            if (mediaRec?.workflow_id) {
-                const remainingMedia = await this.db.media.findByWorkflow(mediaRec.workflow_id).catch(() => []);
+            // 6. Check remaining media on affected workflow containers
+            for (const wfId of affectedWorkflowIds) {
+                const remainingMedia = await this.db.media.findByWorkflow(wfId).catch(() => []);
 
                 if (!remainingMedia || remainingMedia.length === 0) {
                     // Empty workflow: delete workflow container
-                    await this.db.workflows.deleteById(mediaRec.workflow_id).catch((wfErr) => {
-                        logger.warn({ workflowId: mediaRec.workflow_id, message: wfErr.message }, "deleteMedia: delete workflow notice");
+                    await this.db.workflows.deleteById(wfId).catch((wfErr) => {
+                        logger.warn({ workflowId: wfId, message: wfErr.message }, "deleteMedia: delete workflow notice");
                     });
                     workflowDeleted = true;
                 } else {
-                    const workflowRecord = await this.db.workflows.findById(mediaRec.workflow_id, "primary_media_id").catch(() => null);
+                    const workflowRecord = await this.db.workflows.findById(wfId, "primary_media_id").catch(() => null);
                     if (workflowRecord?.primary_media_id === mediaId) {
                         nextPrimaryMediaId = remainingMedia[0]?.id || null;
                         if (this.db.workflows?.updatePrimaryMedia) {
-                            await this.db.workflows.updatePrimaryMedia(mediaRec.workflow_id, nextPrimaryMediaId).catch(() => null);
+                            await this.db.workflows.updatePrimaryMedia(wfId, nextPrimaryMediaId).catch(() => null);
                         }
                     }
                 }

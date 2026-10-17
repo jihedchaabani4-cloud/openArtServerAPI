@@ -3,7 +3,7 @@ import { db, useCaseService, folderService } from "../src/container.js";
 import { createLogger } from "../src/infrastructure/logging/index.js";
 import { resolveMediaMetadata } from "../src/platform/media/mediaMetadataResolver.js";
 import { assertOwns, assertOwnsAny, toMediaIdList } from "../src/platform/security/ownership.js";
-import { linkWorkflowMediaForCreatedRow } from "../src/db/workflowMediaLinker.js";
+import { createMediaInWorkflow } from "../src/db/workflowMediaLinker.js";
 
 const controllerLogger = createLogger("video-controller");
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -154,7 +154,6 @@ export async function generateVideo(req, res) {
       const id = randomUUID();
       await db.media.createMedia({
         id,
-        workflow_id: workflowId,
         project_id:  projectId,
         step_id:     "video_generation",
         url:         null,
@@ -162,7 +161,7 @@ export async function generateVideo(req, res) {
         height:      mediaMeta.height,
         status:      "processing",
       });
-      await linkWorkflowMediaForCreatedRow(db, {
+      await createMediaInWorkflow(db, {
         workflowId,
         mediaId: id,
         stepId: "video_generation",

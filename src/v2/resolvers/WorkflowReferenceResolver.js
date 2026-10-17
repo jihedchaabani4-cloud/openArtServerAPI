@@ -238,9 +238,15 @@ export async function resolveAsMedia(workflowId, userId = null) {
     const media = await db.media.findMediaByIdOrWorkflow(workflowId);
     if (!media) return null;
 
+    let linkedWfId = null;
+    if (db.workflowMedia?.findByMedia) {
+      const links = await db.workflowMedia.findByMedia(media.id || workflowId).catch(() => []);
+      linkedWfId = links?.[0]?.workflow_id || null;
+    }
+
     // Check if this media row belongs to a parent Character or Element workflow
-    if (media.workflow_id && media.workflow_id !== media.id) {
-      const parentWf = await db.workflows.findById(media.workflow_id).catch(() => null);
+    if (linkedWfId && linkedWfId !== media.id) {
+      const parentWf = await db.workflows.findById(linkedWfId).catch(() => null);
       if (parentWf?.workflow_type === WORKFLOW_TYPES.CHARACTER_SHEET) {
         const char = await resolveAsCharacter(parentWf.id, userId);
         if (char) return char;
@@ -252,7 +258,7 @@ export async function resolveAsMedia(workflowId, userId = null) {
     }
 
     return {
-      workflowId:    media.workflow_id || workflowId,
+      workflowId:    linkedWfId || workflowId,
       entityType:    "media",
       entityId:      media.id || workflowId,
       name:          media.display_name || media.name || "Image Reference",

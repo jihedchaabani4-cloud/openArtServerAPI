@@ -29,6 +29,10 @@ export class WorkflowMediaRepository extends BaseRepository {
         return data;
     }
 
+    async createMediaInWorkflow(params = {}) {
+        return this.linkMedia(params);
+    }
+
     async linkMany({ workflowId, workflow_id, mediaIds = [], role, stepId, step_id, workflowType, workflow_type }) {
         const resolvedWorkflowId = workflowId || workflow_id;
         const ids = Array.isArray(mediaIds) ? mediaIds.filter(Boolean) : [];

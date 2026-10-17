@@ -15,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
 import { resolveMediaMetadata } from "../../platform/media/mediaMetadataResolver.js";
-import { linkWorkflowMediaForCreatedRow } from "../../db/workflowMediaLinker.js";
+import { createMediaInWorkflow } from "../../db/workflowMediaLinker.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -93,7 +93,6 @@ export class ElementMediaService {
                 finalUrl = typeof src === "string" ? src : (src?.url || "");
                 const meta = resolveMediaMetadata(typeof src === "object" ? src : {});
                 mediaRecord = await this.db.media.createMedia({
-                    workflow_id: workflowId,
                     project_id: projectId,
                     url: finalUrl,
                     step_id: stepId,
@@ -101,7 +100,7 @@ export class ElementMediaService {
                     height: meta.height,
                     status: "success",
                 });
-                await linkWorkflowMediaForCreatedRow(this.db, {
+                await createMediaInWorkflow(this.db, {
                     workflowId,
                     mediaId: mediaRecord?.id,
                     stepId,
@@ -185,15 +184,14 @@ export class ElementMediaService {
                     projectId: effectiveProjectId,
                 });
                 if (sourceMedia) {
-                    if (this.db?.workflowMedia?.linkMedia) {
-                        await this.db.workflowMedia.linkMedia({
-                            workflowId: wfId,
-                            mediaId: sourceMedia.id,
-                            role: "detail",
-                            stepId: "element_reference",
-                            workflowType: "ELEMENT",
-                        });
-                    }
+                    await createMediaInWorkflow(this.db, {
+                        workflowId: wfId,
+                        mediaId: sourceMedia.id,
+                        role: "detail",
+                        stepId: "element_reference",
+                        workflowType: "ELEMENT",
+                        operation: "addReferenceMedia:linkWorkflowMedia",
+                    });
                     if (element) {
                         const existingImages = Array.isArray(element.source_images) ? element.source_images : [];
                         if (!existingImages.includes(sourceMedia.id)) {
@@ -251,7 +249,6 @@ export class ElementMediaService {
             } else {
                 const meta = resolveMediaMetadata(typeof inputSource === "object" ? inputSource : {});
                 mediaRecord = await this.db.media.createMedia({
-                    workflow_id: wfId,
                     project_id: effectiveProjectId,
                     url: resolvedUrl,
                     step_id: "element_reference",
@@ -259,7 +256,7 @@ export class ElementMediaService {
                     height: meta.height,
                     status: "success",
                 });
-                await linkWorkflowMediaForCreatedRow(this.db, {
+                await createMediaInWorkflow(this.db, {
                     workflowId: wfId,
                     mediaId: mediaRecord?.id,
                     stepId: "element_reference",
@@ -422,7 +419,6 @@ export class ElementMediaService {
             } else {
                 const meta = resolveMediaMetadata(typeof inputSource === "object" ? inputSource : {});
                 mediaRecord = await this.db.media.createMedia({
-                    workflow_id: wfId,
                     project_id: effectiveProjectId,
                     url: resolvedUrl,
                     step_id: "element_sheet",
@@ -430,7 +426,7 @@ export class ElementMediaService {
                     height: meta.height,
                     status: "success",
                 });
-                await linkWorkflowMediaForCreatedRow(this.db, {
+                await createMediaInWorkflow(this.db, {
                     workflowId: wfId,
                     mediaId: mediaRecord?.id,
                     stepId: "element_sheet",
@@ -439,14 +435,9 @@ export class ElementMediaService {
                 });
             }
 
-            // Update primary_media_id on workflow and element
+            // Update primary_media_id on workflow
             if (mediaRecord?.id) {
                 await this.db.workflows.updatePrimaryMedia(wfId, mediaRecord.id).catch(() => null);
-                if (element) {
-                    await this.db.elements.update(element.id, {
-                        primary_media_id: mediaRecord.id,
-                    }).catch(() => null);
-                }
             }
 
             crudOperationLog({
@@ -499,9 +490,13 @@ export class ElementMediaService {
         }
         if (!sourceMedia) return null;
 
-        // Ensure parent workflow context is loaded if sourceMedia itself is missing user/project
-        if (!sourceWf && sourceMedia.workflow_id && this.db.workflows?.getWorkflow) {
-            sourceWf = await this.db.workflows.getWorkflow(sourceMedia.workflow_id).catch(() => null);
+        // Ensure parent workflow context is loaded via workflow_media if sourceMedia itself is missing user/project
+        if (!sourceWf && this.db.workflowMedia?.findByMedia && this.db.workflows?.getWorkflow) {
+            const links = await this.db.workflowMedia.findByMedia(sourceMedia.id).catch(() => []);
+            const linkedWfId = links[0]?.workflow_id;
+            if (linkedWfId) {
+                sourceWf = await this.db.workflows.getWorkflow(linkedWfId).catch(() => null);
+            }
         }
 
         // Ownership verification (cross-tenant)

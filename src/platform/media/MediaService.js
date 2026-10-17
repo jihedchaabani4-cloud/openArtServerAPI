@@ -12,7 +12,7 @@
 
 import { randomUUID } from "node:crypto";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
-import { linkWorkflowMediaForCreatedRow } from "../../db/workflowMediaLinker.js";
+import { createMediaInWorkflow } from "../../db/workflowMediaLinker.js";
 
 export class MediaService {
     /**
@@ -65,8 +65,8 @@ export class MediaService {
                 });
             }
 
+            const { workflow_id: _ignoredWfId, role, workflowType, workflow_type, ...restExtra } = extra;
             const mediaRecord = await this.db.media.createMedia({
-                workflow_id: workflowId,
                 project_id: projectId,
                 generation_config_id: generationConfigId,
                 step_id: stepId,
@@ -75,13 +75,15 @@ export class MediaService {
                 height: Number(height) || 1024,
                 status,
                 error_message: errorMessage,
-                ...extra,
+                ...restExtra,
             });
 
-            await linkWorkflowMediaForCreatedRow(this.db, {
+            await createMediaInWorkflow(this.db, {
                 workflowId,
                 mediaId: mediaRecord?.id,
                 stepId,
+                ...(role ? { role } : {}),
+                ...(workflowType || workflow_type ? { workflowType: workflowType || workflow_type } : {}),
                 operation: "createMedia:linkWorkflowMedia",
             });
 

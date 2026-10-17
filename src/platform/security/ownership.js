@@ -146,10 +146,11 @@ export async function assertOwns(resourceType, id, userId) {
       if (!wfRecord && db.workflows?.getWorkflow) {
         wfRecord = await db.workflows.getWorkflow(id).catch(() => null);
       }
-      if (!wfRecord && db.media?.findById) {
-        const mediaRec = await db.media.findById(id).catch(() => null);
-        if (mediaRec?.workflow_id && db.workflows?.findById) {
-          wfRecord = await db.workflows.findById(mediaRec.workflow_id).catch(() => null);
+      if (!wfRecord && db.workflowMedia?.findByMedia && db.workflows?.findById) {
+        const links = await db.workflowMedia.findByMedia(id).catch(() => []);
+        const linkedWfId = links?.[0]?.workflow_id;
+        if (linkedWfId) {
+          wfRecord = await db.workflows.findById(linkedWfId).catch(() => null);
         }
       }
 
@@ -197,14 +198,18 @@ export async function assertOwns(resourceType, id, userId) {
           }
         }
 
-        // Fallback: check workflow's project ownership if media.workflow_id is present
-        if (mediaRecord.workflow_id && db.workflows?.findById) {
-          const parentWf = await db.workflows.findById(mediaRecord.workflow_id).catch(() => null);
-          if (parentWf?.project_id && db.projects?.findByUser) {
-            const matches = await db.projects.findByUser(userId, parentWf.project_id).catch(() => []);
-            if (matches?.length) {
-              resource = mediaRecord;
-              break;
+        // Fallback: check workflow's project ownership via workflow_media relation
+        if (db.workflowMedia?.findByMedia && db.workflows?.findById) {
+          const links = await db.workflowMedia.findByMedia(mediaRecord.id || id).catch(() => []);
+          const linkedWfId = links?.[0]?.workflow_id;
+          if (linkedWfId) {
+            const parentWf = await db.workflows.findById(linkedWfId).catch(() => null);
+            if (parentWf?.project_id && db.projects?.findByUser) {
+              const matches = await db.projects.findByUser(userId, parentWf.project_id).catch(() => []);
+              if (matches?.length) {
+                resource = mediaRecord;
+                break;
+              }
             }
           }
         }

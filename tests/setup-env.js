@@ -27,7 +27,7 @@ const { RunRepository } = await import("../src/v2/runner/runRepository.js");
 const { WorkflowMediaRepository } = await import("../src/db/WorkflowMediaRepository.js");
 
 RunRepository.useMemoryFallback = true;
-WorkflowMediaRepository.useMemoryFallback = true;
+WorkflowMediaRepository.enableTestMemoryFallback();
 
 const inMemoryStorage = new Map();
 const mockStorageBucket = {

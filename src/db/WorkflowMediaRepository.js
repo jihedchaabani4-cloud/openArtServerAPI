@@ -4,7 +4,31 @@ import { inferWorkflowMediaRole } from "./workflowMediaRole.js";
 const memoryWorkflowMedia = [];
 
 export class WorkflowMediaRepository extends BaseRepository {
-    static useMemoryFallback = false;
+    static _testMemoryEnabled = false;
+
+    static enableTestMemoryFallback() {
+        if (process.env.NODE_ENV !== "test") {
+            throw new Error("WorkflowMediaRepository in-memory fallback is prohibited outside NODE_ENV=test");
+        }
+        WorkflowMediaRepository._testMemoryEnabled = true;
+    }
+
+    static disableTestMemoryFallback() {
+        WorkflowMediaRepository._testMemoryEnabled = false;
+        memoryWorkflowMedia.length = 0;
+    }
+
+    static get useMemoryFallback() {
+        return WorkflowMediaRepository._testMemoryEnabled;
+    }
+
+    static set useMemoryFallback(val) {
+        if (val) {
+            WorkflowMediaRepository.enableTestMemoryFallback();
+        } else {
+            WorkflowMediaRepository.disableTestMemoryFallback();
+        }
+    }
 
     static clearMemory() {
         memoryWorkflowMedia.length = 0;
@@ -16,12 +40,17 @@ export class WorkflowMediaRepository extends BaseRepository {
 
     _isMemoryMode() {
         if (process.env.NODE_ENV !== "test") {
-            if (WorkflowMediaRepository.useMemoryFallback) {
-                throw new Error("In-memory fallback is prohibited outside NODE_ENV=test");
-            }
             return false;
         }
-        return Boolean(WorkflowMediaRepository.useMemoryFallback);
+        return Boolean(WorkflowMediaRepository._testMemoryEnabled);
+    }
+
+    _getClientOrThrow() {
+        const client = this.client();
+        if (!client || typeof client.from !== "function") {
+            throw new Error("WorkflowMediaRepository: Database client is not wired (production requires a valid database client)");
+        }
+        return client;
     }
 
     /**
@@ -53,7 +82,7 @@ export class WorkflowMediaRepository extends BaseRepository {
             return row;
         }
 
-        const { data, error } = await this.client()
+        const { data, error } = await this._getClientOrThrow()
             .from(this.tableName)
             .upsert({
                 workflow_id: resolvedWorkflowId,
@@ -94,7 +123,7 @@ export class WorkflowMediaRepository extends BaseRepository {
             });
         }
 
-        const { data, error } = await this.client()
+        const { data, error } = await this._getClientOrThrow()
             .from(this.tableName)
             .upsert(rows, { onConflict: "workflow_id,media_id,role" })
             .select();
@@ -115,7 +144,7 @@ export class WorkflowMediaRepository extends BaseRepository {
                     workflow_media_created_at: row.created_at,
                 }));
         }
-        const { data, error } = await this.client()
+        const { data, error } = await this._getClientOrThrow()
             .from(this.tableName)
             .select(`
                 workflow_id,
@@ -140,7 +169,7 @@ export class WorkflowMediaRepository extends BaseRepository {
     async findByWorkflowIds(workflowIds = []) {
         const ids = Array.isArray(workflowIds) ? [...new Set(workflowIds.filter(Boolean))] : [];
         if (ids.length === 0) return [];
-        const { data, error } = await this.client()
+        const { data, error } = await this._getClientOrThrow()
             .from(this.tableName)
             .select(`
                 workflow_id,
@@ -180,7 +209,7 @@ export class WorkflowMediaRepository extends BaseRepository {
 
     async findByMedia(mediaId) {
         if (!mediaId) return [];
-        const { data, error } = await this.client()
+        const { data, error } = await this._getClientOrThrow()
             .from(this.tableName)
             .select("workflow_id, media_id, role, created_at")
             .eq("media_id", mediaId)
@@ -193,7 +222,7 @@ export class WorkflowMediaRepository extends BaseRepository {
         const resolvedWorkflowId = workflowId || workflow_id;
         const resolvedMediaId = mediaId || media_id;
         if (!resolvedWorkflowId || !resolvedMediaId) return false;
-        const { data, error } = await this.client()
+        const { data, error } = await this._getClientOrThrow()
             .from(this.tableName)
             .select("workflow_id")
             .eq("workflow_id", resolvedWorkflowId)
@@ -208,7 +237,7 @@ export class WorkflowMediaRepository extends BaseRepository {
         const resolvedMediaId = mediaId || media_id;
         if (!resolvedWorkflowId || !resolvedMediaId) return;
 
-        let query = this.client()
+        let query = this._getClientOrThrow()
             .from(this.tableName)
             .delete()
             .eq("workflow_id", resolvedWorkflowId)
@@ -223,7 +252,7 @@ export class WorkflowMediaRepository extends BaseRepository {
 
     async unlinkByWorkflow(workflowId) {
         if (!workflowId) return;
-        const { error } = await this.client()
+        const { error } = await this._getClientOrThrow()
             .from(this.tableName)
             .delete()
             .eq("workflow_id", workflowId);
@@ -232,7 +261,7 @@ export class WorkflowMediaRepository extends BaseRepository {
 
     async unlinkByMedia(mediaId) {
         if (!mediaId) return;
-        const { error } = await this.client()
+        const { error } = await this._getClientOrThrow()
             .from(this.tableName)
             .delete()
             .eq("media_id", mediaId);
@@ -241,7 +270,7 @@ export class WorkflowMediaRepository extends BaseRepository {
 
     async countLinksForMedia(mediaId) {
         if (!mediaId) return 0;
-        const { count, error } = await this.client()
+        const { count, error } = await this._getClientOrThrow()
             .from(this.tableName)
             .select("media_id", { count: "exact", head: true })
             .eq("media_id", mediaId);

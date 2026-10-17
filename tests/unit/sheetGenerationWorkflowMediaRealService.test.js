@@ -2,7 +2,7 @@ if (!process.env.NODE_ENV) {
   process.env.NODE_ENV = "test";
 }
 
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
 import { CharacterGenerationService } from "../../src/domain/character/CharacterGenerationService.js";
 import { ElementService } from "../../src/domain/element/ElementService.js";
@@ -15,6 +15,7 @@ import {
   setFallbackWorkflowMediaRepo,
   resetFallbackWorkflowMediaRepo,
 } from "../../src/db/workflowMediaLinker.js";
+import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
 
 describe("Sheet Generation real service layer tests — workflow_media integrity", () => {
   let originalRpc;
@@ -344,6 +345,119 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
       assert.equal(links[0].role, "detail", "Element sheet role in workflow_media must be 'detail'");
     } finally {
       resetFallbackWorkflowMediaRepo();
+    }
+  });
+
+  it("4. WorkflowMediaRepository production fail-closed: throws if in-memory mode attempted outside test or if DB client not wired", async () => {
+    const origEnv = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = "production";
+
+      // A. enableTestMemoryFallback must throw in production
+      assert.throws(
+        () => WorkflowMediaRepository.enableTestMemoryFallback(),
+        /prohibited outside NODE_ENV=test/
+      );
+
+      // B. useMemoryFallback setter must throw in production
+      assert.throws(
+        () => {
+          WorkflowMediaRepository.useMemoryFallback = true;
+        },
+        /prohibited outside NODE_ENV=test/
+      );
+
+      // C. In production, calling linkMedia when DB client is not wired must throw
+      const unconfiguredRepo = new WorkflowMediaRepository();
+      unconfiguredRepo.client = () => null;
+
+      await assert.rejects(
+        async () => {
+          await unconfiguredRepo.linkMedia({
+            workflowId: "wf-prod-fail",
+            mediaId: "m-prod-fail",
+            role: "output",
+          });
+        },
+        /Database client is not wired/
+      );
+    } finally {
+      process.env.NODE_ENV = origEnv || "test";
+      WorkflowMediaRepository.enableTestMemoryFallback();
+    }
+  });
+
+  it("5. Worker crash handler: refunds credits idempotently (exactly once on double failure / retry / timeout) and marks direct media failed", async () => {
+    process.env.NODE_ENV = "test";
+    const { handleUseCaseWorkerFailure, useCaseWorker } = await import("../../src/workers/useCaseWorker.js");
+    const { useCaseService, db } = await import("../../src/container.js");
+    const { redisConnection, workerRedisConnection, rateLimitRedisConnection } = await import("../../src/queue/redis.js");
+
+    let actualRefundCount = 0;
+    const mediaTable = new Map();
+    const targetMediaId = "media-crash-idem-1";
+    mediaTable.set(targetMediaId, { id: targetMediaId, status: "processing" });
+
+    const origRollbackPreparedBilling = useCaseService.rollbackPreparedBilling;
+    const origDbMedia = db.media;
+
+    // Simulate real WalletService idempotent rollback behavior:
+    // If the hold was already rolled back (status === "FAILED"), subsequent calls are no-ops
+    let holdStatus = "PENDING";
+    useCaseService.rollbackPreparedBilling = async (holdId, meta) => {
+      if (holdStatus === "FAILED") {
+        // Idempotent: already refunded, do not double refund
+        return { status: "FAILED", holdId, alreadyRefunded: true };
+      }
+      holdStatus = "FAILED";
+      actualRefundCount++;
+      return { status: "FAILED", holdId, alreadyRefunded: false };
+    };
+
+    db.media = {
+      updateMedia: async (id, patch) => {
+        const existing = mediaTable.get(id) || { id };
+        const updated = { ...existing, ...patch };
+        mediaTable.set(id, updated);
+        return updated;
+      },
+      findByWorkflow: async () => [], // Simulates unlinked media (empty relation)
+    };
+
+    const mockJob = {
+      id: "job-crash-101",
+      data: {
+        billingHoldId: "hold-idem-test-1",
+        input: {
+          workflow_id: "wf-crash-101",
+          media_id: targetMediaId,
+        },
+        serverContext: {
+          workflowId: "wf-crash-101",
+          mediaIds: [targetMediaId],
+        },
+      },
+    };
+
+    try {
+      // First crash invocation (e.g. unhandled crash in worker)
+      await handleUseCaseWorkerFailure(mockJob, new Error("Simulated unhandled worker crash"));
+
+      assert.equal(actualRefundCount, 1, "Credits must be refunded on initial crash");
+      assert.equal(mediaTable.get(targetMediaId).status, "failed", "Direct media must be marked failed");
+
+      // Second crash invocation (e.g. retry failure or reservation reaper timeout)
+      await handleUseCaseWorkerFailure(mockJob, new Error("Simulated retry failure / timeout"));
+
+      assert.equal(actualRefundCount, 1, "Credits must NOT be refunded a second time (idempotent)");
+      assert.equal(mediaTable.get(targetMediaId).status, "failed", "Direct media remains failed");
+    } finally {
+      useCaseService.rollbackPreparedBilling = origRollbackPreparedBilling;
+      db.media = origDbMedia;
+      await useCaseWorker?.close?.().catch(() => {});
+      await redisConnection?.quit().catch(() => redisConnection?.disconnect());
+      await workerRedisConnection?.quit().catch(() => workerRedisConnection?.disconnect());
+      await rateLimitRedisConnection?.quit().catch(() => rateLimitRedisConnection?.disconnect());
     }
   });
 });

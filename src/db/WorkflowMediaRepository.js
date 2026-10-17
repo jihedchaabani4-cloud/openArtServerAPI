@@ -77,6 +77,47 @@ export class WorkflowMediaRepository extends BaseRepository {
         }));
     }
 
+    async findByWorkflowIds(workflowIds = []) {
+        const ids = Array.isArray(workflowIds) ? [...new Set(workflowIds.filter(Boolean))] : [];
+        if (ids.length === 0) return [];
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select(`
+                workflow_id,
+                media_id,
+                role,
+                created_at,
+                media:media_id (
+                    id,
+                    generation_config_id,
+                    step_id,
+                    url,
+                    width,
+                    height,
+                    status,
+                    error_message,
+                    create_time
+                )
+            `)
+            .in("workflow_id", ids)
+            .order("created_at", { ascending: true });
+        if (error) throw error;
+        return (data || [])
+            .map((row) => {
+                const media = Array.isArray(row.media) ? row.media[0] : row.media;
+                if (!media) return null;
+                return {
+                    ...media,
+                    workflow_id: row.workflow_id,
+                    workflowId: row.workflow_id,
+                    role: row.role,
+                    mediaRole: row.role,
+                    workflow_media_created_at: row.created_at,
+                };
+            })
+            .filter(Boolean);
+    }
+
     async findByMedia(mediaId) {
         if (!mediaId) return [];
         const { data, error } = await this.client()

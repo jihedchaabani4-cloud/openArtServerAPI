@@ -57,32 +57,130 @@ export class GenerationService {
     }
 
     /**
-     * Given a list of workflows, fetches primary media and generation configs,
-     * and assembles the enriched library payload.
+     * Given a list of workflows, fetches candidate media from workflow_media (capped at 8,
+     * ordered stably by created_at ASC, always preserving pinned primary_media_id and sheet role)
+     * alongside the legacy primary_media compatibility shim and generation configs.
      */
     async #buildLibraryPayload(workflows = []) {
+        const workflowIds = [...new Set(workflows.map((w) => w.id).filter(Boolean))];
         const primaryMediaIds = [...new Set(
             workflows.map((w) => w.primary_media_id).filter(Boolean)
         )];
 
-        let primaryMediaMap = new Map();
-
-        if (primaryMediaIds.length > 0) {
-            const mediaRows = await this.db.media.findByIds(primaryMediaIds);
-            primaryMediaMap = new Map((mediaRows || []).map((m) => [m.id, m]));
+        let relationMediaRows = [];
+        if (workflowIds.length > 0) {
+            if (typeof this.db.workflowMedia?.findByWorkflowIds === "function") {
+                relationMediaRows = (await this.db.workflowMedia.findByWorkflowIds(workflowIds)) || [];
+            } else if (typeof this.db.workflowMedia?.findByWorkflow === "function") {
+                const perWf = await Promise.all(
+                    workflowIds.map((wfId) => this.db.workflowMedia.findByWorkflow(wfId))
+                );
+                relationMediaRows = perWf.flat().filter(Boolean);
+            } else if (typeof this.db.media?.findByWorkflow === "function") {
+                const perWf = await Promise.all(
+                    workflowIds.map((wfId) => this.db.media.findByWorkflow(wfId))
+                );
+                relationMediaRows = perWf.flat().filter(Boolean);
+            }
         }
 
-        const primaryMediaList = workflows
-            .map((w) => primaryMediaMap.get(w.primary_media_id))
-            .filter(Boolean);
+        let primaryMediaMap = new Map();
+        for (const row of relationMediaRows) {
+            if (row?.id && !primaryMediaMap.has(row.id)) {
+                primaryMediaMap.set(row.id, row);
+            }
+        }
+
+        if (primaryMediaIds.length > 0 && typeof this.db.media?.findByIds === "function") {
+            const mediaRows = await this.db.media.findByIds(primaryMediaIds);
+            for (const m of mediaRows || []) {
+                if (m?.id) {
+                    const existing = primaryMediaMap.get(m.id) || {};
+                    primaryMediaMap.set(m.id, { ...existing, ...m });
+                }
+            }
+        }
+
+        const rawCandidatesByWorkflow = new Map();
+        for (const wf of workflows) {
+            rawCandidatesByWorkflow.set(wf.id, []);
+        }
+        for (const row of relationMediaRows) {
+            const wfId = row?.workflowId || row?.workflow_id;
+            if (wfId && rawCandidatesByWorkflow.has(wfId)) {
+                rawCandidatesByWorkflow.get(wfId).push(row);
+            }
+        }
+
+        const selectWorkflowCandidates = (items = [], pinnedId = null, maxItems = 8) => {
+            const indexed = items.map((item, idx) => ({
+                item,
+                idx,
+                ts: String(item.workflow_media_created_at || item.created_at || item.create_time || ""),
+            }));
+            indexed.sort((a, b) => {
+                if (a.ts < b.ts) return -1;
+                if (a.ts > b.ts) return 1;
+                return a.idx - b.idx;
+            });
+
+            const deduped = [];
+            const seenIds = new Set();
+            for (const { item } of indexed) {
+                if (!item?.id) continue;
+                if (seenIds.has(item.id)) continue;
+                seenIds.add(item.id);
+                deduped.push(item);
+            }
+
+            if (deduped.length <= maxItems) return deduped;
+
+            const isMandatory = (m) =>
+                (pinnedId && m.id === pinnedId) ||
+                m.role === "sheet" ||
+                m.mediaRole === "sheet" ||
+                m.step_id === "character_sheet" ||
+                m.step_id === "element_sheet";
+
+            const selectedIds = new Set();
+            for (const m of deduped) {
+                if (isMandatory(m) && selectedIds.size < maxItems) {
+                    selectedIds.add(m.id);
+                }
+            }
+            for (const m of deduped) {
+                if (selectedIds.size >= maxItems) break;
+                if (!selectedIds.has(m.id)) {
+                    selectedIds.add(m.id);
+                }
+            }
+
+            return deduped.filter((m) => selectedIds.has(m.id));
+        };
+
+        const cappedCandidatesByWorkflow = new Map();
+        const allSelectedMedia = [];
+
+        for (const wf of workflows) {
+            const rawList = rawCandidatesByWorkflow.get(wf.id) || [];
+            const pinnedMedia = wf.primary_media_id ? primaryMediaMap.get(wf.primary_media_id) : null;
+            const mergedList =
+                pinnedMedia && !rawList.some((m) => m.id === pinnedMedia.id)
+                    ? [pinnedMedia, ...rawList]
+                    : rawList;
+            const capped = selectWorkflowCandidates(mergedList, wf.primary_media_id, 8);
+            cappedCandidatesByWorkflow.set(wf.id, capped);
+            if (pinnedMedia) allSelectedMedia.push(pinnedMedia);
+            allSelectedMedia.push(...capped);
+        }
 
         const configIds = [...new Set(
-            primaryMediaList.map((m) => m.generation_config_id).filter(Boolean)
+            allSelectedMedia.map((m) => m?.generation_config_id).filter(Boolean)
         )];
 
         let configMap = new Map();
 
-        if (configIds.length > 0) {
+        if (configIds.length > 0 && typeof this.db.configs?.findByIdsWithReferences === "function") {
             const configs = await this.db.configs.findByIdsWithReferences(configIds);
             configMap = new Map(
                 (configs || []).map((c) => [
@@ -105,7 +203,6 @@ export class GenerationService {
                                 ref_media: ref.ref_media
                                     ? {
                                         id: ref.ref_media.id,
-                                        workflow_id: ref.ref_media.workflow_id,
                                         url: ref.ref_media.url,
                                         width: ref.ref_media.width,
                                         height: ref.ref_media.height,
@@ -119,11 +216,46 @@ export class GenerationService {
             );
         }
 
+        const formatMediaEntry = (mediaItem, wfId, fallbackAspectRatio) => {
+            const ratio = (mediaItem.width && mediaItem.height)
+                ? calculateAspectRatio(mediaItem.width, mediaItem.height)
+                : (fallbackAspectRatio || "1:1");
+            return {
+                id: mediaItem.id,
+                workflow_id: wfId,
+                workflowId: wfId,
+                role: mediaItem.role || mediaItem.mediaRole || null,
+                mediaRole: mediaItem.mediaRole || mediaItem.role || null,
+                generation_config_id: mediaItem.generation_config_id ?? null,
+                step_id: mediaItem.step_id ?? null,
+                url: mediaItem.url ?? null,
+                width: mediaItem.width ?? null,
+                height: mediaItem.height ?? null,
+                ratio,
+                aspectRatio: ratio,
+                status: mediaItem.status ?? null,
+                error_message: mediaItem.error_message ?? null,
+                create_time: mediaItem.create_time || mediaItem.workflow_media_created_at || null,
+                created_at: mediaItem.workflow_media_created_at || mediaItem.create_time || null,
+            };
+        };
+
         return workflows.map((workflow) => {
-            const media = primaryMediaMap.get(workflow.primary_media_id) || null;
-            const generationInfo = media?.generation_config_id
-                ? configMap.get(media.generation_config_id) || null
+            const media = workflow.primary_media_id
+                ? (primaryMediaMap.get(workflow.primary_media_id) || null)
                 : null;
+            const rawCandidates = cappedCandidatesByWorkflow.get(workflow.id) || [];
+            const configSourceMedia = media || rawCandidates.find((c) => c?.generation_config_id) || null;
+            const generationInfo = configSourceMedia?.generation_config_id
+                ? configMap.get(configSourceMedia.generation_config_id) || null
+                : null;
+
+            const candidates = rawCandidates.map((candidate) => {
+                const candidateConfig = candidate?.generation_config_id
+                    ? configMap.get(candidate.generation_config_id) || generationInfo
+                    : generationInfo;
+                return formatMediaEntry(candidate, workflow.id, candidateConfig?.aspect_ratio);
+            });
 
             return {
                 workflow: {
@@ -138,21 +270,9 @@ export class GenerationService {
                     create_time: workflow.create_time,
                 },
                 primary_media: media
-                    ? {
-                        id: media.id,
-                        workflow_id: media.workflow_id,
-                        generation_config_id: media.generation_config_id,
-                        step_id: media.step_id,
-                        url: media.url,
-                        width: media.width,
-                        height: media.height,
-                        ratio: (media.width && media.height) ? calculateAspectRatio(media.width, media.height) : (generationInfo?.aspect_ratio || "1:1"),
-                        aspectRatio: (media.width && media.height) ? calculateAspectRatio(media.width, media.height) : (generationInfo?.aspect_ratio || "1:1"),
-                        status: media.status,
-                        error_message: media.error_message,
-                        create_time: media.create_time,
-                    }
+                    ? formatMediaEntry(media, workflow.id, generationInfo?.aspect_ratio)
                     : null,
+                candidates,
                 generation_info: generationInfo
                     ? {
                         ...generationInfo,
@@ -190,7 +310,7 @@ export class GenerationService {
             throw err;
         }
         if (!isOwner && devBypass) {
-            console.warn(`⚠️ [GenerationService] Dev bypass: user ${userId} accessing project ${projectId}`);
+            genLogger.warn({ userId, projectId }, "Dev bypass: user accessing project");
         }
 
         const items = await this.db.media.findByProjectPaginated(projectId, {
@@ -223,8 +343,16 @@ export class GenerationService {
         });
 
         const data = await this.#buildLibraryPayload(workflows || []);
+        const payloadBytes = Buffer.byteLength(JSON.stringify(data), "utf8");
 
-        log("getUserLibrary", "success", { traceId, durationMs: Date.now() - start, userId, total, count: data.length });
+        log("getUserLibrary", "success", {
+            traceId,
+            durationMs: Date.now() - start,
+            userId,
+            total,
+            count: data.length,
+            payloadBytes,
+        });
         return {
             data,
             total: total || 0,

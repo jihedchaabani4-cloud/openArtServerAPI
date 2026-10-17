@@ -166,27 +166,11 @@ export class WorkflowRepository extends BaseRepository {
         } else {
             workflowRepositoryLogger.warn(
                 { workflowId: workflow_id, message: relationErr.message },
-                "workflow_media primary fallback failed; using legacy media.workflow_id"
+                "workflow_media primary fallback failed"
             );
         }
 
-        // 3. Fallback: find first media created for this workflow
-        const { data: firstMedia, error: fErr } = await this.client()
-            .from("media")
-            .select("id, url, generation_config_id")
-            .eq("workflow_id", workflow_id)
-            .order("create_time", { ascending: true })
-            .limit(1)
-            .maybeSingle();
-
-        if (fErr) {
-            workflowRepositoryLogger.error(
-                { workflowId: workflow_id, message: fErr.message },
-                "Error fetching legacy fallback media"
-            );
-        }
-
-        return firstMedia || null;
+        return null;
     }
 
     /**

@@ -95,7 +95,7 @@ export class ProjectReadService {
                 .from("media")
                 .select(`
                     id, step_id, url, width, height, create_time, status, error_message,
-                    workflow_id, generation_config_id,
+                    generation_config_id,
                     generation_config (
                         id, prompt, model, aspect_ratio, generation_type, seed, visibility
                     )
@@ -111,7 +111,7 @@ export class ProjectReadService {
             // Resilience fallback: query media directly without relation joins
             const fallbackResult = await supabase
                 .from("media")
-                .select("id, step_id, url, width, height, create_time, status, error_message, workflow_id, generation_config_id")
+                .select("id, step_id, url, width, height, create_time, status, error_message, generation_config_id")
                 .eq("project_id", projectId)
                 .order("create_time", { ascending: false });
             if (fallbackResult.data) {
@@ -235,8 +235,8 @@ export class ProjectReadService {
             const refs = (config?.references || []).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
             const isVideo = m.url && /\.(mp4|webm|mov)$/i.test(m.url);
             const mRelations = relationsByMediaId.get(m.id) || [];
-            const primaryRelation = mRelations.find((r) => r.workflow_id === m.workflow_id) || mRelations[0] || null;
-            const mediaWorkflowId = primaryRelation?.workflow_id || m.workflow_id;
+            const primaryRelation = mRelations[0] || null;
+            const mediaWorkflowId = primaryRelation?.workflow_id || null;
             const mediaRole = primaryRelation?.role || null;
             const wf = workflowMap.get(mediaWorkflowId);
             const isUpload = !m.generation_config_id ||
@@ -365,7 +365,7 @@ export class ProjectReadService {
             };
             formattedMedia.push(mediaObject);
 
-            for (const otherRel of mRelations) {
+            for (const otherRel of mRelations.slice(1)) {
                 if (otherRel.workflow_id && otherRel.workflow_id !== mediaWorkflowId) {
                     const linkedWf = workflowMap.get(otherRel.workflow_id);
                     const linkedStepId = otherRel.role === "detail"
@@ -423,17 +423,34 @@ export class ProjectReadService {
             });
         }
 
-        const { data: media, error: mediaErr } = await supabase
-            .from("media")
-            .select("id, workflow_id, project_id, status, url, create_time, error_message")
-            .eq("id", mediaId)
-            .single();
+        if (this.db?.media?.findById) {
+            await this.db.media.findById(mediaId, "id, project_id, status, url, create_time, error_message");
+        } else if (!this.db?.workflowMedia?.findByMedia) {
+            const { error: mediaErr } = await supabase
+                .from("media")
+                .select("id, project_id, status, url, create_time, error_message")
+                .eq("id", mediaId)
+                .single();
+            if (mediaErr) throw mediaErr;
+        }
 
-        if (mediaErr) throw mediaErr;
+        let workflowId = null;
+        if (this.db?.workflowMedia?.findByMedia) {
+            const links = await this.db.workflowMedia.findByMedia(mediaId);
+            workflowId = links?.[0]?.workflow_id || null;
+        } else {
+            const { data: relRows, error: relErr } = await supabase
+                .from("workflow_media")
+                .select("workflow_id")
+                .eq("media_id", mediaId)
+                .order("created_at", { ascending: true })
+                .limit(1);
+            if (relErr) throw relErr;
+            workflowId = relRows?.[0]?.workflow_id || null;
+        }
 
-        const workflowId = media.workflow_id;
-        const workflow = await this.db.workflows.getWorkflow(workflowId);
-        const items = await this.db.media.findByWorkflow(workflowId);
+        const workflow = workflowId ? await this.db.workflows.getWorkflow(workflowId) : null;
+        const items = workflowId ? await this.db.media.findByWorkflow(workflowId) : [];
 
         crudOperationLog({ operation, status: "ok", durationMs: Date.now() - started, mediaId, workflowId });
 

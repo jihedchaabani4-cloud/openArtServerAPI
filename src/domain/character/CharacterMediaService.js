@@ -616,11 +616,18 @@ export class CharacterMediaService {
         }
         if (!sourceMedia) return null;
 
-        // Ensure parent workflow context is loaded via workflow_media if sourceMedia itself is missing user/project
-        if (!sourceWf && this.db.workflowMedia?.findByMedia && this.db.workflows?.getWorkflow) {
+        // Verify workflow_media link presence and load parent workflow context if needed
+        if (typeof this.db.workflowMedia?.findByMedia === "function") {
             const links = await this.db.workflowMedia.findByMedia(sourceMedia.id).catch(() => []);
+            if (!Array.isArray(links) || links.length === 0) {
+                throw new CrudServiceError("Media not found", {
+                    statusCode: 404,
+                    errorCode: "MEDIA_NOT_FOUND",
+                    mediaId,
+                });
+            }
             const linkedWfId = links[0]?.workflow_id;
-            if (linkedWfId) {
+            if (!sourceWf && linkedWfId && this.db.workflows?.getWorkflow) {
                 sourceWf = await this.db.workflows.getWorkflow(linkedWfId).catch(() => null);
             }
         }

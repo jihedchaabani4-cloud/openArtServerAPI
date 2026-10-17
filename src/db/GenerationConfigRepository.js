@@ -1,4 +1,7 @@
 import { BaseRepository } from "./BaseRepository.js";
+import { createLogger } from "../infrastructure/logging/index.js";
+
+const configRepositoryLogger = createLogger("generation_config_repository");
 
 export class GenerationConfigRepository extends BaseRepository {
     constructor() {
@@ -38,7 +41,7 @@ export class GenerationConfigRepository extends BaseRepository {
      * @param {string} input_type - "IMAGE_INPUT_TYPE_BASE_IMAGE" | "IMAGE_INPUT_TYPE_REFERENCE"
      */
     async createReference({ generation_config_id, position, input_type, ref_media_id }) {
-        console.log(`🔗 [DB] Creating Reference: ConfigID=${generation_config_id}, Pos=${position}, Type=${input_type}, MediaID=${ref_media_id}`);
+        configRepositoryLogger.debug({ generation_config_id, position, input_type, ref_media_id }, "Creating generation_config_reference");
         const { data, error } = await this.client()
             .from("generation_config_reference")
             .insert({ generation_config_id, position, input_type, ref_media_id })
@@ -100,7 +103,6 @@ export class GenerationConfigRepository extends BaseRepository {
                     ref_media_id,
                     ref_media:media(
                         id,
-                        workflow_id,
                         url,
                         width,
                         height,

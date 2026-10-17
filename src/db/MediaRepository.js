@@ -35,7 +35,7 @@ export class MediaRepository extends BaseRepository {
     }
 
     async findByWorkflow(workflow_id) {
-        const relationResult = await this.client()
+        const { data, error } = await this.client()
             .from("workflow_media")
             .select(`
                 workflow_id,
@@ -46,64 +46,66 @@ export class MediaRepository extends BaseRepository {
             .eq("workflow_id", workflow_id)
             .order("created_at", { ascending: true });
 
-        if (!relationResult.error && Array.isArray(relationResult.data) && relationResult.data.length > 0) {
-            return relationResult.data
-                .map((row) => {
-                    const media = Array.isArray(row.media) ? row.media[0] : row.media;
-                    if (!media) return null;
-                    return {
-                        ...media,
-                        workflow_id: row.workflow_id,
-                        workflowId: row.workflow_id,
-                        role: row.role,
-                        mediaRole: row.role,
-                        workflow_media_created_at: row.created_at,
-                    };
-                })
-                .filter(Boolean);
-        }
-
-        if (relationResult.error) {
-            mediaRepositoryLogger.warn(
-                { workflowId: workflow_id, message: relationResult.error.message },
-                "workflow_media lookup failed; falling back to legacy media.workflow_id"
-            );
-        }
-
-        const { data, error } = await this.client()
-            .from(this.tableName)
-            .select("*")
-            .eq("workflow_id", workflow_id)
-            .order("create_time", { ascending: true }); // init first, then edits
         if (error) throw error;
-        return data;
+
+        return (data || [])
+            .map((row) => {
+                const media = Array.isArray(row.media) ? row.media[0] : row.media;
+                if (!media) return null;
+                return {
+                    ...media,
+                    workflow_id: row.workflow_id,
+                    workflowId: row.workflow_id,
+                    role: row.role,
+                    mediaRole: row.role,
+                    workflow_media_created_at: row.created_at,
+                };
+            })
+            .filter(Boolean);
     }
 
     async findLatestByWorkflow(workflow_id) {
         const { data, error } = await this.client()
-            .from(this.tableName)
+            .from("workflow_media")
             .select(`
-                *,
-                config:generation_config (
-                   dna_data:dna(name, type, description, traits)
+                workflow_id,
+                role,
+                created_at,
+                workflow:workflow_id (
+                    workflow_type
                 ),
-                workflow:workflow!workflow_id (
-                   workflow_type
+                media:media_id (
+                    *,
+                    config:generation_config (
+                       dna_data:dna(name, type, description, traits)
+                    )
                 )
             `)
             .eq("workflow_id", workflow_id)
-            .not("url", "is", null)
-            .order("create_time", { ascending: false })
-            .limit(1)
-            .maybeSingle();
+            .order("created_at", { ascending: false });
 
         if (error) throw error;
-        return data;
+
+        for (const row of data || []) {
+            const media = Array.isArray(row.media) ? row.media[0] : row.media;
+            if (media && media.url) {
+                const wf = Array.isArray(row.workflow) ? row.workflow[0] : row.workflow;
+                return {
+                    ...media,
+                    workflow_id: row.workflow_id,
+                    workflowId: row.workflow_id,
+                    role: row.role,
+                    mediaRole: row.role,
+                    workflow: wf || media.workflow || null,
+                };
+            }
+        }
+        return null;
     }
 
     async findMediaByIdOrWorkflow(id) {
         if (!id || typeof id !== "string") return null;
-        const { data, error } = await this.client()
+        const { data: byId, error: byIdErr } = await this.client()
             .from(this.tableName)
             .select(`
                 *,
@@ -111,20 +113,24 @@ export class MediaRepository extends BaseRepository {
                    dna_data:dna(name, type, description, traits)
                 )
             `)
-            .or(`workflow_id.eq.${id},id.eq.${id}`)
+            .eq("id", id)
             .not("url", "is", null)
-            .order("create_time", { ascending: false })
             .limit(1)
             .maybeSingle();
 
-        if (error) {
+        if (!byIdErr && byId) {
+            return byId;
+        }
+
+        try {
+            return await this.findLatestByWorkflow(id);
+        } catch (error) {
             mediaRepositoryLogger.warn(
                 { mediaOrWorkflowId: id, message: error.message },
                 "findMediaByIdOrWorkflow failed"
             );
             return null;
         }
-        return data;
     }
 
     async findByProject(project_id, limit = 30, offset = 0) {
@@ -139,7 +145,7 @@ export class MediaRepository extends BaseRepository {
     }
 
     /**
-     * Finds media with its generation_config and workflow context.
+     * Finds media with its generation_config and workflow context via workflow_media.
      */
     async findWithContext(id) {
         const { data, error } = await this.client()
@@ -149,15 +155,33 @@ export class MediaRepository extends BaseRepository {
                 config:generation_config (
                     id, prompt, model, aspect_ratio, generation_type, seed,
                     dna_data:dna(name, type, description, traits)
-                ),
-                workflow:workflow!workflow_id (
-                    id, display_name, session_id, variation_index, workflow_type
                 )
             `)
             .eq("id", id)
             .single();
         if (error) throw error;
-        return data;
+
+        const { data: relRow } = await this.client()
+            .from("workflow_media")
+            .select(`
+                workflow_id,
+                role,
+                workflow:workflow_id (
+                    id, display_name, session_id, variation_index, workflow_type
+                )
+            `)
+            .eq("media_id", id)
+            .order("created_at", { ascending: true })
+            .limit(1)
+            .maybeSingle();
+
+        const wf = Array.isArray(relRow?.workflow) ? relRow.workflow[0] : relRow?.workflow;
+        return {
+            ...data,
+            workflow_id: relRow?.workflow_id || null,
+            role: relRow?.role || null,
+            workflow: wf || null,
+        };
     }
 
     async updateUrl(id, url) {
@@ -224,7 +248,7 @@ export class MediaRepository extends BaseRepository {
         if (!ids || ids.length === 0) return [];
         const { data, error } = await this.client()
             .from(this.tableName)
-            .select("id, workflow_id, generation_config_id, step_id, url, width, height, status, error_message, create_time")
+            .select("id, generation_config_id, step_id, url, width, height, status, error_message, create_time")
             .in("id", ids);
         if (error) throw error;
         return data || [];
@@ -242,7 +266,7 @@ export class MediaRepository extends BaseRepository {
     async findByProjectPaginated(projectId, { sessionId, limit = 30, offset = 0 } = {}) {
         let query = this.client()
             .from(this.tableName)
-            .select("id, url, width, height, step_id, workflow_id, create_time")
+            .select("id, url, width, height, step_id, create_time")
             .eq("project_id", projectId)
             .order("create_time", { ascending: false })
             .range(Number(offset), Number(offset) + Number(limit) - 1);

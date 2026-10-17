@@ -339,6 +339,18 @@ export class ElementMediaService {
                     await this.storageService.deleteByUrl(mediaRec.url).catch(() => null);
                 }
                 await this.db.media.deleteById(mediaId);
+                if (elementId && this.db.workflows) {
+                    const elemRec = await this.db.elements?.resolveRecord?.(elementId).catch(() => null);
+                    const wfId = elemRec?.workflow_id || elementId;
+                    const wfRec = await this.db.workflows.findById?.(wfId, "primary_media_id").catch(() => null);
+                    if (wfRec?.primary_media_id === mediaId) {
+                        if (this.db.workflows.updatePrimaryMedia) {
+                            await this.db.workflows.updatePrimaryMedia(wfId, null).catch(() => null);
+                        } else if (this.db.workflows.updateFields) {
+                            await this.db.workflows.updateFields(wfId, { primary_media_id: null }).catch(() => null);
+                        }
+                    }
+                }
             }
 
             // 2. Remove mediaId from element.source_images

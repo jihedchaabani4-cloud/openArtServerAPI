@@ -360,4 +360,133 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
     assert.equal(delRes, true);
     assert.equal(deleteWorkflowCalled, false, "deleteElement must not call deleteWorkflow when workflow_id is null");
   });
+
+  it("Test 1 (B4b): deleting a character's turnaround sheet sets primary_media_id to null while remaining detail photos remain unpinned", async () => {
+    const primaryUpdates = [];
+    const detailPhotos = [
+      { id: "m-detail-1", url: "https://cdn.example.com/detail-1.png", step_id: "character_detail", role: "detail", mediaRole: "detail" },
+      { id: "m-detail-2", url: "https://cdn.example.com/detail-2.png", step_id: "character_detail", role: "detail", mediaRole: "detail" },
+    ];
+
+    const db = {
+      media: {
+        findById: async (id) => ({ id, url: `https://cdn.example.com/${id}.png`, step_id: "character_sheet" }),
+        deleteById: async (id) => ({ id }),
+        findByWorkflow: async () => detailPhotos, // 2 detail photos remain after turnaround sheet is deleted
+        client: () => ({
+          from: () => ({ delete: () => ({ eq: async () => ({ error: null }) }) }),
+        }),
+      },
+      workflows: {
+        findById: async (wfId) => ({
+          id: wfId,
+          primary_media_id: "m-sheet-1",
+          workflow_type: "CHARACTER_SHEET",
+        }),
+        deleteById: async () => ({}),
+        updatePrimaryMedia: async (wfId, mediaId) => {
+          primaryUpdates.push({ wfId, mediaId });
+          return { id: wfId, primary_media_id: mediaId };
+        },
+      },
+      characters: {
+        findByCharacterId: async (wfId) => ({ id: wfId, workflow_id: wfId }),
+      },
+      workflowMedia: {
+        findByMedia: async () => [{ workflow_id: "wf-char-sheet", media_id: "m-sheet-1", role: "sheet" }],
+        unlink: async () => {},
+        countLinksForMedia: async () => 0,
+      },
+    };
+
+    const service = new WorkflowMediaService({
+      db,
+      storageService: { deleteByUrl: async () => {} },
+      authService: { verifyMediaOwnership: async () => true },
+    });
+
+    const result = await service.deleteMedia({ mediaId: "m-sheet-1", userId: "user-1" });
+
+    assert.equal(result.deleted, true);
+    assert.equal(result.workflow_deleted, false);
+    assert.equal(result.next_primary_media_id, null, "Must NOT auto-promote remaining detail photo to primary_media_id");
+    assert.deepEqual(primaryUpdates, [{ wfId: "wf-char-sheet", mediaId: null }]);
+  });
+
+  it("Test 2 (B4b): deleting or detaching a pinned generation or upload sets primary_media_id to null without auto-promoting remaining media", async () => {
+    const primaryUpdates = [];
+    const fieldUpdates = [];
+    const remainingVariations = [
+      { id: "m-var-2", url: "https://cdn.example.com/var-2.png", step_id: "txt2img" },
+      { id: "m-var-3", url: "https://cdn.example.com/var-3.png", step_id: "txt2img" },
+    ];
+
+    const db = {
+      media: {
+        findById: async (id) => ({ id, url: `https://cdn.example.com/${id}.png`, step_id: "txt2img" }),
+        deleteById: async (id) => ({ id }),
+        updateFields: async (id, fields) => ({ id, ...fields }),
+        findByWorkflow: async () => remainingVariations,
+        client: () => ({
+          from: () => ({
+            delete: () => ({ eq: async () => ({ error: null }) }),
+            select: () => ({
+              eq: () => ({
+                single: async () => ({
+                  data: { id: "m-pinned-1", status: "ready", project_id: "proj-1", user_id: "user-1", step_id: "txt2img" },
+                  error: null,
+                }),
+              }),
+            }),
+          }),
+        }),
+      },
+      workflows: {
+        findById: async (wfId) => ({
+          id: wfId,
+          project_id: "proj-1",
+          user_id: "user-1",
+          primary_media_id: "m-pinned-1",
+          workflow_type: "IMAGE",
+        }),
+        createWorkflow: async (payload) => ({ id: "wf-detached-new", ...payload }),
+        deleteById: async () => ({}),
+        updatePrimaryMedia: async (wfId, mediaId) => {
+          primaryUpdates.push({ wfId, mediaId });
+          return { id: wfId, primary_media_id: mediaId };
+        },
+        updateFields: async (wfId, fields) => {
+          fieldUpdates.push({ wfId, fields });
+          return { id: wfId, ...fields };
+        },
+      },
+      workflowMedia: {
+        findByMedia: async () => [{ workflow_id: "wf-gen-1", media_id: "m-pinned-1", role: "output" }],
+        link: async () => ({}),
+        unlink: async () => {},
+        unlinkByWorkflow: async () => {},
+        countLinksForMedia: async () => 0,
+      },
+    };
+
+    const service = new WorkflowMediaService({
+      db,
+      storageService: { deleteByUrl: async () => {} },
+      authService: { verifyMediaOwnership: async () => true },
+    });
+
+    // 1. deleteMedia on pinned generation/upload variation -> sets primary_media_id to null
+    const deleteRes = await service.deleteMedia({ mediaId: "m-pinned-1", userId: "user-1" });
+    assert.equal(deleteRes.deleted, true);
+    assert.equal(deleteRes.workflow_deleted, false);
+    assert.equal(deleteRes.next_primary_media_id, null, "Must NOT auto-promote m-var-2 to primary_media_id on delete");
+    assert.deepEqual(primaryUpdates, [{ wfId: "wf-gen-1", mediaId: null }]);
+
+    // 2. detachMedia on pinned generation/upload variation -> sets old workflow primary_media_id to null
+    fieldUpdates.length = 0;
+    await service.detachMedia({ mediaId: "m-pinned-1", userId: "user-1" });
+    const oldWfUpdate = fieldUpdates.find((u) => u.wfId === "wf-gen-1");
+    assert.ok(oldWfUpdate, "Old workflow primary_media_id must be updated when detaching pinned media");
+    assert.equal(oldWfUpdate.fields.primary_media_id, null, "Old workflow primary_media_id must be nullified, never auto-promoted");
+  });
 });

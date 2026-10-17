@@ -553,6 +553,14 @@ export class CharacterMediaService {
                 remainingLinks = await this.db.workflowMedia.countLinksForMedia(mediaId).catch(() => 0);
             }
 
+            if (wf?.primary_media_id === mediaId) {
+                if (this.db.workflows?.updatePrimaryMedia) {
+                    await this.db.workflows.updatePrimaryMedia(resolvedWfId, null).catch(() => null);
+                } else if (this.db.workflows?.updateFields) {
+                    await this.db.workflows.updateFields(resolvedWfId, { primary_media_id: null }).catch(() => null);
+                }
+            }
+
             if (remainingLinks === 0) {
                 await this.db.media.deleteByIdAndWorkflow(mediaId, resolvedWfId);
 

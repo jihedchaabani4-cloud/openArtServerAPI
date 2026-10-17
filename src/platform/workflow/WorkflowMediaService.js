@@ -243,15 +243,18 @@ export class WorkflowMediaService {
                 primary_media_id: mediaId,
             });
 
-            // 4. If this was the primary media of the old workflow, promote the next oldest media
+            // 4. If this was the primary media of the old workflow, nullify primary_media_id (never auto-promote)
             if (currentWorkflowId) {
                 const oldWf = currentWorkflow || await this.db.workflows.findById(currentWorkflowId, "primary_media_id");
                 if (oldWf?.primary_media_id === mediaId) {
-                    const remaining = await this.db.media.findByWorkflow(currentWorkflowId);
-                    const nextPrimary = remaining?.[0]?.id ?? null;
-                    await this.db.workflows.updateFields(currentWorkflowId, {
-                        primary_media_id: nextPrimary,
-                    });
+                    if (this.db.workflows?.updatePrimaryMedia) {
+                        await this.db.workflows.updatePrimaryMedia(currentWorkflowId, null).catch(() => null);
+                    }
+                    if (this.db.workflows?.updateFields) {
+                        await this.db.workflows.updateFields(currentWorkflowId, {
+                            primary_media_id: null,
+                        }).catch(() => null);
+                    }
                 }
             }
 
@@ -322,6 +325,12 @@ export class WorkflowMediaService {
 
         if (this.db.workflowMedia?.unlinkByWorkflow) {
             await this.db.workflowMedia.unlinkByWorkflow(workflowId);
+        }
+
+        if (this.db.workflows?.updatePrimaryMedia) {
+            await this.db.workflows.updatePrimaryMedia(workflowId, null).catch(() => null);
+        } else if (this.db.workflows?.updateFields) {
+            await this.db.workflows.updateFields(workflowId, { primary_media_id: null }).catch(() => null);
         }
 
         const deletedOrphanIds = [];
@@ -428,7 +437,7 @@ export class WorkflowMediaService {
             }
 
             let workflowDeleted = false;
-            let nextPrimaryMediaId = null;
+            const nextPrimaryMediaId = null;
 
             // 6. Check remaining media on affected workflow containers
             for (const wfId of affectedWorkflowIds) {
@@ -442,8 +451,12 @@ export class WorkflowMediaService {
 
                     if (hasSidecar) {
                         // Preserve workflow container when a character or element sidecar is attached
-                        if (workflowRecord?.primary_media_id === mediaId && this.db.workflows?.updatePrimaryMedia) {
-                            await this.db.workflows.updatePrimaryMedia(wfId, null).catch(() => null);
+                        if (workflowRecord?.primary_media_id === mediaId) {
+                            if (this.db.workflows?.updatePrimaryMedia) {
+                                await this.db.workflows.updatePrimaryMedia(wfId, null).catch(() => null);
+                            } else if (this.db.workflows?.updateFields) {
+                                await this.db.workflows.updateFields(wfId, { primary_media_id: null }).catch(() => null);
+                            }
                         }
                     } else {
                         // Empty plain workflow: delete workflow container
@@ -455,9 +468,10 @@ export class WorkflowMediaService {
                 } else {
                     const workflowRecord = await this.db.workflows.findById(wfId, "primary_media_id").catch(() => null);
                     if (workflowRecord?.primary_media_id === mediaId) {
-                        nextPrimaryMediaId = remainingMedia[0]?.id || null;
                         if (this.db.workflows?.updatePrimaryMedia) {
-                            await this.db.workflows.updatePrimaryMedia(wfId, nextPrimaryMediaId).catch(() => null);
+                            await this.db.workflows.updatePrimaryMedia(wfId, null).catch(() => null);
+                        } else if (this.db.workflows?.updateFields) {
+                            await this.db.workflows.updateFields(wfId, { primary_media_id: null }).catch(() => null);
                         }
                     }
                 }

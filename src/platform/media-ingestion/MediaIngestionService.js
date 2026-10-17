@@ -23,6 +23,7 @@ import { WorkflowAuthorizationService } from "../workflow/WorkflowAuthorizationS
 import { MediaService } from "../media/MediaService.js";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
 import { calculateAspectRatio } from "../../utils/ratioUtils.js";
+import { inferWorkflowMediaRole } from "../../db/workflowMediaRole.js";
 
 export class MediaIngestionService {
     /**
@@ -408,12 +409,7 @@ export class MediaIngestionService {
                 purpose === "element_reference" ? "element_reference" :
                 "upload"
             );
-            const effectiveRole =
-                purpose === "character_detail" ? "detail" :
-                purpose === "character_sheet" ? "sheet" :
-                purpose === "element_sheet" ? "detail" :
-                purpose === "element_reference" ? "detail" :
-                "original";
+            const effectiveRole = inferWorkflowMediaRole({ stepId: effectiveStepId });
 
             const mediaRecord = await this.mediaService.createMedia({
                 workflowId: targetWorkflowId,

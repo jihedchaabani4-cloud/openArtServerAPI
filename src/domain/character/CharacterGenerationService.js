@@ -135,8 +135,9 @@ export class CharacterGenerationService {
                         executionId: characterId,
                         traceId: characterId,
                         serverContext: {
-                            workflowId: characterId,
-                            v1_workflow_id: characterId,
+                            workflowId: resolvedWorkflowId,
+                            v1_workflow_id: resolvedWorkflowId,
+                            characterId,
                             mediaIds: serverMediaIds,
                             projectId,
                         },

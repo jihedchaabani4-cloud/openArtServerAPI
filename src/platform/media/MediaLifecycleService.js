@@ -451,6 +451,40 @@ export class MediaWorkflowLifecycleService {
     }
   }
 
+  /**
+   * Sweeps and marks any orphan or crashed media placeholders that have exceeded
+   * their processing TTL (default: 30 minutes) as failed.
+   *
+   * @param {Object} [options]
+   * @param {number} [options.maxAgeMinutes=30]
+   * @param {string} [options.reason]
+   * @returns {Promise<number>} Number of swept placeholders
+   */
+  async sweepStalePlaceholders({
+    maxAgeMinutes = 30,
+    reason = "Generation execution timed out. Placeholder expired.",
+  } = {}) {
+    if (!this.bridge?.db?.media) return 0;
+
+    try {
+      const cutoffTime = new Date(Date.now() - maxAgeMinutes * 60 * 1000).toISOString();
+      const staleItems = typeof this.bridge.db.media.findStalePlaceholders === "function"
+        ? await this.bridge.db.media.findStalePlaceholders(cutoffTime)
+        : [];
+
+      let sweptCount = 0;
+      for (const item of staleItems) {
+        if (item?.id) {
+          await this.failPlaceholder(item.id, reason);
+          sweptCount++;
+        }
+      }
+      return sweptCount;
+    } catch {
+      return 0;
+    }
+  }
+
   extractAsset(output, nodeType) {
     return this.bridge?.extractAsset(output, nodeType) ?? null;
   }

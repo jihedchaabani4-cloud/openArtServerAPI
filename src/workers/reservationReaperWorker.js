@@ -39,6 +39,12 @@ export async function runReservationReaper({
       }
     }
 
+    if (activeLifecycle && typeof activeLifecycle.sweepStalePlaceholders === "function") {
+      await activeLifecycle.sweepStalePlaceholders().catch((err) => {
+        logger.warn({ err: err.message }, "Failed to sweep stale placeholders in reservation reaper");
+      });
+    }
+
     logger.info(
       {
         reapedCount,

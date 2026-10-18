@@ -100,16 +100,16 @@ export class ElementMediaService {
                     height: meta.height,
                     status: "success",
                 });
+            }
+
+            if (mediaRecord?.id) {
                 await createMediaInWorkflow(this.db, {
                     workflowId,
-                    mediaId: mediaRecord?.id,
+                    mediaId: mediaRecord.id,
                     stepId,
                     workflowType: isPrimary ? "ELEMENT_SHEET" : "ELEMENT",
                     operation: "ingestElementSources:linkWorkflowMedia",
                 });
-            }
-
-            if (mediaRecord) {
                 mediaRecords.push(mediaRecord);
                 if (finalUrl) storageUrls.push(finalUrl);
             }
@@ -256,9 +256,12 @@ export class ElementMediaService {
                     height: meta.height,
                     status: "success",
                 });
+            }
+
+            if (mediaRecord?.id) {
                 await createMediaInWorkflow(this.db, {
                     workflowId: wfId,
-                    mediaId: mediaRecord?.id,
+                    mediaId: mediaRecord.id,
                     stepId: "element_reference",
                     workflowType: "ELEMENT",
                     operation: "addReferenceMedia:linkWorkflowMedia",

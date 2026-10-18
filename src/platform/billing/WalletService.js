@@ -354,7 +354,7 @@ export class WalletService {
    * @returns {Promise<Object>}
    */
   async extendHold(referenceId, additionalSeconds = 300) {
-    if (!referenceId) return null;
+    if (!referenceId || typeof referenceId !== "string" || !referenceId.trim()) return null;
     const seconds = Number(additionalSeconds) || 300;
 
     const { data: tx, error } = await this.supabase.rpc("extend_hold", {
@@ -523,7 +523,9 @@ export class WalletService {
       throw new WalletError(error.message, "DB_ERROR");
     }
 
-    return data ?? 0;
+    if (Array.isArray(data)) return data.length;
+    if (typeof data === "number") return data;
+    return typeof data?.count === "number" ? data.count : 0;
   }
 
   /**
@@ -533,8 +535,20 @@ export class WalletService {
    * @returns {Promise<Array<{ holdId: string, referenceId: string, workflowId: string|null, mediaId: string|null, amount: number }>>}
    */
   async reapExpiredHolds() {
-    // Uses the atomic fallback query to ensure we get the full transaction rows with metadata
-    const expiredTxs = await this.expireStaleHoldsFallback({ returnRows: true });
+    const { data, error } = await this.supabase.rpc("expire_stale_holds");
+    let expiredTxs = [];
+
+    if (!error && data) {
+      expiredTxs = Array.isArray(data) ? data : (data?.records || []);
+    } else if (error) {
+      if (this.isMissingRpcError(error)) {
+        walletLogger.warn({ rpc: "expire_stale_holds" }, "RPC expire_stale_holds not found, using table fallback");
+        expiredTxs = await this.expireStaleHoldsFallback({ returnRows: true });
+      } else {
+        throw new WalletError(error.message, "DB_ERROR");
+      }
+    }
+
     return (expiredTxs || []).map((tx) => ({
       holdId: tx.reference_id || tx.id,
       referenceId: tx.reference_id,

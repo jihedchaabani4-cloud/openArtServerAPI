@@ -157,15 +157,12 @@ export class FailedOpsService {
       .update({ status: "ABANDONED", failure_reason: reason })
       .eq("id", id);
 
-    if (error) throw new Error(`[FailedOpsService] markAbandoned(${id}) failed: ${error.message}`);
-
-    console.error(JSON.stringify({
-      timestamp: new Date().toISOString(),
-      level: "error",
+    billingLogger.error({
+      event: "wallet.op_abandoned",
       operation: "wallet-op-abandoned",
       failedOpId: id,
       reason,
       alert: "MANUAL_INTERVENTION_REQUIRED",
-    }));
+    }, `Wallet operation ${id} abandoned: ${reason}`);
   }
 }

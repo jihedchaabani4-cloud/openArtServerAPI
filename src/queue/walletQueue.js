@@ -1,5 +1,8 @@
 import { Queue } from "bullmq";
 import { redisConnection } from "./redis.js";
+import { createLogger } from "../infrastructure/logging/index.js";
+
+const queueLogger = createLogger("wallet-queue");
 
 /**
  * Wallet Maintenance Queue
@@ -58,7 +61,8 @@ export async function scheduleWalletJobs() {
     { data: {}, opts: {} }
   );
 
-  console.log(
+  queueLogger.info(
+    { event: "wallet.queue.scheduled" },
     "[WalletQueue] Scheduled: expire-stale-holds (every 5 min), retry-failed-ops (every 5 min), reconcile-wallets (daily 03:00 UTC)"
   );
 }

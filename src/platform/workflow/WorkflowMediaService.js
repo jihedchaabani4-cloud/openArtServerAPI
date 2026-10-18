@@ -464,13 +464,13 @@ export class WorkflowMediaService {
             const affectedWorkflowIds = [...new Set(existingLinks.map((row) => row?.workflow_id).filter(Boolean))];
 
             // 1. Unlink workflow_media relation rows FIRST (before any delete).
-            if (this.db.workflowMedia?.unlink) {
-                await this.db.workflowMedia.unlink({ mediaId }).catch((unlinkErr) => {
-                    logger.warn({ mediaId, message: unlinkErr.message }, "deleteMedia: workflowMedia.unlink notice");
-                });
-            } else if (this.db.workflowMedia?.unlinkByMedia) {
+            if (this.db.workflowMedia?.unlinkByMedia) {
                 await this.db.workflowMedia.unlinkByMedia(mediaId).catch((unlinkErr) => {
                     logger.warn({ mediaId, message: unlinkErr.message }, "deleteMedia: workflowMedia.unlinkByMedia notice");
+                });
+            } else if (this.db.workflowMedia?.unlink) {
+                await this.db.workflowMedia.unlink({ mediaId }).catch((unlinkErr) => {
+                    logger.warn({ mediaId, message: unlinkErr.message }, "deleteMedia: workflowMedia.unlink notice");
                 });
             }
 
@@ -532,13 +532,17 @@ export class WorkflowMediaService {
                         }
                     } else {
                         // Empty plain workflow: delete workflow container
-                        await this.db.workflows.deleteById(wfId).catch((wfErr) => {
-                            logger.warn({ workflowId: wfId, message: wfErr.message }, "deleteMedia: delete workflow notice");
-                        });
+                        if (this.db.workflows?.deleteById) {
+                            await this.db.workflows.deleteById(wfId).catch((wfErr) => {
+                                logger.warn({ workflowId: wfId, message: wfErr.message }, "deleteMedia: delete workflow notice");
+                            });
+                        }
                         workflowDeleted = true;
                     }
                 } else {
-                    const workflowRecord = await this.db.workflows.findById(wfId, "primary_media_id").catch(() => null);
+                    const workflowRecord = this.db.workflows?.findById
+                        ? await this.db.workflows.findById(wfId, "primary_media_id").catch(() => null)
+                        : null;
                     if (workflowRecord?.primary_media_id === mediaId) {
                         if (this.db.workflows?.updatePrimaryMedia) {
                             await this.db.workflows.updatePrimaryMedia(wfId, null).catch(() => null);

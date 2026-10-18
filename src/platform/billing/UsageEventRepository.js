@@ -1,4 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
+import { createLogger } from "../../infrastructure/logging/index.js";
+
+const logger = createLogger("usage-event-repo");
 
 /**
  * UsageEventRepository
@@ -44,7 +47,7 @@ export class UsageEventRepository {
       .maybeSingle();
 
     if (error) {
-      console.warn(`[UsageEventRepository] recordActive failed for ${referenceId}:`, error.message);
+      logger.warn({ event: "usage.record_active_failed", referenceId, error: error.message }, "[UsageEventRepository] recordActive failed");
       // Non-fatal: audit trail failure should not block execution
       return { reference_id: referenceId, status: "ACTIVE", kind, _persisted: false };
     }
@@ -88,7 +91,7 @@ export class UsageEventRepository {
       .maybeSingle();
 
     if (error) {
-      console.warn(`[UsageEventRepository] findByReference failed for ${referenceId}:`, error.message);
+      logger.warn({ event: "usage.find_by_reference_failed", referenceId, error: error.message }, "[UsageEventRepository] findByReference failed");
       return null;
     }
     return data;
@@ -106,7 +109,7 @@ export class UsageEventRepository {
       .maybeSingle();
 
     if (error) {
-      console.warn(`[UsageEventRepository] _updateStatus(${newStatus}) failed for ${referenceId}:`, error.message);
+      logger.warn({ event: "usage.update_status_failed", referenceId, newStatus, error: error.message }, "[UsageEventRepository] _updateStatus failed");
       return null;
     }
     return data;

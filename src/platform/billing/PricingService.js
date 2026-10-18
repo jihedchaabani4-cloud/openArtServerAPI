@@ -15,6 +15,10 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
+import { createLogger } from "../../infrastructure/logging/index.js";
+
+const pricingLogger = createLogger("pricing-service");
+
 export class PricingService {
   /** Redis TTL for cached pricing rules (5 minutes) */
   CACHE_TTL_SECONDS = 300;
@@ -46,7 +50,7 @@ export class PricingService {
       }
     } catch (redisErr) {
       // Cache read failure → fall through to DB (fail open)
-      console.warn("[PricingService] Redis read error — falling back to DB:", redisErr?.message);
+      pricingLogger.warn({ event: "pricing.redis_read_error", error: redisErr?.message }, "[PricingService] Redis read error — falling back to DB");
     }
 
     // ── DB lookup ────────────────────────────────────────────────────────────
@@ -82,7 +86,7 @@ export class PricingService {
     try {
       await this.redis.setex(cacheKey, this.CACHE_TTL_SECONDS, JSON.stringify(result));
     } catch (redisErr) {
-      console.warn("[PricingService] Redis write error — cache not populated:", redisErr?.message);
+      pricingLogger.warn({ event: "pricing.redis_write_error", error: redisErr?.message }, "[PricingService] Redis write error — cache not populated");
     }
 
     return { ...result, cached: false };
@@ -117,7 +121,7 @@ export class PricingService {
       await this.redis.del(cacheKey);
       cacheInvalidated = true;
     } catch (redisErr) {
-      console.warn("[PricingService] Redis DEL error during cache invalidation:", redisErr?.message);
+      pricingLogger.warn({ event: "pricing.redis_del_error", error: redisErr?.message }, "[PricingService] Redis DEL error during cache invalidation");
     }
 
     const rule = {

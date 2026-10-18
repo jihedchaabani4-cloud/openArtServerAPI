@@ -209,6 +209,16 @@ export class WorkflowMediaRepository extends BaseRepository {
 
     async findByMedia(mediaId) {
         if (!mediaId) return [];
+        if (this._isMemoryMode()) {
+            return memoryWorkflowMedia
+                .filter((m) => m.media_id === mediaId)
+                .map((r) => ({
+                    workflow_id: r.workflow_id,
+                    media_id: r.media_id,
+                    role: r.role,
+                    created_at: r.created_at,
+                }));
+        }
         const { data, error } = await this._getClientOrThrow()
             .from(this.tableName)
             .select("workflow_id, media_id, role, created_at")
@@ -222,6 +232,11 @@ export class WorkflowMediaRepository extends BaseRepository {
         const resolvedWorkflowId = workflowId || workflow_id;
         const resolvedMediaId = mediaId || media_id;
         if (!resolvedWorkflowId || !resolvedMediaId) return false;
+        if (this._isMemoryMode()) {
+            return memoryWorkflowMedia.some(
+                (m) => m.workflow_id === resolvedWorkflowId && m.media_id === resolvedMediaId
+            );
+        }
         const { data, error } = await this._getClientOrThrow()
             .from(this.tableName)
             .select("workflow_id")
@@ -232,18 +247,32 @@ export class WorkflowMediaRepository extends BaseRepository {
         return (data || []).length > 0;
     }
 
-    async unlink({ workflowId, workflow_id, mediaId, media_id, role = null }) {
+    async unlink({ workflowId, workflow_id, mediaId, media_id, role = null } = {}) {
         const resolvedWorkflowId = workflowId || workflow_id;
         const resolvedMediaId = mediaId || media_id;
-        if (!resolvedWorkflowId || !resolvedMediaId) return;
+        if (!resolvedWorkflowId && !resolvedMediaId) return;
+
+        const normalizedRole = role ? inferWorkflowMediaRole({ role }) : null;
+
+        if (this._isMemoryMode()) {
+            for (let i = memoryWorkflowMedia.length - 1; i >= 0; i--) {
+                const item = memoryWorkflowMedia[i];
+                const matchesWf = !resolvedWorkflowId || item.workflow_id === resolvedWorkflowId;
+                const matchesMedia = !resolvedMediaId || item.media_id === resolvedMediaId;
+                const matchesRole = !normalizedRole || item.role === normalizedRole;
+                if (matchesWf && matchesMedia && matchesRole) {
+                    memoryWorkflowMedia.splice(i, 1);
+                }
+            }
+            return;
+        }
 
         let query = this._getClientOrThrow()
             .from(this.tableName)
-            .delete()
-            .eq("workflow_id", resolvedWorkflowId)
-            .eq("media_id", resolvedMediaId);
+            .delete();
 
-        const normalizedRole = role ? inferWorkflowMediaRole({ role }) : null;
+        if (resolvedWorkflowId) query = query.eq("workflow_id", resolvedWorkflowId);
+        if (resolvedMediaId) query = query.eq("media_id", resolvedMediaId);
         if (normalizedRole) query = query.eq("role", normalizedRole);
 
         const { error } = await query;
@@ -252,24 +281,19 @@ export class WorkflowMediaRepository extends BaseRepository {
 
     async unlinkByWorkflow(workflowId) {
         if (!workflowId) return;
-        const { error } = await this._getClientOrThrow()
-            .from(this.tableName)
-            .delete()
-            .eq("workflow_id", workflowId);
-        if (error) throw error;
+        return this.unlink({ workflowId });
     }
 
     async unlinkByMedia(mediaId) {
         if (!mediaId) return;
-        const { error } = await this._getClientOrThrow()
-            .from(this.tableName)
-            .delete()
-            .eq("media_id", mediaId);
-        if (error) throw error;
+        return this.unlink({ mediaId });
     }
 
     async countLinksForMedia(mediaId) {
         if (!mediaId) return 0;
+        if (this._isMemoryMode()) {
+            return memoryWorkflowMedia.filter((m) => m.media_id === mediaId).length;
+        }
         const { count, error } = await this._getClientOrThrow()
             .from(this.tableName)
             .select("media_id", { count: "exact", head: true })

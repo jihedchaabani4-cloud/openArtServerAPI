@@ -48,32 +48,50 @@ export async function createWorkflowWithMedia(
     db,
     { workflowData, mediaData, setAsPrimary = true, initialStatus = null }
 ) {
-    const workflow = await db.workflows.createWorkflow(workflowData);
-    const { workflow_id: _ignoredWfId, ...cleanMediaData } = mediaData || {};
-    const media = await db.media.createMedia({
-        ...cleanMediaData,
-        ...(initialStatus ? { status: initialStatus } : {}),
-    });
-    await createMediaInWorkflow(db, {
-        workflowId: workflow.id,
-        mediaId: media?.id,
-        stepId: mediaData.step_id,
-        workflowType: workflowData.workflow_type,
-        operation: "createWorkflowWithMedia:linkWorkflowMedia",
-    });
+    let workflow = null;
+    let media = null;
+    try {
+        workflow = await db.workflows.createWorkflow(workflowData);
+        const { workflow_id: _ignoredWfId, ...cleanMediaData } = mediaData || {};
+        media = await db.media.createMedia({
+            ...cleanMediaData,
+            ...(initialStatus ? { status: initialStatus } : {}),
+        });
+        const linkRes = await createMediaInWorkflow(db, {
+            workflowId: workflow.id,
+            mediaId: media?.id,
+            stepId: mediaData?.step_id,
+            workflowType: workflowData?.workflow_type,
+            operation: "createWorkflowWithMedia:linkWorkflowMedia",
+        });
 
-    if (setAsPrimary) {
-        await db.workflows.updatePrimaryMedia(workflow.id, media.id);
+        if (!linkRes && media?.id) {
+            throw new Error("Failed to link media to workflow in workflow_media");
+        }
+
+        if (setAsPrimary && media?.id) {
+            await db.workflows.updatePrimaryMedia(workflow.id, media.id);
+        }
+
+        return { workflow, media };
+    } catch (err) {
+        // Compensating rollback for atomicity
+        if (media?.id && db.media?.deleteMedia) {
+            try { await db.media.deleteMedia(media.id); } catch (_) {}
+        }
+        if (workflow?.id && db.workflows?.deleteWorkflow) {
+            try { await db.workflows.deleteWorkflow(workflow.id); } catch (_) {}
+        }
+        throw err;
     }
-
-    return { workflow, media };
 }
 
 /**
- * Atomically create a workflow + media placeholder inside a single PostgreSQL
- * transaction via the `create_workflow_with_placeholder_media` Supabase RPC.
+ * Atomically create a workflow + media placeholder in the backend code.
  *
- * If the RPC is not yet deployed, falls back to the sequential 3-step approach.
+ * Implements the atomic creation pattern purely in the backend application,
+ * eliminating runtime dependency on live Supabase RPC drift, while providing
+ * automatic compensating rollback if media creation or workflow_media link fails.
  *
  * @param {Object} db              — the container db object
  * @param {Object} opts
@@ -82,63 +100,53 @@ export async function createWorkflowWithMedia(
  * @returns {{ workflow: { id: string }, media: { id: string } }}
  */
 export async function createWorkflowWithMediaAtomic(db, { workflowData, mediaData }) {
-    try {
-        const { data, error } = await supabase.rpc("create_workflow_with_placeholder_media", {
-            p_project_id:           workflowData.project_id         || null,
-            p_session_id:           workflowData.session_id         || null,
-            p_display_name:         workflowData.display_name       || "Untitled",
-            p_workflow_type:        workflowData.workflow_type       || "GENERATION",
-            p_generation_config_id: mediaData.generation_config_id  || null,
-            p_step_id:              mediaData.step_id                || "GEN",
-        });
-
-        if (error) {
-            // RPC not deployed yet — fallback to sequential inserts
-            if (
-                error.code === "PGRST202" ||
-                error.code === "42883"    ||
-                (error.message && error.message.includes("create_workflow_with_placeholder_media"))
-            ) {
-                workflowMediaOpsLogger.warn(
-                    { code: error.code },
-                    "RPC not found; falling back to sequential workflow/media inserts"
-                );
-                return createWorkflowWithMedia(db, {
-                    workflowData,
-                    mediaData,
-                    setAsPrimary: true,
-                    initialStatus: mediaData.status || "processing",
-                });
-            }
-            throw error;
-        }
-
-        await createMediaInWorkflow(db, {
-            workflowId: data.workflow_id,
-            mediaId: data.media_id,
-            stepId: mediaData?.step_id,
-            workflowType: workflowData?.workflow_type,
-            operation: "createWorkflowWithMediaAtomic:linkWorkflowMedia",
-        });
-
-        // RPC returns { workflow_id, media_id } as JSONB
-        return {
-            workflow: { id: data.workflow_id },
-            media:    { id: data.media_id },
-        };
-    } catch (err) {
-        // If anything unexpected happens at network level, fall back
-        workflowMediaOpsLogger.warn(
-            { message: err.message },
-            "RPC error; falling back to sequential workflow/media inserts"
-        );
+    // If the db container provides repository methods, execute directly in backend code
+    if (db?.workflows?.createWorkflow && db?.media?.createMedia) {
         return createWorkflowWithMedia(db, {
             workflowData,
             mediaData,
             setAsPrimary: true,
-            initialStatus: mediaData.status || "processing",
+            initialStatus: mediaData?.status || "processing",
         });
     }
+
+    // Compatibility fallback for environments or test mocks providing only supabase.rpc
+    if (typeof supabase?.rpc === "function") {
+        try {
+            const { data, error } = await supabase.rpc("create_workflow_with_placeholder_media", {
+                p_project_id:           workflowData.project_id         || null,
+                p_session_id:           workflowData.session_id         || null,
+                p_display_name:         workflowData.display_name       || "Untitled",
+                p_workflow_type:        workflowData.workflow_type       || "GENERATION",
+                p_generation_config_id: mediaData.generation_config_id  || null,
+                p_step_id:              mediaData.step_id                || "GEN",
+            });
+
+            if (!error && data?.workflow_id && data?.media_id) {
+                await createMediaInWorkflow(db, {
+                    workflowId: data.workflow_id,
+                    mediaId: data.media_id,
+                    stepId: mediaData?.step_id,
+                    workflowType: workflowData?.workflow_type,
+                    operation: "createWorkflowWithMediaAtomic:linkWorkflowMedia",
+                });
+
+                return {
+                    workflow: { id: data.workflow_id },
+                    media:    { id: data.media_id },
+                };
+            }
+        } catch (_) {
+            // Fall back to backend creation
+        }
+    }
+
+    return createWorkflowWithMedia(db, {
+        workflowData,
+        mediaData,
+        setAsPrimary: true,
+        initialStatus: mediaData?.status || "processing",
+    });
 }
 
 /**

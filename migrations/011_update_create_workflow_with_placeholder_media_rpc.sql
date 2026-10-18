@@ -30,7 +30,6 @@ BEGIN
     -- 2. Insert Media placeholder row (url = NULL, status = 'processing')
     INSERT INTO media (
         project_id,
-        workflow_id,
         generation_config_id,
         step_id,
         status,
@@ -40,7 +39,6 @@ BEGIN
     )
     VALUES (
         p_project_id,
-        v_workflow_id,
         p_generation_config_id,
         p_step_id,
         'processing',

@@ -8,6 +8,24 @@ import { createLogger } from "../src/infrastructure/logging/index.js";
 
 const routeLogger = createLogger("route:assets");
 
+/**
+ * Maps a caught error onto the public API error contract.
+ * Internal failures (5xx) are masked; validation and not-found messages (4xx)
+ * are intentional public contract and keep their message and errorCode.
+ */
+function safePublicRouteError(err) {
+    const statusCode = err.statusCode || 500;
+    const isInternal = statusCode >= 500;
+    const errorCode = isInternal
+        ? "INTERNAL_ERROR"
+        : (err.errorCode || (statusCode === 404 ? "NOT_FOUND" : "APP_ERROR"));
+    return {
+        statusCode,
+        errorCode,
+        publicMessage: isInternal ? "Internal server error" : err.message,
+    };
+}
+
 const router = Router();
 router.use(requireAuth);
 
@@ -85,19 +103,16 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         });
 
     } catch (err) {
-        if (err instanceof AppError) {
-            return res.status(err.statusCode).json({
-                ok: false,
-                errorCode: err.errorCode || (err.statusCode === 404 ? "NOT_FOUND" : "APP_ERROR"),
-                message: err.message,
-                error: err.message,
-            });
-        }
-        return res.status(err.statusCode || 500).json({
-            ok: false,
-            errorCode: err.errorCode || (err.statusCode === 404 ? "NOT_FOUND" : "INTERNAL_ERROR"),
-            message: err.message,
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        routeLogger.error("Asset upload failed", {
             error: err.message,
+            statusCode,
+        });
+        return res.status(statusCode).json({
+            ok: false,
+            errorCode,
+            message: publicMessage,
+            error: publicMessage,
         });
     }
 });
@@ -114,8 +129,13 @@ router.delete("/:id", async (req, res) => {
         routeLogger.info({ mediaId: id }, "Deleted media");
         return res.json({ ok: true, ...result });
     } catch (err) {
-        routeLogger.error({ err, mediaId: req.params.id }, "Delete error");
-        return res.status(err.statusCode || 500).json({ ok: false, error: err.message });
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        routeLogger.error("Delete failed", {
+            error: err.message,
+            statusCode,
+            mediaId: req.params.id,
+        });
+        return res.status(statusCode).json({ ok: false, errorCode, error: publicMessage });
     }
 });
 

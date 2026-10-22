@@ -3,6 +3,7 @@
  * Canonical generator for storage paths across all platform domains.
  * Eliminates ad-hoc string concatenation and ensures consistent hierarchy in storage buckets.
  */
+import { CrudServiceError } from "../../utils/crudOperationLog.js";
 
 export class StoragePathResolver {
     constructor({ defaultBucket = "generated_images" } = {}) {
@@ -39,10 +40,38 @@ export class StoragePathResolver {
     }
 
     /**
+     * Validates a client-facing storage folder as a single object-key segment.
+     *
+     * Supabase object keys are taken literally by the provider, so a folder value
+     * carrying separators or traversal would become part of a foreign key path
+     * with `upsert: true`. Blank values fall back to the canonical default so
+     * callers without a folder override keep their existing keys.
+     *
+     * @param {string} folder
+     * @returns {string} The validated segment
+     */
+    static validateFolderSegment(folder) {
+        const segment = String(folder ?? "").trim();
+        if (!segment) return "uploads";
+        if (!/^[A-Za-z0-9_-]+$/.test(segment)) {
+            const preview = segment.length > 32 ? `${segment.slice(0, 32)}…` : segment;
+            throw new CrudServiceError(
+                `Invalid storage folder "${preview}": expected a single segment of [A-Za-z0-9_-].`,
+                {
+                    statusCode: 400,
+                    errorCode: "VALIDATION_ERROR",
+                }
+            );
+        }
+        return segment;
+    }
+
+    /**
      * User-uploaded project assets (images or videos)
      */
     projectAsset(userId, folder = "uploads", filename) {
-        return `${this._cleanId(userId)}/${folder}/${filename}`;
+        const segment = StoragePathResolver.validateFolderSegment(folder);
+        return `${this._cleanId(userId)}/${segment}/${filename}`;
     }
 
     /**

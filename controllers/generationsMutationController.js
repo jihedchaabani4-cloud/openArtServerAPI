@@ -5,6 +5,7 @@
  */
 
 import { generationService } from "../src/container.js";
+import { safePublicRouteError } from "../src/utils/safePublicRouteError.js";
 import { assertOwns } from "../src/platform/security/ownership.js";
 
 export const deleteGeneration = async (req, res) => {
@@ -24,7 +25,8 @@ export const deleteItem = async (req, res) => {
         await deleteOne("collection_items", req.params.id);
         res.json({ ok: true });
     } catch (err) {
-        res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        return res.status(statusCode).json({ ok: false, errorCode, message: publicMessage });
     }
 };
 
@@ -44,6 +46,7 @@ export const toggleLike = async (req, res) => {
         // is_liked not natively supported in new schema yet — placeholder
         res.json({ ok: true, note: "is_liked not natively supported in new schema yet." });
     } catch (err) {
-        res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        return res.status(statusCode).json({ ok: false, errorCode, message: publicMessage });
     }
 };

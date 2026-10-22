@@ -53,7 +53,7 @@ export class WorkflowAuthorizationService {
         }
 
         const ownedIds = (data || [])
-            .filter((wf) => !wf.project?.user_id || wf.project?.user_id === userId)
+            .filter((wf) => wf.project?.user_id === userId)
             .map((wf) => wf.id);
 
         if (ownedIds.length !== cleanIds.length) {
@@ -65,42 +65,60 @@ export class WorkflowAuthorizationService {
     }
 
     /**
-     * Verifies that a given user owns the project associated with a media asset.
+     * Verifies that a given user owns the media asset (or, as documented legacy
+     * behavior, the workflow having the same ID).
+     *
+     * Fail-closed contract, matching ProjectReadService._verifyMediaOwnership:
+     * - owned by userId → true
+     * - owned by someone else, or the record has no owner → false
+     * - record does not exist → false
+     * - database failure → throws (an infrastructure fault is never a "yes")
      */
     async verifyMediaOwnership(mediaId, userId, req = null) {
         if (!mediaId) return false;
         if (this._isBypassed(req)) return true;
 
-        const { data: media } = await this.db.media.client()
+        const { data: media, error: mediaError } = await this.db.media.client()
             .from("media")
             .select("id, project:project!project_id(user_id)")
             .eq("id", mediaId)
             .maybeSingle();
 
-        if (media) {
-            if (media.project?.user_id && media.project?.user_id !== userId) {
-                authLogger.warn({ event: "workflow_auth.media_access_denied", userId, mediaId, owner: media.project?.user_id }, "Foreign-ownership access denied for media");
-                return false;
-            }
-            return true;
+        if (mediaError) {
+            authLogger.error({ event: "workflow_auth.media_lookup_error", err: mediaError.message, userId, mediaId }, "verifyMediaOwnership media lookup error");
+            throw mediaError;
         }
 
-        // Check if mediaId is actually a workflow ID
-        const { data: wf } = await this.db.workflows.client()
+        if (media) {
+            if (media.project?.user_id === userId) {
+                return true;
+            }
+            authLogger.warn({ event: "workflow_auth.media_access_denied", userId, mediaId, owner: media.project?.user_id ?? null }, "Foreign or ownerless media access denied");
+            return false;
+        }
+
+        // mediaId may refer to a workflow container (documented legacy alias).
+        const { data: wf, error: wfError } = await this.db.workflows.client()
             .from("workflow")
             .select("id, project:project!project_id(user_id)")
             .eq("id", mediaId)
             .maybeSingle();
 
-        if (wf) {
-            if (wf.project?.user_id && wf.project?.user_id !== userId) {
-                authLogger.warn({ event: "workflow_auth.wf_access_denied", userId, workflowId: mediaId, owner: wf.project?.user_id }, "Foreign-ownership access denied for workflow");
-                return false;
-            }
-            return true;
+        if (wfError) {
+            authLogger.error({ event: "workflow_auth.wf_lookup_error", err: wfError.message, userId, mediaId }, "verifyMediaOwnership workflow lookup error");
+            throw wfError;
         }
 
-        return true;
+        if (wf) {
+            if (wf.project?.user_id === userId) {
+                return true;
+            }
+            authLogger.warn({ event: "workflow_auth.wf_access_denied", userId, workflowId: mediaId, owner: wf.project?.user_id ?? null }, "Foreign or ownerless workflow access denied");
+            return false;
+        }
+
+        authLogger.warn({ event: "workflow_auth.media_missing", userId, mediaId }, "Media/workflow not found; denying request (fail-closed)");
+        return false;
     }
 }
 

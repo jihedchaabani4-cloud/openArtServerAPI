@@ -190,7 +190,18 @@ app.use((err, req, res, next) => {
     }
 
     const statusCode = err.statusCode || 500;
-    const errorCode = err.code || (statusCode >= 500 ? LogErrorCodes.INTERNAL_UNEXPECTED_ERROR : "REQUEST_ERROR");
+
+    // An in-flight-cap / rate-limit 503 is an intentional public contract (the
+    // client is told to retry after a delay). Every other 5xx is unexpected:
+    // its internals must be logged server-side but masked from the client.
+    const intentionalRetry = statusCode === 503 && (err.retryAfter || err.code === "SERVICE_UNAVAILABLE");
+    const isUnexpectedInternal = statusCode >= 500 && !intentionalRetry;
+    const publicMessage = isUnexpectedInternal
+        ? "Internal server error"
+        : (err.message || "Internal Server Error");
+    const errorCode = isUnexpectedInternal
+        ? "INTERNAL_ERROR"
+        : (err.code || (statusCode >= 500 ? LogErrorCodes.INTERNAL_UNEXPECTED_ERROR : "REQUEST_ERROR"));
 
     // 503 Service Unavailable / In-Flight Memory Cap with Retry-After
     if (statusCode === 503 && (err.retryAfter || err.code === "SERVICE_UNAVAILABLE")) {
@@ -216,7 +227,8 @@ app.use((err, req, res, next) => {
     res.status(statusCode).json({
         ok: false,
         status: err.status || 'error',
-        message: err.message || "Internal Server Error",
+        errorCode,
+        message: publicMessage,
     });
 });
 

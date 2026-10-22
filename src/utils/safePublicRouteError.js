@@ -9,16 +9,19 @@
  *   message and errorCode (including CrudServiceError passthrough).
  *
  * @param {Object} err
+ * @param {{ statusCode?: number }} [overrides] - explicit statusCode derivation
+ *   handed over by call sites that own their own fallback rule
+ *   (e.g. INSUFFICIENT_CREDITS -> 402). Omitted: err.statusCode || 500.
  * @returns {{ statusCode: number, errorCode: string, publicMessage: string }}
  */
-export function safePublicRouteError(err) {
-    const statusCode = err.statusCode || 500;
-    const isInternal = statusCode >= 500;
+export function safePublicRouteError(err, { statusCode } = {}) {
+    const resolvedStatusCode = statusCode ?? (err.statusCode || 500);
+    const isInternal = resolvedStatusCode >= 500;
     const errorCode = isInternal
         ? "INTERNAL_ERROR"
-        : (err.errorCode || (statusCode === 404 ? "NOT_FOUND" : "APP_ERROR"));
+        : (err.errorCode || (resolvedStatusCode === 404 ? "NOT_FOUND" : "APP_ERROR"));
     return {
-        statusCode,
+        statusCode: resolvedStatusCode,
         errorCode,
         publicMessage: isInternal ? "Internal server error" : err.message,
     };

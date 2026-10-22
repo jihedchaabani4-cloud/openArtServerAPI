@@ -1,5 +1,6 @@
 import { characterService } from "../src/container.js";
 import { createLogger } from "../src/infrastructure/logging/index.js";
+import { safePublicRouteError } from "../src/utils/safePublicRouteError.js";
 
 const controllerLogger = createLogger("controller");
 
@@ -39,8 +40,8 @@ export async function createCharacter(req, res) {
         return res.json({ ok: true, ...result });
     } catch (err) {
         controllerLogger.error({ err }, `createCharacter error: ${err.message}`);
-        const statusCode = err.statusCode || 500;
-        return res.status(statusCode).json({ ok: false, message: err.message });
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        return res.status(statusCode).json({ ok: false, errorCode, message: publicMessage });
     }
 }
 
@@ -69,8 +70,10 @@ export async function generateCharacterSheet(req, res) {
         return res.json({ ok: true, ...result });
     } catch (err) {
         controllerLogger.error({ characterId: req.params?.characterId, err }, `generateCharacterSheet error: ${err.message}`);
-        const statusCode = err.statusCode || (err.code === "INSUFFICIENT_CREDITS" ? 402 : 500);
-        return res.status(statusCode).json({ ok: false, message: err.message });
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err, {
+            statusCode: err.statusCode || (err.code === "INSUFFICIENT_CREDITS" ? 402 : 500),
+        });
+        return res.status(statusCode).json({ ok: false, errorCode, message: publicMessage });
     }
 }
 
@@ -116,8 +119,8 @@ export async function updateCharacter(req, res) {
         return res.json({ ok: true, ...result });
     } catch (err) {
         controllerLogger.error({ characterId: req.params?.characterId, err }, `updateCharacter error: ${err.message}`);
-        const statusCode = err.statusCode || 500;
-        return res.status(statusCode).json({ ok: false, message: err.message });
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        return res.status(statusCode).json({ ok: false, errorCode, message: publicMessage });
     }
 }
 
@@ -133,8 +136,8 @@ export async function deleteCharacter(req, res) {
         return res.json({ ok: true, ...result });
     } catch (err) {
         controllerLogger.error({ characterId: req.params?.characterId, err }, `deleteCharacter error: ${err.message}`);
-        const statusCode = err.statusCode || 500;
-        return res.status(statusCode).json({ ok: false, message: err.message });
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        return res.status(statusCode).json({ ok: false, errorCode, message: publicMessage });
     }
 }
 
@@ -162,8 +165,8 @@ export async function addMediaToCharacter(req, res) {
         return res.json({ ok: true, ...result });
     } catch (err) {
         controllerLogger.error({ characterId: req.params?.characterId, err }, `addMediaToCharacter error: ${err.message}`);
-        const statusCode = err.statusCode || 500;
-        return res.status(statusCode).json({ ok: false, message: err.message });
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        return res.status(statusCode).json({ ok: false, errorCode, message: publicMessage });
     }
 }
 
@@ -180,8 +183,8 @@ export async function removeMediaFromCharacter(req, res) {
         return res.json({ ok: true, ...result });
     } catch (err) {
         controllerLogger.error({ characterId: req.params?.characterId, mediaId: req.params?.mediaId, err }, `removeMediaFromCharacter error: ${err.message}`);
-        const statusCode = err.statusCode || 500;
-        return res.status(statusCode).json({ ok: false, message: err.message });
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        return res.status(statusCode).json({ ok: false, errorCode, message: publicMessage });
     }
 }
 
@@ -209,8 +212,8 @@ export async function setCharacterSheetMedia(req, res) {
         return res.json({ ok: true, ...result });
     } catch (err) {
         controllerLogger.error({ characterId: req.params?.characterId, err }, `setCharacterSheetMedia error: ${err.message}`);
-        const statusCode = err.statusCode || 500;
-        return res.status(statusCode).json({ ok: false, message: err.message });
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        return res.status(statusCode).json({ ok: false, errorCode, message: publicMessage });
     }
 }
 
@@ -235,7 +238,7 @@ export async function uploadCharacterMedia(req, res) {
         return res.json({ ok: true, ...result });
     } catch (err) {
         controllerLogger.error({ characterId: req.params?.characterId, err }, `uploadCharacterMedia error: ${err.message}`);
-        const statusCode = err.statusCode || 500;
-        return res.status(statusCode).json({ ok: false, message: err.message });
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        return res.status(statusCode).json({ ok: false, errorCode, message: publicMessage });
     }
 }

@@ -50,4 +50,20 @@ export class ProjectRepository extends BaseRepository {
         if (error) throw error;
         return data || [];
     }
+
+    /**
+     * Returns the most recent project owned by userId, or null when none exists.
+     * Used as the default target project for standalone asset uploads.
+     */
+    async findMostRecentForUser(userId) {
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("id, user_id")
+            .eq("user_id", userId)
+            .order("create_time", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        if (error) throw error;
+        return data || null;
+    }
 }

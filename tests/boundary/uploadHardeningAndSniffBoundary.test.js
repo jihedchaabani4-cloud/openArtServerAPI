@@ -645,9 +645,9 @@ describe("RC1.4-D2.3 — Upload Hardening and Sniff Boundary Tests", () => {
     });
 
     it("TEST D2.3-f8: Valid image/png is accepted on upload route", async () => {
-      const { mediaIngestionService } = await import("../../src/container.js");
-      const origIngest = mediaIngestionService.ingest;
-      mediaIngestionService.ingest = async ({ source }) => {
+      const { assetUploadService } = await import("../../src/container.js");
+      const origUpload = assetUploadService.uploadAsset;
+      assetUploadService.uploadAsset = async ({ source }) => {
         const buf = source.buffer || Buffer.from(source, "base64");
         const inspection = await MediaInspector.inspect(buf, source.mimetype || "image/png");
         return {
@@ -677,7 +677,7 @@ describe("RC1.4-D2.3 — Upload Hardening and Sniff Boundary Tests", () => {
         assert.equal(data.ok, true);
         assert.ok(data.url);
       } finally {
-        mediaIngestionService.ingest = origIngest;
+        assetUploadService.uploadAsset = origUpload;
       }
 
       // Print summary table required by D2.3 (f)

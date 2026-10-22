@@ -9,7 +9,9 @@ import net from "node:net";
 export class SourcePolicy {
     static PROFILES = {
         default: {
-            maxSizeBytes: 100 * 1024 * 1024, // 100 MB
+            maxSizeBytes: 100 * 1024 * 1024, // 100 MB max (videos)
+            imageLimit: 20 * 1024 * 1024,   // 20 MB max (images)
+            videoLimit: 100 * 1024 * 1024,  // 100 MB max (videos)
             allowedMimeTypes: [
                 "image/jpeg", "image/png", "image/webp", "image/gif", "image/avif",
                 "video/mp4", "video/webm", "video/quicktime",
@@ -20,18 +22,56 @@ export class SourcePolicy {
         },
         avatar: {
             maxSizeBytes: 10 * 1024 * 1024, // 10 MB
+            imageLimit: 10 * 1024 * 1024,
+            videoLimit: 0,
             allowedMimeTypes: ["image/jpeg", "image/png", "image/webp"],
             maxImagePixels: 50 * 1000 * 1000,
             maxVideoDurationSec: 0,
         },
         character_reference: {
-            maxSizeBytes: 25 * 1024 * 1024, // 25 MB
+            maxSizeBytes: 20 * 1024 * 1024, // 20 MB
+            imageLimit: 20 * 1024 * 1024,
+            videoLimit: 0,
+            allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/avif"],
+            maxImagePixels: 100 * 1000 * 1000,
+            maxVideoDurationSec: 0,
+        },
+        character_sheet: {
+            maxSizeBytes: 20 * 1024 * 1024, // 20 MB
+            imageLimit: 20 * 1024 * 1024,
+            videoLimit: 0,
+            allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/avif"],
+            maxImagePixels: 100 * 1000 * 1000,
+            maxVideoDurationSec: 0,
+        },
+        character_detail: {
+            maxSizeBytes: 20 * 1024 * 1024, // 20 MB
+            imageLimit: 20 * 1024 * 1024,
+            videoLimit: 0,
+            allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/avif"],
+            maxImagePixels: 100 * 1000 * 1000,
+            maxVideoDurationSec: 0,
+        },
+        element_reference: {
+            maxSizeBytes: 20 * 1024 * 1024, // 20 MB
+            imageLimit: 20 * 1024 * 1024,
+            videoLimit: 0,
+            allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/avif"],
+            maxImagePixels: 100 * 1000 * 1000,
+            maxVideoDurationSec: 0,
+        },
+        element_sheet: {
+            maxSizeBytes: 20 * 1024 * 1024, // 20 MB
+            imageLimit: 20 * 1024 * 1024,
+            videoLimit: 0,
             allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/avif"],
             maxImagePixels: 100 * 1000 * 1000,
             maxVideoDurationSec: 0,
         },
         video_reference: {
-            maxSizeBytes: 200 * 1024 * 1024, // 200 MB
+            maxSizeBytes: 100 * 1024 * 1024, // 100 MB
+            imageLimit: 0,
+            videoLimit: 100 * 1024 * 1024,
             allowedMimeTypes: ["video/mp4", "video/webm", "video/quicktime"],
             maxVideoDurationSec: 60,
             maxVideoPixels: 200 * 1000 * 1000,
@@ -167,16 +207,32 @@ export class SourcePolicy {
 
         // 1. MIME Whitelist
         if (profile.allowedMimeTypes && !profile.allowedMimeTypes.includes(inspected.detectedMime)) {
-            throw new Error(
+            const err = new Error(
                 `[SourcePolicy] File format "${inspected.detectedMime}" is not allowed for this operation. Allowed: ${profile.allowedMimeTypes.join(", ")}`
             );
+            err.statusCode = 415;
+            err.code = "UNSUPPORTED_MEDIA_TYPE";
+            throw err;
         }
 
-        // 2. Size limit
+        // 2. Specific Image Size limit
+        if (inspected.type === "image" && profile.imageLimit && inspected.sizeBytes > profile.imageLimit) {
+            const maxMB = (profile.imageLimit / (1024 * 1024)).toFixed(1);
+            const actualMB = (inspected.sizeBytes / (1024 * 1024)).toFixed(1);
+            const err = new Error(`[SourcePolicy] Image file is too large (${actualMB}MB). Maximum allowed is ${maxMB}MB.`);
+            err.statusCode = 413;
+            err.code = "PAYLOAD_TOO_LARGE";
+            throw err;
+        }
+
+        // 2.1 Overall Size limit
         if (inspected.sizeBytes && inspected.sizeBytes > profile.maxSizeBytes) {
             const maxMB = (profile.maxSizeBytes / (1024 * 1024)).toFixed(1);
             const actualMB = (inspected.sizeBytes / (1024 * 1024)).toFixed(1);
-            throw new Error(`[SourcePolicy] File is too large (${actualMB}MB). Maximum allowed is ${maxMB}MB.`);
+            const err = new Error(`[SourcePolicy] File is too large (${actualMB}MB). Maximum allowed is ${maxMB}MB.`);
+            err.statusCode = 413;
+            err.code = "PAYLOAD_TOO_LARGE";
+            throw err;
         }
 
         // 3. Image Resolution

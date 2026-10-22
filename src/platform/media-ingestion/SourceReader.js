@@ -59,7 +59,10 @@ export class SourceReader {
         if (buf.length > maxSizeBytes) {
             const maxMB = (maxSizeBytes / (1024 * 1024)).toFixed(1);
             const actualMB = (buf.length / (1024 * 1024)).toFixed(1);
-            throw new Error(`[SourceReader] Uploaded file is too large (${actualMB}MB). Maximum allowed is ${maxMB}MB.`);
+            const err = new Error(`[SourceReader] Uploaded file is too large (${actualMB}MB). Maximum allowed is ${maxMB}MB.`);
+            err.statusCode = 413;
+            err.code = "PAYLOAD_TOO_LARGE";
+            throw err;
         }
 
         return {
@@ -91,7 +94,10 @@ export class SourceReader {
         if (buf.length > maxSizeBytes) {
             const maxMB = (maxSizeBytes / (1024 * 1024)).toFixed(1);
             const actualMB = (buf.length / (1024 * 1024)).toFixed(1);
-            throw new Error(`[SourceReader] Base64 payload is too large (${actualMB}MB). Maximum allowed is ${maxMB}MB.`);
+            const err = new Error(`[SourceReader] Base64 payload is too large (${actualMB}MB). Maximum allowed is ${maxMB}MB.`);
+            err.statusCode = 413;
+            err.code = "PAYLOAD_TOO_LARGE";
+            throw err;
         }
 
         return {
@@ -164,9 +170,12 @@ export class SourceReader {
                     clearTimeout(timeout);
                     const maxMB = (maxSizeBytes / (1024 * 1024)).toFixed(1);
                     const actualMB = (declaredBytes / (1024 * 1024)).toFixed(1);
-                    throw new Error(
+                    const err = new Error(
                         `[SourceReader] Remote file size (${actualMB}MB) exceeds maximum limit (${maxMB}MB).`
                     );
+                    err.statusCode = 413;
+                    err.code = "PAYLOAD_TOO_LARGE";
+                    throw err;
                 }
             }
 
@@ -181,9 +190,12 @@ export class SourceReader {
                     if (totalBytes > maxSizeBytes) {
                         controller.abort();
                         const maxMB = (maxSizeBytes / (1024 * 1024)).toFixed(1);
-                        throw new Error(
+                        const err = new Error(
                             `[SourceReader] File stream exceeded maximum allowed size of ${maxMB}MB during download.`
                         );
+                        err.statusCode = 413;
+                        err.code = "PAYLOAD_TOO_LARGE";
+                        throw err;
                     }
                     chunks.push(Buffer.from(chunk));
                 }
@@ -191,7 +203,10 @@ export class SourceReader {
                 clearTimeout(timeout);
                 if (streamErr.name === "AbortError" && totalBytes > maxSizeBytes) {
                     const maxMB = (maxSizeBytes / (1024 * 1024)).toFixed(1);
-                    throw new Error(`[SourceReader] File stream exceeded maximum allowed size of ${maxMB}MB during download.`);
+                    const err = new Error(`[SourceReader] File stream exceeded maximum allowed size of ${maxMB}MB during download.`);
+                    err.statusCode = 413;
+                    err.code = "PAYLOAD_TOO_LARGE";
+                    throw err;
                 }
                 throw streamErr;
             } finally {

@@ -26,6 +26,7 @@ import { WorkflowBillingGateway } from "./infrastructure/billing/workflowBilling
 import { MediaWorkflowLifecycleService } from "#platform/media/MediaLifecycleService.js";
 import { WorkflowLifecycleService } from "#platform/workflow/WorkflowService.js";
 import { MediaService } from "#platform/media/MediaService.js";
+import { BinaryIngestionService } from "#platform/media-ingestion/BinaryIngestionService.js";
 import { MediaIngestionService } from "#platform/media-ingestion/MediaIngestionService.js";
 import { CharacterService } from "#domain/character/CharacterService.js";
 import { ElementService } from "#domain/element/ElementService.js";
@@ -35,6 +36,7 @@ import { ProjectReadService } from "#domain/project/ProjectReadService.js";
 import { GenerationService } from "#domain/generation/GenerationService.js";
 import { FolderService } from "./domain/folder/FolderService.js";
 import { WorkflowStorageGateway } from "./infrastructure/storage/workflowStorageGateway.js";
+import { AssetUploadService } from "./domain/asset/AssetUploadService.js";
 
 import { UsageEventRepository } from "#platform/billing/UsageEventRepository.js";
 
@@ -204,13 +206,47 @@ folderService.setWorkflowService(workflowService);
 export const workflowMediaService = workflowService.mediaService;
 export const mediaService = new MediaService({ db });
 
-export const mediaIngestionService = new MediaIngestionService({
+export const binaryIngestionService = new BinaryIngestionService({ storageService });
+
+export const assetUploadService = new AssetUploadService({
     db,
-    storageService,
+    binaryIngestionService,
     workflowAuthService: workflowService.authService,
     mediaService,
     folderService,
+    storageService,
 });
+
+export const mediaIngestionService = new MediaIngestionService({
+    binaryIngestionService,
+    storageService,
+});
+
+/**
+ * Supported container-level legacy compatibility adapter.
+ *
+ * Preserves the pre-refactor `mediaIngestionService.ingest()` dual contract:
+ * 1. Binary-only mode (`skipMediaCreate: true`): delegates to pure `BinaryIngestionService.ingestBinary()`
+ *    and formats response with `{ media: null, isNew: true, mediaId: null, workflowId, ...binaryResult }`.
+ * 2. Standalone upload mode (default): delegates to `AssetUploadService.uploadAsset()` for canonical
+ *    workflow creation, media persistence, and primary pinning.
+ *
+ * Maintained as an explicit adapter for external/legacy harnesses migrating off monolithic ingest.
+ */
+export const legacyMediaIngestAdapter = {
+    async ingest(options = {}) {
+        if (options?.skipMediaCreate) {
+            return binaryIngestionService.ingestBinary(options).then((res) => ({
+                media: null,
+                isNew: true,
+                mediaId: null,
+                workflowId: options.workflowId || null,
+                ...res,
+            }));
+        }
+        return assetUploadService.uploadAsset(options);
+    },
+};
 
 export const characterService = new CharacterService({
     db,

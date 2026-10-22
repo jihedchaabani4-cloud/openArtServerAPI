@@ -1,68 +1,21 @@
 import { Router } from "express";
-import multer from "multer";
-import { workflowService, mediaIngestionService } from "../src/container.js";
+import { workflowService, assetUploadService } from "../src/container.js";
 import { requireAuth } from "../src/middleware/auth.js";
-import { createSizeLimitedMemoryStorage } from "../src/middleware/sizeLimitedStorage.js";
+import { createUploadMiddleware } from "../src/middleware/uploadMiddleware.js";
 import { AppError } from "../src/utils/AppError.js";
 import { createLogger } from "../src/infrastructure/logging/index.js";
+import { safePublicRouteError } from "../src/utils/safePublicRouteError.js";
 
 const routeLogger = createLogger("route:assets");
-
-/**
- * Maps a caught error onto the public API error contract.
- * Internal failures (5xx) are masked; validation and not-found messages (4xx)
- * are intentional public contract and keep their message and errorCode.
- */
-function safePublicRouteError(err) {
-    const statusCode = err.statusCode || 500;
-    const isInternal = statusCode >= 500;
-    const errorCode = isInternal
-        ? "INTERNAL_ERROR"
-        : (err.errorCode || (statusCode === 404 ? "NOT_FOUND" : "APP_ERROR"));
-    return {
-        statusCode,
-        errorCode,
-        publicMessage: isInternal ? "Internal server error" : err.message,
-    };
-}
 
 const router = Router();
 router.use(requireAuth);
 
-// ─── Multer ────────────────────────────────────────────────────────────────
-const upload = multer({
-    storage: createSizeLimitedMemoryStorage({
-        imageLimit: 20 * 1024 * 1024,
-        videoLimit: 100 * 1024 * 1024,
-    }),
-    limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB max (videos)
-    fileFilter: (req, file, cb) => {
-        const allowed = [
-            "image/jpeg", "image/png", "image/webp", "image/gif", "image/avif",
-            "video/mp4", "video/webm", "video/quicktime",
-        ];
-        if (allowed.includes(file.mimetype)) {
-            cb(null, true);
-        } else {
-            const err = new Error(`Unsupported file type: ${file.mimetype}`);
-            err.statusCode = 415;
-            err.code = "UNSUPPORTED_MEDIA_TYPE";
-            cb(err);
-        }
-    },
-});
+const upload = createUploadMiddleware("default");
 
 // ─── POST /api/assets/upload ───────────────────────────────────────────────
-router.post("/upload", upload.single("file"), async (req, res) => {
+router.post("/upload", upload, async (req, res) => {
     try {
-        if (req.file && req.file.mimetype.startsWith("image/") && req.file.size > 20 * 1024 * 1024) {
-            return res.status(413).json({
-                ok: false,
-                code: "PAYLOAD_TOO_LARGE",
-                message: "Image file exceeds maximum allowed size of 20MB",
-            });
-        }
-
         const sourceInput = req.file || req.body?.source || req.body?.base64;
         if (!sourceInput) {
             return res.status(400).json({ ok: false, error: "No file or base64 provided." });
@@ -73,7 +26,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
             ? String(rawFolder).trim()
             : null;
 
-        const result = await mediaIngestionService.ingest({
+        const result = await assetUploadService.uploadAsset({
             source: sourceInput,
             userId: req.user.id,
             projectId: req.body?.project_id || req.body?.projectId || null,

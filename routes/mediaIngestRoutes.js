@@ -1,44 +1,23 @@
 import { Router } from "express";
-import multer from "multer";
-import { mediaIngestionService } from "../src/container.js";
+import { assetUploadService } from "../src/container.js";
 import { requireAuth } from "../src/middleware/auth.js";
-import { createSizeLimitedMemoryStorage } from "../src/middleware/sizeLimitedStorage.js";
+import { createUploadMiddleware } from "../src/middleware/uploadMiddleware.js";
+import { createLogger } from "../src/infrastructure/logging/index.js";
+import { safePublicRouteError } from "../src/utils/safePublicRouteError.js";
+
+const routeLogger = createLogger("route:mediaIngest");
 
 const router = Router();
 router.use(requireAuth);
 
-const upload = multer({
-    storage: createSizeLimitedMemoryStorage({
-        imageLimit: 20 * 1024 * 1024,
-        videoLimit: 100 * 1024 * 1024,
-    }),
-    limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB max (videos)
-    fileFilter: (req, file, cb) => {
-        if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) {
-            cb(null, true);
-        } else {
-            const err = new Error(`Unsupported file type: ${file.mimetype}`);
-            err.statusCode = 415;
-            err.code = "UNSUPPORTED_MEDIA_TYPE";
-            cb(err);
-        }
-    },
-});
+const upload = createUploadMiddleware("default");
 
 /**
  * POST /api/media/ingest
  * Canonical ingestion endpoint: accepts multipart file, URL string, Base64 data URI, or media_id.
  */
-router.post("/ingest", upload.single("file"), async (req, res) => {
+router.post("/ingest", upload, async (req, res) => {
     try {
-        if (req.file && req.file.mimetype.startsWith("image/") && req.file.size > 20 * 1024 * 1024) {
-            return res.status(413).json({
-                ok: false,
-                code: "PAYLOAD_TOO_LARGE",
-                message: "Image file exceeds maximum allowed size of 20MB",
-            });
-        }
-
         const userId = req.user.id;
         const sourceInput = req.file || req.body?.source || req.body?.image_url || req.body?.media_id || req.body?.base64;
 
@@ -63,7 +42,7 @@ router.post("/ingest", upload.single("file"), async (req, res) => {
             ? String(rawFolder).trim()
             : null;
 
-        const result = await mediaIngestionService.ingest({
+        const result = await assetUploadService.uploadAsset({
             source: sourceInput,
             userId,
             projectId: project_id,
@@ -94,10 +73,15 @@ router.post("/ingest", upload.single("file"), async (req, res) => {
             media: result.media,
         });
     } catch (err) {
-        console.error("❌ [/api/media/ingest] Error:", err.message);
-        return res.status(err.statusCode || 500).json({
-            ok: false,
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        routeLogger.error("Failed to ingest media", {
             error: err.message,
+            statusCode,
+        });
+        return res.status(statusCode).json({
+            ok: false,
+            errorCode,
+            error: publicMessage,
         });
     }
 });

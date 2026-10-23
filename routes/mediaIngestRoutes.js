@@ -33,8 +33,6 @@ router.post("/ingest", upload, async (req, res) => {
             project_id,
             session_id,
             workflow_id,
-            purpose = "default",
-            folder,
             display_name,
         } = req.body || {};
 
@@ -49,8 +47,6 @@ router.post("/ingest", upload, async (req, res) => {
             projectId: project_id,
             sessionId: session_id,
             workflowId: workflow_id,
-            purpose,
-            folder,
             folderId: normalizedFolder,
             displayName: display_name,
             req,

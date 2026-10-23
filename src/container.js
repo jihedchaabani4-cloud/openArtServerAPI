@@ -34,7 +34,9 @@ import { ElementService } from "#domain/element/ElementService.js";
 import { ElementMediaService } from "#domain/element/ElementMediaService.js";
 import { ElementAnalysisService } from "#domain/element/ElementAnalysisService.js";
 import { ProjectReadService } from "#domain/project/ProjectReadService.js";
+import { ProjectService } from "#domain/project/ProjectService.js";
 import { GenerationService } from "#domain/generation/GenerationService.js";
+import { GenerationRequestService } from "#domain/generation/GenerationRequestService.js";
 import { FolderService } from "./domain/folder/FolderService.js";
 import { WorkflowStorageGateway } from "./infrastructure/storage/workflowStorageGateway.js";
 import { AssetUploadService } from "./domain/asset/AssetUploadService.js";
@@ -212,6 +214,8 @@ export const mediaUploadService = new MediaUploadService({ storageService });
 
 export const assetUploadService = new AssetUploadService({
     db,
+    mediaUploadService,
+    workflowMediaService,
     binaryIngestionService,
     workflowAuthService: workflowService.authService,
     mediaService,
@@ -280,5 +284,7 @@ workflowService.setEntitySyncHandlers({
 });
 
 export const projectReadService = new ProjectReadService({ db });
+export const projectService = new ProjectService({ projectRepo: db.projects });
 export const generationService = new GenerationService({ db });
+export const generationRequestService = new GenerationRequestService({ db, useCaseService, folderService });
 

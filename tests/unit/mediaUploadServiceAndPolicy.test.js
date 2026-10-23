@@ -557,8 +557,8 @@ describe("MediaUploadService Seam 1 Contract", () => {
                 return {
                     deleted: ["k1"],
                     failures: [
-                        { key: "k2", message: "NoSuchKey: The specified key does not exist." },
-                        { key: "k3", message: "404 Not Found" },
+                        { key: "k2", code: "NoSuchKey", message: "NoSuchKey: The specified key does not exist." },
+                        { key: "k3", statusCode: 404, message: "404 Not Found" },
                     ],
                 };
             },
@@ -575,6 +575,25 @@ describe("MediaUploadService Seam 1 Contract", () => {
         });
         await assert.rejects(
             service.discard(["k4"]),
+            (err) => err instanceof UploadError && err.statusCode === 502
+        );
+
+        // Must throw UploadError when failure indicates a missing bucket (never swallow bucket misconfigurations)
+        fakeStorage.deleteFiles = async () => ({
+            deleted: [],
+            failures: [{ key: "k5", message: "Bucket not found: generated_images", statusCode: 404 }],
+        });
+        await assert.rejects(
+            service.discard(["k5"]),
+            (err) => err instanceof UploadError && err.statusCode === 502
+        );
+
+        fakeStorage.deleteFiles = async () => ({
+            deleted: [],
+            failures: [{ key: "k6", code: "NoSuchBucket", message: "The specified bucket does not exist" }],
+        });
+        await assert.rejects(
+            service.discard(["k6"]),
             (err) => err instanceof UploadError && err.statusCode === 502
         );
     });

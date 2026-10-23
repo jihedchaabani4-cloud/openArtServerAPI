@@ -103,8 +103,21 @@ export class MediaUploadService {
         try {
             const result = await this.storageService.deleteFiles(uniqueKeys);
             const genuineFailures = (result?.failures || []).filter((f) => {
-                const msg = String(f?.error?.message || f?.message || "").toLowerCase();
-                return !msg.includes("not found") && !msg.includes("nosuchkey") && !msg.includes("404");
+                const code = f?.error?.code || f?.code || f?.error?.name || f?.name || "";
+                const statusCode = f?.error?.statusCode || f?.error?.status || f?.statusCode || f?.status;
+                const msg = String(f?.error?.message || f?.message || f?.error || "");
+
+                // Known object-level not-found error codes: NoSuchKey, NotFound, ResourceNotFound
+                const knownNotFoundCodes = ["NoSuchKey", "NotFound", "ResourceNotFound", "NotFoundException"];
+                const isKnownNotFoundCode = knownNotFoundCodes.includes(code) || msg.includes("NoSuchKey");
+
+                // statusCode 404 is allowed ONLY if it's not a bucket-level error
+                const isObject404 = (Number(statusCode) === 404 || msg.includes("404")) &&
+                    !msg.toLowerCase().includes("bucket") &&
+                    code !== "NoSuchBucket";
+
+                const isIgnorableMissingObject = isKnownNotFoundCode || isObject404;
+                return !isIgnorableMissingObject;
             });
             if (genuineFailures.length > 0) {
                 throw new UploadError(`Failed to discard ${genuineFailures.length} storage file(s).`);

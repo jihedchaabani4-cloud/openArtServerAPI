@@ -491,13 +491,16 @@ export class WorkflowMediaService {
                 rollbackHandle.primaryRestored = true;
             } catch (restoreErr) {
                 primaryRestoreFailed = true;
+                const primaryEntry = entries.find((e) => e.mediaId === newPrimaryMediaId);
                 crudOperationLog({
                     traceId: opTraceId,
                     operation: "rollbackAttachedMedia:restorePrimary",
-                    status: "warning",
+                    status: "error",
                     workflowId,
+                    mediaId: newPrimaryMediaId,
+                    storageKey: primaryEntry?.storageKey || null,
                     previousPrimaryMediaId,
-                    message: restoreErr?.message,
+                    message: `Primary restore failed; media stays attached and counts toward quota: ${restoreErr?.message}`,
                 });
             }
         }
@@ -521,9 +524,11 @@ export class WorkflowMediaService {
                     crudOperationLog({
                         traceId: opTraceId,
                         operation: "rollbackAttachedMedia:deleteMedia",
-                        status: "warning",
+                        status: "error",
+                        workflowId,
                         mediaId: entry.mediaId,
-                        message: delErr?.message,
+                        storageKey: entry.storageKey,
+                        message: `Media deleteById failed; storageKey preserved to avoid dangling DB pointer: ${delErr?.message}`,
                     });
                 }
             }
@@ -552,7 +557,7 @@ export class WorkflowMediaService {
             crudOperationLog({
                 traceId: opTraceId,
                 operation: "attachMediaItems:rollbackSkipDiscard",
-                status: "warning",
+                status: "error",
                 workflowId,
                 skippedStorageKeys,
                 message: "Storage discard skipped for items whose media row or unlink was not confirmed",

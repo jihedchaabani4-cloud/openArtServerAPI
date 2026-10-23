@@ -89,19 +89,20 @@ async function main() {
 
     // Create baseline tables matching canonical production schema (ADR 0006 & ADR 0007)
     runPsql(`
-      CREATE TABLE IF NOT EXISTS public.workflow (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id UUID NOT NULL,
-        project_id UUID NOT NULL,
-        title TEXT,
-        created_at TIMESTAMPTZ DEFAULT now()
-      );
-
       CREATE TABLE IF NOT EXISTS public.media (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         url TEXT NOT NULL,
         project_id UUID,
         user_id UUID,
+        created_at TIMESTAMPTZ DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.workflow (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL,
+        project_id UUID NOT NULL,
+        title TEXT,
+        primary_media_id UUID REFERENCES public.media(id) ON DELETE SET NULL,
         created_at TIMESTAMPTZ DEFAULT now()
       );
 
@@ -135,18 +136,18 @@ async function main() {
       GRANT ALL ON public.workflow_media TO service_role;
     `);
 
-    // Apply Migration 1: Attach RPC
-    let attachMigrationPath = path.resolve("..", "supabase", "migrations", "20261020020000_atomic_attach_workflow_reference_media_rpc.sql");
+    // Apply Migration 1: Attach RPC (strictly from canonical supabase/migrations)
+    const attachMigrationPath = path.resolve("..", "supabase", "migrations", "20261020020000_atomic_attach_workflow_reference_media_rpc.sql");
     if (!fs.existsSync(attachMigrationPath)) {
-      attachMigrationPath = path.resolve("..", "supabase", "migrations", "draft_20261020020000_atomic_attach_workflow_reference_media_rpc.sql");
+      throw new Error(`Canonical migration file missing: ${attachMigrationPath}`);
     }
     const attachSql = fs.readFileSync(attachMigrationPath, "utf8");
     runPsql(attachSql);
 
-    // Apply Migration 2: Unlink & Reap RPC
-    let unlinkMigrationPath = path.resolve("..", "supabase", "migrations", "20261020030000_atomic_unlink_workflow_media_and_reap_orphan_rpc.sql");
+    // Apply Migration 2: Unlink & Reap RPC (strictly from canonical supabase/migrations)
+    const unlinkMigrationPath = path.resolve("..", "supabase", "migrations", "20261020030000_atomic_unlink_workflow_media_and_reap_orphan_rpc.sql");
     if (!fs.existsSync(unlinkMigrationPath)) {
-      unlinkMigrationPath = path.resolve("..", "supabase", "migrations", "draft_20261020030000_atomic_unlink_workflow_media_and_reap_orphan_rpc.sql");
+      throw new Error(`Canonical migration file missing: ${unlinkMigrationPath}`);
     }
     const unlinkSql = fs.readFileSync(unlinkMigrationPath, "utf8");
     runPsql(unlinkSql);
@@ -581,6 +582,50 @@ async function main() {
       throw new Error("Expected media row to be deleted after final wildcard unlink!");
     }
     console.log("  ✔ PASS 7.2: Unlink with p_role IS NULL acts as wildcard for workflow container, detects was_primary=true, and cleanly reaps orphan");
+
+    // SCENARIO 8: Atomic Conditional Primary Media Restore (Zero Overwrite Invariant)
+    console.log("\n► SCENARIO 8: Atomic Conditional Primary Media Restore (Zero Overwrite Invariant)");
+    const wfCond = runPsqlScalar(`INSERT INTO public.workflow (user_id, project_id, title) VALUES (gen_random_uuid(), gen_random_uuid(), 'Conditional Restore WF') RETURNING id;`, "service_role");
+    const mCondA = runPsqlScalar(`INSERT INTO public.media (url) VALUES ('https://storage.test/cond_a.png') RETURNING id;`, "service_role");
+    const mCondB = runPsqlScalar(`INSERT INTO public.media (url) VALUES ('https://storage.test/cond_b.png') RETURNING id;`, "service_role");
+
+    // Set initial primary to mCondA
+    runPsql(`UPDATE public.workflow SET primary_media_id = '${mCondA}' WHERE id = '${wfCond}';`, "service_role");
+    const initialPrimary = runPsqlScalar(`SELECT primary_media_id FROM public.workflow WHERE id = '${wfCond}';`, "service_role");
+    if (initialPrimary !== mCondA) throw new Error(`Expected primary ${mCondA}, got: ${initialPrimary}`);
+
+    // 8.1: Successful conditional restore: expected matches current primary (returns 1 affected row)
+    const restoreSuccessRows = runPsqlJson(`
+      WITH updated AS (
+        UPDATE public.workflow
+        SET primary_media_id = NULL
+        WHERE id = '${wfCond}' AND primary_media_id = '${mCondA}'
+        RETURNING id, primary_media_id
+      )
+      SELECT COALESCE(json_agg(row_to_json(updated)), '[]'::json) FROM updated;
+    `, "service_role");
+
+    if (!Array.isArray(restoreSuccessRows) || restoreSuccessRows.length !== 1) {
+      throw new Error(`Expected exactly 1 updated row on matching expected primary, got: ${JSON.stringify(restoreSuccessRows)}`);
+    }
+    console.log("  ✔ PASS 8.1: Conditional UPDATE matched expected primary, cleared primary, returned 1 affected row");
+
+    // 8.2: Failed conditional restore: expected primary does NOT match (simulates concurrent change)
+    // Returns 0 affected rows (empty array [])
+    const restoreMismatchedRows = runPsqlJson(`
+      WITH updated AS (
+        UPDATE public.workflow
+        SET primary_media_id = '${mCondB}'
+        WHERE id = '${wfCond}' AND primary_media_id = '${mCondA}'
+        RETURNING id, primary_media_id
+      )
+      SELECT COALESCE(json_agg(row_to_json(updated)), '[]'::json) FROM updated;
+    `, "service_role");
+
+    if (!Array.isArray(restoreMismatchedRows) || restoreMismatchedRows.length !== 0) {
+      throw new Error(`Expected exactly 0 updated rows on mismatched expected primary, got: ${JSON.stringify(restoreMismatchedRows)}`);
+    }
+    console.log("  ✔ PASS 8.2: Conditional UPDATE rejected stale expected primary (0 affected rows), preserved current DB state");
 
     console.log("\n================================================================================");
     console.log("  ALL REAL POSTGRESQL CONCURRENCY & INTEGRATION SCENARIOS PASSED (100% SUCCESS)");

@@ -6,8 +6,9 @@ import http from "node:http";
 import express from "express";
 import assetsRouter from "../../routes/assets.js";
 import mediaIngestRouter from "../../routes/mediaIngestRoutes.js";
+import elementRoutes from "../../routes/elementRoutes.js";
 import { supabase } from "../../lib/supabase.js";
-import { assetUploadService } from "../../src/container.js";
+import { assetUploadService, elementMediaService, db } from "../../src/container.js";
 import { createUploadMiddleware } from "../../src/middleware/uploadMiddleware.js";
 import {
     rateLimitRedisConnection,
@@ -38,6 +39,16 @@ function buildMinimalHeicBuffer() {
     buf.write("heic", 8, "ascii");
     buf.writeUInt32BE(0, 12);
     buf.write("heicmif1", 16, "ascii");
+    return buf;
+}
+
+function buildMinimalMp4Buffer() {
+    const buf = Buffer.alloc(64, 0);
+    buf.writeUInt32BE(24, 0);
+    buf.write("ftyp", 4, "ascii");
+    buf.write("isom", 8, "ascii");
+    buf.writeUInt32BE(512, 12);
+    buf.write("isomiso2", 16, "ascii");
     return buf;
 }
 
@@ -152,6 +163,7 @@ describe("Ticket 02b — Upload Routers Policy Wiring & Route-Level Parity Tests
         app.use(express.json());
         app.use("/api/assets", assetsRouter);
         app.use("/api/media", mediaIngestRouter);
+        app.use("/api/v2/elements", elementRoutes);
 
         server = http.createServer(app);
         await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -159,11 +171,15 @@ describe("Ticket 02b — Upload Routers Policy Wiring & Route-Level Parity Tests
 
         const legacyDefaultApp = express();
         const legacyDefaultUpload = createUploadMiddleware("default");
+        const legacyElementUpload = createUploadMiddleware("element_reference");
         legacyDefaultApp.post("/api/assets/upload", legacyDefaultUpload, (req, res) => {
             res.status(200).json({ ok: true, size: req.file?.size });
         });
         legacyDefaultApp.post("/api/media/ingest", legacyDefaultUpload, (req, res) => {
             res.status(200).json({ ok: true, size: req.file?.size });
+        });
+        legacyDefaultApp.post("/api/v2/elements/:id/images", legacyElementUpload, (req, res) => {
+            res.status(201).json({ status: "created", media: { id: "legacy-elem-media" } });
         });
         legacyDefaultServer = http.createServer(legacyDefaultApp);
         await new Promise((resolve) => legacyDefaultServer.listen(0, "127.0.0.1", resolve));
@@ -364,6 +380,131 @@ describe("Ticket 02b — Upload Routers Policy Wiring & Route-Level Parity Tests
                 assert.equal(octetRes.body?.code, legacyOctetRes.body?.code);
             } finally {
                 assetUploadService.uploadAsset = origUploadAsset;
+            }
+        });
+    });
+
+    describe("3. routes/elementRoutes.js — POST /api/v2/elements/:id/images (ELEMENT_REFERENCE_UPLOAD_POLICY + preUploadElementCapacityGuard ordering)", () => {
+        const ELEMENT_ID = "00000000-0000-0000-0000-000000000001";
+
+        it("runs preUploadElementCapacityGuard BEFORE upload middleware (fail-fast before Multer parses stream) and enforces ELEMENT_REFERENCE_UPLOAD_POLICY", async () => {
+            const origAssertUploadAllowed = elementMediaService.assertUploadAllowed;
+            const origAddReferenceMedia = elementMediaService.addReferenceMedia;
+            const origElementsRepo = db.elements;
+
+            const callOrder = [];
+            let guardShouldRejectFull = false;
+
+            db.elements = {
+                ...origElementsRepo,
+                findById: async (id) => ({ id, user_id: "test-user-02b", project_id: "proj-1", workflow_id: "wf-elem-1" }),
+                resolveRecord: async (id) => ({ id, user_id: "test-user-02b", project_id: "proj-1", workflow_id: "wf-elem-1" }),
+            };
+
+            elementMediaService.assertUploadAllowed = async ({ elementId, userId }) => {
+                callOrder.push("preUploadElementCapacityGuard");
+                if (guardShouldRejectFull) {
+                    const err = new Error("Maximum 6 reference images allowed per element");
+                    err.statusCode = 400;
+                    err.errorCode = "LIMIT_EXCEEDED";
+                    throw err;
+                }
+                return { allowed: true, currentCount: 0, maxAllowed: 6, remainingSlots: 6, workflowId: elementId };
+            };
+
+            elementMediaService.addReferenceMedia = async ({ file }) => {
+                assert.ok(file?.buffer, "Multer upload.single('file') must populate req.file before addImageToElement");
+                callOrder.push("upload->addImageToElement");
+                return { media: { id: "media-elem-1", url: "https://cdn.example.com/elem.png" } };
+            };
+
+            try {
+                // 1. Order check when Element is full: sending application/octet-stream (which Multer would reject with 415)
+                // must return 400 LIMIT_EXCEEDED from preUploadElementCapacityGuard BEFORE Multer runs
+                guardShouldRejectFull = true;
+                const fullRes = await sendMultipartRequest(baseUrl, `/api/v2/elements/${ELEMENT_ID}/images`, {
+                    filename: "raw.bin",
+                    contentType: "application/octet-stream",
+                    payloadBuffer: VALID_PNG_1X1,
+                });
+                assert.equal(fullRes.status, 400, "preUploadElementCapacityGuard must short-circuit with 400 before Multer 415");
+                assert.equal(fullRes.body?.code, "LIMIT_EXCEEDED");
+                assert.deepEqual(callOrder, ["preUploadElementCapacityGuard"]);
+
+                // 2. (a) Valid image -> 201 Created and exact middleware execution order
+                guardShouldRejectFull = false;
+                callOrder.length = 0;
+                const validRes = await sendMultipartRequest(baseUrl, `/api/v2/elements/${ELEMENT_ID}/images`, {
+                    filename: "valid.png",
+                    contentType: "image/png",
+                    payloadBuffer: VALID_PNG_1X1,
+                });
+                const legacyValidRes = await sendMultipartRequest(legacyDefaultBaseUrl, `/api/v2/elements/${ELEMENT_ID}/images`, {
+                    filename: "valid.png",
+                    contentType: "image/png",
+                    payloadBuffer: VALID_PNG_1X1,
+                });
+                assert.equal(validRes.status, 201);
+                assert.equal(validRes.status, legacyValidRes.status);
+                assert.deepEqual(callOrder, ["preUploadElementCapacityGuard", "upload->addImageToElement"]);
+
+                // 3. (b) Spoofed MIME (MP4 video bytes declared as image/png) -> 415 UNSUPPORTED_MEDIA_TYPE
+                const spoofRes = await sendMultipartRequest(baseUrl, `/api/v2/elements/${ELEMENT_ID}/images`, {
+                    filename: "spoof.png",
+                    contentType: "image/png",
+                    payloadBuffer: buildMinimalMp4Buffer(),
+                });
+                const legacySpoofRes = await sendMultipartRequest(legacyDefaultBaseUrl, `/api/v2/elements/${ELEMENT_ID}/images`, {
+                    filename: "spoof.png",
+                    contentType: "image/png",
+                    payloadBuffer: buildMinimalMp4Buffer(),
+                });
+                assert.equal(spoofRes.status, 415);
+                assert.equal(spoofRes.status, legacySpoofRes.status);
+                assert.equal(spoofRes.body?.code, "UNSUPPORTED_MEDIA_TYPE");
+                assert.equal(spoofRes.body?.code, legacySpoofRes.body?.code);
+                assert.match(
+                    spoofRes.body?.message || "",
+                    /Unsupported file type: video\/mp4/,
+                    "routes/elementRoutes.js must be wired to ELEMENT_REFERENCE_UPLOAD_POLICY"
+                );
+
+                // 4. (c) Oversized image (> 20MB) -> 413 PAYLOAD_TOO_LARGE
+                const oversizedBuf = buildOversizedPngBuffer();
+                const overRes = await sendMultipartRequest(baseUrl, `/api/v2/elements/${ELEMENT_ID}/images`, {
+                    filename: "huge.png",
+                    contentType: "image/png",
+                    payloadBuffer: oversizedBuf,
+                });
+                const legacyOverRes = await sendMultipartRequest(legacyDefaultBaseUrl, `/api/v2/elements/${ELEMENT_ID}/images`, {
+                    filename: "huge.png",
+                    contentType: "image/png",
+                    payloadBuffer: oversizedBuf,
+                });
+                assert.equal(overRes.status, 413);
+                assert.equal(overRes.status, legacyOverRes.status);
+                assert.equal(overRes.body?.code, "PAYLOAD_TOO_LARGE");
+                assert.equal(overRes.body?.code, legacyOverRes.body?.code);
+
+                // 5. (d) Declared application/octet-stream -> 415 UNSUPPORTED_MEDIA_TYPE
+                const octetRes = await sendMultipartRequest(baseUrl, `/api/v2/elements/${ELEMENT_ID}/images`, {
+                    filename: "raw.bin",
+                    contentType: "application/octet-stream",
+                    payloadBuffer: VALID_PNG_1X1,
+                });
+                const legacyOctetRes = await sendMultipartRequest(legacyDefaultBaseUrl, `/api/v2/elements/${ELEMENT_ID}/images`, {
+                    filename: "raw.bin",
+                    contentType: "application/octet-stream",
+                    payloadBuffer: VALID_PNG_1X1,
+                });
+                assert.equal(octetRes.status, 415);
+                assert.equal(octetRes.status, legacyOctetRes.status);
+                assert.equal(octetRes.body?.code, "UNSUPPORTED_MEDIA_TYPE");
+                assert.equal(octetRes.body?.code, legacyOctetRes.body?.code);
+            } finally {
+                elementMediaService.assertUploadAllowed = origAssertUploadAllowed;
+                elementMediaService.addReferenceMedia = origAddReferenceMedia;
+                db.elements = origElementsRepo;
             }
         });
     });

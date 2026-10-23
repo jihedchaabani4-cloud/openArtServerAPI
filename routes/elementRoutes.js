@@ -10,10 +10,10 @@
  *   POST   /api/v2/elements/build-prompt       → buildPrompt
  *   POST   /api/v2/elements/:id/images         → addImageToElement
  *   DELETE /api/v2/elements/:id/images/:mediaId→ removeImageFromElement
+ *   PATCH  /api/v2/elements/:id/cover          → setElementCover
  */
 
 import express from "express";
-import multer from "multer";
 import {
     createElement,
     listProjectElements,
@@ -27,26 +27,11 @@ import {
 } from "../controllers/elementController.js";
 import { requireAuth } from "../src/middleware/auth.js";
 import { rateLimit } from "../src/middleware/rateLimit.js";
-import { createSizeLimitedMemoryStorage } from "../src/middleware/sizeLimitedStorage.js";
+import { createUploadMiddleware } from "../src/middleware/uploadMiddleware.js";
+import { preUploadElementCapacityGuard } from "../src/middleware/elementUploadGuard.js";
+import { ELEMENT_REFERENCE_UPLOAD_POLICY } from "../src/platform/media-ingestion/UploadPolicy.js";
 
-const upload = multer({
-    storage: createSizeLimitedMemoryStorage({
-        imageLimit: 20 * 1024 * 1024,
-        videoLimit: 20 * 1024 * 1024,
-        defaultLimit: 20 * 1024 * 1024,
-    }),
-    limits: { fileSize: 20 * 1024 * 1024 }, // 20MB max file size (images only)
-    fileFilter: (req, file, cb) => {
-        if (file.mimetype.startsWith("image/")) {
-            cb(null, true);
-        } else {
-            const err = new Error(`Unsupported file type: ${file.mimetype}`);
-            err.statusCode = 415;
-            err.code = "UNSUPPORTED_MEDIA_TYPE";
-            cb(err);
-        }
-    },
-});
+const upload = createUploadMiddleware(ELEMENT_REFERENCE_UPLOAD_POLICY);
 
 const router = express.Router();
 
@@ -63,7 +48,8 @@ router.get("/project/:projectId", listProjectElements);
 router.post("/build-prompt", buildPrompt);
 
 // ─── POST /api/v2/elements/:id/images ────────────────────────────────────────
-router.post("/:id/images", upload.single("file"), addImageToElement);
+// Pre-upload capacity guard checks ownership and workflow_media quota BEFORE multer consumes stream
+router.post("/:id/images", preUploadElementCapacityGuard, upload, addImageToElement);
 
 // ─── DELETE /api/v2/elements/:id/images/:mediaId ─────────────────────────────
 router.delete("/:id/images/:mediaId", removeImageFromElement);

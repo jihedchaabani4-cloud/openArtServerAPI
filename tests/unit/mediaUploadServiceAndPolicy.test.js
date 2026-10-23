@@ -1,5 +1,6 @@
-import { describe, it } from "node:test";
+import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { PassThrough, Readable } from "node:stream";
 import sharp from "sharp";
 import {
     DEFAULT_UPLOAD_POLICY,
@@ -16,6 +17,11 @@ import {
 import { MediaUploadService } from "../../src/platform/media-ingestion/MediaUploadService.js";
 import { SourceReader } from "../../src/platform/media-ingestion/SourceReader.js";
 import { SourcePolicy } from "../../src/platform/media-ingestion/SourcePolicy.js";
+import { createUploadMiddleware } from "../../src/middleware/uploadMiddleware.js";
+import {
+    resetActiveUploadsForTest,
+    resetInFlightBytesForTest,
+} from "../../src/middleware/sizeLimitedStorage.js";
 
 const VALID_PNG_1X1 = Buffer.from([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -536,5 +542,209 @@ describe("MediaUploadService Seam 1 Contract", () => {
         );
 
         assert.equal(fakeStorage.deletedBatches.length, 1, "discard() was attempted");
+    });
+});
+
+function buildMultipartStream({ fieldName = "file", filename = "test.png", contentType = "image/png", payloadBuffer }) {
+    const boundary = "----OpenArtBoundary7MA4YWxkTrZu0gW";
+    const preamble = Buffer.from(
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="${fieldName}"; filename="${filename}"\r\n` +
+        `Content-Type: ${contentType}\r\n\r\n`
+    );
+    const epilogue = Buffer.from(`\r\n--${boundary}--\r\n`);
+    const totalLength = preamble.length + payloadBuffer.length + epilogue.length;
+
+    const req = new PassThrough();
+    req.headers = {
+        "content-type": `multipart/form-data; boundary=${boundary}`,
+        "content-length": String(totalLength),
+    };
+    req.user = { id: "user-mw-test" };
+    req.ip = "127.0.0.1";
+
+    process.nextTick(() => {
+        req.write(preamble);
+        req.write(payloadBuffer);
+        req.end(epilogue);
+    });
+
+    return req;
+}
+
+function invokeMiddleware(middleware, req) {
+    return new Promise((resolve) => {
+        const headers = {};
+        const res = {
+            statusCode: 200,
+            headers,
+            setHeader(k, v) {
+                headers[k.toLowerCase()] = v;
+            },
+            status(code) {
+                this.statusCode = code;
+                return this;
+            },
+            json(body) {
+                resolve({ status: this.statusCode, body, headers, nextCalled: false });
+                return this;
+            },
+        };
+        req.res = res;
+        middleware(req, res, (err) => {
+            resolve({ status: err ? (err.statusCode || 500) : 200, err, headers, nextCalled: !err });
+        });
+    });
+}
+
+describe("createUploadMiddleware(policy) Seam 1 Contract (Ticket 02a)", () => {
+    beforeEach(() => {
+        resetActiveUploadsForTest();
+        resetInFlightBytesForTest();
+    });
+
+    it("accepts a frozen UploadPolicy object directly without calling SourcePolicy.getProfile, while retaining the deprecated string purpose shim", async () => {
+        const origGetProfile = SourcePolicy.getProfile;
+        let getProfileCalls = 0;
+        SourcePolicy.getProfile = function (...args) {
+            getProfileCalls += 1;
+            return origGetProfile.apply(this, args);
+        };
+
+        try {
+            const mwDirect = createUploadMiddleware(ELEMENT_REFERENCE_UPLOAD_POLICY);
+            assert.equal(typeof mwDirect, "function");
+            assert.equal(getProfileCalls, 0, "Passing an UploadPolicy object must NOT invoke SourcePolicy.getProfile");
+
+            const mwLegacy = createUploadMiddleware("element_reference");
+            assert.equal(typeof mwLegacy, "function");
+            assert.equal(getProfileCalls, 1, "Passing a legacy string purpose must invoke the deprecated SourcePolicy.getProfile shim");
+        } finally {
+            SourcePolicy.getProfile = origGetProfile;
+        }
+    });
+
+    it("enforces stream-level magic-byte and policy allowedMimeTypes (415) across DEFAULT_UPLOAD_POLICY, ELEMENT_REFERENCE_UPLOAD_POLICY, and CHARACTER_DETAIL_UPLOAD_POLICY", async () => {
+        const charMw = createUploadMiddleware(CHARACTER_DETAIL_UPLOAD_POLICY);
+        const elemMw = createUploadMiddleware(ELEMENT_REFERENCE_UPLOAD_POLICY);
+        const defaultMw = createUploadMiddleware(DEFAULT_UPLOAD_POLICY);
+
+        // 1. Video sent to CHARACTER_DETAIL_UPLOAD_POLICY with application/octet-stream (bypassing declared MIME filter, caught by stream magic-byte policy check)
+        const videoStreamReq = buildMultipartStream({
+            filename: "clip.mp4",
+            contentType: "application/octet-stream",
+            payloadBuffer: buildMinimalMp4Buffer(),
+        });
+        const charRes = await invokeMiddleware(charMw, videoStreamReq);
+        assert.equal(charRes.status, 415);
+        assert.equal(charRes.body?.code, "UNSUPPORTED_MEDIA_TYPE");
+
+        // 2. Spoofed non-image bytes declared as image/png on ELEMENT_REFERENCE_UPLOAD_POLICY -> 415
+        const spoofedReq = buildMultipartStream({
+            filename: "spoof.png",
+            contentType: "image/png",
+            payloadBuffer: Buffer.alloc(64, 0x41),
+        });
+        const elemRes = await invokeMiddleware(elemMw, spoofedReq);
+        assert.equal(elemRes.status, 415);
+        assert.equal(elemRes.body?.code, "UNSUPPORTED_MEDIA_TYPE");
+
+        // 3. Valid PNG on DEFAULT_UPLOAD_POLICY -> passes and populates req.file
+        const validReq = buildMultipartStream({
+            filename: "ok.png",
+            contentType: "image/png",
+            payloadBuffer: VALID_PNG_1X1,
+        });
+        const okRes = await invokeMiddleware(defaultMw, validReq);
+        assert.equal(okRes.nextCalled, true);
+        assert.equal(validReq.file?.detectedMimetype, "image/png");
+    });
+
+    it("enforces per-type streaming size limit (413 PAYLOAD_TOO_LARGE) when an image exceeds policy.maxImageSize under DEFAULT_UPLOAD_POLICY", async () => {
+        const customSmallImagePolicy = Object.freeze({
+            ...DEFAULT_UPLOAD_POLICY,
+            maxImageSize: 1024, // 1 KB image cap
+            maxVideoSize: 10 * 1024 * 1024, // 10 MB video cap
+        });
+        const mw = createUploadMiddleware(customSmallImagePolicy);
+
+        const oversizedPng = Buffer.alloc(2048, 0);
+        VALID_PNG_1X1.copy(oversizedPng, 0);
+
+        const req = buildMultipartStream({
+            filename: "big.png",
+            contentType: "image/png",
+            payloadBuffer: oversizedPng,
+        });
+
+        const res = await invokeMiddleware(mw, req);
+        assert.equal(res.status, 413);
+        assert.equal(res.body?.code, "PAYLOAD_TOO_LARGE");
+    });
+
+    it("preserves 429 TOO_MANY_CONCURRENT_UPLOADS and 503 SERVICE_UNAVAILABLE (in-flight RAM cap) when configured with an UploadPolicy", async () => {
+        const mw = createUploadMiddleware(ELEMENT_REFERENCE_UPLOAD_POLICY);
+
+        // Hold 2 active uploads open for the same user (default concurrency limit = 2)
+        const boundary = "----OpenArtHoldBoundary";
+        const makeOpenReq = () => {
+            const req = new PassThrough();
+            req.headers = {
+                "content-type": `multipart/form-data; boundary=${boundary}`,
+                "transfer-encoding": "chunked",
+            };
+            req.user = { id: "user-concurrent-1" };
+            process.nextTick(() => {
+                req.write(
+                    `--${boundary}\r\n` +
+                    `Content-Disposition: form-data; name="file"; filename="hold.png"\r\n` +
+                    `Content-Type: image/png\r\n\r\n`
+                );
+                req.write(VALID_PNG_1X1);
+            });
+            return req;
+        };
+
+        const openReq1 = makeOpenReq();
+        const openReq2 = makeOpenReq();
+        const p1 = invokeMiddleware(mw, openReq1);
+        const p2 = invokeMiddleware(mw, openReq2);
+
+        // Wait a tick for Busboy/Multer to enter _handleFile on both streams
+        await new Promise((r) => setTimeout(r, 20));
+
+        // 3rd concurrent upload for the same user -> 429 TOO_MANY_CONCURRENT_UPLOADS
+        const req3 = buildMultipartStream({
+            filename: "third.png",
+            contentType: "image/png",
+            payloadBuffer: VALID_PNG_1X1,
+        });
+        req3.user = { id: "user-concurrent-1" };
+        const res3 = await invokeMiddleware(mw, req3);
+        assert.equal(res3.status, 429);
+        assert.equal(res3.body?.code, "TOO_MANY_CONCURRENT_UPLOADS");
+
+        // Cleanly close the two open streams
+        openReq1.end(`\r\n--${boundary}--\r\n`);
+        openReq2.end(`\r\n--${boundary}--\r\n`);
+        await Promise.all([p1, p2]);
+
+        // Verify 503 SERVICE_UNAVAILABLE when MAX_IN_FLIGHT_UPLOAD_BYTES is exceeded
+        const origMaxInFlight = process.env.MAX_IN_FLIGHT_UPLOAD_BYTES;
+        process.env.MAX_IN_FLIGHT_UPLOAD_BYTES = "32";
+        try {
+            const lowRamMw = createUploadMiddleware(CHARACTER_DETAIL_UPLOAD_POLICY);
+            const ramReq = buildMultipartStream({
+                filename: "ram.png",
+                contentType: "image/png",
+                payloadBuffer: VALID_PNG_1X1, // > 32 bytes
+            });
+            const ramRes = await invokeMiddleware(lowRamMw, ramReq);
+            assert.equal(ramRes.status, 503);
+            assert.equal(ramRes.body?.code, "SERVICE_UNAVAILABLE");
+        } finally {
+            if (origMaxInFlight === undefined) delete process.env.MAX_IN_FLIGHT_UPLOAD_BYTES;
+            else process.env.MAX_IN_FLIGHT_UPLOAD_BYTES = origMaxInFlight;
+        }
     });
 });

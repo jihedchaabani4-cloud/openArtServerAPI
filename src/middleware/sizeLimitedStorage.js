@@ -17,18 +17,55 @@ let currentInFlightBytes = 0;
 
 function getMaxConcurrentUploads() {
     return (
-        RATE_LIMIT_POLICIES?.concurrentUploads?.limit ||
         Number(process.env.MAX_CONCURRENT_UPLOADS_PER_USER) ||
+        RATE_LIMIT_POLICIES?.concurrentUploads?.limit ||
         2
     );
 }
 
 function getMaxInFlightUploadBytes() {
     return (
-        RATE_LIMIT_POLICIES?.inFlightUploadMemory?.maxBytes ||
         Number(process.env.MAX_IN_FLIGHT_UPLOAD_BYTES) ||
+        RATE_LIMIT_POLICIES?.inFlightUploadMemory?.maxBytes ||
         250 * 1024 * 1024
     );
+}
+
+function createUnsupportedMediaError(message) {
+    const err = new Error(message);
+    err.code = "UNSUPPORTED_MEDIA_TYPE";
+    err.statusCode = 415;
+    return err;
+}
+
+function validateHeaderMagicAndMime(headerBuffer, declaredMime, allowedMimeTypes) {
+    let detectedMime = null;
+    try {
+        detectedMime = MediaInspector.sniffMagicBytes(headerBuffer);
+    } catch (sniffErr) {
+        throw createUnsupportedMediaError(`Unsupported or dangerous file payload: ${sniffErr.message}`);
+    }
+
+    if (!detectedMime) {
+        throw createUnsupportedMediaError("Unsupported file type or unrecognized magic bytes");
+    }
+
+    if (Array.isArray(allowedMimeTypes) && !allowedMimeTypes.includes(detectedMime)) {
+        throw createUnsupportedMediaError(`Unsupported file type: ${detectedMime}`);
+    }
+
+    if (
+        declaredMime &&
+        !declaredMime.startsWith("application/octet-stream") &&
+        !declaredMime.startsWith("multipart/") &&
+        declaredMime !== detectedMime
+    ) {
+        throw createUnsupportedMediaError(
+            `Declared MIME "${declaredMime}" does not match detected file type ("${detectedMime}").`
+        );
+    }
+
+    return detectedMime;
 }
 
 export function resetActiveUploadsForTest() {
@@ -63,12 +100,12 @@ export function createSizeLimitedMemoryStorage({
     imageLimit = 20 * 1024 * 1024,
     videoLimit = 100 * 1024 * 1024,
     defaultLimit = 20 * 1024 * 1024,
+    allowedMimeTypes = null,
     maxInFlightBytes = null,
 } = {}) {
-    const instanceMaxInFlight = maxInFlightBytes || getMaxInFlightUploadBytes();
     return {
         _handleFile(req, file, cb) {
-            // ── 0. Per-Instance Total In-Flight Upload Memory Cap ──────────────────
+            const instanceMaxInFlight = maxInFlightBytes || getMaxInFlightUploadBytes();
             if (currentInFlightBytes >= instanceMaxInFlight) {
                 const err = new Error("Server upload capacity temporarily exceeded. Please retry shortly.");
                 err.code = "SERVICE_UNAVAILABLE";
@@ -78,7 +115,6 @@ export function createSizeLimitedMemoryStorage({
                 return cb(err);
             }
 
-            // ── 1. Per-User Concurrent Upload Limiter ─────────────────────────────
             const userId = req.user?.id || req.ip || "anonymous";
             const maxConcurrent = getMaxConcurrentUploads();
             const currentActive = activeUploadsByUser.get(userId) || 0;
@@ -108,7 +144,6 @@ export function createSizeLimitedMemoryStorage({
                 }
             };
 
-            // Release slot on client abort, stream error, or connection termination
             file.stream.on("close", releaseSlot);
             file.stream.on("aborted", releaseSlot);
             if (req && typeof req.on === "function") {
@@ -121,7 +156,6 @@ export function createSizeLimitedMemoryStorage({
                 req.on("timeout", releaseSlot);
             }
 
-            // ── 2. Streaming Chunk Handler & Early Magic-Bytes Sniff ──────────────
             let detectedMime = null;
             let maxBytes = defaultLimit;
             let headerBuffer = Buffer.alloc(0);
@@ -131,6 +165,14 @@ export function createSizeLimitedMemoryStorage({
             let totalBytes = 0;
             let aborted = false;
 
+            const abortStreamWithError = (err) => {
+                aborted = true;
+                releaseSlot();
+                file.stream.pause();
+                file.stream.destroy();
+                return cb(err);
+            };
+
             file.stream.on("data", (chunk) => {
                 if (aborted) return;
 
@@ -138,71 +180,25 @@ export function createSizeLimitedMemoryStorage({
                 currentInFlightBytes += chunk.length;
 
                 if (currentInFlightBytes > instanceMaxInFlight) {
-                    aborted = true;
-                    releaseSlot();
-                    file.stream.pause();
-                    file.stream.destroy();
                     const err = new Error("Server upload capacity temporarily exceeded. Please retry shortly.");
                     err.code = "SERVICE_UNAVAILABLE";
                     err.statusCode = 503;
                     err.retryAfter = 5;
                     if (req?.res?.setHeader) req.res.setHeader("Retry-After", "5");
-                    return cb(err);
+                    return abortStreamWithError(err);
                 }
 
-                // Early sniff on first bytes received (buffer up to 32 bytes for longest signature)
                 if (!headerSniffed) {
                     headerBuffer = Buffer.concat([headerBuffer, chunk]);
                     if (headerBuffer.length >= 32) {
                         headerSniffed = true;
                         try {
-                            detectedMime = MediaInspector.sniffMagicBytes(headerBuffer);
-                        } catch (sniffErr) {
-                            aborted = true;
-                            releaseSlot();
-                            file.stream.pause();
-                            file.stream.destroy();
-                            const err = new Error(`Unsupported or dangerous file payload: ${sniffErr.message}`);
-                            err.code = "UNSUPPORTED_MEDIA_TYPE";
-                            err.statusCode = 415;
-                            return cb(err);
-                        }
-
-                        if (!detectedMime) {
-                            aborted = true;
-                            releaseSlot();
-                            file.stream.pause();
-                            file.stream.destroy();
-                            const err = new Error(`Unsupported file type or unrecognized magic bytes`);
-                            err.code = "UNSUPPORTED_MEDIA_TYPE";
-                            err.statusCode = 415;
-                            return cb(err);
-                        }
-
-                        // Check match with declared MIME type
-                        const declaredMime = file.mimetype;
-                        if (
-                            declaredMime &&
-                            !declaredMime.startsWith("application/octet-stream") &&
-                            !declaredMime.startsWith("multipart/")
-                        ) {
-                            if (declaredMime !== detectedMime) {
-                                aborted = true;
-                                releaseSlot();
-                                file.stream.pause();
-                                file.stream.destroy();
-                                const err = new Error(
-                                    `Declared MIME "${declaredMime}" does not match detected file type ("${detectedMime}").`
-                                );
-                                err.code = "UNSUPPORTED_MEDIA_TYPE";
-                                err.statusCode = 415;
-                                return cb(err);
-                            }
+                            detectedMime = validateHeaderMagicAndMime(headerBuffer, file.mimetype, allowedMimeTypes);
+                        } catch (headerErr) {
+                            return abortStreamWithError(headerErr);
                         }
 
                         file.detectedMimetype = detectedMime;
-
-                        // Apply 20MB/100MB cap based on DETECTED type
                         const isVideo = detectedMime.startsWith("video/");
                         const isImage = detectedMime.startsWith("image/");
                         maxBytes = isVideo ? videoLimit : (isImage ? imageLimit : defaultLimit);
@@ -211,10 +207,6 @@ export function createSizeLimitedMemoryStorage({
 
                 totalBytes += chunk.length;
                 if (totalBytes > maxBytes) {
-                    aborted = true;
-                    releaseSlot();
-                    file.stream.pause();
-                    file.stream.destroy();
                     const isImage = (detectedMime || file.mimetype || "").startsWith("image/");
                     const err = new Error(
                         isImage
@@ -223,7 +215,7 @@ export function createSizeLimitedMemoryStorage({
                     );
                     err.code = "LIMIT_FILE_SIZE";
                     err.statusCode = 413;
-                    return cb(err);
+                    return abortStreamWithError(err);
                 }
 
                 chunks.push(chunk);
@@ -235,18 +227,9 @@ export function createSizeLimitedMemoryStorage({
 
                 if (!headerSniffed && headerBuffer.length > 0) {
                     try {
-                        detectedMime = MediaInspector.sniffMagicBytes(headerBuffer);
-                    } catch (err) {
-                        const e = new Error(`Unsupported or dangerous file payload: ${err.message}`);
-                        e.code = "UNSUPPORTED_MEDIA_TYPE";
-                        e.statusCode = 415;
-                        return cb(e);
-                    }
-                    if (!detectedMime) {
-                        const e = new Error("Unsupported file type or unrecognized magic bytes");
-                        e.code = "UNSUPPORTED_MEDIA_TYPE";
-                        e.statusCode = 415;
-                        return cb(e);
+                        detectedMime = validateHeaderMagicAndMime(headerBuffer, file.mimetype, allowedMimeTypes);
+                    } catch (headerErr) {
+                        return cb(headerErr);
                     }
                     file.detectedMimetype = detectedMime;
                 }

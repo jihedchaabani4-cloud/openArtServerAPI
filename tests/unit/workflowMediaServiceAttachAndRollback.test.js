@@ -235,6 +235,21 @@ function createMockHarness() {
 
 describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollback Order", () => {
     describe("1. Contract & Input Validation", () => {
+        it("throws an error at construction if mediaUploadService is missing or lacks a discard method (fail-fast)", () => {
+            assert.throws(
+                () => new WorkflowMediaService({ db: {}, storageService: {} }),
+                /WorkflowMediaService requires mediaUploadService with a discard method\./
+            );
+            assert.throws(
+                () => new WorkflowMediaService({ db: {}, storageService: {}, mediaUploadService: {} }),
+                /WorkflowMediaService requires mediaUploadService with a discard method\./
+            );
+            assert.throws(
+                () => new WorkflowMediaService({ db: {}, storageService: {}, mediaUploadService: { discard: "not-a-func" } }),
+                /WorkflowMediaService requires mediaUploadService with a discard method\./
+            );
+        });
+
         it("rejects undefined, NaN, string, negative, and non-integer maxAllowed with ValidationError (and discards uploaded keys)", async () => {
             const h = createMockHarness();
             const wfId = "00000000-0000-0000-0000-000000000001";

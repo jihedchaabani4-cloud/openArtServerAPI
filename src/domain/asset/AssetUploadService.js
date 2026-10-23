@@ -65,17 +65,17 @@ export class AssetUploadService {
             this.mediaUploadService = null;
         }
 
-        // If workflowMediaService is explicitly provided, use it; otherwise only instantiate if attachReferenceMedia is supported
+        // If workflowMediaService is explicitly provided, use it; otherwise instantiate if mediaUploadService is available
         if (workflowMediaService) {
             this.workflowMediaService = workflowMediaService;
-        } else if (!this.binaryIngestionService && db) {
+        } else if (this.mediaUploadService && !this.binaryIngestionService && db) {
             this.workflowMediaService = new WorkflowMediaService({
                 db,
                 storageService,
                 workflowAuthService: this.authService,
                 mediaUploadService: this.mediaUploadService,
             });
-        } else if (db && typeof db.workflowMedia?.attachReferenceMedia === "function") {
+        } else if (this.mediaUploadService && db && typeof db.workflowMedia?.attachReferenceMedia === "function") {
             this.workflowMediaService = new WorkflowMediaService({
                 db,
                 storageService,

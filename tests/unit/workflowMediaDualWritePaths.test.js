@@ -276,9 +276,9 @@ describe("workflow_media write helper (B1) — workflow_media ONLY, no media.wor
       assert.equal("workflow_id" in call, false, "Character media creation must not pass workflow_id");
     }
     assert.deepEqual(linkCalls, [
-      { workflowId: "char-wf-1", mediaId: "character_sheet-media", stepId: "character_sheet", workflowType: "CHARACTER" },
-      { workflowId: "char-wf-1", mediaId: "character_sheet-media", stepId: "character_sheet", workflowType: "CHARACTER" },
-      { workflowId: "char-wf-1", mediaId: "character_detail-media", stepId: "character_detail", workflowType: "CHARACTER" },
+      { workflowId: "char-wf-1", mediaId: "image_generation-media", role: "sheet", stepId: "image_generation", workflowType: "CHARACTER" },
+      { workflowId: "char-wf-1", mediaId: "upload-media", role: "sheet", stepId: "upload", workflowType: "CHARACTER" },
+      { workflowId: "char-wf-1", mediaId: "upload-media", role: "detail", stepId: "upload", workflowType: "CHARACTER" },
     ]);
   });
 
@@ -338,9 +338,9 @@ describe("workflow_media write helper (B1) — workflow_media ONLY, no media.wor
       assert.equal("primary_media_id" in u.patch, false, "ElementMediaService must not write primary_media_id to element");
     }
     assert.deepEqual(linkCalls, [
-      { workflowId: "elem-wf-1", mediaId: "element_sheet-media", stepId: "element_sheet", workflowType: "ELEMENT_SHEET" },
-      { workflowId: "elem-wf-1", mediaId: "element_reference-media", stepId: "element_reference", workflowType: "ELEMENT" },
-      { workflowId: "elem-wf-1", mediaId: "element_sheet-media", stepId: "element_sheet", workflowType: "ELEMENT_SHEET" },
+      { workflowId: "elem-wf-1", mediaId: "upload-media", role: "detail", stepId: "upload", workflowType: "ELEMENT_SHEET" },
+      { workflowId: "elem-wf-1", mediaId: "upload-media", role: "detail", stepId: "upload", workflowType: "ELEMENT", is_primary: true, isPrimary: true },
+      { workflowId: "elem-wf-1", mediaId: "upload-media", role: "detail", stepId: "upload", workflowType: "ELEMENT_SHEET" },
     ]);
   });
 
@@ -425,6 +425,7 @@ describe("workflow_media write helper (B1) — workflow_media ONLY, no media.wor
       },
       storageService: {},
       authService: { verifyMediaOwnership: async () => true },
+      mediaUploadService: { discard: async () => ({}) },
     });
 
     await service.detachMedia({ mediaId: "m-detach-1", userId: "user-1" });

@@ -37,9 +37,12 @@ export class WorkflowMediaService {
      * @param {Object} deps.db                 - Repository map (db.workflows, db.media, db.workflowMedia)
      * @param {Object} deps.storageService      - StorageService instance
      * @param {Object} [deps.authService]       - WorkflowAuthorizationService instance
-     * @param {Object} [deps.mediaUploadService]- MediaUploadService instance
+     * @param {Object} deps.mediaUploadService  - MediaUploadService instance with discard method (required)
      */
-    constructor({ db, storageService, authService = null, mediaUploadService = null }) {
+    constructor({ db, storageService, authService = null, mediaUploadService = null } = {}) {
+        if (!mediaUploadService || typeof mediaUploadService.discard !== "function") {
+            throw new Error("WorkflowMediaService requires mediaUploadService with a discard method.");
+        }
         this.db = db;
         this.storageService = storageService;
         this.authService = authService;
@@ -50,15 +53,7 @@ export class WorkflowMediaService {
         const uniqueKeys = [...new Set((keys || []).filter(Boolean))];
         if (uniqueKeys.length === 0) return;
         try {
-            if (this.mediaUploadService?.discard) {
-                await this.mediaUploadService.discard(uniqueKeys);
-            } else if (this.storageService?.deleteFiles) {
-                await this.storageService.deleteFiles(uniqueKeys);
-            } else if (this.storageService?.delete) {
-                for (const k of uniqueKeys) {
-                    await this.storageService.delete(k).catch(() => null);
-                }
-            }
+            await this.mediaUploadService.discard(uniqueKeys);
         } catch (err) {
             crudOperationLog({
                 operation: "WorkflowMediaService:discardStorage",

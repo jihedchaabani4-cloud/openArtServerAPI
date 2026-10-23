@@ -187,10 +187,12 @@ describe("Ticket 07: BullMQ Reservation Reaper Worker & Media Deletion Concurren
       db: mockDb,
       storageService: mockStorage,
       authService: mockAuth,
+      mediaUploadService: { discard: async () => ({}) },
     });
 
     const result = await service.deleteMedia({
       mediaId: "m-orphan",
+      workflowId: "wf-1",
       userId: "user-1",
     });
 

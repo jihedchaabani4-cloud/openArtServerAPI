@@ -43,7 +43,7 @@ export class WorkflowService {
      * @param {Object} [deps.mediaService] - Optional pre-configured WorkflowMediaService
      * @param {Object} [deps.folderService] - Optional FolderService instance
      */
-    constructor({ db, storageService, authService, mediaService, folderService = null }) {
+    constructor({ db, storageService, authService, mediaService, folderService = null, mediaUploadService = null }) {
         this.db = db;
         this.storageService = storageService;
         this.folderService = folderService;
@@ -53,6 +53,7 @@ export class WorkflowService {
             db,
             storageService,
             authService: this.authService,
+            mediaUploadService,
         });
         this._entitySyncHandlers = null;
     }
@@ -110,14 +111,30 @@ export class WorkflowService {
                 const cleaned = String(updates.display_name || "").replace(/^@+/, "").trim();
                 if (cleaned.length > 0) allowedFields.display_name = cleaned;
             }
-            if (updates.primary_media_id !== undefined) {
-                allowedFields.primary_media_id = updates.primary_media_id || null;
-            }
             if (updates.favorited !== undefined) {
                 allowedFields.favorited = Boolean(updates.favorited);
             }
 
-            if (Object.keys(allowedFields).length === 0) {
+            let primaryUpdated = false;
+            const primaryId = updates.primaryMediaId !== undefined ? updates.primaryMediaId : updates.primary_media_id;
+            if (primaryId !== undefined) {
+                primaryUpdated = true;
+                if (primaryId) {
+                    if (this.mediaService?.setPrimaryMedia) {
+                        await this.mediaService.setPrimaryMedia({ workflowId: cleanWorkflowId, mediaId: primaryId, userId, req });
+                    } else if (this.db.workflowMedia?.setPrimaryMedia) {
+                        await this.db.workflowMedia.setPrimaryMedia({ workflowId: cleanWorkflowId, mediaId: primaryId });
+                    }
+                } else {
+                    if (this.mediaService?.clearPrimaryMedia) {
+                        await this.mediaService.clearPrimaryMedia({ workflowId: cleanWorkflowId, userId, req });
+                    } else if (this.db.workflowMedia?.clearPrimaryMedia) {
+                        await this.db.workflowMedia.clearPrimaryMedia({ workflowId: cleanWorkflowId });
+                    }
+                }
+            }
+
+            if (Object.keys(allowedFields).length === 0 && !primaryUpdated) {
                 throw new CrudServiceError("No supported workflow fields provided", {
                     statusCode: 400,
                     errorCode: "VALIDATION_ERROR",
@@ -126,7 +143,14 @@ export class WorkflowService {
                 });
             }
 
-            const workflow = await this.db.workflows.updateFields(cleanWorkflowId, allowedFields);
+            const workflow = Object.keys(allowedFields).length > 0
+                ? await this.db.workflows.updateFields(cleanWorkflowId, allowedFields)
+                : { id: cleanWorkflowId };
+
+            if (primaryUpdated) {
+                workflow.primary_media_id = primaryId || null;
+                workflow.primaryMediaId = primaryId || null;
+            }
 
             crudOperationLog({
                 traceId,
@@ -422,6 +446,15 @@ export class WorkflowService {
     }
 
     // ── Media Delegations to WorkflowMediaService ─────────────────────────────
+
+    async clearPrimaryMedia(params) {
+        if (this.mediaService?.clearPrimaryMedia) {
+            return this.mediaService.clearPrimaryMedia(params);
+        }
+        if (this.db.workflowMedia?.clearPrimaryMedia) {
+            return this.db.workflowMedia.clearPrimaryMedia(params);
+        }
+    }
 
     async setPrimaryMedia(params) {
         return this.mediaService.setPrimaryMedia(params);

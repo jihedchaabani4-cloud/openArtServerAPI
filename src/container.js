@@ -203,14 +203,17 @@ export { jobQueueService };
 export const useCaseService = new UseCaseService({ walletService, pricingService, jobQueueService, db });
 
 // ─── Domain & Platform Services ──────────────────────────────────────────────
+export const binaryIngestionService = new BinaryIngestionService({ storageService });
+export const mediaUploadService = new MediaUploadService({ storageService });
+
 export const folderService = new FolderService({ folderRepo: db.folders, projectRepo: db.projects });
-export const workflowService = new WorkflowLifecycleService({ db, storageService, folderService });
+export const workflowService = new WorkflowLifecycleService({ db, storageService, folderService, mediaUploadService });
 folderService.setWorkflowService(workflowService);
 export const workflowMediaService = workflowService.mediaService;
 export const mediaService = new MediaService({ db });
 
-export const binaryIngestionService = new BinaryIngestionService({ storageService });
-export const mediaUploadService = new MediaUploadService({ storageService });
+
+
 
 export const assetUploadService = new AssetUploadService({
     db,

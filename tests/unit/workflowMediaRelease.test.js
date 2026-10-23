@@ -52,7 +52,32 @@ function createHarness() {
         }),
       }),
     },
-    workflowMedia: {
+        workflowMedia: {
+      unlink: async ({ workflowId, mediaId } = {}) => {
+        for (let i = relationRows.length - 1; i >= 0; i -= 1) {
+          const matchWf = !workflowId || relationRows[i].workflow_id === workflowId;
+          const matchMedia = !mediaId || relationRows[i].media_id === mediaId;
+          if (matchWf && matchMedia) relationRows.splice(i, 1);
+        }
+      },
+      unlinkAndReapOrphan: async ({ workflowId, mediaId } = {}) => {
+        const idx = relationRows.findIndex(
+          (r) => r.workflow_id === workflowId && r.media_id === mediaId
+        );
+        if (idx === -1) {
+          return { unlinked: false, is_orphan: false, storage_url: null, remaining_links: relationRows.filter((r) => r.media_id === mediaId).length };
+        }
+        relationRows.splice(idx, 1);
+        const remaining = relationRows.filter((r) => r.media_id === mediaId).length;
+        const mediaRec = mediaRows.find((m) => m.id === mediaId);
+        return {
+          unlinked: true,
+          is_orphan: remaining === 0,
+          storage_url: remaining === 0 ? (mediaRec?.url || null) : null,
+          remaining_links: remaining,
+          was_primary: false,
+        };
+      },
       unlinkByWorkflow: async (workflowId) => {
         for (let i = relationRows.length - 1; i >= 0; i -= 1) {
           if (relationRows[i].workflow_id === workflowId) relationRows.splice(i, 1);
@@ -119,6 +144,7 @@ function createHarness() {
       verifyWorkflowOwnershipBulk: async (ids) => ids,
       verifyMediaOwnership: async () => true,
     },
+    mediaUploadService: { discard: async () => ({}) },
   });
 
   const workflowService = new WorkflowService({
@@ -130,6 +156,7 @@ function createHarness() {
       verifyWorkflowOwnershipBulk: async (ids) => ids,
       verifyMediaOwnership: async () => true,
     },
+    mediaUploadService: { discard: async () => ({}) },
   });
 
   return {
@@ -187,6 +214,7 @@ describe("Workflow media unlink vs delete", () => {
 
   it("deleteMedia removes the media record and storage, not only the relation", async () => {
     const result = await harness.mediaService.deleteMedia({
+      workflowId: "wf-1",
       mediaId: "m-exclusive",
       userId: "user-1",
     });

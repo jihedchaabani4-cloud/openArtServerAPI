@@ -59,6 +59,16 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
         findByMedia: async () => [{ workflow_id: "wf-1", media_id: "media-1" }],
         unlink: async (args) => { calls.unlink.push(args); },
         countLinksForMedia: async () => countLinks,
+        unlinkAndReapOrphan: async ({ workflowId, mediaId } = {}) => {
+          calls.unlink.push({ workflowId, mediaId });
+          return {
+            unlinked: true,
+            is_orphan: countLinks === 0,
+            storage_url: countLinks === 0 ? (mediaRec?.url || null) : null,
+            remaining_links: countLinks,
+            was_primary: false,
+          };
+        },
       },
     };
 
@@ -70,7 +80,9 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
       verifyMediaOwnership: async () => authorised,
     };
 
-    const service = new WorkflowMediaService({ db, storageService, authService });
+    const service = new WorkflowMediaService({ db, storageService, authService, mediaUploadService: { discard: async () => ({}) } });
+    const origDeleteMedia = service.deleteMedia.bind(service);
+    service.deleteMedia = ({ workflowId = "wf-1", ...args }) => origDeleteMedia({ workflowId, ...args });
     return { service, calls };
   }
 
@@ -94,11 +106,11 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
 
     const result = await service.deleteMedia({ mediaId: "media-1", userId: "user-1" });
 
-    assert.equal(result.deleted, true);
-    // unlink still called
+    assert.equal(result.deleted, false);
+    // unlink still called (to remove the global association)
     assert.equal(calls.unlink.length, 1);
-    // media row still deleted (user asked for it)
-    assert.deepEqual(calls.deleteById, ["media-1"]);
+    // media row NOT deleted — still linked to other workflows
+    assert.deepEqual(calls.deleteById, []);
     // storage NOT deleted — other workflows still reference this file
     assert.deepEqual(calls.storageDelete, []);
   });
@@ -138,6 +150,10 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
         findByMedia: async () => [{ workflow_id: "wf-1", media_id: "media-1" }],
         unlink: async () => { order.push("unlink"); },
         countLinksForMedia: async () => 0,
+        unlinkAndReapOrphan: async ({ workflowId, mediaId } = {}) => {
+          order.push("unlink");
+          return { unlinked: true, is_orphan: true, storage_url: "https://cdn.example.com/img.png", remaining_links: 0, was_primary: false };
+        },
       },
     };
 
@@ -145,9 +161,10 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
       db,
       storageService: { deleteByUrl: async () => {} },
       authService: { verifyMediaOwnership: async () => true },
+      mediaUploadService: { discard: async () => ({}) },
     });
 
-    await service.deleteMedia({ mediaId: "media-1", userId: "user-1" });
+    await service.deleteMedia({ mediaId: "media-1", workflowId: "wf-1", userId: "user-1" });
 
     assert.equal(order[0], "unlink", "unlink must happen before deleteById");
     assert.equal(order[1], "deleteById");
@@ -195,6 +212,15 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
         },
         unlink: async () => {},
         countLinksForMedia: async () => 0,
+        unlinkAndReapOrphan: async ({ workflowId, mediaId } = {}) => {
+          return {
+            unlinked: true,
+            is_orphan: true,
+            storage_url: `https://cdn.example.com/${mediaId}.png`,
+            remaining_links: 0,
+            was_primary: true,
+          };
+        },
       },
     };
 
@@ -202,24 +228,25 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
       db,
       storageService: { deleteByUrl: async () => {} },
       authService: { verifyMediaOwnership: async () => true },
+      mediaUploadService: { discard: async () => ({}) },
     });
 
     // 1. Delete last media of character workflow -> container MUST NOT be deleted
-    const charRes = await service.deleteMedia({ mediaId: "m-char-last", userId: "user-1" });
+    const charRes = await service.deleteMedia({ mediaId: "m-char-last", workflowId: "wf-char-1", userId: "user-1" });
     assert.equal(charRes.deleted, true);
     assert.equal(charRes.workflow_deleted, false, "Character workflow container must NOT be deleted when last media is removed");
     assert.equal(deletedWorkflowIds.includes("wf-char-1"), false);
     assert.deepEqual(updatedPrimaryCalls[0], { wfId: "wf-char-1", mediaId: null });
 
     // 2. Delete last media of element workflow -> container MUST NOT be deleted
-    const elemRes = await service.deleteMedia({ mediaId: "m-elem-last", userId: "user-1" });
+    const elemRes = await service.deleteMedia({ mediaId: "m-elem-last", workflowId: "wf-elem-1", userId: "user-1" });
     assert.equal(elemRes.deleted, true);
     assert.equal(elemRes.workflow_deleted, false, "Element workflow container must NOT be deleted when last media is removed");
     assert.equal(deletedWorkflowIds.includes("wf-elem-1"), false);
     assert.deepEqual(updatedPrimaryCalls[1], { wfId: "wf-elem-1", mediaId: null });
 
     // 3. Delete last media of plain non-sidecar workflow -> container IS deleted
-    const plainRes = await service.deleteMedia({ mediaId: "m-plain-last", userId: "user-1" });
+    const plainRes = await service.deleteMedia({ mediaId: "m-plain-last", workflowId: "wf-plain-1", userId: "user-1" });
     assert.equal(plainRes.deleted, true);
     assert.equal(plainRes.workflow_deleted, true);
     assert.equal(deletedWorkflowIds.includes("wf-plain-1"), true);
@@ -398,6 +425,7 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
         findByMedia: async () => [{ workflow_id: "wf-char-sheet", media_id: "m-sheet-1", role: "sheet" }],
         unlink: async () => {},
         countLinksForMedia: async () => 0,
+        unlinkAndReapOrphan: async () => ({ unlinked: true, is_orphan: true, storage_url: "https://cdn.example.com/m-sheet-1.png", remaining_links: 0, was_primary: true }),
       },
     };
 
@@ -405,9 +433,10 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
       db,
       storageService: { deleteByUrl: async () => {} },
       authService: { verifyMediaOwnership: async () => true },
+      mediaUploadService: { discard: async () => ({}) },
     });
 
-    const result = await service.deleteMedia({ mediaId: "m-sheet-1", userId: "user-1" });
+    const result = await service.deleteMedia({ mediaId: "m-sheet-1", workflowId: "wf-char-sheet", userId: "user-1" });
 
     assert.equal(result.deleted, true);
     assert.equal(result.workflow_deleted, false);
@@ -468,6 +497,7 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
         unlink: async () => {},
         unlinkByWorkflow: async () => {},
         countLinksForMedia: async () => 0,
+        unlinkAndReapOrphan: async () => ({ unlinked: true, is_orphan: true, storage_url: "https://cdn.example.com/m-pinned-1.png", remaining_links: 0, was_primary: true }),
       },
     };
 
@@ -475,10 +505,11 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
       db,
       storageService: { deleteByUrl: async () => {} },
       authService: { verifyMediaOwnership: async () => true },
+      mediaUploadService: { discard: async () => ({}) },
     });
 
     // 1. deleteMedia on pinned generation/upload variation -> sets primary_media_id to null
-    const deleteRes = await service.deleteMedia({ mediaId: "m-pinned-1", userId: "user-1" });
+    const deleteRes = await service.deleteMedia({ mediaId: "m-pinned-1", workflowId: "wf-gen-1", userId: "user-1" });
     assert.equal(deleteRes.deleted, true);
     assert.equal(deleteRes.workflow_deleted, false);
     assert.equal(deleteRes.next_primary_media_id, null, "Must NOT auto-promote m-var-2 to primary_media_id on delete");
@@ -625,6 +656,7 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
         deleteByUrl: async () => { deleteByUrlCalled = true; },
       },
       authService: {},
+      mediaUploadService: { discard: async () => ({}) },
     });
 
     const report = await service.scanOrphanMediaDryRun({ projectId: "proj-1" });

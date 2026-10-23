@@ -549,7 +549,7 @@ describe("MediaUploadService Seam 1 Contract", () => {
         assert.equal(fakeStorage.deletedBatches.length, 1, "discard() was attempted");
     });
 
-    it("discard ignores NoSuchKey, 404, and not found errors idempotently but throws and logs genuine storage errors", async () => {
+    it("discard ignores structured NoSuchKey code idempotently but throws and logs genuine storage errors including 404 bucket errors", async () => {
         let deleteFilesCalledWith = null;
         const fakeStorage = {
             async deleteFiles(keys) {
@@ -557,16 +557,15 @@ describe("MediaUploadService Seam 1 Contract", () => {
                 return {
                     deleted: ["k1"],
                     failures: [
-                        { key: "k2", code: "NoSuchKey", message: "NoSuchKey: The specified key does not exist." },
-                        { key: "k3", statusCode: 404, message: "404 Not Found" },
+                        { key: "k2", code: "NoSuchKey" },
                     ],
                 };
             },
         };
         const service = new MediaUploadService({ storageService: fakeStorage });
-        // Must NOT throw on NoSuchKey / 404
-        await service.discard(["k1", "k2", "k3"]);
-        assert.deepEqual(deleteFilesCalledWith, ["k1", "k2", "k3"]);
+        // Must NOT throw on structured NoSuchKey
+        await service.discard(["k1", "k2"]);
+        assert.deepEqual(deleteFilesCalledWith, ["k1", "k2"]);
 
         // Must throw UploadError on genuine failures (e.g. 500 / EACCES)
         fakeStorage.deleteFiles = async () => ({
@@ -578,7 +577,18 @@ describe("MediaUploadService Seam 1 Contract", () => {
             (err) => err instanceof UploadError && err.statusCode === 502
         );
 
-        // Must throw UploadError when failure indicates a missing bucket (never swallow bucket misconfigurations)
+        // A 404 without NoSuchKey code (e.g. from missing bucket) must be treated as a real error and thrown,
+        // even when the word "bucket" is NOT in the message
+        fakeStorage.deleteFiles = async () => ({
+            deleted: [],
+            failures: [{ key: "k3", statusCode: 404, message: "Not Found" }],
+        });
+        await assert.rejects(
+            service.discard(["k3"]),
+            (err) => err instanceof UploadError && err.statusCode === 502
+        );
+
+        // Must throw UploadError when failure indicates a missing bucket
         fakeStorage.deleteFiles = async () => ({
             deleted: [],
             failures: [{ key: "k5", message: "Bucket not found: generated_images", statusCode: 404 }],

@@ -835,6 +835,7 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
             h.callLog.length = 0;
             const rbRes = await h.service.rollbackAttachedMedia(res.rollbackHandle);
 
+            assert.equal(rbRes.complete, true, "Rollback must report complete: true on successful compensation");
             assert.equal(rbRes.restoredPrimaryMediaId, prevPrimaryId);
             assert.equal(h.workflows.get(wfId).primary_media_id, prevPrimaryId);
 
@@ -958,6 +959,7 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
 
             const rbRes = await h.service.rollbackAttachedMedia(res.rollbackHandle);
 
+            assert.equal(rbRes.complete, false, "Rollback must report complete: false when primary restore fails");
             // New primary media row must NOT be deleted, and its storage file must NOT be discarded
             assert.ok(rbRes.skippedStorageKeys.includes("user-1/uploads/keep_file_on_restore_fail.png"));
             assert.ok(!rbRes.discardedStorageKeys.includes("user-1/uploads/keep_file_on_restore_fail.png"));

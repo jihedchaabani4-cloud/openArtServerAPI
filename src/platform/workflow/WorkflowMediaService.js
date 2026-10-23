@@ -419,6 +419,7 @@ export class WorkflowMediaService {
         const skippedStorageKeys = [];
         let restoredPrimaryMediaId = null;
         let primaryRestoreFailed = false;
+        let hasFatalError = false;
 
         try {
 
@@ -565,6 +566,7 @@ export class WorkflowMediaService {
         }
 
         } catch (fatalErr) {
+            hasFatalError = true;
             crudOperationLog({
                 traceId: opTraceId,
                 operation: "rollbackAttachedMedia:fatal",
@@ -574,12 +576,21 @@ export class WorkflowMediaService {
             });
         }
 
+        const anyUnlinkFailed = entries.some((e) => e.unlinkFailed);
+        const anyMediaNotDeleted = entries.some((e) => e.kind === "uploaded" && e.mediaCreatedInCall && !e.mediaDeleted);
+        const complete = !hasFatalError &&
+            !primaryRestoreFailed &&
+            !anyUnlinkFailed &&
+            !anyMediaNotDeleted &&
+            skippedStorageKeys.length === 0;
+
         crudOperationLog({
             traceId: opTraceId,
             operation: "rollbackAttachedMedia:done",
             status: "ok",
             durationMs: Date.now() - start,
             workflowId,
+            complete,
             unlinkedCount: unlinkedMediaIds.length,
             deletedCount: deletedMediaIds.length,
             discardedCount: discardedStorageKeys.length,
@@ -587,6 +598,7 @@ export class WorkflowMediaService {
         });
 
         return {
+            complete,
             unlinkedMediaIds,
             deletedMediaIds,
             discardedStorageKeys,

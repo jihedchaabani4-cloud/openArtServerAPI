@@ -2,7 +2,7 @@
  * Disposable Real PostgreSQL Integration Test Runner for Shared Media Concurrency
  *
  * Starts a 100% ephemeral local PostgreSQL instance using local Scoop binaries,
- * applies the exact draft migrations for attach and unlink/reap, executes real
+ * applies the canonical production migrations for attach and unlink/reap, executes real
  * multi-connection concurrency and security tests, and cleans up the cluster on exit.
  */
 
@@ -68,7 +68,7 @@ async function main() {
       "start",
     ], { stdio: "ignore" });
 
-    console.log("3. Creating baseline tables, roles, and applying draft migrations...");
+    console.log("3. Creating baseline tables, roles, and applying canonical production migrations...");
 
     // Create Supabase standard roles
     runPsql(`

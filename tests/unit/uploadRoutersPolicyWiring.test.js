@@ -7,9 +7,17 @@ import express from "express";
 import assetsRouter from "../../routes/assets.js";
 import mediaIngestRouter from "../../routes/mediaIngestRoutes.js";
 import elementRoutes from "../../routes/elementRoutes.js";
+import charactersRouter from "../../routes/characters.js";
 import { supabase } from "../../lib/supabase.js";
-import { assetUploadService, elementMediaService, db } from "../../src/container.js";
-import { createUploadMiddleware } from "../../src/middleware/uploadMiddleware.js";
+import { assetUploadService, elementMediaService, characterService, db } from "../../src/container.js";
+import {
+    createUploadMiddleware,
+    resolveMiddlewarePolicy,
+} from "../../src/middleware/uploadMiddleware.js";
+import {
+    CHARACTER_SHEET_UPLOAD_POLICY,
+    CHARACTER_DETAIL_UPLOAD_POLICY,
+} from "../../src/platform/media-ingestion/UploadPolicy.js";
 import {
     rateLimitRedisConnection,
     redisConnection,
@@ -164,6 +172,7 @@ describe("Ticket 02b — Upload Routers Policy Wiring & Route-Level Parity Tests
         app.use("/api/assets", assetsRouter);
         app.use("/api/media", mediaIngestRouter);
         app.use("/api/v2/elements", elementRoutes);
+        app.use("/api/characters", charactersRouter);
 
         server = http.createServer(app);
         await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -172,6 +181,7 @@ describe("Ticket 02b — Upload Routers Policy Wiring & Route-Level Parity Tests
         const legacyDefaultApp = express();
         const legacyDefaultUpload = createUploadMiddleware("default");
         const legacyElementUpload = createUploadMiddleware("element_reference");
+        const legacyCharacterUpload = createUploadMiddleware("character_reference");
         legacyDefaultApp.post("/api/assets/upload", legacyDefaultUpload, (req, res) => {
             res.status(200).json({ ok: true, size: req.file?.size });
         });
@@ -181,6 +191,18 @@ describe("Ticket 02b — Upload Routers Policy Wiring & Route-Level Parity Tests
         legacyDefaultApp.post("/api/v2/elements/:id/images", legacyElementUpload, (req, res) => {
             res.status(201).json({ status: "created", media: { id: "legacy-elem-media" } });
         });
+        for (const charPath of [
+            "/api/characters/create",
+            "/api/characters",
+            "/api/characters/character",
+            "/api/characters/:characterId/media",
+            "/api/characters/:characterId/sheet-media",
+            "/api/characters/:characterId/upload",
+        ]) {
+            legacyDefaultApp.post(charPath, legacyCharacterUpload, (req, res) => {
+                res.status(200).json({ ok: true, size: req.file?.size });
+            });
+        }
         legacyDefaultServer = http.createServer(legacyDefaultApp);
         await new Promise((resolve) => legacyDefaultServer.listen(0, "127.0.0.1", resolve));
         legacyDefaultBaseUrl = `http://127.0.0.1:${legacyDefaultServer.address().port}`;
@@ -505,6 +527,165 @@ describe("Ticket 02b — Upload Routers Policy Wiring & Route-Level Parity Tests
                 elementMediaService.assertUploadAllowed = origAssertUploadAllowed;
                 elementMediaService.addReferenceMedia = origAddReferenceMedia;
                 db.elements = origElementsRepo;
+            }
+        });
+    });
+
+    describe("4. routes/characters.js — sheet vs detail UploadPolicy wiring & middleware parity guard", () => {
+        const CHAR_ID = "00000000-0000-0000-0000-000000000009";
+
+        it("fails if CHARACTER_SHEET_UPLOAD_POLICY and CHARACTER_DETAIL_UPLOAD_POLICY ever differ in any field consumed by createUploadMiddleware (imageLimit, videoLimit, maxSizeBytes, allowedMimeTypes)", () => {
+            const sheetCfg = resolveMiddlewarePolicy(CHARACTER_SHEET_UPLOAD_POLICY);
+            const detailCfg = resolveMiddlewarePolicy(CHARACTER_DETAIL_UPLOAD_POLICY);
+
+            assert.equal(sheetCfg.imageLimit, detailCfg.imageLimit, "sheet and detail must share identical imageLimit");
+            assert.equal(sheetCfg.videoLimit, detailCfg.videoLimit, "sheet and detail must share identical videoLimit");
+            assert.equal(sheetCfg.maxSizeBytes, detailCfg.maxSizeBytes, "sheet and detail must share identical maxSizeBytes");
+            assert.deepEqual(
+                sheetCfg.allowedMimeTypes,
+                detailCfg.allowedMimeTypes,
+                "sheet and detail must share identical allowedMimeTypes"
+            );
+
+            // Verify router mounts one middleware instance per policy:
+            // /create, /, /character, /:characterId/sheet-media, and /:characterId/upload share uploadSheet;
+            // /:characterId/media mounts the separate uploadDetail instance.
+            const routeMiddlewareByPath = new Map();
+            for (const layer of charactersRouter.stack) {
+                if (layer.route && layer.route.methods?.post) {
+                    routeMiddlewareByPath.set(layer.route.path, layer.route.stack[0]?.handle);
+                }
+            }
+            const sheetMwHandle = routeMiddlewareByPath.get("/create");
+            const detailMwHandle = routeMiddlewareByPath.get("/:characterId/media");
+            assert.equal(typeof sheetMwHandle, "function");
+            assert.equal(typeof detailMwHandle, "function");
+            assert.notEqual(
+                sheetMwHandle,
+                detailMwHandle,
+                "/:characterId/media must use a dedicated uploadDetail middleware instance distinct from uploadSheet"
+            );
+            for (const sheetRoutePath of ["/create", "/", "/character", "/:characterId/sheet-media", "/:characterId/upload"]) {
+                assert.equal(
+                    routeMiddlewareByPath.get(sheetRoutePath),
+                    sheetMwHandle,
+                    `${sheetRoutePath} must use the uploadSheet (CHARACTER_SHEET_UPLOAD_POLICY) middleware instance`
+                );
+            }
+        });
+
+        it("wires all 6 character upload endpoints to CHARACTER_SHEET_UPLOAD_POLICY / CHARACTER_DETAIL_UPLOAD_POLICY and matches legacy status and error codes", async () => {
+            const origCreateCharacter = characterService.createCharacter;
+            const origAddMedia = characterService.addMediaToCharacter;
+            const origSetSheet = characterService.setCharacterSheetMedia;
+
+            characterService.createCharacter = async ({ file }) => {
+                assert.ok(file?.buffer, "createCharacter must receive req.file from uploadSheet");
+                return { characterId: CHAR_ID, media: { id: "media-char-sheet" } };
+            };
+            characterService.addMediaToCharacter = async ({ file }) => {
+                assert.ok(file?.buffer, "addMediaToCharacter must receive req.file from uploadDetail");
+                return { media: { id: "media-char-detail" } };
+            };
+            characterService.setCharacterSheetMedia = async ({ file }) => {
+                assert.ok(file?.buffer, "setCharacterSheetMedia must receive req.file from uploadSheet");
+                return { media: { id: "media-char-sheet-replace" } };
+            };
+
+            const endpoints = [
+                { path: "/api/characters/create", fields: { project_id: "proj-1", name: "Hero" } },
+                { path: "/api/characters", fields: { project_id: "proj-1", name: "Hero" } },
+                { path: "/api/characters/character", fields: { project_id: "proj-1", name: "Hero" } },
+                { path: `/api/characters/${CHAR_ID}/media`, fields: { projectId: "proj-1" } },
+                { path: `/api/characters/${CHAR_ID}/sheet-media`, fields: { projectId: "proj-1" } },
+                { path: `/api/characters/${CHAR_ID}/upload`, fields: { projectId: "proj-1", type: "sheet" } },
+            ];
+
+            try {
+                for (const { path, fields } of endpoints) {
+                    // (a) Valid image -> 200 OK
+                    const validRes = await sendMultipartRequest(baseUrl, path, {
+                        filename: "valid.png",
+                        contentType: "image/png",
+                        payloadBuffer: VALID_PNG_1X1,
+                        fields,
+                    });
+                    const legacyValidRes = await sendMultipartRequest(legacyDefaultBaseUrl, path, {
+                        filename: "valid.png",
+                        contentType: "image/png",
+                        payloadBuffer: VALID_PNG_1X1,
+                        fields,
+                    });
+                    assert.equal(validRes.status, 200, `${path}: valid image must return 200`);
+                    assert.equal(validRes.status, legacyValidRes.status);
+                    assert.equal(validRes.body?.ok, true);
+
+                    // (b) Spoofed MIME (MP4 bytes declared as image/png) -> 415 UNSUPPORTED_MEDIA_TYPE
+                    const spoofRes = await sendMultipartRequest(baseUrl, path, {
+                        filename: "spoof.png",
+                        contentType: "image/png",
+                        payloadBuffer: buildMinimalMp4Buffer(),
+                        fields,
+                    });
+                    const legacySpoofRes = await sendMultipartRequest(legacyDefaultBaseUrl, path, {
+                        filename: "spoof.png",
+                        contentType: "image/png",
+                        payloadBuffer: buildMinimalMp4Buffer(),
+                        fields,
+                    });
+                    assert.equal(spoofRes.status, 415, `${path}: spoofed MIME must return 415`);
+                    assert.equal(spoofRes.status, legacySpoofRes.status);
+                    assert.equal(spoofRes.body?.code, "UNSUPPORTED_MEDIA_TYPE");
+                    assert.equal(spoofRes.body?.code, legacySpoofRes.body?.code);
+                    assert.match(
+                        spoofRes.body?.message || "",
+                        /Unsupported file type: video\/mp4/,
+                        `${path} must be wired to CHARACTER_SHEET_UPLOAD_POLICY / CHARACTER_DETAIL_UPLOAD_POLICY`
+                    );
+
+                    // (d) Declared application/octet-stream -> 415 UNSUPPORTED_MEDIA_TYPE
+                    const octetRes = await sendMultipartRequest(baseUrl, path, {
+                        filename: "raw.bin",
+                        contentType: "application/octet-stream",
+                        payloadBuffer: VALID_PNG_1X1,
+                        fields,
+                    });
+                    const legacyOctetRes = await sendMultipartRequest(legacyDefaultBaseUrl, path, {
+                        filename: "raw.bin",
+                        contentType: "application/octet-stream",
+                        payloadBuffer: VALID_PNG_1X1,
+                        fields,
+                    });
+                    assert.equal(octetRes.status, 415, `${path}: application/octet-stream must return 415`);
+                    assert.equal(octetRes.status, legacyOctetRes.status);
+                    assert.equal(octetRes.body?.code, "UNSUPPORTED_MEDIA_TYPE");
+                    assert.equal(octetRes.body?.code, legacyOctetRes.body?.code);
+                }
+
+                // (c) Oversized image (> 20MB) on sheet route (/create) and detail route (/:characterId/media) -> 413 PAYLOAD_TOO_LARGE
+                const oversizedBuf = buildOversizedPngBuffer();
+                for (const path of ["/api/characters/create", `/api/characters/${CHAR_ID}/media`]) {
+                    const overRes = await sendMultipartRequest(baseUrl, path, {
+                        filename: "huge.png",
+                        contentType: "image/png",
+                        payloadBuffer: oversizedBuf,
+                        fields: { project_id: "proj-1", name: "Hero" },
+                    });
+                    const legacyOverRes = await sendMultipartRequest(legacyDefaultBaseUrl, path, {
+                        filename: "huge.png",
+                        contentType: "image/png",
+                        payloadBuffer: oversizedBuf,
+                        fields: { project_id: "proj-1", name: "Hero" },
+                    });
+                    assert.equal(overRes.status, 413, `${path}: >20MB image must return 413`);
+                    assert.equal(overRes.status, legacyOverRes.status);
+                    assert.equal(overRes.body?.code, "PAYLOAD_TOO_LARGE");
+                    assert.equal(overRes.body?.code, legacyOverRes.body?.code);
+                }
+            } finally {
+                characterService.createCharacter = origCreateCharacter;
+                characterService.addMediaToCharacter = origAddMedia;
+                characterService.setCharacterSheetMedia = origSetSheet;
             }
         });
     });

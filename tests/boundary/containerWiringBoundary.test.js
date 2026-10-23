@@ -140,7 +140,7 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
         } finally {
             container.storageService.deleteFiles = originalDeleteFiles;
             container.storageService.upload = originalUpload;
-            if (container.storageService.provider && originalProviderDeleteFiles) {
+            if (container.storageService.provider) {
                 container.storageService.provider.deleteFiles = originalProviderDeleteFiles;
             }
             container.db.projects.findById = originalDbProjectsFindById;

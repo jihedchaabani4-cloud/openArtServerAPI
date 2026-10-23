@@ -199,6 +199,12 @@ describe("AssetUploadService — Characterization Tests (Ticket 04 Pre-Check)", 
             primary_media_id: existingPrimaryId,
             workflow_type: "GENERATION",
         });
+        h.workflowMedia.push({
+            workflow_id: existingWfId,
+            media_id: existingPrimaryId,
+            role: "output",
+            is_primary: true,
+        });
 
         const initialWfCount = h.workflows.size;
 
@@ -225,7 +231,10 @@ describe("AssetUploadService — Characterization Tests (Ticket 04 Pre-Check)", 
         assert.equal(link.is_primary, false, "workflow_media.is_primary must be false");
     });
 
-    it("2b. Existing-workflow case with NO primary cover: characterizes old vs new behavior when attaching to a primary-less workflow", async () => {
+    // SKIPPED: Awaiting human decision on Option (a) vs Option (b) for primary-less workflow attachment.
+    // Under old behavior, link.is_primary was false. Under new attach_workflow_reference_media RPC,
+    // it becomes true when the container has no existing primary cover.
+    it.skip("2b. Existing-workflow case with NO primary cover: characterizes old vs new behavior when attaching to a primary-less workflow", async () => {
         const h = makeCharacterizeHarness();
         const projectId = "00000000-0000-0000-0000-000000000001";
         const primaryLessWfId = "00000000-0000-0000-0000-000000000020";

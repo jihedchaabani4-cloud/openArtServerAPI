@@ -156,6 +156,7 @@ export class WorkflowMediaRepository extends BaseRepository {
         media_id,
         role = "detail",
         maxAllowed = null,
+        autoPrimary = true,
     } = {}) {
         return this.attachReferenceMedia({
             workflowId,

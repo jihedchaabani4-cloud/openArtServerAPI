@@ -110,6 +110,7 @@ export class AssetUploadService {
             projectId = null,
             workflowId = null,
             stepId = null,
+            folder = null,
             displayName = null,
             req = null,
             imageUrl = null,
@@ -264,8 +265,17 @@ export class AssetUploadService {
                     }
                 }
 
-                // If a target workflowId is provided, attach existing media to it via workflowMediaService
+                // If a target workflowId is provided, verify ownership and attach existing media
                 if (workflowId && this.workflowMediaService?.attachMediaItems) {
+                    const isWfAuthorized = await this.authService.verifyWorkflowOwnership(workflowId, userId, req);
+                    if (!isWfAuthorized) {
+                        throw new CrudServiceError("Workflow not found.", {
+                            statusCode: 404,
+                            errorCode: "NOT_FOUND",
+                            traceId,
+                            operation: "assetUpload",
+                        });
+                    }
                     await this.workflowMediaService.attachMediaItems({
                         workflowId,
                         projectId,
@@ -325,6 +335,7 @@ export class AssetUploadService {
                     policy: DEFAULT_UPLOAD_POLICY,
                     maxFiles: 1,
                     userId,
+                    folder: folder || null,
                 });
                 uploadItem = uploadResult.uploaded[0];
             } else if (this.binaryIngestionService) {
@@ -390,7 +401,7 @@ export class AssetUploadService {
                     targetWorkflowId = containerWf.id;
                 }
             } catch (containerErr) {
-                // If container creation failed, discard the uploaded file
+                // If workflow verification or container creation failed, discard the uploaded file
                 if (uploadItem.storageKey && this.mediaUploadService?.discard) {
                     await this.mediaUploadService.discard([uploadItem.storageKey]).catch(() => null);
                 }

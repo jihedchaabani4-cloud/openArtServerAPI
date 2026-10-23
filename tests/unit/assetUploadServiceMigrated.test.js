@@ -339,4 +339,149 @@ describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaS
         assert.equal(result.isNew, false);
         assert.equal(result.mediaId, existingUuid);
     });
+
+    it("8. Cross-tenant workflow authorization fails closed with 404 and discards uploaded storage key", async () => {
+        const h = createHarness({ workflowOwned: false });
+
+        await assert.rejects(
+            async () => h.service.uploadAsset({
+                source: { buffer: VALID_PNG_1X1 },
+                userId: "user-1",
+                projectId: "proj-1",
+                workflowId: "wf-foreign",
+            }),
+            (err) => err.statusCode === 404
+        );
+
+        // Uploaded storage key was discarded
+        assert.equal(h.mockMediaUploadService.discardCalls.length, 1);
+        assert.deepEqual(h.mockMediaUploadService.discardCalls[0], ["user-1/uploads/migrated.webp"]);
+    });
+
+    it("9. StoragePathResolver.validateFolderSegment enforces whitelist of allowed storage folders", async () => {
+        const { StoragePathResolver } = await import("../../src/platform/storage/StoragePathResolver.js");
+        // Allowed folders
+        assert.equal(StoragePathResolver.validateFolderSegment("uploads"), "uploads");
+        assert.equal(StoragePathResolver.validateFolderSegment("element-references"), "element-references");
+        assert.equal(StoragePathResolver.validateFolderSegment("character-sheets"), "character-sheets");
+        assert.equal(StoragePathResolver.validateFolderSegment("character-details"), "character-details");
+        assert.equal(StoragePathResolver.validateFolderSegment(""), "uploads");
+        assert.equal(StoragePathResolver.validateFolderSegment(null), "uploads");
+
+        // Disallowed / traversal folders throw 400 VALIDATION_ERROR
+        assert.throws(
+            () => StoragePathResolver.validateFolderSegment("arbitrary_folder"),
+            (err) => err.statusCode === 400 && err.errorCode === "VALIDATION_ERROR"
+        );
+        assert.throws(
+            () => StoragePathResolver.validateFolderSegment("../traversal"),
+            (err) => err.statusCode === 400 && err.errorCode === "VALIDATION_ERROR"
+        );
+    });
+
+    it("10. Integrated 4-step rollback with real WorkflowMediaService: executes unlink -> delete media -> discard -> delete containerWf", async () => {
+        const { WorkflowMediaService } = await import("../../src/platform/workflow/WorkflowMediaService.js");
+
+        const orderEvents = [];
+        const discarded = [];
+
+        const mockStorageService = {
+            paths: {
+                projectAsset: (userId, folder, filename) => `${userId}/${folder}/${filename}`,
+            },
+            upload: async (key) => `https://mock-storage.local/${key}`,
+            remove: async (keys) => {
+                orderEvents.push({ step: "discard", keys });
+                discarded.push(...keys);
+                return { data: keys, error: null };
+            },
+        };
+
+        const createdMedia = [];
+        const deletedMediaIds = [];
+        const unlinkedItems = [];
+        const workflows = [];
+        const deletedWorkflowIds = [];
+
+        const integratedDb = {
+            media: {
+                createMedia: async (data) => {
+                    const id = `media-${Date.now()}`;
+                    createdMedia.push({ id, ...data });
+                    return { id, ...data };
+                },
+                deleteById: async (id) => {
+                    orderEvents.push({ step: "deleteMedia", id });
+                    deletedMediaIds.push(id);
+                    return { id };
+                },
+            },
+            workflowMedia: {
+                attachReferenceMedia: async ({ workflowId, mediaId, role }) => {
+                    orderEvents.push({ step: "attach", mediaId });
+                    // Throw to simulate attach failure after media created
+                    throw new Error("Simulated RPC attachment error");
+                },
+                unlink: async ({ workflowId, mediaId, role }) => {
+                    orderEvents.push({ step: "unlink", mediaId });
+                    unlinkedItems.push({ workflowId, mediaId, role });
+                },
+            },
+            workflows: {
+                createWorkflow: async (wf) => {
+                    const id = `wf-int-1`;
+                    workflows.push({ id, ...wf });
+                    return { id, ...wf };
+                },
+                deleteById: async (id) => {
+                    orderEvents.push({ step: "deleteContainerWf", id });
+                    deletedWorkflowIds.push(id);
+                    return { id };
+                },
+                getWorkflow: async (id) => ({ id, user_id: "user-1", project_id: "proj-1" }),
+                findById: async (id) => ({ id, user_id: "user-1", project_id: "proj-1" }),
+            },
+            projects: {
+                findByUser: async () => [{ id: "proj-1", user_id: "user-1" }],
+                findMostRecentForUser: async () => ({ id: "proj-1", user_id: "user-1" }),
+            },
+        };
+
+        const realWorkflowMediaService = new WorkflowMediaService({
+            db: integratedDb,
+            storageService: mockStorageService,
+            workflowAuthService: {
+                verifyWorkflowOwnership: async () => true,
+                verifyMediaOwnership: async () => true,
+            },
+        });
+
+        const integratedService = new AssetUploadService({
+            db: integratedDb,
+            workflowMediaService: realWorkflowMediaService,
+            storageService: mockStorageService,
+            workflowAuthService: {
+                verifyWorkflowOwnership: async () => true,
+                verifyMediaOwnership: async () => true,
+            },
+        });
+
+        await assert.rejects(
+            async () => integratedService.uploadAsset({
+                source: { buffer: VALID_PNG_1X1, originalname: "test.png", mimetype: "image/png" },
+                userId: "user-1",
+                projectId: "proj-1",
+            }),
+            /Simulated RPC attachment error/
+        );
+
+        // Verify exact 4-step rollback order: deleteMedia -> discard -> deleteContainerWf
+        const rollbackSteps = orderEvents.filter((e) => ["unlink", "deleteMedia", "discard", "deleteContainerWf"].includes(e.step));
+        assert.deepEqual(
+            rollbackSteps.map((s) => s.step),
+            ["deleteMedia", "discard", "deleteContainerWf"]
+        );
+        assert.equal(deletedWorkflowIds.length, 1);
+        assert.equal(deletedWorkflowIds[0], "wf-int-1");
+    });
 });

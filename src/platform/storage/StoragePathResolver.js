@@ -39,8 +39,19 @@ export class StoragePathResolver {
         return `elements/${this._cleanId(userId)}/${projectId}/${filename}`;
     }
 
+    static ALLOWED_STORAGE_FOLDERS = new Set([
+        "uploads",
+        "video_uploads",
+        "element-references",
+        "element-sheets",
+        "character-sheets",
+        "character-details",
+        "avatars",
+        "video-references",
+    ]);
+
     /**
-     * Validates a client-facing storage folder as a single object-key segment.
+     * Validates a client-facing storage folder against the explicit whitelist of known storage folders.
      *
      * Supabase object keys are taken literally by the provider, so a folder value
      * carrying separators or traversal would become part of a foreign key path
@@ -53,10 +64,10 @@ export class StoragePathResolver {
     static validateFolderSegment(folder) {
         const segment = String(folder ?? "").trim();
         if (!segment) return "uploads";
-        if (!/^[A-Za-z0-9_-]+$/.test(segment)) {
+        if (!StoragePathResolver.ALLOWED_STORAGE_FOLDERS.has(segment)) {
             const preview = segment.length > 32 ? `${segment.slice(0, 32)}…` : segment;
             throw new CrudServiceError(
-                `Invalid storage folder "${preview}": expected a single segment of [A-Za-z0-9_-].`,
+                `Invalid storage folder "${preview}": must be one of allowed storage folders.`,
                 {
                     statusCode: 400,
                     errorCode: "VALIDATION_ERROR",

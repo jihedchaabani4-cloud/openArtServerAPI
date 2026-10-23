@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import express from "express";
 import assetsRouter from "../../routes/assets.js";
+import mediaIngestRouter from "../../routes/mediaIngestRoutes.js";
 import { supabase } from "../../lib/supabase.js";
 import { assetUploadService } from "../../src/container.js";
 import { createUploadMiddleware } from "../../src/middleware/uploadMiddleware.js";
@@ -150,12 +151,20 @@ describe("Ticket 02b — Upload Routers Policy Wiring & Route-Level Parity Tests
         const app = express();
         app.use(express.json());
         app.use("/api/assets", assetsRouter);
+        app.use("/api/media", mediaIngestRouter);
 
         server = http.createServer(app);
         await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
         baseUrl = `http://127.0.0.1:${server.address().port}`;
 
-        const legacyDefaultApp = buildLegacyReferenceApp("default", "/api/assets", "/upload");
+        const legacyDefaultApp = express();
+        const legacyDefaultUpload = createUploadMiddleware("default");
+        legacyDefaultApp.post("/api/assets/upload", legacyDefaultUpload, (req, res) => {
+            res.status(200).json({ ok: true, size: req.file?.size });
+        });
+        legacyDefaultApp.post("/api/media/ingest", legacyDefaultUpload, (req, res) => {
+            res.status(200).json({ ok: true, size: req.file?.size });
+        });
         legacyDefaultServer = http.createServer(legacyDefaultApp);
         await new Promise((resolve) => legacyDefaultServer.listen(0, "127.0.0.1", resolve));
         legacyDefaultBaseUrl = `http://127.0.0.1:${legacyDefaultServer.address().port}`;
@@ -254,6 +263,97 @@ describe("Ticket 02b — Upload Routers Policy Wiring & Route-Level Parity Tests
                     payloadBuffer: VALID_PNG_1X1,
                 });
                 const legacyOctetRes = await sendMultipartRequest(legacyDefaultBaseUrl, "/api/assets/upload", {
+                    filename: "raw.bin",
+                    contentType: "application/octet-stream",
+                    payloadBuffer: VALID_PNG_1X1,
+                });
+                assert.equal(octetRes.status, 415);
+                assert.equal(octetRes.status, legacyOctetRes.status);
+                assert.equal(octetRes.body?.code, "UNSUPPORTED_MEDIA_TYPE");
+                assert.equal(octetRes.body?.code, legacyOctetRes.body?.code);
+            } finally {
+                assetUploadService.uploadAsset = origUploadAsset;
+            }
+        });
+    });
+
+    describe("2. routes/mediaIngestRoutes.js — POST /api/media/ingest (DEFAULT_UPLOAD_POLICY)", () => {
+        it("matches legacy status and error code across valid image, spoofed MIME, oversized file, and application/octet-stream while enforcing DEFAULT_UPLOAD_POLICY stream sniffing", async () => {
+            const origUploadAsset = assetUploadService.uploadAsset;
+            assetUploadService.uploadAsset = async () => ({
+                url: "https://cdn.example.com/uploads/ingested.png",
+                mediaId: "media-ingest-1",
+                workflowId: "wf-ingest-1",
+                type: "image",
+                width: 1,
+                height: 1,
+                ratio: "1:1",
+                format: "PNG",
+                isNew: true,
+                media: { id: "media-ingest-1" },
+            });
+
+            try {
+                // (a) Valid image -> 200 OK
+                const validRes = await sendMultipartRequest(baseUrl, "/api/media/ingest", {
+                    filename: "valid.png",
+                    contentType: "image/png",
+                    payloadBuffer: VALID_PNG_1X1,
+                });
+                const legacyValidRes = await sendMultipartRequest(legacyDefaultBaseUrl, "/api/media/ingest", {
+                    filename: "valid.png",
+                    contentType: "image/png",
+                    payloadBuffer: VALID_PNG_1X1,
+                });
+                assert.equal(validRes.status, 200);
+                assert.equal(validRes.status, legacyValidRes.status);
+                assert.equal(validRes.body?.ok, true);
+
+                // (b) Spoofed MIME (disallowed HEIC magic bytes declared as image/png) -> 415 UNSUPPORTED_MEDIA_TYPE
+                const spoofRes = await sendMultipartRequest(baseUrl, "/api/media/ingest", {
+                    filename: "spoof.png",
+                    contentType: "image/png",
+                    payloadBuffer: buildMinimalHeicBuffer(),
+                });
+                const legacySpoofRes = await sendMultipartRequest(legacyDefaultBaseUrl, "/api/media/ingest", {
+                    filename: "spoof.png",
+                    contentType: "image/png",
+                    payloadBuffer: buildMinimalHeicBuffer(),
+                });
+                assert.equal(spoofRes.status, 415);
+                assert.equal(spoofRes.status, legacySpoofRes.status);
+                assert.equal(spoofRes.body?.code, "UNSUPPORTED_MEDIA_TYPE");
+                assert.equal(spoofRes.body?.code, legacySpoofRes.body?.code);
+                assert.match(
+                    spoofRes.body?.message || "",
+                    /Unsupported file type: image\/heic/,
+                    "routes/mediaIngestRoutes.js must be wired to DEFAULT_UPLOAD_POLICY"
+                );
+
+                // (c) Oversized image (> 20MB) -> 413 PAYLOAD_TOO_LARGE
+                const oversizedBuf = buildOversizedPngBuffer();
+                const overRes = await sendMultipartRequest(baseUrl, "/api/media/ingest", {
+                    filename: "huge.png",
+                    contentType: "image/png",
+                    payloadBuffer: oversizedBuf,
+                });
+                const legacyOverRes = await sendMultipartRequest(legacyDefaultBaseUrl, "/api/media/ingest", {
+                    filename: "huge.png",
+                    contentType: "image/png",
+                    payloadBuffer: oversizedBuf,
+                });
+                assert.equal(overRes.status, 413);
+                assert.equal(overRes.status, legacyOverRes.status);
+                assert.equal(overRes.body?.code, "PAYLOAD_TOO_LARGE");
+                assert.equal(overRes.body?.code, legacyOverRes.body?.code);
+
+                // (d) Declared application/octet-stream -> 415 UNSUPPORTED_MEDIA_TYPE
+                const octetRes = await sendMultipartRequest(baseUrl, "/api/media/ingest", {
+                    filename: "raw.bin",
+                    contentType: "application/octet-stream",
+                    payloadBuffer: VALID_PNG_1X1,
+                });
+                const legacyOctetRes = await sendMultipartRequest(legacyDefaultBaseUrl, "/api/media/ingest", {
                     filename: "raw.bin",
                     contentType: "application/octet-stream",
                     payloadBuffer: VALID_PNG_1X1,

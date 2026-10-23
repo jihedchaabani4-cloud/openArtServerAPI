@@ -17,16 +17,13 @@ export class WorkflowRepository extends BaseRepository {
      */
     async createWorkflow(data, options = {}) {
         const {
-            project_id, session_id, display_name, primary_media_id,
-            variation_index, workflow_type,
+            project_id, display_name,
+            workflow_type,
         } = data;
 
         const newWorkflow = {
             project_id:       project_id       || null,
-            session_id:       session_id       || null,
             display_name:     display_name     || "Untitled Workflow",
-            variation_index:  variation_index  || 0,
-            primary_media_id: primary_media_id || null,
         };
 
         if (data.id) newWorkflow.id = data.id;
@@ -57,36 +54,50 @@ export class WorkflowRepository extends BaseRepository {
     }
 
     /**
-     * Sets the primary_media_id after the first media is created.
-     * Called once per workflow after generation/upload succeeds.
+     * Sets the primary media via workflow_media.is_primary.
      */
     async updatePrimaryMedia(workflow_id, media_id) {
-        const { error } = await supabase
-            .from(this.tableName)
-            .update({ primary_media_id: media_id })
-            .eq("id", workflow_id);
-        if (error) throw error;
+        if (!workflow_id) return;
+        if (media_id) {
+            const client = this.client();
+            // Preferred atomic path: RPC in single transaction with row locking
+            if (typeof client.rpc === "function") {
+                try {
+                    const { data, error } = await client.rpc("set_workflow_primary_media", {
+                        p_workflow_id: workflow_id,
+                        p_media_id: media_id,
+                    });
+                    if (!error && data) return data;
+                } catch (_) {}
+            }
+
+            // Correct sequential fallback: CLEAR PREVIOUS FIRST, SET NEW SECOND
+            await client
+                .from("workflow_media")
+                .update({ is_primary: false })
+                .eq("workflow_id", workflow_id)
+                .eq("is_primary", true)
+                .neq("media_id", media_id);
+
+            const { error: relErr } = await client
+                .from("workflow_media")
+                .update({ is_primary: true })
+                .eq("workflow_id", workflow_id)
+                .eq("media_id", media_id);
+            if (relErr) {
+                await client
+                    .from("workflow_media")
+                    .upsert({ workflow_id, media_id, role: "output", is_primary: true }, { onConflict: "workflow_id,media_id,role" });
+            }
+        } else {
+            await this.client()
+                .from("workflow_media")
+                .update({ is_primary: false })
+                .eq("workflow_id", workflow_id)
+                .eq("is_primary", true);
+        }
     }
 
-    async findByBatch(batch_id, options = {}) {
-        const { data, error } = await this.client()
-            .from(this.tableName)
-            .select("*")
-            .eq("batch_id", batch_id)
-            .order("variation_index", { ascending: true });
-        if (error) throw error;
-        return data;
-    }
-
-    async findBySession(session_id, options = {}) {
-        const { select = "*", order = { column: "create_time", ascending: false } } = options;
-        let query = supabase.from(this.tableName).select(select);
-        if (order) query = query.order(order.column, { ascending: order.ascending });
-        query = query.eq("session_id", session_id);
-        const { data, error } = await query;
-        if (error) throw error;
-        return data;
-    }
 
     async findByProject(project_id, options = {}) {
         const { select = "*", order = { column: "create_time", ascending: false } } = options;
@@ -100,60 +111,51 @@ export class WorkflowRepository extends BaseRepository {
 
     /**
      * Resolves the primary media URL for a workflow.
-     * Logic: primary_media_id > First created media
      */
     async getPrimaryMediaUrl(workflow_id) {
         const media = await this.getPrimaryMedia(workflow_id);
         return media?.url || null;
     }
 
+    async conditionalRestorePrimaryMedia({ workflowId, expectedPrimaryMediaId, restorePrimaryMediaId }) {
+        if (!workflowId || !expectedPrimaryMediaId) return { updated: false };
+        const client = this.client();
+        const { data, error } = await client
+            .from(this.tableName)
+            .update({ primary_media_id: restorePrimaryMediaId || null })
+            .eq("id", workflowId)
+            .eq("primary_media_id", expectedPrimaryMediaId)
+            .select("id, primary_media_id");
+        if (error) throw error;
+        return {
+            workflowId,
+            updated: Array.isArray(data) && data.length > 0,
+            data,
+        };
+    }
+
     /**
-     * Resolves the primary media for a workflow.
-     * Logic: primary_media_id > First created media
+     * Resolves the primary media for a workflow via workflow_media.is_primary.
      */
     async getPrimaryMedia(workflow_id) {
         if (!workflow_id) return null;
 
-        // 1. Get workflow to find primary_media_id
-        const { data: wf, error: wfErr } = await this.client()
-            .from(this.tableName)
-            .select("primary_media_id")
-            .eq("id", workflow_id)
-            .maybeSingle();
-        
-        if (wfErr) {
-            workflowRepositoryLogger.error(
-                { workflowId: workflow_id, message: wfErr.message },
-                "Error fetching workflow primary media pointer"
-            );
-            return null;
-        }
-
-        if (wf?.primary_media_id) {
-            const { data: media, error: mErr } = await this.client()
-                .from("media")
-                .select("id, url, generation_config_id")
-                .eq("id", wf.primary_media_id)
-                .maybeSingle();
-            if (!mErr && media) return media;
-        }
-
-        // 2. Fallback: relation rows created by workflow_media rollout
         const { data: relationRow, error: relationErr } = await this.client()
             .from("workflow_media")
             .select(`
                 workflow_id,
                 role,
                 created_at,
-                media:media_id (id, url, generation_config_id)
+                is_primary,
+                media:media_id (id, url)
             `)
             .eq("workflow_id", workflow_id)
-            .order("created_at", { ascending: true })
+            .eq("is_primary", true)
             .limit(1)
             .maybeSingle();
 
-        if (!relationErr) {
-            const relationMedia = Array.isArray(relationRow?.media) ? relationRow.media[0] : relationRow?.media;
+        if (!relationErr && relationRow?.media) {
+            const relationMedia = Array.isArray(relationRow.media) ? relationRow.media[0] : relationRow.media;
             if (relationMedia) {
                 return {
                     ...relationMedia,
@@ -161,13 +163,9 @@ export class WorkflowRepository extends BaseRepository {
                     workflowId: workflow_id,
                     role: relationRow.role,
                     mediaRole: relationRow.role,
+                    is_primary: true,
                 };
             }
-        } else {
-            workflowRepositoryLogger.warn(
-                { workflowId: workflow_id, message: relationErr.message },
-                "workflow_media primary fallback failed"
-            );
         }
 
         return null;
@@ -178,7 +176,7 @@ export class WorkflowRepository extends BaseRepository {
      * Returns { workflows, total } for library listing.
      * Used by GenerationService.getUserLibrary.
      */
-    async findByProjectsPaginated(projectIds, { sessionId, limit = 30, offset = 0 } = {}) {
+    async findByProjectsPaginated(projectIds, { limit = 30, offset = 0 } = {}) {
         if (!projectIds || projectIds.length === 0) return { workflows: [], total: 0 };
 
         // Total count
@@ -186,18 +184,16 @@ export class WorkflowRepository extends BaseRepository {
             .from(this.tableName)
             .select("id", { count: "exact", head: true })
             .in("project_id", projectIds);
-        if (sessionId) countQ = countQ.eq("session_id", sessionId);
         const { count: total, error: countErr } = await countQ;
         if (countErr) throw countErr;
 
         // Data page
         let dataQ = this.client()
             .from(this.tableName)
-            .select("id, project_id, session_id, display_name, variation_index, primary_media_id, favorited, workflow_type, create_time")
+            .select("id, project_id, display_name, favorited, workflow_type, create_time")
             .in("project_id", projectIds)
             .order("create_time", { ascending: false })
             .range(Number(offset), Number(offset) + Number(limit) - 1);
-        if (sessionId) dataQ = dataQ.eq("session_id", sessionId);
         const { data: workflows, error: dataErr } = await dataQ;
         if (dataErr) throw dataErr;
 
@@ -213,7 +209,7 @@ export class WorkflowRepository extends BaseRepository {
         if (!projectIds || projectIds.length === 0) return null;
         const { data, error } = await this.client()
             .from(this.tableName)
-            .select("id, project_id, session_id, display_name, variation_index, primary_media_id, favorited, workflow_type, create_time")
+            .select("id, project_id, display_name, favorited, workflow_type, create_time")
             .eq("id", workflowId)
             .in("project_id", projectIds)
             .maybeSingle();

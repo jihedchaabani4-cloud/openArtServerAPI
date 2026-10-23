@@ -40,6 +40,15 @@ function createMockHarness() {
                 }
                 return { id: workflowId, primary_media_id: primaryMediaId };
             },
+            conditionalRestorePrimaryMedia: async ({ workflowId, expectedPrimaryMediaId, restorePrimaryMediaId }) => {
+                callLog.push({ op: "workflows.conditionalRestorePrimaryMedia", workflowId, expectedPrimaryMediaId, restorePrimaryMediaId });
+                const wf = workflows.get(workflowId);
+                if (wf && wf.primary_media_id === expectedPrimaryMediaId) {
+                    wf.primary_media_id = restorePrimaryMediaId || null;
+                    return { workflowId, updated: true, primary_media_id: wf.primary_media_id };
+                }
+                return { workflowId, updated: false, primary_media_id: wf?.primary_media_id || null };
+            },
             updateFields: async (workflowId, fields) => {
                 callLog.push({ op: "workflows.updateFields", workflowId, fields });
                 const wf = workflows.get(workflowId);
@@ -954,9 +963,51 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
             assert.ok(!rbRes.discardedStorageKeys.includes("user-1/uploads/keep_file_on_restore_fail.png"));
             assert.ok(!rbRes.deletedMediaIds.includes(res.attached[0].media.id));
         });
+
+        it("auto-primary: empty workflow, no setPrimary, a later caller step fails, and workflows.primary_media_id must not reference a deleted media row", async () => {
+            const h = createMockHarness();
+            const wfId = "00000000-0000-0000-0000-000000000001";
+            h.workflows.set(wfId, { id: wfId, user_id: "user-1", project_id: "proj-1", primary_media_id: null });
+
+            const res = await h.service.attachMediaItems({
+                workflowId: wfId,
+                userId: "user-1",
+                projectId: "proj-1",
+                role: "detail",
+                maxAllowed: 6,
+                setPrimary: false,
+                items: [
+                    {
+                        kind: "uploaded",
+                        uploadedFile: {
+                            storageKey: "user-1/uploads/auto_primary.png",
+                            url: "https://storage.test/auto_primary.png",
+                            width: 100,
+                            height: 100,
+                            format: "PNG",
+                        },
+                    },
+                ],
+            });
+
+            assert.equal(res.attached[0].is_primary, true, "First item becomes primary via RPC/mock");
+            const attachedMediaId = res.attached[0].media.id;
+
+            // Simulate caller step 2 writing workflows.primary_media_id
+            await h.db.workflows.updatePrimaryMedia(wfId, attachedMediaId);
+            assert.equal(h.workflows.get(wfId).primary_media_id, attachedMediaId);
+
+            // Caller step 3 fails -> calls rollbackAttachedMedia
+            const rbRes = await h.service.rollbackAttachedMedia(res.rollbackHandle);
+
+            // workflows.primary_media_id must NOT point to the deleted media row
+            assert.equal(h.workflows.get(wfId).primary_media_id, null, "primary_media_id must be cleared on rollback");
+            assert.equal(h.media.has(attachedMediaId), false, "Media record must be deleted");
+            assert.ok(rbRes.discardedStorageKeys.includes("user-1/uploads/auto_primary.png"), "Storage file must be discarded");
+        });
     });
 
-    describe("7. Rollback Idempotency", () => {
+    describe("7. Rollback Idempotency & Non-Throwing Invariant", () => {
         it("calling rollbackAttachedMedia twice is idempotent and does not repeat DB or storage actions", async () => {
             const h = createMockHarness();
             const wfId = "00000000-0000-0000-0000-000000000001";
@@ -999,6 +1050,40 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
             // Zero DB calls during second rollback
             const dbOps = h.callLog.filter((c) => c.op.startsWith("workflowMedia.") || c.op.startsWith("media."));
             assert.equal(dbOps.length, 0);
+        });
+
+        it("rollbackAttachedMedia never throws even when DB unlink, deleteById, and storage discard reject", async () => {
+            const h = createMockHarness();
+            const wfId = "00000000-0000-0000-0000-000000000001";
+            h.workflows.set(wfId, { id: wfId, user_id: "user-1", project_id: "proj-1" });
+
+            const res = await h.service.attachMediaItems({
+                workflowId: wfId,
+                userId: "user-1",
+                projectId: "proj-1",
+                role: "detail",
+                maxAllowed: 6,
+                items: [
+                    {
+                        kind: "uploaded",
+                        uploadedFile: {
+                            storageKey: "user-1/uploads/crash.png",
+                            url: "https://storage.test/crash.png",
+                            width: 100,
+                            height: 100,
+                            format: "PNG",
+                        },
+                    },
+                ],
+            });
+
+            // Sabotage DB and storage methods to throw
+            h.db.workflowMedia.unlink = async () => { throw new Error("DB fatal unlink crash"); };
+            h.db.media.deleteById = async () => { throw new Error("DB fatal delete crash"); };
+            h.storageService.deleteFiles = async () => { throw new Error("Storage fatal crash"); };
+
+            const rbRes = await h.service.rollbackAttachedMedia(res.rollbackHandle);
+            assert.ok(rbRes && typeof rbRes === "object", "Must return tracking object without throwing");
         });
     });
 });

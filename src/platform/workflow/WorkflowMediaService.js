@@ -237,13 +237,10 @@ export class WorkflowMediaService {
             }
         }
 
-        // 5. Inspect previous primary state if setPrimary is requested
-        let previousPrimaryMediaId = null;
-        if (setPrimary) {
-            const currentPrimary = await this.db.workflowMedia?.getPrimaryMedia?.(workflowId).catch(() => null);
-            const currentWf = await this.db.workflows?.findById?.(workflowId, "primary_media_id").catch(() => null);
-            previousPrimaryMediaId = currentPrimary?.media_id || currentPrimary?.id || currentWf?.primary_media_id || null;
-        }
+        // 5. Inspect previous primary state before any attachments
+        const currentPrimary = await this.db.workflowMedia?.getPrimaryMedia?.(workflowId).catch(() => null);
+        const currentWf = await this.db.workflows?.findById?.(workflowId, "primary_media_id").catch(() => null);
+        const previousPrimaryMediaId = currentPrimary?.media_id || currentPrimary?.id || currentWf?.primary_media_id || null;
 
         // 6. Build rollbackHandle tracking per-item state
         const rollbackHandle = {
@@ -309,6 +306,10 @@ export class WorkflowMediaService {
 
                     entry.linkCreatedInCall = !attachRes.is_existing;
                     entry.is_existing = Boolean(attachRes.is_existing);
+                    if (attachRes.is_primary) {
+                        rollbackHandle.primaryModified = true;
+                        rollbackHandle.newPrimaryMediaId = mediaRecord.id;
+                    }
 
                     attached.push({
                         kind: "uploaded",
@@ -343,6 +344,10 @@ export class WorkflowMediaService {
                     entry.mediaId = sourceMedia.id;
                     entry.linkCreatedInCall = !attachRes.is_existing;
                     entry.is_existing = Boolean(attachRes.is_existing);
+                    if (attachRes.is_primary) {
+                        rollbackHandle.primaryModified = true;
+                        rollbackHandle.newPrimaryMediaId = sourceMedia.id;
+                    }
 
                     attached.push({
                         kind: "existing",
@@ -415,6 +420,8 @@ export class WorkflowMediaService {
         let restoredPrimaryMediaId = null;
         let primaryRestoreFailed = false;
 
+        try {
+
         // Step 1: Unlink items where a new link was created in this call
         for (const entry of entries) {
             if (entry.linkCreatedInCall && entry.mediaId && !entry.unlinked) {
@@ -443,48 +450,45 @@ export class WorkflowMediaService {
         // Step 2: Restore or clear primary before deleting media row
         if (primaryModified && !rollbackHandle.primaryRestored) {
             try {
-                // Compare-and-restore check: check current primary on workflows or workflowMedia
-                let currentPrimaryId = null;
-                if (this.db.workflowMedia?.getPrimaryMedia) {
-                    const currentPrimary = await this.db.workflowMedia.getPrimaryMedia(workflowId).catch(() => null);
-                    currentPrimaryId = currentPrimary?.media_id || currentPrimary?.id || null;
-                }
-                if (!currentPrimaryId && this.db.workflows?.findById) {
+                let currentMatches = false;
+                if (this.db.workflows?.conditionalRestorePrimaryMedia) {
+                    const res = await this.db.workflows.conditionalRestorePrimaryMedia({
+                        workflowId,
+                        expectedPrimaryMediaId: newPrimaryMediaId,
+                        restorePrimaryMediaId: previousPrimaryMediaId || null,
+                    }).catch(() => null);
+                    currentMatches = Boolean(res?.updated !== false);
+                } else if (this.db.workflows?.findById) {
                     const wf = await this.db.workflows.findById(workflowId, "primary_media_id").catch(() => null);
-                    currentPrimaryId = wf?.primary_media_id || null;
+                    const currentWfPrimary = wf?.primary_media_id || null;
+                    if (!currentWfPrimary || currentWfPrimary === newPrimaryMediaId) {
+                        if (this.db.workflows?.updatePrimaryMedia) {
+                            await this.db.workflows.updatePrimaryMedia(workflowId, previousPrimaryMediaId || null).catch(() => null);
+                        } else if (this.db.workflows?.updateFields) {
+                            await this.db.workflows.updateFields(workflowId, { primary_media_id: previousPrimaryMediaId || null }).catch(() => null);
+                        }
+                        currentMatches = true;
+                    }
+                } else {
+                    currentMatches = true;
                 }
 
-                // If current primary is null or matches the media this call set, proceed with restoration
-                const matchesThisCall = !currentPrimaryId || currentPrimaryId === newPrimaryMediaId;
-                if (matchesThisCall) {
+                if (currentMatches) {
                     if (previousPrimaryMediaId) {
                         if (this.db.workflowMedia?.setPrimaryMedia) {
                             await this.db.workflowMedia.setPrimaryMedia({ workflowId, mediaId: previousPrimaryMediaId });
                         }
-                        if (this.db.workflows?.updatePrimaryMedia) {
-                            await this.db.workflows.updatePrimaryMedia(workflowId, previousPrimaryMediaId).catch(() => null);
-                        } else if (this.db.workflows?.updateFields) {
-                            await this.db.workflows.updateFields(workflowId, { primary_media_id: previousPrimaryMediaId }).catch(() => null);
-                        }
                         restoredPrimaryMediaId = previousPrimaryMediaId;
                     } else {
-                        // Previous primary was null: clear primary
                         if (this.db.workflowMedia?.clearPrimaryMedia) {
                             await this.db.workflowMedia.clearPrimaryMedia({ workflowId }).catch(() => null);
                         }
-                        if (this.db.workflows?.updatePrimaryMedia) {
-                            await this.db.workflows.updatePrimaryMedia(workflowId, null).catch(() => null);
-                        } else if (this.db.workflows?.updateFields) {
-                            await this.db.workflows.updateFields(workflowId, { primary_media_id: null }).catch(() => null);
-                        }
                         restoredPrimaryMediaId = null;
                     }
-                    rollbackHandle.primaryRestored = true;
                 } else {
-                    // Concurrent change detected: preserve concurrent primary
                     restoredPrimaryMediaId = null;
-                    rollbackHandle.primaryRestored = true;
                 }
+                rollbackHandle.primaryRestored = true;
             } catch (restoreErr) {
                 primaryRestoreFailed = true;
                 crudOperationLog({
@@ -552,6 +556,16 @@ export class WorkflowMediaService {
                 workflowId,
                 skippedStorageKeys,
                 message: "Storage discard skipped for items whose media row or unlink was not confirmed",
+            });
+        }
+
+        } catch (fatalErr) {
+            crudOperationLog({
+                traceId: opTraceId,
+                operation: "rollbackAttachedMedia:fatal",
+                status: "error",
+                message: fatalErr?.message,
+                workflowId,
             });
         }
 

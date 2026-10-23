@@ -548,6 +548,36 @@ describe("MediaUploadService Seam 1 Contract", () => {
 
         assert.equal(fakeStorage.deletedBatches.length, 1, "discard() was attempted");
     });
+
+    it("discard ignores NoSuchKey, 404, and not found errors idempotently but throws and logs genuine storage errors", async () => {
+        let deleteFilesCalledWith = null;
+        const fakeStorage = {
+            async deleteFiles(keys) {
+                deleteFilesCalledWith = keys;
+                return {
+                    deleted: ["k1"],
+                    failures: [
+                        { key: "k2", message: "NoSuchKey: The specified key does not exist." },
+                        { key: "k3", message: "404 Not Found" },
+                    ],
+                };
+            },
+        };
+        const service = new MediaUploadService({ storageService: fakeStorage });
+        // Must NOT throw on NoSuchKey / 404
+        await service.discard(["k1", "k2", "k3"]);
+        assert.deepEqual(deleteFilesCalledWith, ["k1", "k2", "k3"]);
+
+        // Must throw UploadError on genuine failures (e.g. 500 / EACCES)
+        fakeStorage.deleteFiles = async () => ({
+            deleted: [],
+            failures: [{ key: "k4", message: "500 Internal Server Error" }],
+        });
+        await assert.rejects(
+            service.discard(["k4"]),
+            (err) => err instanceof UploadError && err.statusCode === 502
+        );
+    });
 });
 
 function buildMultipartStream({ fieldName = "file", filename = "test.png", contentType = "image/png", payloadBuffer }) {

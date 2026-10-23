@@ -60,6 +60,16 @@ function buildMinimalMp4Buffer() {
     return buf;
 }
 
+function buildMinimalJpegBuffer() {
+    const buf = Buffer.alloc(64, 0);
+    Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01]).copy(buf, 0);
+    buf[62] = 0xff;
+    buf[63] = 0xd9;
+    return buf;
+}
+
+const GARBAGE_BYTES_64 = Buffer.alloc(64, 0x41);
+
 function buildOversizedPngBuffer() {
     const buf = Buffer.alloc(20 * 1024 * 1024 + 1024, 0);
     VALID_PNG_1X1.copy(buf, 0);
@@ -140,13 +150,100 @@ async function sendMultipartRequest(baseUrl, path, { filename, contentType, payl
     });
 }
 
-function buildLegacyReferenceApp(purpose, mountPath, routePath) {
-    const app = express();
-    const legacyUpload = createUploadMiddleware(purpose);
-    app.post(`${mountPath}${routePath}`, legacyUpload, (req, res) => {
+function buildLegacyReferenceApp() {
+    const legacyApp = express();
+    const legacyDefaultUpload = createUploadMiddleware("default");
+    const legacyElementUpload = createUploadMiddleware("element_reference");
+    const legacyCharacterUpload = createUploadMiddleware("character_reference");
+
+    legacyApp.post("/api/assets/upload", legacyDefaultUpload, (req, res) => {
         res.status(200).json({ ok: true, size: req.file?.size });
     });
-    return app;
+    legacyApp.post("/api/media/ingest", legacyDefaultUpload, (req, res) => {
+        res.status(200).json({ ok: true, size: req.file?.size });
+    });
+    legacyApp.post("/api/v2/elements/:id/images", legacyElementUpload, (req, res) => {
+        res.status(201).json({ status: "created", media: { id: "legacy-elem-media" } });
+    });
+    for (const charPath of [
+        "/api/characters/create",
+        "/api/characters",
+        "/api/characters/character",
+        "/api/characters/:characterId/media",
+        "/api/characters/:characterId/sheet-media",
+        "/api/characters/:characterId/upload",
+    ]) {
+        legacyApp.post(charPath, legacyCharacterUpload, (req, res) => {
+            res.status(200).json({ ok: true, size: req.file?.size });
+        });
+    }
+    return legacyApp;
+}
+
+async function assertDeclaredMimeMismatchAndOctetStreamParity(baseUrl, legacyBaseUrl, path, fields = {}) {
+    // (d1) Declared application/octet-stream with real PNG bytes -> 415 UNSUPPORTED_MEDIA_TYPE
+    const octetPngRes = await sendMultipartRequest(baseUrl, path, {
+        filename: "raw.bin",
+        contentType: "application/octet-stream",
+        payloadBuffer: VALID_PNG_1X1,
+        fields,
+    });
+    const legacyOctetPngRes = await sendMultipartRequest(legacyBaseUrl, path, {
+        filename: "raw.bin",
+        contentType: "application/octet-stream",
+        payloadBuffer: VALID_PNG_1X1,
+        fields,
+    });
+    assert.equal(octetPngRes.status, 415, `${path}: application/octet-stream with real PNG bytes must return 415`);
+    assert.equal(octetPngRes.status, legacyOctetPngRes.status);
+    assert.equal(octetPngRes.body?.code, "UNSUPPORTED_MEDIA_TYPE");
+    assert.equal(octetPngRes.body?.code, legacyOctetPngRes.body?.code);
+    assert.equal(octetPngRes.body?.message, "Unsupported file type: application/octet-stream");
+    assert.equal(octetPngRes.body?.message, legacyOctetPngRes.body?.message);
+
+    // (d2) Declared application/octet-stream with garbage bytes -> 415 UNSUPPORTED_MEDIA_TYPE
+    const octetGarbageRes = await sendMultipartRequest(baseUrl, path, {
+        filename: "garbage.bin",
+        contentType: "application/octet-stream",
+        payloadBuffer: GARBAGE_BYTES_64,
+        fields,
+    });
+    const legacyOctetGarbageRes = await sendMultipartRequest(legacyBaseUrl, path, {
+        filename: "garbage.bin",
+        contentType: "application/octet-stream",
+        payloadBuffer: GARBAGE_BYTES_64,
+        fields,
+    });
+    assert.equal(octetGarbageRes.status, 415, `${path}: application/octet-stream with garbage bytes must return 415`);
+    assert.equal(octetGarbageRes.status, legacyOctetGarbageRes.status);
+    assert.equal(octetGarbageRes.body?.code, "UNSUPPORTED_MEDIA_TYPE");
+    assert.equal(octetGarbageRes.body?.code, legacyOctetGarbageRes.body?.code);
+    assert.equal(octetGarbageRes.body?.message, "Unsupported file type: application/octet-stream");
+    assert.equal(octetGarbageRes.body?.message, legacyOctetGarbageRes.body?.message);
+
+    // (e) Declared image/png with real JPEG bytes (both allowed types, declared != detected) -> 415 UNSUPPORTED_MEDIA_TYPE
+    const jpegBytes = buildMinimalJpegBuffer();
+    const mismatchRes = await sendMultipartRequest(baseUrl, path, {
+        filename: "mismatch.png",
+        contentType: "image/png",
+        payloadBuffer: jpegBytes,
+        fields,
+    });
+    const legacyMismatchRes = await sendMultipartRequest(legacyBaseUrl, path, {
+        filename: "mismatch.png",
+        contentType: "image/png",
+        payloadBuffer: jpegBytes,
+        fields,
+    });
+    assert.equal(mismatchRes.status, 415, `${path}: declared image/png with real JPEG bytes must return 415`);
+    assert.equal(mismatchRes.status, legacyMismatchRes.status);
+    assert.equal(mismatchRes.body?.code, "UNSUPPORTED_MEDIA_TYPE");
+    assert.equal(mismatchRes.body?.code, legacyMismatchRes.body?.code);
+    assert.equal(
+        mismatchRes.body?.message,
+        'Declared MIME "image/png" does not match detected file type ("image/jpeg").'
+    );
+    assert.equal(mismatchRes.body?.message, legacyMismatchRes.body?.message);
 }
 
 describe("Ticket 02b — Upload Routers Policy Wiring & Route-Level Parity Tests", () => {
@@ -178,31 +275,7 @@ describe("Ticket 02b — Upload Routers Policy Wiring & Route-Level Parity Tests
         await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
         baseUrl = `http://127.0.0.1:${server.address().port}`;
 
-        const legacyDefaultApp = express();
-        const legacyDefaultUpload = createUploadMiddleware("default");
-        const legacyElementUpload = createUploadMiddleware("element_reference");
-        const legacyCharacterUpload = createUploadMiddleware("character_reference");
-        legacyDefaultApp.post("/api/assets/upload", legacyDefaultUpload, (req, res) => {
-            res.status(200).json({ ok: true, size: req.file?.size });
-        });
-        legacyDefaultApp.post("/api/media/ingest", legacyDefaultUpload, (req, res) => {
-            res.status(200).json({ ok: true, size: req.file?.size });
-        });
-        legacyDefaultApp.post("/api/v2/elements/:id/images", legacyElementUpload, (req, res) => {
-            res.status(201).json({ status: "created", media: { id: "legacy-elem-media" } });
-        });
-        for (const charPath of [
-            "/api/characters/create",
-            "/api/characters",
-            "/api/characters/character",
-            "/api/characters/:characterId/media",
-            "/api/characters/:characterId/sheet-media",
-            "/api/characters/:characterId/upload",
-        ]) {
-            legacyDefaultApp.post(charPath, legacyCharacterUpload, (req, res) => {
-                res.status(200).json({ ok: true, size: req.file?.size });
-            });
-        }
+        const legacyDefaultApp = buildLegacyReferenceApp();
         legacyDefaultServer = http.createServer(legacyDefaultApp);
         await new Promise((resolve) => legacyDefaultServer.listen(0, "127.0.0.1", resolve));
         legacyDefaultBaseUrl = `http://127.0.0.1:${legacyDefaultServer.address().port}`;
@@ -294,21 +367,13 @@ describe("Ticket 02b — Upload Routers Policy Wiring & Route-Level Parity Tests
                 assert.equal(overRes.body?.code, "PAYLOAD_TOO_LARGE");
                 assert.equal(overRes.body?.code, legacyOverRes.body?.code);
 
-                // (d) Declared application/octet-stream -> 415 UNSUPPORTED_MEDIA_TYPE
-                const octetRes = await sendMultipartRequest(baseUrl, "/api/assets/upload", {
-                    filename: "raw.bin",
-                    contentType: "application/octet-stream",
-                    payloadBuffer: VALID_PNG_1X1,
-                });
-                const legacyOctetRes = await sendMultipartRequest(legacyDefaultBaseUrl, "/api/assets/upload", {
-                    filename: "raw.bin",
-                    contentType: "application/octet-stream",
-                    payloadBuffer: VALID_PNG_1X1,
-                });
-                assert.equal(octetRes.status, 415);
-                assert.equal(octetRes.status, legacyOctetRes.status);
-                assert.equal(octetRes.body?.code, "UNSUPPORTED_MEDIA_TYPE");
-                assert.equal(octetRes.body?.code, legacyOctetRes.body?.code);
+                // (d1) application/octet-stream with real PNG bytes, (d2) application/octet-stream with garbage bytes,
+                // (e) declared image/png with real JPEG bytes
+                await assertDeclaredMimeMismatchAndOctetStreamParity(
+                    baseUrl,
+                    legacyDefaultBaseUrl,
+                    "/api/assets/upload"
+                );
             } finally {
                 assetUploadService.uploadAsset = origUploadAsset;
             }
@@ -385,21 +450,13 @@ describe("Ticket 02b — Upload Routers Policy Wiring & Route-Level Parity Tests
                 assert.equal(overRes.body?.code, "PAYLOAD_TOO_LARGE");
                 assert.equal(overRes.body?.code, legacyOverRes.body?.code);
 
-                // (d) Declared application/octet-stream -> 415 UNSUPPORTED_MEDIA_TYPE
-                const octetRes = await sendMultipartRequest(baseUrl, "/api/media/ingest", {
-                    filename: "raw.bin",
-                    contentType: "application/octet-stream",
-                    payloadBuffer: VALID_PNG_1X1,
-                });
-                const legacyOctetRes = await sendMultipartRequest(legacyDefaultBaseUrl, "/api/media/ingest", {
-                    filename: "raw.bin",
-                    contentType: "application/octet-stream",
-                    payloadBuffer: VALID_PNG_1X1,
-                });
-                assert.equal(octetRes.status, 415);
-                assert.equal(octetRes.status, legacyOctetRes.status);
-                assert.equal(octetRes.body?.code, "UNSUPPORTED_MEDIA_TYPE");
-                assert.equal(octetRes.body?.code, legacyOctetRes.body?.code);
+                // (d1) application/octet-stream with real PNG bytes, (d2) application/octet-stream with garbage bytes,
+                // (e) declared image/png with real JPEG bytes
+                await assertDeclaredMimeMismatchAndOctetStreamParity(
+                    baseUrl,
+                    legacyDefaultBaseUrl,
+                    "/api/media/ingest"
+                );
             } finally {
                 assetUploadService.uploadAsset = origUploadAsset;
             }
@@ -508,21 +565,13 @@ describe("Ticket 02b — Upload Routers Policy Wiring & Route-Level Parity Tests
                 assert.equal(overRes.body?.code, "PAYLOAD_TOO_LARGE");
                 assert.equal(overRes.body?.code, legacyOverRes.body?.code);
 
-                // 5. (d) Declared application/octet-stream -> 415 UNSUPPORTED_MEDIA_TYPE
-                const octetRes = await sendMultipartRequest(baseUrl, `/api/v2/elements/${ELEMENT_ID}/images`, {
-                    filename: "raw.bin",
-                    contentType: "application/octet-stream",
-                    payloadBuffer: VALID_PNG_1X1,
-                });
-                const legacyOctetRes = await sendMultipartRequest(legacyDefaultBaseUrl, `/api/v2/elements/${ELEMENT_ID}/images`, {
-                    filename: "raw.bin",
-                    contentType: "application/octet-stream",
-                    payloadBuffer: VALID_PNG_1X1,
-                });
-                assert.equal(octetRes.status, 415);
-                assert.equal(octetRes.status, legacyOctetRes.status);
-                assert.equal(octetRes.body?.code, "UNSUPPORTED_MEDIA_TYPE");
-                assert.equal(octetRes.body?.code, legacyOctetRes.body?.code);
+                // 5. (d1) application/octet-stream with real PNG bytes, (d2) application/octet-stream with garbage bytes,
+                // (e) declared image/png with real JPEG bytes
+                await assertDeclaredMimeMismatchAndOctetStreamParity(
+                    baseUrl,
+                    legacyDefaultBaseUrl,
+                    `/api/v2/elements/${ELEMENT_ID}/images`
+                );
             } finally {
                 elementMediaService.assertUploadAllowed = origAssertUploadAllowed;
                 elementMediaService.addReferenceMedia = origAddReferenceMedia;
@@ -643,23 +692,14 @@ describe("Ticket 02b — Upload Routers Policy Wiring & Route-Level Parity Tests
                         `${path} must be wired to CHARACTER_SHEET_UPLOAD_POLICY / CHARACTER_DETAIL_UPLOAD_POLICY`
                     );
 
-                    // (d) Declared application/octet-stream -> 415 UNSUPPORTED_MEDIA_TYPE
-                    const octetRes = await sendMultipartRequest(baseUrl, path, {
-                        filename: "raw.bin",
-                        contentType: "application/octet-stream",
-                        payloadBuffer: VALID_PNG_1X1,
-                        fields,
-                    });
-                    const legacyOctetRes = await sendMultipartRequest(legacyDefaultBaseUrl, path, {
-                        filename: "raw.bin",
-                        contentType: "application/octet-stream",
-                        payloadBuffer: VALID_PNG_1X1,
-                        fields,
-                    });
-                    assert.equal(octetRes.status, 415, `${path}: application/octet-stream must return 415`);
-                    assert.equal(octetRes.status, legacyOctetRes.status);
-                    assert.equal(octetRes.body?.code, "UNSUPPORTED_MEDIA_TYPE");
-                    assert.equal(octetRes.body?.code, legacyOctetRes.body?.code);
+                    // (d1) application/octet-stream with real PNG bytes, (d2) application/octet-stream with garbage bytes,
+                    // (e) declared image/png with real JPEG bytes
+                    await assertDeclaredMimeMismatchAndOctetStreamParity(
+                        baseUrl,
+                        legacyDefaultBaseUrl,
+                        path,
+                        fields
+                    );
                 }
 
                 // (c) Oversized image (> 20MB) on sheet route (/create) and detail route (/:characterId/media) -> 413 PAYLOAD_TOO_LARGE

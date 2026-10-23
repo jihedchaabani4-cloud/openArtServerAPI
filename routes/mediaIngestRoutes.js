@@ -33,9 +33,15 @@ router.post("/ingest", upload, async (req, res) => {
             project_id,
             session_id,
             workflow_id,
-            folder,
             display_name,
         } = req.body || {};
+
+        if (req.body?.purpose) {
+            routeLogger.warn("Client supplied deprecated 'purpose' parameter; ignoring in favor of DEFAULT_UPLOAD_POLICY", {
+                purpose: req.body.purpose,
+                userId,
+            });
+        }
 
         const rawFolder = req.body?.folder_id ?? req.body?.folderId ?? req.body?.collection_id ?? req.body?.collectionId ?? req.query?.folder_id ?? req.query?.folderId ?? req.query?.collection_id ?? req.query?.collectionId ?? null;
         const normalizedFolder = (rawFolder && !["null", "undefined", "none", ""].includes(String(rawFolder).trim().toLowerCase()))
@@ -48,7 +54,6 @@ router.post("/ingest", upload, async (req, res) => {
             projectId: project_id,
             sessionId: session_id,
             workflowId: workflow_id,
-            folder,
             folderId: normalizedFolder,
             displayName: display_name,
             req,

@@ -335,7 +335,6 @@ export class AssetUploadService {
                     policy: DEFAULT_UPLOAD_POLICY,
                     maxFiles: 1,
                     userId,
-                    folder: folder || null,
                 });
                 uploadItem = uploadResult.uploaded[0];
             } else if (this.binaryIngestionService) {

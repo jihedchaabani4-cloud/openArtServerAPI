@@ -46,8 +46,6 @@ export class StoragePathResolver {
         "element-sheets",
         "character-sheets",
         "character-details",
-        "avatars",
-        "video-references",
     ]);
 
     /**

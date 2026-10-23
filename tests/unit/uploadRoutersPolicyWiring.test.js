@@ -461,6 +461,46 @@ describe("Ticket 02b — Upload Routers Policy Wiring & Route-Level Parity Tests
                 assetUploadService.uploadAsset = origUploadAsset;
             }
         });
+
+        it("strips client-supplied folder from req.body and logs warning when deprecated purpose is provided", async () => {
+            const origUploadAsset = assetUploadService.uploadAsset;
+            let capturedOptions = null;
+            assetUploadService.uploadAsset = async (opts) => {
+                capturedOptions = opts;
+                return {
+                    url: "https://cdn.example.com/uploads/ingested.png",
+                    mediaId: "media-ingest-1",
+                    workflowId: "wf-ingest-1",
+                    type: "image",
+                    width: 1,
+                    height: 1,
+                    ratio: "1:1",
+                    format: "PNG",
+                    isNew: true,
+                    media: { id: "media-ingest-1" },
+                };
+            };
+
+            try {
+                const res = await sendMultipartRequest(baseUrl, "/api/media/ingest", {
+                    filename: "valid.png",
+                    contentType: "image/png",
+                    payloadBuffer: VALID_PNG_1X1,
+                    fields: {
+                        folder: "element-references",
+                        purpose: "element_reference",
+                        project_id: "proj-1",
+                    },
+                });
+
+                assert.equal(res.status, 200);
+                assert.ok(capturedOptions, "assetUploadService.uploadAsset must be called");
+                assert.equal(capturedOptions.folder, undefined, "routes/mediaIngestRoutes must NOT pass client folder to uploadAsset");
+                assert.equal(capturedOptions.projectId, "proj-1");
+            } finally {
+                assetUploadService.uploadAsset = origUploadAsset;
+            }
+        });
     });
 
     describe("3. routes/elementRoutes.js — POST /api/v2/elements/:id/images (ELEMENT_REFERENCE_UPLOAD_POLICY + preUploadElementCapacityGuard ordering)", () => {

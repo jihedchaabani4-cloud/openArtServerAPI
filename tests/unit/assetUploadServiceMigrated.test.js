@@ -484,4 +484,61 @@ describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaS
         assert.equal(deletedWorkflowIds.length, 1);
         assert.equal(deletedWorkflowIds[0], "wf-int-1");
     });
+
+    it("11. Client-controlled folder isolation: passing folder override to uploadAsset is ignored and never passed to MediaUploadService.upload", async () => {
+        const h = createHarness();
+        await h.service.uploadAsset({
+            source: { buffer: VALID_PNG_1X1, originalname: "photo.png", mimetype: "image/png" },
+            userId: "user-1",
+            projectId: "proj-1",
+            folder: "element-references", // client attempt to direct storage key into another folder
+        });
+
+        assert.equal(h.mockMediaUploadService.uploadCalls.length, 1);
+        const uploadCall = h.mockMediaUploadService.uploadCalls[0];
+        assert.equal(uploadCall.folder, undefined, "MediaUploadService.upload must NOT receive client folder override");
+        assert.equal(uploadCall.policy, DEFAULT_UPLOAD_POLICY);
+    });
+
+    it("12. Real storage folder enforcement: uploadAsset with real MediaUploadService stores image strictly under uploads/ even if folder='element-references' is passed", async () => {
+        const { MediaUploadService } = await import("../../src/platform/media-ingestion/MediaUploadService.js");
+        const { StoragePathResolver } = await import("../../src/platform/storage/StoragePathResolver.js");
+
+        let savedStorageKey = null;
+        const mockStorageService = {
+            paths: new StoragePathResolver(),
+            upload: async (key, buffer) => {
+                savedStorageKey = key;
+                return `https://mock-storage.local/${key}`;
+            },
+            deleteFiles: async () => ({ deletedCount: 0, failures: [] }),
+        };
+
+        const mediaUploadService = new MediaUploadService({ storageService: mockStorageService });
+        const h = createHarness();
+        const service = new AssetUploadService({
+            db: h.mockDb,
+            mediaUploadService,
+            workflowMediaService: h.mockWorkflowMediaService,
+            workflowAuthService: {
+                verifyWorkflowOwnership: async () => true,
+                verifyMediaOwnership: async () => true,
+            },
+        });
+
+        const result = await service.uploadAsset({
+            source: { buffer: VALID_PNG_1X1, originalname: "photo.png", mimetype: "image/png" },
+            userId: "user-1",
+            projectId: "proj-1",
+            folder: "element-references",
+        });
+
+        assert.ok(savedStorageKey, "Storage upload must have been called");
+        assert.match(
+            savedStorageKey,
+            /^user-1\/uploads\/\d+_[a-f0-9]+\.(png|webp)$/,
+            `Storage key must be in policy storageFolder 'uploads/', got: ${savedStorageKey}`
+        );
+        assert.ok(!savedStorageKey.includes("element-references"), "Storage key must NOT use client-supplied folder");
+    });
 });

@@ -385,15 +385,37 @@ describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaS
         const orderEvents = [];
         const discarded = [];
 
+        const mockMediaUploadService = {
+            upload: async () => ({
+                uploaded: [
+                    {
+                        url: "https://mock-storage.local/migrated.webp",
+                        storageKey: "user-1/uploads/migrated.webp",
+                        mimeType: "image/webp",
+                        size: 1234,
+                        type: "image",
+                        width: 100,
+                        height: 100,
+                        ratio: "1:1",
+                        format: "webp",
+                        originalName: "test.png",
+                    },
+                ],
+            }),
+            discard: async (keys) => {
+                orderEvents.push({ step: "discard", keys });
+                discarded.push(...keys);
+                return { removed: keys };
+            },
+        };
+
         const mockStorageService = {
             paths: {
                 projectAsset: (userId, folder, filename) => `${userId}/${folder}/${filename}`,
             },
             upload: async (key) => `https://mock-storage.local/${key}`,
-            remove: async (keys) => {
-                orderEvents.push({ step: "discard", keys });
-                discarded.push(...keys);
-                return { data: keys, error: null };
+            deleteFiles: async (keys) => {
+                return { deletedCount: keys.length, failures: [] };
             },
         };
 
@@ -450,6 +472,7 @@ describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaS
         const realWorkflowMediaService = new WorkflowMediaService({
             db: integratedDb,
             storageService: mockStorageService,
+            mediaUploadService: mockMediaUploadService,
             workflowAuthService: {
                 verifyWorkflowOwnership: async () => true,
                 verifyMediaOwnership: async () => true,
@@ -459,6 +482,7 @@ describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaS
         const integratedService = new AssetUploadService({
             db: integratedDb,
             workflowMediaService: realWorkflowMediaService,
+            mediaUploadService: mockMediaUploadService,
             storageService: mockStorageService,
             workflowAuthService: {
                 verifyWorkflowOwnership: async () => true,

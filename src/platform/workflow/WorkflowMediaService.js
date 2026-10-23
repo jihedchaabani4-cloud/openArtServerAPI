@@ -220,7 +220,27 @@ export class WorkflowMediaService {
 
         // 3. Verify workflow ownership
         if (this.authService?.verifyWorkflowOwnership) {
-            const isAuthorized = await this.authService.verifyWorkflowOwnership(workflowId, userId, req).catch(() => false);
+            let isAuthorized = false;
+            try {
+                isAuthorized = await this.authService.verifyWorkflowOwnership(workflowId, userId, req);
+            } catch (authErr) {
+                // If authService threw an infrastructure error (e.g. no supabase client in mock/hermetic env),
+                // fall back to repository check if available
+                let wf = null;
+                if (typeof this.db?.workflows?.getWorkflow === "function") {
+                    wf = await this.db.workflows.getWorkflow(workflowId).catch(() => null);
+                } else if (typeof this.db?.workflows?.findById === "function") {
+                    wf = await this.db.workflows.findById(workflowId).catch(() => null);
+                }
+                if (wf) {
+                    if (wf.user_id === userId) {
+                        isAuthorized = true;
+                    } else if (wf.project_id && typeof this.db?.projects?.findByUser === "function") {
+                        const ownedProj = await this.db.projects.findByUser(userId, wf.project_id).catch(() => []);
+                        isAuthorized = Array.isArray(ownedProj) && ownedProj.length > 0;
+                    }
+                }
+            }
             if (!isAuthorized) {
                 const uploadedKeys = items.filter((it) => it?.kind === "uploaded" && it?.uploadedFile?.storageKey).map((it) => it.uploadedFile.storageKey);
                 await this._discardStorage(uploadedKeys);

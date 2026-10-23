@@ -189,57 +189,19 @@ export class AssetUploadService {
                 const assetId = descriptor.value;
                 let existingMedia = null;
 
-                if (this.workflowMediaService?.resolveOwnedSourceMedia) {
-                    try {
-                        existingMedia = await this.workflowMediaService.resolveOwnedSourceMedia({
-                            mediaId: assetId,
-                            userId,
-                            projectId,
-                            req,
-                        });
-                    } catch (resolveErr) {
-                        if (options.imageUrl || descriptor.fallbackUrl) {
-                            const fallbackSource = options.imageUrl || descriptor.fallbackUrl;
-                            return this.uploadAsset({ ...options, source: fallbackSource });
-                        }
-                        throw resolveErr;
-                    }
-                } else {
-                    existingMedia = await this.mediaService.findById(assetId);
-                    if (!existingMedia) {
-                        const sourceWf = await this.db.workflows.getWorkflow(assetId).catch(() => null);
-                        if (sourceWf?.primary_media_id) {
-                            existingMedia = await this.mediaService.findById(sourceWf.primary_media_id);
-                        }
-                        if (!existingMedia) {
-                            const wfMedia = await this.mediaService.findByWorkflow(assetId);
-                            existingMedia = wfMedia.find((m) => m.url && m.status !== "failed") || wfMedia[0] || null;
-                        }
-                    }
-
-                    if (!existingMedia && (options.imageUrl || descriptor.fallbackUrl)) {
+                try {
+                    existingMedia = await this.workflowMediaService.resolveOwnedSourceMedia({
+                        mediaId: assetId,
+                        userId,
+                        projectId,
+                        req,
+                    });
+                } catch (resolveErr) {
+                    if (options.imageUrl || descriptor.fallbackUrl) {
                         const fallbackSource = options.imageUrl || descriptor.fallbackUrl;
                         return this.uploadAsset({ ...options, source: fallbackSource });
                     }
-
-                    if (!existingMedia) {
-                        throw new CrudServiceError(`Media or workflow record "${assetId}" not found.`, {
-                            statusCode: 404,
-                            errorCode: "NOT_FOUND",
-                            traceId,
-                            operation: "assetUpload",
-                        });
-                    }
-
-                    const isAuthorized = await this.authService.verifyMediaOwnership(existingMedia.id, userId, req);
-                    if (!isAuthorized) {
-                        throw new CrudServiceError("Media not found.", {
-                            statusCode: 404,
-                            errorCode: "NOT_FOUND",
-                            traceId,
-                            operation: "assetUpload",
-                        });
-                    }
+                    throw resolveErr;
                 }
 
                 // If a target workflowId is provided, verify ownership and attach existing media
@@ -392,41 +354,23 @@ export class AssetUploadService {
             const effectiveRole = containerWf ? "original" : "output";
 
             try {
-                let mediaRecord;
-                if (this.workflowMediaService?.attachMediaItems) {
-                    const attachResult = await this.workflowMediaService.attachMediaItems({
-                        workflowId: targetWorkflowId,
-                        projectId: targetProjectId,
-                        userId,
-                        role: effectiveRole,
-                        maxAllowed: null,
-                        autoPrimary: Boolean(containerWf),
-                        items: [
-                            {
-                                kind: "uploaded",
-                                uploadedFile: uploadItem,
-                                stepId: effectiveStepId,
-                            },
-                        ],
-                        req,
-                    });
-                    mediaRecord = attachResult.attached[0].media;
-                } else {
-                    mediaRecord = await this.mediaService.createMedia({
-                        workflowId: targetWorkflowId,
-                        projectId: targetProjectId,
-                        generationConfigId: null,
-                        stepId: effectiveStepId,
-                        role: effectiveRole,
-                        is_primary: Boolean(containerWf),
-                        isPrimary: Boolean(containerWf),
-                        workflowType: containerWf ? "UPLOAD" : undefined,
-                        url: uploadItem.url,
-                        width: uploadItem.width,
-                        height: uploadItem.height,
-                        status: "success",
-                    });
-                }
+                const attachResult = await this.workflowMediaService.attachMediaItems({
+                    workflowId: targetWorkflowId,
+                    projectId: targetProjectId,
+                    userId,
+                    role: effectiveRole,
+                    maxAllowed: null,
+                    autoPrimary: Boolean(containerWf),
+                    items: [
+                        {
+                            kind: "uploaded",
+                            uploadedFile: uploadItem,
+                            stepId: effectiveStepId,
+                        },
+                    ],
+                    req,
+                });
+                const mediaRecord = attachResult.attached[0].media;
 
                 crudOperationLog({
                     traceId,

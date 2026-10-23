@@ -164,6 +164,7 @@ export class WorkflowMediaRepository extends BaseRepository {
             media_id,
             role,
             maxAllowed,
+            autoPrimary,
         });
     }
 
@@ -179,6 +180,7 @@ export class WorkflowMediaRepository extends BaseRepository {
         media_id,
         role = "detail",
         maxAllowed = 6,
+        autoPrimary = true,
     } = {}) {
         const resolvedWorkflowId = workflowId || workflow_id;
         const resolvedMediaId = mediaId || media_id;
@@ -202,10 +204,14 @@ export class WorkflowMediaRepository extends BaseRepository {
             }
 
             if (!exists) {
-                const hasPrimary = memoryWorkflowMedia.some(
-                    (m) => m.workflow_id === resolvedWorkflowId && m.is_primary === true
-                );
-                const shouldBePrimary = !hasPrimary;
+                const autoPrimaryEffective = autoPrimary === undefined || autoPrimary === null ? true : Boolean(autoPrimary);
+                let shouldBePrimary = false;
+                if (autoPrimaryEffective) {
+                    const hasPrimary = memoryWorkflowMedia.some(
+                        (m) => m.workflow_id === resolvedWorkflowId && m.is_primary === true
+                    );
+                    shouldBePrimary = !hasPrimary;
+                }
                 const row = {
                     workflow_id: resolvedWorkflowId,
                     media_id: resolvedMediaId,
@@ -247,12 +253,17 @@ export class WorkflowMediaRepository extends BaseRepository {
             throw unavailableErr;
         }
 
-        const { data, error } = await client.rpc("attach_workflow_reference_media", {
+        const rpcParams = {
             p_workflow_id: resolvedWorkflowId,
             p_media_id: resolvedMediaId,
             p_role: resolvedRole,
             p_max_allowed: maxAllowed,
-        });
+        };
+        if (autoPrimary === false) {
+            rpcParams.p_auto_primary = false;
+        }
+
+        const { data, error } = await client.rpc("attach_workflow_reference_media", rpcParams);
         if (!error && data) {
             return data;
         }

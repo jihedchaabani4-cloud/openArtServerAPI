@@ -152,7 +152,67 @@ async function main() {
     const unlinkSql = fs.readFileSync(unlinkMigrationPath, "utf8");
     runPsql(unlinkSql);
 
-    console.log("   Migrations applied successfully.\n");
+    console.log("   Canonical migrations (20261020020000 & 20261020030000) applied successfully.\n");
+
+    // Apply Migration Draft: 20261024000000_add_auto_primary_to_attach_reference_media.sql
+    console.log("   Applying migration draft: 20261024000000_add_auto_primary_to_attach_reference_media.sql...");
+    const draftMigrationPath = path.resolve("..", ".scratch", "unified-media-upload", "drafts", "20261024000000_add_auto_primary_to_attach_reference_media.sql");
+    if (!fs.existsSync(draftMigrationPath)) {
+      throw new Error(`Draft migration file missing: ${draftMigrationPath}`);
+    }
+    const draftSql = fs.readFileSync(draftMigrationPath, "utf8");
+    runPsql(draftSql);
+
+    // Verify pg_proc after draft: exactly ONE function named attach_workflow_reference_media with 5 arguments
+    const procCount = Number(runPsqlScalar(`SELECT count(*) FROM pg_proc WHERE proname = 'attach_workflow_reference_media';`));
+    if (procCount !== 1) {
+      throw new Error(`Expected exactly 1 function named attach_workflow_reference_media in pg_proc, found: ${procCount}`);
+    }
+    const procNargs = Number(runPsqlScalar(`SELECT pronargs FROM pg_proc WHERE proname = 'attach_workflow_reference_media';`));
+    if (procNargs !== 5) {
+      throw new Error(`Expected attach_workflow_reference_media to have pronargs=5, found: ${procNargs}`);
+    }
+    console.log("   ✔ PASS: Draft applied: exactly ONE function in pg_proc with pronargs=5.");
+
+    // Verify Rollback Draft: restore 4-arg function, verify pg_proc and service_role-only grants
+    console.log("   Testing rollback draft: 20261024000000_add_auto_primary_to_attach_reference_media_rollback.sql...");
+    const rollbackDraftPath = path.resolve("..", ".scratch", "unified-media-upload", "drafts", "20261024000000_add_auto_primary_to_attach_reference_media_rollback.sql");
+    if (!fs.existsSync(rollbackDraftPath)) {
+      throw new Error(`Rollback draft missing: ${rollbackDraftPath}`);
+    }
+    const rollbackSql = fs.readFileSync(rollbackDraftPath, "utf8");
+    runPsql(rollbackSql);
+
+    const rbProcCount = Number(runPsqlScalar(`SELECT count(*) FROM pg_proc WHERE proname = 'attach_workflow_reference_media';`));
+    if (rbProcCount !== 1) {
+      throw new Error(`Expected exactly 1 function named attach_workflow_reference_media after rollback, found: ${rbProcCount}`);
+    }
+    const rbProcNargs = Number(runPsqlScalar(`SELECT pronargs FROM pg_proc WHERE proname = 'attach_workflow_reference_media';`));
+    if (rbProcNargs !== 4) {
+      throw new Error(`Expected 4-arg function after rollback, found: ${rbProcNargs}`);
+    }
+    let rbDenied = 0;
+    try {
+      runPsql(`SET ROLE anon; SELECT public.attach_workflow_reference_media('00000000-0000-0000-0000-000000000000', '00000000-0000-0000-0000-000000000000');`);
+    } catch (err) {
+      if (err.message.includes("permission denied for function attach_workflow_reference_media")) rbDenied++;
+    }
+    try {
+      runPsql(`SET ROLE authenticated; SELECT public.attach_workflow_reference_media('00000000-0000-0000-0000-000000000000', '00000000-0000-0000-0000-000000000000');`);
+    } catch (err) {
+      if (err.message.includes("permission denied for function attach_workflow_reference_media")) rbDenied++;
+    }
+    if (rbDenied !== 2) throw new Error(`Expected 2 denials for anon/authenticated after rollback, got: ${rbDenied}`);
+    console.log("   ✔ PASS: Rollback draft restored 4-arg function with service_role-only grants.");
+
+    // Re-apply migration draft to proceed with scenarios testing the 5-arg RPC
+    runPsql(draftSql);
+    const reProcCount = Number(runPsqlScalar(`SELECT count(*) FROM pg_proc WHERE proname = 'attach_workflow_reference_media';`));
+    const reProcNargs = Number(runPsqlScalar(`SELECT pronargs FROM pg_proc WHERE proname = 'attach_workflow_reference_media';`));
+    if (reProcCount !== 1 || reProcNargs !== 5) {
+      throw new Error(`Expected 1 function with 5 args after re-applying draft, got count=${reProcCount}, nargs=${reProcNargs}`);
+    }
+    console.log("   ✔ PASS: Migration draft re-applied; 5-arg RPC active for all scenarios.\n");
 
     // -------------------------------------------------------------------------
     // TEST SCENARIOS
@@ -162,7 +222,7 @@ async function main() {
     console.log("► SCENARIO 1: Least Privilege - anon and authenticated must be rejected (42501)");
     let deniedCount = 0;
     try {
-      runPsql(`SET ROLE authenticated; SELECT public.attach_workflow_reference_media('00000000-0000-0000-0000-000000000000', '00000000-0000-0000-0000-000000000000');`);
+      runPsql(`SET ROLE authenticated; SELECT public.attach_workflow_reference_media('00000000-0000-0000-0000-000000000000', '00000000-0000-0000-0000-000000000000', 'detail', 6, false);`);
     } catch (err) {
       if (err.message.includes("permission denied for function attach_workflow_reference_media")) {
         deniedCount++;
@@ -176,7 +236,7 @@ async function main() {
       }
     }
     try {
-      runPsql(`SET ROLE anon; SELECT public.attach_workflow_reference_media('00000000-0000-0000-0000-000000000000', '00000000-0000-0000-0000-000000000000');`);
+      runPsql(`SET ROLE anon; SELECT public.attach_workflow_reference_media('00000000-0000-0000-0000-000000000000', '00000000-0000-0000-0000-000000000000', 'detail', 6, false);`);
     } catch (err) {
       if (err.message.includes("permission denied for function attach_workflow_reference_media")) {
         deniedCount++;
@@ -626,6 +686,100 @@ async function main() {
       throw new Error(`Expected exactly 0 updated rows on mismatched expected primary, got: ${JSON.stringify(restoreMismatchedRows)}`);
     }
     console.log("  ✔ PASS 8.2: Conditional UPDATE rejected stale expected primary (0 affected rows), preserved current DB state");
+
+    // SCENARIO 9: p_auto_primary Parameter Semantics & Invariants
+    console.log("\n► SCENARIO 9: p_auto_primary Parameter Semantics & Invariants");
+    const wfAutoPri = runPsqlScalar(`INSERT INTO public.workflow (user_id, project_id, title) VALUES (gen_random_uuid(), gen_random_uuid(), 'AutoPrimary WF') RETURNING id;`, "service_role");
+    const mPri1 = runPsqlScalar(`INSERT INTO public.media (url) VALUES ('https://storage.test/pri_1.png') RETURNING id;`, "service_role");
+    const mPri2 = runPsqlScalar(`INSERT INTO public.media (url) VALUES ('https://storage.test/pri_2.png') RETURNING id;`, "service_role");
+    const mPri3 = runPsqlScalar(`INSERT INTO public.media (url) VALUES ('https://storage.test/pri_3.png') RETURNING id;`, "service_role");
+
+    // 9.1: p_auto_primary = false on primary-less workflow -> is_primary = false
+    const resAutoFalse = runPsqlJson(`SET ROLE service_role; SELECT public.attach_workflow_reference_media('${wfAutoPri}', '${mPri1}', 'detail', 6, false);`);
+    if (resAutoFalse.is_primary !== false || resAutoFalse.current_count !== 1) {
+      throw new Error(`Expected is_primary=false when p_auto_primary=false, got: ${JSON.stringify(resAutoFalse)}`);
+    }
+    const hasAnyPrimary1 = runPsqlScalar(`SELECT count(*) FROM public.workflow_media WHERE workflow_id = '${wfAutoPri}' AND is_primary = true;`, "service_role");
+    if (Number(hasAnyPrimary1) !== 0) {
+      throw new Error(`Expected 0 primary rows in workflow_media when p_auto_primary=false, got: ${hasAnyPrimary1}`);
+    }
+    console.log("  ✔ PASS 9.1: p_auto_primary=false on primary-less workflow attaches with is_primary=false");
+
+    // 9.2: p_auto_primary = NULL -> behaves as default true (is_primary = true since workflow still has no primary)
+    const resAutoNull = runPsqlJson(`SET ROLE service_role; SELECT public.attach_workflow_reference_media('${wfAutoPri}', '${mPri2}', 'detail', 6, NULL);`);
+    if (resAutoNull.is_primary !== true || resAutoNull.current_count !== 2) {
+      throw new Error(`Expected is_primary=true when p_auto_primary=NULL (COALESCE to default true), got: ${JSON.stringify(resAutoNull)}`);
+    }
+    const hasAnyPrimary2 = runPsqlScalar(`SELECT count(*) FROM public.workflow_media WHERE workflow_id = '${wfAutoPri}' AND is_primary = true;`, "service_role");
+    if (Number(hasAnyPrimary2) !== 1) {
+      throw new Error(`Expected exactly 1 primary row in workflow_media after p_auto_primary=NULL attach, got: ${hasAnyPrimary2}`);
+    }
+    console.log("  ✔ PASS 9.2: p_auto_primary=NULL coalesces to default true (became primary on workflow without existing primary)");
+
+    // 9.3: p_auto_primary = false on workflow with existing primary -> is_primary = false
+    const resAutoFalseWithExisting = runPsqlJson(`SET ROLE service_role; SELECT public.attach_workflow_reference_media('${wfAutoPri}', '${mPri3}', 'detail', 6, false);`);
+    if (resAutoFalseWithExisting.is_primary !== false || resAutoFalseWithExisting.current_count !== 3) {
+      throw new Error(`Expected is_primary=false on attach with existing primary, got: ${JSON.stringify(resAutoFalseWithExisting)}`);
+    }
+    console.log("  ✔ PASS 9.3: p_auto_primary=false on workflow with existing primary results in is_primary=false");
+
+    // 9.4: Idempotent re-attach with false preserves existing is_primary
+    // 9.4a: Re-attaching mPri2 (which is primary) with false preserves is_primary=true
+    const reattachPri2 = runPsqlJson(`SET ROLE service_role; SELECT public.attach_workflow_reference_media('${wfAutoPri}', '${mPri2}', 'detail', 6, false);`);
+    if (reattachPri2.is_primary !== true || reattachPri2.is_existing !== true || reattachPri2.current_count !== 3) {
+      throw new Error(`Expected idempotent re-attach with false to preserve is_primary=true, got: ${JSON.stringify(reattachPri2)}`);
+    }
+    // 9.4b: Re-attaching mPri1 (which is non-primary) with false preserves is_primary=false
+    const reattachPri1 = runPsqlJson(`SET ROLE service_role; SELECT public.attach_workflow_reference_media('${wfAutoPri}', '${mPri1}', 'detail', 6, false);`);
+    if (reattachPri1.is_primary !== false || reattachPri1.is_existing !== true || reattachPri1.current_count !== 3) {
+      throw new Error(`Expected idempotent re-attach with false to preserve is_primary=false, got: ${JSON.stringify(reattachPri1)}`);
+    }
+    console.log("  ✔ PASS 9.4: Idempotent re-attach with false preserves existing is_primary state (both true and false)");
+
+    // 9.5: Quota 23514 unchanged with false (fill up to quota and assert check violation)
+    const mPri4 = runPsqlScalar(`INSERT INTO public.media (url) VALUES ('https://storage.test/pri_4.png') RETURNING id;`, "service_role");
+    const mPri5 = runPsqlScalar(`INSERT INTO public.media (url) VALUES ('https://storage.test/pri_5.png') RETURNING id;`, "service_role");
+    const mPri6 = runPsqlScalar(`INSERT INTO public.media (url) VALUES ('https://storage.test/pri_6.png') RETURNING id;`, "service_role");
+    runPsqlJson(`SET ROLE service_role; SELECT public.attach_workflow_reference_media('${wfAutoPri}', '${mPri4}', 'detail', 6, false);`);
+    runPsqlJson(`SET ROLE service_role; SELECT public.attach_workflow_reference_media('${wfAutoPri}', '${mPri5}', 'detail', 6, false);`);
+    runPsqlJson(`SET ROLE service_role; SELECT public.attach_workflow_reference_media('${wfAutoPri}', '${mPri6}', 'detail', 6, false);`);
+    const countAtQuota = runPsqlScalar(`SELECT count(*) FROM public.workflow_media WHERE workflow_id = '${wfAutoPri}';`, "service_role");
+    if (Number(countAtQuota) !== 6) throw new Error(`Expected 6 items at quota, got: ${countAtQuota}`);
+
+    const mPri7 = runPsqlScalar(`INSERT INTO public.media (url) VALUES ('https://storage.test/pri_7.png') RETURNING id;`, "service_role");
+    let quotaExceededFalse = false;
+    try {
+      runPsql(`SET ROLE service_role; SELECT public.attach_workflow_reference_media('${wfAutoPri}', '${mPri7}', 'detail', 6, false);`);
+    } catch (err) {
+      if (err.message.includes("Maximum 6 reference images allowed")) quotaExceededFalse = true;
+    }
+    if (!quotaExceededFalse) throw new Error("Expected quota 23514 to be raised on 7th attachment with p_auto_primary=false");
+    console.log("  ✔ PASS 9.5: Quota enforcement (23514) identical and unaffected by p_auto_primary=false");
+
+    // 9.6: Return jsonb keys identical across 4-arg and 5-arg calls, including current_count
+    const expectedKeys = ["current_count", "is_existing", "is_primary", "max_allowed", "media_id", "role", "workflow_id"];
+    const actualKeys = Object.keys(resAutoFalse).sort();
+    if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) {
+      throw new Error(`JSON keys mismatch! Expected ${JSON.stringify(expectedKeys)}, got: ${JSON.stringify(actualKeys)}`);
+    }
+    console.log("  ✔ PASS 9.6: Return jsonb keys identical: " + JSON.stringify(expectedKeys));
+
+    // 9.7: Calling with 4 named parameters is NOT ambiguous and succeeds, defaulting p_auto_primary to true
+    const wfNamed = runPsqlScalar(`INSERT INTO public.workflow (user_id, project_id, title) VALUES (gen_random_uuid(), gen_random_uuid(), 'Named Params WF') RETURNING id;`, "service_role");
+    const mNamed = runPsqlScalar(`INSERT INTO public.media (url) VALUES ('https://storage.test/named.png') RETURNING id;`, "service_role");
+    const resNamed = runPsqlJson(`
+      SET ROLE service_role;
+      SELECT public.attach_workflow_reference_media(
+        p_workflow_id := '${wfNamed}',
+        p_media_id := '${mNamed}',
+        p_role := 'detail',
+        p_max_allowed := 6
+      );
+    `);
+    if (resNamed.is_primary !== true || resNamed.current_count !== 1) {
+      throw new Error(`Named param call failed or did not default auto_primary to true: ${JSON.stringify(resNamed)}`);
+    }
+    console.log("  ✔ PASS 9.7: 4-named-parameter call is not ambiguous and defaults p_auto_primary to true");
 
     console.log("\n================================================================================");
     console.log("  ALL REAL POSTGRESQL CONCURRENCY & INTEGRATION SCENARIOS PASSED (100% SUCCESS)");

@@ -186,6 +186,7 @@ export class WorkflowMediaService {
         maxAllowed,
         items = [],
         setPrimary = false,
+        autoPrimary = true,
         workflowType = null,
         req = null,
     } = {}) {
@@ -201,6 +202,19 @@ export class WorkflowMediaService {
             await this._discardStorage(uploadedKeys, { workflowId });
             throw new ValidationError(
                 `Invalid maxAllowed value (${maxAllowed}): must be null or an integer >= 0.`,
+                { statusCode: 400, code: "VALIDATION_ERROR" }
+            );
+        }
+
+        // 1b. Validate autoPrimary (must be boolean or undefined)
+        const isAutoPrimaryValid = autoPrimary === undefined || autoPrimary === null || typeof autoPrimary === "boolean";
+        if (!isAutoPrimaryValid) {
+            const uploadedKeys = items
+                .filter((it) => it?.kind === "uploaded" && it?.uploadedFile?.storageKey)
+                .map((it) => it.uploadedFile.storageKey);
+            await this._discardStorage(uploadedKeys, { workflowId });
+            throw new ValidationError(
+                `Invalid autoPrimary value (${autoPrimary}): must be undefined or a boolean.`,
                 { statusCode: 400, code: "VALIDATION_ERROR" }
             );
         }
@@ -328,6 +342,7 @@ export class WorkflowMediaService {
                             mediaId: mediaRecord.id,
                             role,
                             maxAllowed,
+                            autoPrimary,
                         });
                     } catch (attachErr) {
                         if (isWorkflowReferenceQuotaError(attachErr)) {
@@ -365,6 +380,7 @@ export class WorkflowMediaService {
                             mediaId: sourceMedia.id,
                             role,
                             maxAllowed,
+                            autoPrimary,
                         });
                     } catch (attachErr) {
                         if (isWorkflowReferenceQuotaError(attachErr)) {

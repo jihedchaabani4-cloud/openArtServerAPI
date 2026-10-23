@@ -296,6 +296,51 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
             }
         });
 
+        it("rejects non-boolean autoPrimary with ValidationError (and discards uploaded keys)", async () => {
+            const h = createMockHarness();
+            const wfId = "00000000-0000-0000-0000-000000000001";
+            h.workflows.set(wfId, { id: wfId, user_id: "user-1", project_id: "proj-1" });
+            h.storageFiles.add("user-1/uploads/temp-auto.png");
+
+            const invalidValues = ["true", "false", 1, 0, NaN, {}, []];
+
+            for (const badValue of invalidValues) {
+                h.callLog.length = 0;
+                await assert.rejects(
+                    async () => {
+                        await h.service.attachMediaItems({
+                            workflowId: wfId,
+                            userId: "user-1",
+                            projectId: "proj-1",
+                            role: "detail",
+                            maxAllowed: 6,
+                            autoPrimary: badValue,
+                            items: [
+                                {
+                                    kind: "uploaded",
+                                    uploadedFile: {
+                                        storageKey: "user-1/uploads/temp-auto.png",
+                                        url: "https://storage.test/temp-auto.png",
+                                        width: 100,
+                                        height: 100,
+                                        format: "PNG",
+                                    },
+                                },
+                            ],
+                        });
+                    },
+                    (err) => {
+                        assert.ok(err instanceof ValidationError, `Expected ValidationError for ${badValue}, got ${err}`);
+                        assert.equal(err.statusCode, 400);
+                        return true;
+                    }
+                );
+                const discardCall = h.callLog.find((c) => c.op === "mediaUploadService.discard");
+                assert.ok(discardCall, `Expected discard on bad autoPrimary: ${badValue}`);
+                assert.deepEqual(discardCall.keys, ["user-1/uploads/temp-auto.png"]);
+            }
+        });
+
         it("accepts maxAllowed: null (unlimited quota) and maxAllowed: 0 (zero-capacity quota)", async () => {
             const h = createMockHarness();
             const wfId = "00000000-0000-0000-0000-000000000001";

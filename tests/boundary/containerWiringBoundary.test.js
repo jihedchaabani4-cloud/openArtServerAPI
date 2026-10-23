@@ -72,4 +72,84 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
             "characterService.workflowService.mediaService must hold root mediaUploadService"
         );
     });
+
+    it("behavioral wiring: attachMediaItems failure triggers storageKey discard on shared mediaUploadService through the real container service graph", async () => {
+        const deletedPaths = [];
+        const originalDeleteFiles = container.storageService.deleteFiles;
+        const originalUpload = container.storageService.upload;
+        const originalProviderDeleteFiles = container.storageService.provider?.deleteFiles;
+
+        const originalDbProjectsFindById = container.db.projects.findById;
+        const originalDbProjectsFindByUser = container.db.projects.findByUser;
+        const originalDbWorkflowsCreate = container.db.workflows.createWorkflow;
+        const originalDbWorkflowsDeleteById = container.db.workflows.deleteById;
+        const originalDbWorkflowsFindById = container.db.workflows.findById;
+        const originalDbWorkflowsGetWorkflow = container.db.workflows.getWorkflow;
+        const originalDbMediaCreate = container.db.media.createMedia;
+
+        const VALID_PNG_BUFFER = Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+            "base64"
+        );
+
+        try {
+            container.storageService.upload = async (path) => `https://mock.storage/${path}`;
+            container.storageService.deleteFiles = async (paths) => {
+                deletedPaths.push(...paths);
+                return { deletedCount: paths.length, failures: [] };
+            };
+            if (container.storageService.provider) {
+                container.storageService.provider.deleteFiles = async (paths) => {
+                    deletedPaths.push(...paths);
+                    return { data: paths.map((p) => ({ name: p })), error: null };
+                };
+            }
+
+            const mockWf = {
+                id: "wf-wiring-new",
+                user_id: "user-wiring-1",
+                project_id: "proj-wiring-1",
+                workflow_type: "UPLOAD",
+            };
+            container.db.projects.findById = async (id) => ({ id, user_id: "user-wiring-1" });
+            container.db.projects.findByUser = async (uid, pid) => [{ id: pid, user_id: uid }];
+            container.db.workflows.createWorkflow = async (data) => ({ ...mockWf, ...data });
+            container.db.workflows.findById = async () => mockWf;
+            container.db.workflows.getWorkflow = async () => mockWf;
+            container.db.workflows.deleteById = async () => ({ deleted: true });
+
+            // Simulate failure inside attachMediaItems (e.g. media insert failure or attach RPC failure)
+            container.db.media.createMedia = async () => {
+                throw new Error("Simulated DB failure during attach");
+            };
+
+            await assert.rejects(
+                () => container.assetUploadService.uploadAsset({
+                    source: { buffer: VALID_PNG_BUFFER, originalName: "test-wiring-file.png" },
+                    userId: "user-wiring-1",
+                    projectId: "proj-wiring-1",
+                }),
+                /Simulated DB failure during attach/
+            );
+
+            assert.ok(deletedPaths.length > 0, "storageService.deleteFiles must have received discarded storage keys");
+            assert.ok(
+                deletedPaths.some((p) => p.includes("user-wiring-1/uploads/")),
+                `discarded paths must include uploaded user key, got: ${JSON.stringify(deletedPaths)}`
+            );
+        } finally {
+            container.storageService.deleteFiles = originalDeleteFiles;
+            container.storageService.upload = originalUpload;
+            if (container.storageService.provider && originalProviderDeleteFiles) {
+                container.storageService.provider.deleteFiles = originalProviderDeleteFiles;
+            }
+            container.db.projects.findById = originalDbProjectsFindById;
+            container.db.projects.findByUser = originalDbProjectsFindByUser;
+            container.db.workflows.createWorkflow = originalDbWorkflowsCreate;
+            container.db.workflows.findById = originalDbWorkflowsFindById;
+            container.db.workflows.getWorkflow = originalDbWorkflowsGetWorkflow;
+            container.db.workflows.deleteById = originalDbWorkflowsDeleteById;
+            container.db.media.createMedia = originalDbMediaCreate;
+        }
+    });
 });

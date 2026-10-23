@@ -6,6 +6,16 @@
  * - Deleting single media records and cascading cleanup to storage and workflows
  * - Releasing workflow relations without deleting still-linked media
  * - Deleting orphan media that no longer belongs to any workflow
+ *
+ * Public methods:
+ * - attachMediaItems(options)
+ * - rollbackAttachedMedia(rollbackHandle)
+ * - resolveOwnedSourceMedia(options)
+ * - deleteMedia(options)
+ * - releaseMedia(options)
+ * - setPrimaryMedia(options)
+ * - clearPrimaryMedia(options)
+ * - createMediaInWorkflow(options)
  */
 
 import { randomUUID } from "node:crypto";
@@ -129,7 +139,14 @@ export class WorkflowMediaService {
                     mediaId: sourceMedia.id,
                 });
             }
-            const linkedWfId = links[0]?.workflow_id;
+            if (workflowId && !links.some((l) => (l.workflow_id || l.workflowId) === workflowId)) {
+                throw new CrudServiceError("Media not found", {
+                    statusCode: 404,
+                    errorCode: "NOT_FOUND",
+                    mediaId: sourceMedia.id,
+                });
+            }
+            const linkedWfId = (workflowId && links.find((l) => (l.workflow_id || l.workflowId) === workflowId)?.workflow_id) || links[0]?.workflow_id;
             if (!sourceWf && linkedWfId && this.db.workflows?.getWorkflow) {
                 sourceWf = await this.db.workflows.getWorkflow(linkedWfId).catch(() => null);
             }

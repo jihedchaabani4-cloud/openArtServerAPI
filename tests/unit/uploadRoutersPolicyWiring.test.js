@@ -501,6 +501,40 @@ describe("Ticket 02b — Upload Routers Policy Wiring & Route-Level Parity Tests
                 assetUploadService.uploadAsset = origUploadAsset;
             }
         });
+
+        it("sanitizes purpose in warning log: strips control characters and truncates to 64 chars", async () => {
+            const origUploadAsset = assetUploadService.uploadAsset;
+            assetUploadService.uploadAsset = async () => ({
+                url: "https://cdn.example.com/uploads/ingested.png",
+                mediaId: "media-ingest-2",
+                workflowId: "wf-ingest-2",
+                type: "image",
+                width: 1,
+                height: 1,
+                ratio: "1:1",
+                format: "PNG",
+                isNew: true,
+                media: { id: "media-ingest-2" },
+            });
+
+            try {
+                const maliciousPurpose = "malicious_\x00\r\n\x1b[31mevil_preset_" + "A".repeat(100);
+                const res = await sendMultipartRequest(baseUrl, "/api/media/ingest", {
+                    filename: "valid.png",
+                    contentType: "image/png",
+                    payloadBuffer: VALID_PNG_1X1,
+                    fields: {
+                        purpose: maliciousPurpose,
+                        project_id: "proj-1",
+                    },
+                });
+
+                assert.equal(res.status, 200);
+                assert.equal(res.body?.ok, true);
+            } finally {
+                assetUploadService.uploadAsset = origUploadAsset;
+            }
+        });
     });
 
     describe("3. routes/elementRoutes.js — POST /api/v2/elements/:id/images (ELEMENT_REFERENCE_UPLOAD_POLICY + preUploadElementCapacityGuard ordering)", () => {

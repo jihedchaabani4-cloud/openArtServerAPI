@@ -36,9 +36,11 @@ router.post("/ingest", upload, async (req, res) => {
             display_name,
         } = req.body || {};
 
-        if (req.body?.purpose) {
+        if (req.body?.purpose !== undefined && req.body?.purpose !== null) {
+            const rawPurpose = String(req.body.purpose).replace(/[\x00-\x1F\x7F-\x9F]/g, "").trim();
+            const sanitizedPurpose = rawPurpose.length > 64 ? `${rawPurpose.slice(0, 64)}…` : rawPurpose;
             routeLogger.warn("Client supplied deprecated 'purpose' parameter; ignoring in favor of DEFAULT_UPLOAD_POLICY", {
-                purpose: req.body.purpose,
+                purpose: sanitizedPurpose,
                 userId,
             });
         }

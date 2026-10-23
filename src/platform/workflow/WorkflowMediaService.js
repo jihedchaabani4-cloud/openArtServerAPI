@@ -402,7 +402,11 @@ export class WorkflowMediaService {
 
             return { attached, rollbackHandle };
         } catch (err) {
-            await this.rollbackAttachedMedia(rollbackHandle, { traceId });
+            const rollbackResult = await this.rollbackAttachedMedia(rollbackHandle, { traceId });
+            if (err && typeof err === "object") {
+                err.rollbackResult = rollbackResult;
+                err.rollbackHandle = rollbackHandle;
+            }
             throw err;
         }
     }

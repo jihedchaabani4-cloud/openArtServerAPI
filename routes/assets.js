@@ -2,6 +2,7 @@ import { Router } from "express";
 import { workflowService, assetUploadService } from "../src/container.js";
 import { requireAuth } from "../src/middleware/auth.js";
 import { createUploadMiddleware } from "../src/middleware/uploadMiddleware.js";
+import { DEFAULT_UPLOAD_POLICY } from "../src/platform/media-ingestion/UploadPolicy.js";
 import { AppError } from "../src/utils/AppError.js";
 import { createLogger } from "../src/infrastructure/logging/index.js";
 import { safePublicRouteError } from "../src/utils/safePublicRouteError.js";
@@ -11,7 +12,7 @@ const routeLogger = createLogger("route:assets");
 const router = Router();
 router.use(requireAuth);
 
-const upload = createUploadMiddleware("default");
+const upload = createUploadMiddleware(DEFAULT_UPLOAD_POLICY);
 
 // ─── POST /api/assets/upload ───────────────────────────────────────────────
 router.post("/upload", upload, async (req, res) => {

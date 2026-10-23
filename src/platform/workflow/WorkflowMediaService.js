@@ -58,6 +58,8 @@ export class WorkflowMediaService {
                 for (const k of uniqueKeys) {
                     await this.storageService.delete(k).catch(() => null);
                 }
+            } else if (typeof this.storageService?.remove === "function") {
+                await this.storageService.remove(uniqueKeys);
             }
         } catch (err) {
             crudOperationLog({

@@ -13,6 +13,7 @@ import {
 } from "../../src/platform/media-ingestion/MediaUploadErrors.js";
 import { CrudServiceError } from "../../src/utils/crudOperationLog.js";
 import { baseLogger } from "../../src/infrastructure/logging/index.js";
+import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
 
 function createMockHarness() {
     const workflows = new Map();
@@ -100,8 +101,8 @@ function createMockHarness() {
             getPrimaryMedia: async (workflowId) => {
                 return workflowMedia.find((wm) => wm.workflow_id === workflowId && wm.is_primary === true) || null;
             },
-            attachReferenceMedia: async ({ workflowId, mediaId, role = "detail", maxAllowed = 6 }) => {
-                callLog.push({ op: "workflowMedia.attachReferenceMedia", workflowId, mediaId, role, maxAllowed });
+            attachReferenceMedia: async ({ workflowId, mediaId, role = "detail", maxAllowed = 6, autoPrimary = true }) => {
+                callLog.push({ op: "workflowMedia.attachReferenceMedia", workflowId, mediaId, role, maxAllowed, autoPrimary });
                 const currentRelations = workflowMedia.filter(
                     (wm) => wm.workflow_id === workflowId && wm.role === role
                 );
@@ -125,8 +126,12 @@ function createMockHarness() {
                     throw err;
                 }
 
-                const hasPrimary = workflowMedia.some((wm) => wm.workflow_id === workflowId && wm.is_primary === true);
-                const is_primary = !hasPrimary;
+                const autoPrimaryEffective = autoPrimary === undefined || autoPrimary === null ? true : Boolean(autoPrimary);
+                let is_primary = false;
+                if (autoPrimaryEffective) {
+                    const hasPrimary = workflowMedia.some((wm) => wm.workflow_id === workflowId && wm.is_primary === true);
+                    is_primary = !hasPrimary;
+                }
                 const link = {
                     workflow_id: workflowId,
                     media_id: mediaId,
@@ -339,6 +344,25 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
                 assert.ok(discardCall, `Expected discard on bad autoPrimary: ${badValue}`);
                 assert.deepEqual(discardCall.keys, ["user-1/uploads/temp-auto.png"]);
             }
+        });
+
+        it("in-memory double handles autoPrimary: false -> sets is_primary: false on workflow with no primary", async () => {
+            WorkflowMediaRepository.enableTestMemoryFallback();
+            WorkflowMediaRepository.clearMemory();
+            const repo = new WorkflowMediaRepository();
+
+            const res = await repo.attachReferenceMedia({
+                workflowId: "00000000-0000-0000-0000-000000000099",
+                mediaId: "00000000-0000-0000-0000-000000000088",
+                role: "detail",
+                maxAllowed: 6,
+                autoPrimary: false,
+            });
+
+            assert.equal(res.is_primary, false, "Must not set is_primary when autoPrimary is false");
+            const links = await repo.findByWorkflow("00000000-0000-0000-0000-000000000099");
+            assert.equal(links.length, 1);
+            assert.equal(links[0].is_primary, false);
         });
 
         it("accepts maxAllowed: null (unlimited quota) and maxAllowed: 0 (zero-capacity quota)", async () => {
@@ -938,6 +962,47 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
             assert.equal(h.workflows.get(wfId).primary_media_id, null, "primary_media_id must be cleared to null");
             const hasAnyPrimary = h.workflowMedia.some((w) => w.workflow_id === wfId && w.is_primary === true);
             assert.equal(hasAnyPrimary, false);
+        });
+
+        it("rollback with autoPrimary: false unlinks and reaps media without altering workflow primary", async () => {
+            const h = createMockHarness();
+            const wfId = "00000000-0000-0000-0000-000000000003";
+            h.workflows.set(wfId, { id: wfId, user_id: "user-1", project_id: "proj-1", primary_media_id: null });
+            h.storageFiles.add("user-1/uploads/autoprimary_false.png");
+
+            const res = await h.service.attachMediaItems({
+                workflowId: wfId,
+                userId: "user-1",
+                projectId: "proj-1",
+                role: "detail",
+                maxAllowed: 6,
+                autoPrimary: false,
+                items: [
+                    {
+                        kind: "uploaded",
+                        uploadedFile: {
+                            storageKey: "user-1/uploads/autoprimary_false.png",
+                            url: "https://storage.test/autoprimary_false.png",
+                            width: 100,
+                            height: 100,
+                            format: "PNG",
+                        },
+                    },
+                ],
+            });
+
+            assert.equal(res.attached[0].is_primary, false);
+            assert.equal(h.workflows.get(wfId).primary_media_id, null);
+
+            // Rollback
+            const rbRes = await h.service.rollbackAttachedMedia(res.rollbackHandle);
+            assert.equal(rbRes.complete, true);
+            assert.equal(rbRes.unlinkedMediaIds.length, 1);
+            assert.equal(rbRes.deletedMediaIds.length, 1);
+            assert.equal(h.workflows.get(wfId).primary_media_id, null);
+
+            // Storage was discarded
+            assert.ok(!h.storageFiles.has("user-1/uploads/autoprimary_false.png"));
         });
 
         it("compare-and-restore does not overwrite a concurrent primary change made by another process", async () => {

@@ -154,16 +154,16 @@ async function main() {
 
     console.log("   Canonical migrations (20261020020000 & 20261020030000) applied successfully.\n");
 
-    // Apply Migration Draft: 20261024000000_add_auto_primary_to_attach_reference_media.sql
-    console.log("   Applying migration draft: 20261024000000_add_auto_primary_to_attach_reference_media.sql...");
-    const draftMigrationPath = path.resolve("..", ".scratch", "unified-media-upload", "drafts", "20261024000000_add_auto_primary_to_attach_reference_media.sql");
-    if (!fs.existsSync(draftMigrationPath)) {
-      throw new Error(`Draft migration file missing: ${draftMigrationPath}`);
+    // Apply Promoted Migration: 20261024000000_add_auto_primary_to_attach_reference_media.sql (from canonical supabase/migrations)
+    console.log("   Applying promoted migration: 20261024000000_add_auto_primary_to_attach_reference_media.sql...");
+    const migrationPath = path.resolve("..", "supabase", "migrations", "20261024000000_add_auto_primary_to_attach_reference_media.sql");
+    if (!fs.existsSync(migrationPath)) {
+      throw new Error(`Promoted migration file missing: ${migrationPath}`);
     }
-    const draftSql = fs.readFileSync(draftMigrationPath, "utf8");
-    runPsql(draftSql);
+    const migrationSql = fs.readFileSync(migrationPath, "utf8");
+    runPsql(migrationSql);
 
-    // Verify pg_proc after draft: exactly ONE function named attach_workflow_reference_media with 5 arguments
+    // Verify pg_proc after migration: exactly ONE function named attach_workflow_reference_media with 5 arguments
     const procCount = Number(runPsqlScalar(`SELECT count(*) FROM pg_proc WHERE proname = 'attach_workflow_reference_media';`));
     if (procCount !== 1) {
       throw new Error(`Expected exactly 1 function named attach_workflow_reference_media in pg_proc, found: ${procCount}`);
@@ -172,15 +172,17 @@ async function main() {
     if (procNargs !== 5) {
       throw new Error(`Expected attach_workflow_reference_media to have pronargs=5, found: ${procNargs}`);
     }
-    console.log("   ✔ PASS: Draft applied: exactly ONE function in pg_proc with pronargs=5.");
+    console.log("   ✔ PASS: Promoted migration applied: exactly ONE function in pg_proc with pronargs=5.");
 
-    // Verify Rollback Draft: restore 4-arg function, verify pg_proc and service_role-only grants
-    console.log("   Testing rollback draft: 20261024000000_add_auto_primary_to_attach_reference_media_rollback.sql...");
-    const rollbackDraftPath = path.resolve("..", ".scratch", "unified-media-upload", "drafts", "20261024000000_add_auto_primary_to_attach_reference_media_rollback.sql");
-    if (!fs.existsSync(rollbackDraftPath)) {
-      throw new Error(`Rollback draft missing: ${rollbackDraftPath}`);
+    // Verify Rollback: restore 4-arg function, verify pg_proc and service_role-only grants
+    console.log("   Testing rollback: 20261024000000_add_auto_primary_to_attach_reference_media_rollback.sql...");
+    const rollbackPath = fs.existsSync(path.resolve("..", "supabase", "rollbacks", "20261024000000_add_auto_primary_to_attach_reference_media_rollback.sql"))
+      ? path.resolve("..", "supabase", "rollbacks", "20261024000000_add_auto_primary_to_attach_reference_media_rollback.sql")
+      : path.resolve("..", ".scratch", "unified-media-upload", "drafts", "20261024000000_add_auto_primary_to_attach_reference_media_rollback.sql");
+    if (!fs.existsSync(rollbackPath)) {
+      throw new Error(`Rollback file missing: ${rollbackPath}`);
     }
-    const rollbackSql = fs.readFileSync(rollbackDraftPath, "utf8");
+    const rollbackSql = fs.readFileSync(rollbackPath, "utf8");
     runPsql(rollbackSql);
 
     const rbProcCount = Number(runPsqlScalar(`SELECT count(*) FROM pg_proc WHERE proname = 'attach_workflow_reference_media';`));
@@ -203,16 +205,16 @@ async function main() {
       if (err.message.includes("permission denied for function attach_workflow_reference_media")) rbDenied++;
     }
     if (rbDenied !== 2) throw new Error(`Expected 2 denials for anon/authenticated after rollback, got: ${rbDenied}`);
-    console.log("   ✔ PASS: Rollback draft restored 4-arg function with service_role-only grants.");
+    console.log("   ✔ PASS: Rollback restored 4-arg function with service_role-only grants.");
 
-    // Re-apply migration draft to proceed with scenarios testing the 5-arg RPC
-    runPsql(draftSql);
+    // Re-apply promoted migration to proceed with scenarios testing the 5-arg RPC
+    runPsql(migrationSql);
     const reProcCount = Number(runPsqlScalar(`SELECT count(*) FROM pg_proc WHERE proname = 'attach_workflow_reference_media';`));
     const reProcNargs = Number(runPsqlScalar(`SELECT pronargs FROM pg_proc WHERE proname = 'attach_workflow_reference_media';`));
     if (reProcCount !== 1 || reProcNargs !== 5) {
-      throw new Error(`Expected 1 function with 5 args after re-applying draft, got count=${reProcCount}, nargs=${reProcNargs}`);
+      throw new Error(`Expected 1 function with 5 args after re-applying migration, got count=${reProcCount}, nargs=${reProcNargs}`);
     }
-    console.log("   ✔ PASS: Migration draft re-applied; 5-arg RPC active for all scenarios.\n");
+    console.log("   ✔ PASS: Promoted migration re-applied; 5-arg RPC active for all scenarios.\n");
 
     // -------------------------------------------------------------------------
     // TEST SCENARIOS

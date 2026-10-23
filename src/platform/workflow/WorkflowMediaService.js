@@ -68,6 +68,17 @@ export class WorkflowMediaService {
     }
 
     /**
+     * Extracts storage keys from uploaded batch items and discards them through mediaUploadService.
+     * Invoked during early pre-flight validation failures before DB writes occur.
+     */
+    async _discardUploadedItems(items = [], workflowId = null) {
+        const uploadedKeys = (items || [])
+            .filter((it) => it?.kind === "uploaded" && it?.uploadedFile?.storageKey)
+            .map((it) => it.uploadedFile.storageKey);
+        return this._discardStorage(uploadedKeys, { workflowId });
+    }
+
+    /**
      * Link a media record to a workflow strictly in `public.workflow_media`.
      */
     async createMediaInWorkflow({ workflowId, workflow_id, mediaId, media_id, role, stepId, step_id, workflowType, workflow_type } = {}) {
@@ -196,10 +207,7 @@ export class WorkflowMediaService {
         // 1. Validate maxAllowed (must be null or integer >= 0)
         const isAllowedValid = maxAllowed === null || (typeof maxAllowed === "number" && Number.isInteger(maxAllowed) && maxAllowed >= 0);
         if (!isAllowedValid) {
-            const uploadedKeys = items
-                .filter((it) => it?.kind === "uploaded" && it?.uploadedFile?.storageKey)
-                .map((it) => it.uploadedFile.storageKey);
-            await this._discardStorage(uploadedKeys, { workflowId });
+            await this._discardUploadedItems(items, workflowId);
             throw new ValidationError(
                 `Invalid maxAllowed value (${maxAllowed}): must be null or an integer >= 0.`,
                 { statusCode: 400, code: "VALIDATION_ERROR" }
@@ -209,10 +217,7 @@ export class WorkflowMediaService {
         // 1b. Validate autoPrimary (must be boolean or undefined)
         const isAutoPrimaryValid = autoPrimary === undefined || autoPrimary === null || typeof autoPrimary === "boolean";
         if (!isAutoPrimaryValid) {
-            const uploadedKeys = items
-                .filter((it) => it?.kind === "uploaded" && it?.uploadedFile?.storageKey)
-                .map((it) => it.uploadedFile.storageKey);
-            await this._discardStorage(uploadedKeys, { workflowId });
+            await this._discardUploadedItems(items, workflowId);
             throw new ValidationError(
                 `Invalid autoPrimary value (${autoPrimary}): must be undefined or a boolean.`,
                 { statusCode: 400, code: "VALIDATION_ERROR" }
@@ -221,13 +226,11 @@ export class WorkflowMediaService {
 
         // 2. Validate workflowId and userId
         if (!workflowId || typeof workflowId !== "string") {
-            const uploadedKeys = items.filter((it) => it?.kind === "uploaded" && it?.uploadedFile?.storageKey).map((it) => it.uploadedFile.storageKey);
-            await this._discardStorage(uploadedKeys, { workflowId });
+            await this._discardUploadedItems(items, workflowId);
             throw new ValidationError("workflowId is required", { statusCode: 400, code: "VALIDATION_ERROR" });
         }
         if (!userId) {
-            const uploadedKeys = items.filter((it) => it?.kind === "uploaded" && it?.uploadedFile?.storageKey).map((it) => it.uploadedFile.storageKey);
-            await this._discardStorage(uploadedKeys, { workflowId });
+            await this._discardUploadedItems(items, workflowId);
             throw new ValidationError("userId is required", { statusCode: 400, code: "VALIDATION_ERROR" });
         }
 
@@ -255,8 +258,7 @@ export class WorkflowMediaService {
                 }
             }
             if (!isAuthorized) {
-                const uploadedKeys = items.filter((it) => it?.kind === "uploaded" && it?.uploadedFile?.storageKey).map((it) => it.uploadedFile.storageKey);
-                await this._discardStorage(uploadedKeys, { workflowId });
+                await this._discardUploadedItems(items, workflowId);
                 throw new CrudServiceError("Workflow not found", {
                     statusCode: 404,
                     errorCode: "NOT_FOUND",
@@ -279,8 +281,7 @@ export class WorkflowMediaService {
                         req,
                     });
                 } catch (existingErr) {
-                    const uploadedKeys = items.filter((it) => it?.kind === "uploaded" && it?.uploadedFile?.storageKey).map((it) => it.uploadedFile.storageKey);
-                    await this._discardStorage(uploadedKeys, { workflowId });
+                    await this._discardUploadedItems(items, workflowId);
                     throw existingErr;
                 }
                 resolvedExisting.set(item, resolvedMedia);

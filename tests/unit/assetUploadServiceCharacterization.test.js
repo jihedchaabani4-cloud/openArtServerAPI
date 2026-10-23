@@ -119,11 +119,13 @@ function makeCharacterizeHarness() {
                 workflowMedia.push(row);
                 return row;
             },
-            attachReferenceMedia: async ({ workflowId, mediaId, role, maxAllowed }) => {
-                // Emulates the SQL RPC attach_workflow_reference_media auto-primary rule:
-                // v_is_primary := NOT EXISTS (SELECT 1 FROM workflow_media WHERE workflow_id = ... AND is_primary = true)
-                const hasPrimary = workflowMedia.some((w) => w.workflow_id === workflowId && w.is_primary);
-                const is_primary = !hasPrimary;
+            attachReferenceMedia: async ({ workflowId, mediaId, role, maxAllowed, autoPrimary = true }) => {
+                const autoPrimaryEffective = autoPrimary === undefined || autoPrimary === null ? true : Boolean(autoPrimary);
+                let is_primary = false;
+                if (autoPrimaryEffective) {
+                    const hasPrimary = workflowMedia.some((w) => w.workflow_id === workflowId && w.is_primary);
+                    is_primary = !hasPrimary;
+                }
                 const row = {
                     workflow_id: workflowId,
                     media_id: mediaId,
@@ -283,10 +285,9 @@ describe("AssetUploadService — Characterization Tests (Ticket 04 Pre-Check)", 
         assert.equal(link.is_primary, false, "workflow_media.is_primary must be false");
     });
 
-    // SKIPPED: Awaiting human decision on Option (a) vs Option (b) for primary-less workflow attachment.
-    // Under old behavior, link.is_primary was false. Under new attach_workflow_reference_media RPC,
-    // it becomes true when the container has no existing primary cover.
-    it.skip("2b. Existing-workflow case with NO primary cover: characterizes old vs new behavior when attaching to a primary-less workflow", async () => {
+    // Option (b) verified: p_auto_primary suppresses primary promotion when attaching to existing workflows,
+    // preserving the legacy invariant that an existing workflow without a primary cover remains without primary.
+    it("2b. Existing-workflow case with NO primary cover: characterizes old vs new behavior when attaching to a primary-less workflow", async () => {
         const h = makeCharacterizeHarness();
         const projectId = "00000000-0000-0000-0000-000000000001";
         const primaryLessWfId = "00000000-0000-0000-0000-000000000020";
@@ -313,10 +314,7 @@ describe("AssetUploadService — Characterization Tests (Ticket 04 Pre-Check)", 
         const link = h.workflowMedia.find((w) => w.workflow_id === primaryLessWfId && w.media_id === result.mediaId);
         assert.ok(link, "workflow_media link must exist");
         assert.equal(link.role, "output");
-        // OLD legacy behavior: linkMedia always set is_primary: false on existing workflow attach
-        assert.equal(link.is_primary, false, "OLD behavior: is_primary was false even if workflow had no primary cover");
-        // In NEW behavior via attach_workflow_reference_media RPC:
-        // if idx_workflow_media_single_primary has no primary row, the RPC sets v_is_primary = true.
+        assert.equal(link.is_primary, false, "Option (b): is_primary is false when attaching to an existing workflow, even without primary cover");
     });
 
     it("3. Pre-flight validation: missing/invalid project_id fails before storage upload is called", async () => {

@@ -259,6 +259,7 @@ export class AssetUploadService {
                         userId,
                         role: "output",
                         maxAllowed: null,
+                        autoPrimary: false,
                         items: [{ kind: "existing", mediaId: existingMedia.id }],
                         req,
                     });
@@ -399,6 +400,7 @@ export class AssetUploadService {
                         userId,
                         role: effectiveRole,
                         maxAllowed: null,
+                        autoPrimary: Boolean(containerWf),
                         items: [
                             {
                                 kind: "uploaded",

@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { AssetUploadService } from "../../src/domain/asset/AssetUploadService.js";
 import { MediaService } from "../../src/platform/media/MediaService.js";
 import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
+import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
 
 const VALID_PNG_BUFFER = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
@@ -53,15 +54,67 @@ function baseMockDb({ latestProject = null, latestProjectError = null, workflowD
                     return workflowDerived;
                 },
                 getWorkflow: async () => null,
+                deleteById: async () => {},
             },
-            media: { createMedia: async () => ({ id: "media-1" }) },
+            workflowMedia: {
+                attachReferenceMedia: async ({ workflowId, mediaId, role }) => ({
+                    is_existing: false,
+                    is_primary: true,
+                    role,
+                    media_id: mediaId,
+                }),
+                unlinkWorkflowMedia: async () => ({ unlinked: true }),
+                getPrimaryMedia: async () => null,
+                setPrimaryMedia: async () => {},
+            },
+            media: {
+                createMedia: async () => ({ id: "media-1" }),
+                deleteById: async () => true,
+            },
         },
     };
 }
 
 function makeService(mockDb, ingest, { storageService = null } = {}) {
+    const mediaUploadService = {
+        upload: async () => ({
+            uploaded: [{
+                storageKey: "user-123/uploads/uploaded.webp",
+                url: "https://mock-storage.local/uploaded.webp",
+                type: "image",
+                width: 1920,
+                height: 1080,
+                ratio: "16:9",
+                format: "WEBP",
+                sizeBytes: 4096,
+                originalName: "uploaded.png",
+            }],
+            failures: [],
+        }),
+        discard: async (keys) => {
+            if (storageService?.deleteByUrl) {
+                for (const _k of keys) {
+                    await storageService.deleteByUrl("https://mock-storage.local/uploaded.webp");
+                }
+            }
+            return { deletedCount: keys?.length || 0 };
+        },
+    };
+
+    const workflowMediaService = new WorkflowMediaService({
+        db: mockDb.db,
+        storageService,
+        mediaUploadService,
+        workflowAuthService: {
+            verifyMediaOwnership: async () => true,
+            verifyWorkflowOwnership: async () => true,
+        },
+    });
+
     return new AssetUploadService({
         db: mockDb.db,
+        mediaUploadService,
+        workflowMediaService,
         binaryIngestionService: ingest.stub,
         mediaService: new MediaService({ db: mockDb.db }),
         storageService,
@@ -128,6 +181,7 @@ describe("AssetUploadService — fail-closed default project resolution", () => 
     it("deletes the just-uploaded storage object when media persistence fails", async () => {
         const mediaCreateFailures = new Error("media insert failed");
         const mockDb = baseMockDb({ latestProject: { id: "proj-latest", user_id: "user-123" } });
+        mockDb.db.media._throwError = mediaCreateFailures;
         mockDb.db.media.createMedia = async () => {
             throw mediaCreateFailures;
         };

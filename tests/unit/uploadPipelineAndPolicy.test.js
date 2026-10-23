@@ -7,6 +7,7 @@ import { MediaIngestionService } from "../../src/platform/media-ingestion/MediaI
 import { AssetUploadService } from "../../src/domain/asset/AssetUploadService.js";
 import { MediaService } from "../../src/platform/media/MediaService.js";
 import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
+import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
 
 const VALID_PNG_BUFFER = Buffer.from([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -224,9 +225,36 @@ describe("Canonical Primary-Media Persistence & WorkflowMedia Contract", () => {
             }),
         };
 
+        const mockUploadService = {
+            upload: async () => ({
+                uploaded: [{
+                    storageKey: "user-123/uploads/canonical.webp",
+                    url: "https://mock-storage.local/canonical.webp",
+                    mimeType: "image/webp",
+                    size: 8888,
+                    type: "image",
+                    width: 1920,
+                    height: 1080,
+                    ratio: "16:9",
+                    format: "WEBP",
+                    durationSec: null,
+                    originalName: "photo.png",
+                }],
+                failures: [],
+            }),
+            discard: async () => ({ deletedCount: 0 }),
+        };
+
+        const mockWfMediaService = new WorkflowMediaService({
+            db: mockDb,
+            storageService: {},
+            mediaUploadService: mockUploadService,
+        });
+
         const assetService = new AssetUploadService({
             db: mockDb,
-            binaryIngestionService: mockBinaryIngest,
+            mediaUploadService: mockUploadService,
+            workflowMediaService: mockWfMediaService,
             mediaService,
         });
 

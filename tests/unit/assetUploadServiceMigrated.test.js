@@ -181,6 +181,25 @@ function createHarness({
 }
 
 describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaService (Ticket 04)", () => {
+    it("0. Constructor fail-fast: throws if mediaUploadService or workflowMediaService is missing", () => {
+        assert.throws(
+            () => new AssetUploadService({ db: {} }),
+            /AssetUploadService requires mediaUploadService with an upload method\./
+        );
+        assert.throws(
+            () => new AssetUploadService({ db: {}, mediaUploadService: {} }),
+            /AssetUploadService requires mediaUploadService with an upload method\./
+        );
+        assert.throws(
+            () => new AssetUploadService({ db: {}, mediaUploadService: { upload: async () => {} } }),
+            /AssetUploadService requires workflowMediaService with an attachMediaItems method\./
+        );
+        assert.throws(
+            () => new AssetUploadService({ db: {}, mediaUploadService: { upload: async () => {} }, workflowMediaService: {} }),
+            /AssetUploadService requires workflowMediaService with an attachMediaItems method\./
+        );
+    });
+
     it("1. Standalone upload: uses DEFAULT_UPLOAD_POLICY, creates UPLOAD containerWf, attaches with role: 'original', returns DTO", async () => {
         const h = createHarness();
         const result = await h.service.uploadAsset({

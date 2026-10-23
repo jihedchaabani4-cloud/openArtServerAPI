@@ -39,52 +39,29 @@ export class AssetUploadService {
      */
     constructor({
         db,
-        mediaUploadService = null,
-        workflowMediaService = null,
+        mediaUploadService,
+        workflowMediaService,
         binaryIngestionService = null,
         mediaIngestionService = null,
         workflowAuthService = null,
         mediaService = null,
         folderService = null,
         storageService = null,
-    }) {
+    } = {}) {
+        if (!mediaUploadService || typeof mediaUploadService.upload !== "function") {
+            throw new Error("AssetUploadService requires mediaUploadService with an upload method.");
+        }
+        if (!workflowMediaService || typeof workflowMediaService.attachMediaItems !== "function") {
+            throw new Error("AssetUploadService requires workflowMediaService with an attachMediaItems method.");
+        }
         this.db = db;
+        this.mediaUploadService = mediaUploadService;
+        this.workflowMediaService = workflowMediaService;
         this.storageService = storageService;
         this.authService = workflowAuthService || new WorkflowAuthorizationService({ db });
         this.mediaService = mediaService || new MediaService({ db });
         this.folderService = folderService;
-
         this.binaryIngestionService = binaryIngestionService || mediaIngestionService;
-
-        // If mediaUploadService is explicitly provided, use it; otherwise only instantiate if no legacy binaryIngestionService
-        if (mediaUploadService) {
-            this.mediaUploadService = mediaUploadService;
-        } else if (!this.binaryIngestionService && storageService) {
-            this.mediaUploadService = new MediaUploadService({ storageService });
-        } else {
-            this.mediaUploadService = null;
-        }
-
-        // If workflowMediaService is explicitly provided, use it; otherwise instantiate if mediaUploadService is available
-        if (workflowMediaService) {
-            this.workflowMediaService = workflowMediaService;
-        } else if (this.mediaUploadService && !this.binaryIngestionService && db) {
-            this.workflowMediaService = new WorkflowMediaService({
-                db,
-                storageService,
-                workflowAuthService: this.authService,
-                mediaUploadService: this.mediaUploadService,
-            });
-        } else if (this.mediaUploadService && db && typeof db.workflowMedia?.attachReferenceMedia === "function") {
-            this.workflowMediaService = new WorkflowMediaService({
-                db,
-                storageService,
-                workflowAuthService: this.authService,
-                mediaUploadService: this.mediaUploadService,
-            });
-        } else {
-            this.workflowMediaService = null;
-        }
     }
 
     /**
@@ -403,8 +380,7 @@ export class AssetUploadService {
                 // If workflow verification or container creation failed, discard the uploaded file
                 if (uploadItem.storageKey && this.mediaUploadService?.discard) {
                     await this.mediaUploadService.discard([uploadItem.storageKey]).catch(() => null);
-                }
-                if (uploadItem.url && this.storageService?.deleteByUrl) {
+                } else if (uploadItem.url && this.storageService?.deleteByUrl) {
                     await this.storageService.deleteByUrl(uploadItem.url).catch(() => null);
                 }
                 throw containerErr;

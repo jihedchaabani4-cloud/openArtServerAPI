@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { AssetUploadService } from "../../src/domain/asset/AssetUploadService.js";
 import { MediaService } from "../../src/platform/media/MediaService.js";
 import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
+import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
 
 const VALID_PNG_BUFFER = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
@@ -118,7 +119,29 @@ function makeCharacterizeHarness() {
                 workflowMedia.push(row);
                 return row;
             },
+            attachReferenceMedia: async ({ workflowId, mediaId, role, maxAllowed }) => {
+                // Emulates the SQL RPC attach_workflow_reference_media auto-primary rule:
+                // v_is_primary := NOT EXISTS (SELECT 1 FROM workflow_media WHERE workflow_id = ... AND is_primary = true)
+                const hasPrimary = workflowMedia.some((w) => w.workflow_id === workflowId && w.is_primary);
+                const is_primary = !hasPrimary;
+                const row = {
+                    workflow_id: workflowId,
+                    media_id: mediaId,
+                    role: role || "detail",
+                    is_primary,
+                    is_existing: false,
+                };
+                workflowMedia.push(row);
+                return row;
+            },
             unlink: async ({ workflowId, mediaId, role }) => {
+                const idx = workflowMedia.findIndex(
+                    (w) => w.workflow_id === workflowId && w.media_id === mediaId && (!role || w.role === role)
+                );
+                if (idx >= 0) workflowMedia.splice(idx, 1);
+                return { unlinked: idx >= 0 };
+            },
+            unlinkWorkflowMedia: async ({ workflowId, mediaId, role }) => {
                 const idx = workflowMedia.findIndex(
                     (w) => w.workflow_id === workflowId && w.media_id === mediaId && (!role || w.role === role)
                 );
@@ -130,20 +153,49 @@ function makeCharacterizeHarness() {
 
     const ingest = makeIngestStub();
 
+    const mediaUploadService = {
+        upload: async () => ({
+            uploaded: [{
+                storageKey: "user-1/uploads/test.webp",
+                url: "https://mock-storage.local/characterize.webp",
+                type: "image",
+                width: 1920,
+                height: 1080,
+                ratio: "16:9",
+                format: "WEBP",
+                sizeBytes: 8888,
+                originalName: "test.png",
+            }],
+            failures: [],
+        }),
+        discard: async () => ({ deletedCount: 0 }),
+    };
+
+    const authService = {
+        verifyMediaOwnership: async (mediaId, userId) => {
+            const m = media.get(mediaId);
+            return Boolean(m && (!m.user_id || m.user_id === userId));
+        },
+        verifyWorkflowOwnership: async (wfId, userId) => {
+            const w = workflows.get(wfId);
+            return Boolean(w && w.user_id === userId);
+        },
+    };
+
+    const workflowMediaService = new WorkflowMediaService({
+        db,
+        storageService: {},
+        mediaUploadService,
+        workflowAuthService: authService,
+    });
+
     const service = new AssetUploadService({
         db,
+        mediaUploadService,
+        workflowMediaService,
         binaryIngestionService: ingest,
         mediaService: new MediaService({ db }),
-        workflowAuthService: {
-            verifyMediaOwnership: async (mediaId, userId) => {
-                const m = media.get(mediaId);
-                return Boolean(m && (!m.user_id || m.user_id === userId));
-            },
-            verifyWorkflowOwnership: async (wfId, userId) => {
-                const w = workflows.get(wfId);
-                return Boolean(w && w.user_id === userId);
-            },
-        },
+        workflowAuthService: authService,
     });
 
     return { service, db, ingest, workflows, media, workflowMedia, projects, folders };

@@ -28,8 +28,8 @@ export class AssetUploadService {
     /**
      * @param {Object} deps
      * @param {Object} deps.db                          - Repositories (db.media, db.workflows, db.projects, db.folders, db.workflowMedia)
-     * @param {Object} [deps.mediaUploadService]        - MediaUploadService instance (Ticket 01)
-     * @param {Object} [deps.workflowMediaService]      - WorkflowMediaService instance (Ticket 03)
+     * @param {Object} deps.mediaUploadService         - MediaUploadService instance (Ticket 01)
+     * @param {Object} deps.workflowMediaService       - WorkflowMediaService instance (Ticket 03)
      * @param {Object} [deps.binaryIngestionService]    - Legacy BinaryIngestionService fallback
      * @param {Object} [deps.mediaIngestionService]     - Legacy fallback
      * @param {Object} [deps.workflowAuthService]       - WorkflowAuthorizationService instance
@@ -380,8 +380,6 @@ export class AssetUploadService {
                 // If workflow verification or container creation failed, discard the uploaded file
                 if (uploadItem.storageKey && this.mediaUploadService?.discard) {
                     await this.mediaUploadService.discard([uploadItem.storageKey]).catch(() => null);
-                } else if (uploadItem.url && this.storageService?.deleteByUrl) {
-                    await this.storageService.deleteByUrl(uploadItem.url).catch(() => null);
                 }
                 throw containerErr;
             }
@@ -479,20 +477,6 @@ export class AssetUploadService {
                                 message: deleteWfErr?.message,
                             });
                         }
-                    }
-                }
-
-                // If mediaService fallback was used without workflowMediaService, do legacy storage deletion
-                if (!this.workflowMediaService && this.storageService?.deleteByUrl && uploadItem?.url) {
-                    try {
-                        await this.storageService.deleteByUrl(uploadItem.url);
-                    } catch (cleanupError) {
-                        crudOperationLog({
-                            traceId,
-                            operation: "assetUpload:orphanCleanup",
-                            status: "warning",
-                            message: cleanupError?.message,
-                        });
                     }
                 }
 

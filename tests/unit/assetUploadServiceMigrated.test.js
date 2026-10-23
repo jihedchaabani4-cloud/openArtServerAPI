@@ -29,6 +29,7 @@ function createHarness({
     rollbackComplete = true,
     workflowOwned = true,
     projectOwned = true,
+    hasRollbackResult = true,
 } = {}) {
     const events = [];
 
@@ -70,13 +71,17 @@ function createHarness({
             events.push({ type: "workflowMedia.attachMediaItems", role: params.role, workflowId: params.workflowId });
             if (attachMediaItemsError) {
                 const err = attachMediaItemsError;
-                err.rollbackResult = {
-                    complete: rollbackComplete,
-                    skippedStorageKeys: rollbackComplete ? [] : ["user-1/uploads/migrated.webp"],
-                    unlinkedMediaIds: ["media-1"],
-                    deletedMediaIds: rollbackComplete ? ["media-1"] : [],
-                    discardedStorageKeys: rollbackComplete ? ["user-1/uploads/migrated.webp"] : [],
-                };
+                if (hasRollbackResult) {
+                    err.rollbackResult = {
+                        complete: rollbackComplete,
+                        skippedStorageKeys: rollbackComplete ? [] : ["user-1/uploads/migrated.webp"],
+                        unlinkedMediaIds: ["media-1"],
+                        deletedMediaIds: rollbackComplete ? ["media-1"] : [],
+                        discardedStorageKeys: rollbackComplete ? ["user-1/uploads/migrated.webp"] : [],
+                    };
+                } else {
+                    delete err.rollbackResult;
+                }
                 throw err;
             }
             return {
@@ -300,6 +305,22 @@ describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaS
         );
 
         // Assert containerWf was NOT deleted because rollback was incomplete
+        assert.equal(h.mockDb.workflows.deleteCalls.length, 0);
+    });
+
+    it("4b. Rollback undefined (rollbackResult missing or null): containerWf is NOT deleted", async () => {
+        const attachError = new Error("Infrastructure crash without rollbackResult");
+        const h = createHarness({ attachMediaItemsError: attachError, hasRollbackResult: false });
+
+        await assert.rejects(
+            async () => h.service.uploadAsset({
+                source: { buffer: VALID_PNG_1X1 },
+                userId: "user-1",
+                projectId: "proj-1",
+            }),
+            /Infrastructure crash without rollbackResult/
+        );
+
         assert.equal(h.mockDb.workflows.deleteCalls.length, 0);
     });
 

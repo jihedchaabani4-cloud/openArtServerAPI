@@ -454,19 +454,10 @@ export class AssetUploadService {
                     inspection: uploadItem.inspection,
                 };
             } catch (attachErr) {
-                // If containerWf was created in this call, clean it up only when rollback is complete
+                // If containerWf was created in this call, clean it up ONLY when rollback complete === true
                 if (containerWf) {
                     const rollbackResult = attachErr?.rollbackResult;
-                    if (rollbackResult && rollbackResult.complete === false) {
-                        crudOperationLog({
-                            traceId,
-                            operation: "assetUpload:containerWfPreserved",
-                            status: "error",
-                            workflowId: containerWf.id,
-                            skippedStorageKeys: rollbackResult.skippedStorageKeys || [],
-                            message: "Container workflow preserved because rollback was incomplete (media row or link remains)",
-                        });
-                    } else {
+                    if (rollbackResult?.complete === true) {
                         try {
                             if (this.db?.workflows?.deleteById) {
                                 await this.db.workflows.deleteById(containerWf.id);
@@ -479,6 +470,15 @@ export class AssetUploadService {
                                 message: deleteWfErr?.message,
                             });
                         }
+                    } else {
+                        crudOperationLog({
+                            traceId,
+                            operation: "assetUpload:containerWfPreserved",
+                            status: "error",
+                            workflowId: containerWf.id,
+                            skippedStorageKeys: rollbackResult?.skippedStorageKeys || [],
+                            message: "Container workflow preserved because rollback was incomplete (media row or link remains)",
+                        });
                     }
                 }
 

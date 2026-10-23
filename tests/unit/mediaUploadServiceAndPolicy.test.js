@@ -17,11 +17,16 @@ import {
 import { MediaUploadService } from "../../src/platform/media-ingestion/MediaUploadService.js";
 import { SourceReader } from "../../src/platform/media-ingestion/SourceReader.js";
 import { SourcePolicy } from "../../src/platform/media-ingestion/SourcePolicy.js";
-import { createUploadMiddleware } from "../../src/middleware/uploadMiddleware.js";
+import {
+    createUploadMiddleware,
+    resolveMiddlewarePolicy,
+} from "../../src/middleware/uploadMiddleware.js";
 import {
     resetActiveUploadsForTest,
     resetInFlightBytesForTest,
 } from "../../src/middleware/sizeLimitedStorage.js";
+
+process.env.NODE_ENV = "test";
 
 const VALID_PNG_1X1 = Buffer.from([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -629,15 +634,16 @@ describe("createUploadMiddleware(policy) Seam 1 Contract (Ticket 02a)", () => {
         const elemMw = createUploadMiddleware(ELEMENT_REFERENCE_UPLOAD_POLICY);
         const defaultMw = createUploadMiddleware(DEFAULT_UPLOAD_POLICY);
 
-        // 1. Video sent to CHARACTER_DETAIL_UPLOAD_POLICY with application/octet-stream (bypassing declared MIME filter, caught by stream magic-byte policy check)
+        // 1. Video bytes sent to CHARACTER_DETAIL_UPLOAD_POLICY declared as image/png (passes fileFilter, caught by stream magic-byte policy allowedMimeTypes check)
         const videoStreamReq = buildMultipartStream({
-            filename: "clip.mp4",
-            contentType: "application/octet-stream",
+            filename: "clip.png",
+            contentType: "image/png",
             payloadBuffer: buildMinimalMp4Buffer(),
         });
         const charRes = await invokeMiddleware(charMw, videoStreamReq);
         assert.equal(charRes.status, 415);
         assert.equal(charRes.body?.code, "UNSUPPORTED_MEDIA_TYPE");
+        assert.match(charRes.body?.message || "", /Unsupported file type: video\/mp4/);
 
         // 2. Spoofed non-image bytes declared as image/png on ELEMENT_REFERENCE_UPLOAD_POLICY -> 415
         const spoofedReq = buildMultipartStream({
@@ -745,6 +751,160 @@ describe("createUploadMiddleware(policy) Seam 1 Contract (Ticket 02a)", () => {
         } finally {
             if (origMaxInFlight === undefined) delete process.env.MAX_IN_FLIGHT_UPLOAD_BYTES;
             else process.env.MAX_IN_FLIGHT_UPLOAD_BYTES = origMaxInFlight;
+        }
+    });
+
+    it("applies allowedMimeTypes stream-sniffing ONLY when an UploadPolicy object is passed, preserving exact legacy string path behavior", async () => {
+        for (const legacyPurpose of ["default", "element_reference", "character_reference"]) {
+            const resolvedLegacy = resolveMiddlewarePolicy(legacyPurpose);
+            assert.equal(resolvedLegacy.isPolicyObject, false);
+            assert.equal(
+                resolvedLegacy.streamAllowedMimeTypes,
+                null,
+                `Legacy string "${legacyPurpose}" must NOT enable streamAllowedMimeTypes in sizeLimitedStorage`
+            );
+        }
+
+        for (const policyObj of [
+            DEFAULT_UPLOAD_POLICY,
+            ELEMENT_REFERENCE_UPLOAD_POLICY,
+            CHARACTER_DETAIL_UPLOAD_POLICY,
+            CHARACTER_SHEET_UPLOAD_POLICY,
+        ]) {
+            const resolvedPolicy = resolveMiddlewarePolicy(policyObj);
+            assert.equal(resolvedPolicy.isPolicyObject, true);
+            assert.deepEqual(resolvedPolicy.streamAllowedMimeTypes, policyObj.allowedMimeTypes);
+        }
+
+        // Behavioral verification: MP4 bytes declared as image/png on UploadPolicy vs legacy string
+        const policyMw = createUploadMiddleware(CHARACTER_DETAIL_UPLOAD_POLICY);
+        const legacyMw = createUploadMiddleware("character_reference");
+
+        const policyRes = await invokeMiddleware(
+            policyMw,
+            buildMultipartStream({
+                filename: "spoof.png",
+                contentType: "image/png",
+                payloadBuffer: buildMinimalMp4Buffer(),
+            })
+        );
+        assert.equal(policyRes.status, 415);
+        assert.equal(policyRes.body?.code, "UNSUPPORTED_MEDIA_TYPE");
+        assert.match(
+            policyRes.body?.message || "",
+            /Unsupported file type: video\/mp4/,
+            "UploadPolicy path must reject via stream-sniffed allowedMimeTypes"
+        );
+
+        const legacyRes = await invokeMiddleware(
+            legacyMw,
+            buildMultipartStream({
+                filename: "spoof.png",
+                contentType: "image/png",
+                payloadBuffer: buildMinimalMp4Buffer(),
+            })
+        );
+        assert.equal(legacyRes.status, 415);
+        assert.equal(legacyRes.body?.code, "UNSUPPORTED_MEDIA_TYPE");
+        assert.match(
+            legacyRes.body?.message || "",
+            /Declared MIME "image\/png" does not match detected file type \("video\/mp4"\)/,
+            "Legacy string path must behave identically to pre-02a (declared-vs-detected check without streamAllowedMimeTypes)"
+        );
+    });
+
+    it("verifies per-route equivalence between legacy string profile and target UploadPolicy (imageLimit, videoLimit, allowedMimeTypes, declared-MIME fileFilter behavior)", async () => {
+        const routeMappings = [
+            {
+                route: "POST /api/assets/upload (routes/assets.js)",
+                legacyPurpose: "default",
+                targetPolicy: DEFAULT_UPLOAD_POLICY,
+                allowsVideo: true,
+            },
+            {
+                route: "POST /api/media/ingest (routes/mediaIngestRoutes.js)",
+                legacyPurpose: "default",
+                targetPolicy: DEFAULT_UPLOAD_POLICY,
+                allowsVideo: true,
+            },
+            {
+                route: "POST /api/v2/elements/:id/images (routes/elementRoutes.js)",
+                legacyPurpose: "element_reference",
+                targetPolicy: ELEMENT_REFERENCE_UPLOAD_POLICY,
+                allowsVideo: false,
+            },
+            {
+                route: "POST /api/characters/:characterId/media (routes/characters.js detail)",
+                legacyPurpose: "character_reference",
+                targetPolicy: CHARACTER_DETAIL_UPLOAD_POLICY,
+                allowsVideo: false,
+            },
+            {
+                route: "POST /api/characters/{create,/,character,:characterId/sheet-media} (routes/characters.js sheet)",
+                legacyPurpose: "character_reference",
+                targetPolicy: CHARACTER_SHEET_UPLOAD_POLICY,
+                allowsVideo: false,
+            },
+        ];
+
+        for (const { route, legacyPurpose, targetPolicy, allowsVideo } of routeMappings) {
+            const legacyCfg = resolveMiddlewarePolicy(legacyPurpose);
+            const policyCfg = resolveMiddlewarePolicy(targetPolicy);
+
+            assert.equal(policyCfg.imageLimit, legacyCfg.imageLimit, `${route}: imageLimit must match`);
+            assert.equal(policyCfg.videoLimit, legacyCfg.videoLimit, `${route}: videoLimit must match`);
+            assert.equal(policyCfg.maxSizeBytes, legacyCfg.maxSizeBytes, `${route}: maxSizeBytes must match`);
+            assert.deepEqual(policyCfg.allowedMimeTypes, legacyCfg.allowedMimeTypes, `${route}: allowedMimeTypes must match`);
+
+            const legacyMw = createUploadMiddleware(legacyPurpose);
+            const policyMw = createUploadMiddleware(targetPolicy);
+
+            // Declared-MIME check 1: application/octet-stream rejected identically at fileFilter (415)
+            const legacyOctetRes = await invokeMiddleware(
+                legacyMw,
+                buildMultipartStream({
+                    filename: "raw.bin",
+                    contentType: "application/octet-stream",
+                    payloadBuffer: VALID_PNG_1X1,
+                })
+            );
+            const policyOctetRes = await invokeMiddleware(
+                policyMw,
+                buildMultipartStream({
+                    filename: "raw.bin",
+                    contentType: "application/octet-stream",
+                    payloadBuffer: VALID_PNG_1X1,
+                })
+            );
+            assert.equal(legacyOctetRes.status, 415, `${route}: legacy must reject application/octet-stream`);
+            assert.equal(policyOctetRes.status, 415, `${route}: policy must reject application/octet-stream`);
+            assert.equal(policyOctetRes.body?.message, legacyOctetRes.body?.message);
+
+            // Declared-MIME check 2: video/mp4 accepted on default routes, rejected at fileFilter on images-only routes
+            const legacyVidRes = await invokeMiddleware(
+                legacyMw,
+                buildMultipartStream({
+                    filename: "clip.mp4",
+                    contentType: "video/mp4",
+                    payloadBuffer: buildMinimalMp4Buffer(),
+                })
+            );
+            const policyVidRes = await invokeMiddleware(
+                policyMw,
+                buildMultipartStream({
+                    filename: "clip.mp4",
+                    contentType: "video/mp4",
+                    payloadBuffer: buildMinimalMp4Buffer(),
+                })
+            );
+            if (allowsVideo) {
+                assert.equal(legacyVidRes.nextCalled, true, `${route}: legacy must accept video/mp4`);
+                assert.equal(policyVidRes.nextCalled, true, `${route}: policy must accept video/mp4`);
+            } else {
+                assert.equal(legacyVidRes.status, 415, `${route}: legacy must reject video/mp4`);
+                assert.equal(policyVidRes.status, 415, `${route}: policy must reject video/mp4`);
+                assert.equal(policyVidRes.body?.message, legacyVidRes.body?.message);
+            }
         }
     });
 });

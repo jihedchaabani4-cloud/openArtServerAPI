@@ -12,16 +12,18 @@ import multer from "multer";
 import { SourcePolicy } from "../platform/media-ingestion/SourcePolicy.js";
 import { createSizeLimitedMemoryStorage } from "./sizeLimitedStorage.js";
 
-function resolveMiddlewarePolicy(policyOrPurpose) {
+export function resolveMiddlewarePolicy(policyOrPurpose) {
     if (policyOrPurpose && typeof policyOrPurpose === "object" && Array.isArray(policyOrPurpose.allowedTypes)) {
         const imageLimit = policyOrPurpose.maxImageSize ?? 0;
         const videoLimit = policyOrPurpose.maxVideoSize ?? 0;
         const maxSizeBytes = Math.max(imageLimit, videoLimit);
         return {
+            isPolicyObject: true,
             imageLimit,
             videoLimit,
             maxSizeBytes,
             allowedMimeTypes: policyOrPurpose.allowedMimeTypes,
+            streamAllowedMimeTypes: policyOrPurpose.allowedMimeTypes,
             allowedTypes: policyOrPurpose.allowedTypes,
         };
     }
@@ -29,20 +31,19 @@ function resolveMiddlewarePolicy(policyOrPurpose) {
     // @deprecated Legacy string purpose shim; removed in contract cleanup (Ticket 10)
     const profile = SourcePolicy.getProfile(policyOrPurpose);
     return {
+        isPolicyObject: false,
         imageLimit: profile.imageLimit ?? profile.maxSizeBytes,
         videoLimit: profile.videoLimit ?? profile.maxSizeBytes,
         maxSizeBytes: profile.maxSizeBytes,
         allowedMimeTypes: profile.allowedMimeTypes,
+        streamAllowedMimeTypes: null,
         allowedTypes: profile.allowedTypes,
     };
 }
 
 function createMimeFileFilter(allowedMimeTypes) {
     return (_req, file, cb) => {
-        const isGenericStream =
-            file.mimetype?.startsWith("application/octet-stream") ||
-            file.mimetype?.startsWith("multipart/");
-        if (!isGenericStream && allowedMimeTypes && !allowedMimeTypes.includes(file.mimetype)) {
+        if (allowedMimeTypes && !allowedMimeTypes.includes(file.mimetype)) {
             const err = new Error(`Unsupported file type: ${file.mimetype}`);
             err.statusCode = 415;
             err.code = "UNSUPPORTED_MEDIA_TYPE";
@@ -105,7 +106,7 @@ export function createUploadMiddleware(policyOrPurpose = "default", fieldName = 
         imageLimit: resolvedPolicy.imageLimit,
         videoLimit: resolvedPolicy.videoLimit,
         defaultLimit: resolvedPolicy.maxSizeBytes,
-        allowedMimeTypes: resolvedPolicy.allowedMimeTypes,
+        allowedMimeTypes: resolvedPolicy.streamAllowedMimeTypes,
         maxInFlightBytes: options.maxInFlightBytes || null,
     });
 

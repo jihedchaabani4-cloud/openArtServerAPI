@@ -5,21 +5,86 @@
 
 import dns from "node:dns/promises";
 import net from "node:net";
+import { ValidationError, createPayloadTooLargeError } from "./MediaUploadErrors.js";
+import {
+    DEFAULT_UPLOAD_POLICY,
+    ELEMENT_REFERENCE_UPLOAD_POLICY,
+    ELEMENT_SHEET_UPLOAD_POLICY,
+    CHARACTER_SHEET_UPLOAD_POLICY,
+    CHARACTER_DETAIL_UPLOAD_POLICY,
+} from "./UploadPolicy.js";
+
+function toLegacyProfile(policy) {
+    return {
+        ...policy,
+        maxSizeBytes: Math.max(policy.maxImageSize || 0, policy.maxVideoSize || 0),
+        imageLimit: policy.maxImageSize || 0,
+        videoLimit: policy.maxVideoSize || 0,
+    };
+}
+
+function validateAllowedTypeAndMime(inspected, profile) {
+    if (Array.isArray(profile.allowedTypes) && profile.allowedTypes.length > 0 && !profile.allowedTypes.includes(inspected.type)) {
+        throw new ValidationError(
+            `[SourcePolicy] Media type "${inspected.type}" is not allowed. Allowed types: ${profile.allowedTypes.join(", ")}.`,
+            { statusCode: 415, code: "UNSUPPORTED_MEDIA_TYPE" }
+        );
+    }
+
+    if (profile.allowedMimeTypes && !profile.allowedMimeTypes.includes(inspected.detectedMime)) {
+        throw new ValidationError(
+            `[SourcePolicy] File format "${inspected.detectedMime}" is not allowed for this operation. Allowed: ${profile.allowedMimeTypes.join(", ")}`,
+            { statusCode: 415, code: "UNSUPPORTED_MEDIA_TYPE" }
+        );
+    }
+}
+
+function validateByteSizeCaps(inspected, profile) {
+    const imageLimit = profile.maxImageSize ?? profile.imageLimit ?? 0;
+    const videoLimit = profile.maxVideoSize ?? profile.videoLimit ?? 0;
+    const outerLimit = profile.maxSizeBytes ?? Math.max(imageLimit, videoLimit);
+
+    if (inspected.type === "image" && imageLimit && inspected.sizeBytes > imageLimit) {
+        throw createPayloadTooLargeError(inspected.sizeBytes, imageLimit, "[SourcePolicy] Image file");
+    }
+    if (inspected.type === "video" && videoLimit && inspected.sizeBytes > videoLimit) {
+        throw createPayloadTooLargeError(inspected.sizeBytes, videoLimit, "[SourcePolicy] Video file");
+    }
+    if (inspected.sizeBytes && outerLimit && inspected.sizeBytes > outerLimit) {
+        throw createPayloadTooLargeError(inspected.sizeBytes, outerLimit, "[SourcePolicy] File");
+    }
+}
+
+function validateDimensionAndDurationCaps(inspected, profile) {
+    if (inspected.type === "image" && profile.maxImagePixels && inspected.width && inspected.height) {
+        const pixels = inspected.width * inspected.height;
+        if (pixels > profile.maxImagePixels) {
+            const mp = (pixels / 1000000).toFixed(1);
+            const maxMp = (profile.maxImagePixels / 1000000).toFixed(1);
+            throw new ValidationError(`[SourcePolicy] Image resolution is too high (${mp}MP). Maximum allowed is ${maxMp}MP.`);
+        }
+    }
+
+    if (inspected.type === "video") {
+        if (profile.maxVideoDurationSec && inspected.durationSec && inspected.durationSec > profile.maxVideoDurationSec) {
+            throw new ValidationError(
+                `[SourcePolicy] Video duration (${inspected.durationSec}s) exceeds maximum allowed ${profile.maxVideoDurationSec}s.`
+            );
+        }
+        if (profile.maxVideoPixels && inspected.width && inspected.height) {
+            const pixels = inspected.width * inspected.height;
+            if (pixels > profile.maxVideoPixels) {
+                const mp = (pixels / 1000000).toFixed(1);
+                const maxMp = (profile.maxVideoPixels / 1000000).toFixed(1);
+                throw new ValidationError(`[SourcePolicy] Video resolution is too high (${mp}MP). Maximum allowed is ${maxMp}MP.`);
+            }
+        }
+    }
+}
 
 export class SourcePolicy {
     static PROFILES = {
-        default: {
-            maxSizeBytes: 100 * 1024 * 1024, // 100 MB max (videos)
-            imageLimit: 20 * 1024 * 1024,   // 20 MB max (images)
-            videoLimit: 100 * 1024 * 1024,  // 100 MB max (videos)
-            allowedMimeTypes: [
-                "image/jpeg", "image/png", "image/webp", "image/gif", "image/avif",
-                "video/mp4", "video/webm", "video/quicktime",
-            ],
-            maxImagePixels: 200 * 1000 * 1000,
-            maxVideoDurationSec: 60,
-            maxVideoPixels: 200 * 1000 * 1000,
-        },
+        default: toLegacyProfile(DEFAULT_UPLOAD_POLICY),
         avatar: {
             maxSizeBytes: 10 * 1024 * 1024, // 10 MB
             imageLimit: 10 * 1024 * 1024,
@@ -28,46 +93,11 @@ export class SourcePolicy {
             maxImagePixels: 50 * 1000 * 1000,
             maxVideoDurationSec: 0,
         },
-        character_reference: {
-            maxSizeBytes: 20 * 1024 * 1024, // 20 MB
-            imageLimit: 20 * 1024 * 1024,
-            videoLimit: 0,
-            allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/avif"],
-            maxImagePixels: 100 * 1000 * 1000,
-            maxVideoDurationSec: 0,
-        },
-        character_sheet: {
-            maxSizeBytes: 20 * 1024 * 1024, // 20 MB
-            imageLimit: 20 * 1024 * 1024,
-            videoLimit: 0,
-            allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/avif"],
-            maxImagePixels: 100 * 1000 * 1000,
-            maxVideoDurationSec: 0,
-        },
-        character_detail: {
-            maxSizeBytes: 20 * 1024 * 1024, // 20 MB
-            imageLimit: 20 * 1024 * 1024,
-            videoLimit: 0,
-            allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/avif"],
-            maxImagePixels: 100 * 1000 * 1000,
-            maxVideoDurationSec: 0,
-        },
-        element_reference: {
-            maxSizeBytes: 20 * 1024 * 1024, // 20 MB
-            imageLimit: 20 * 1024 * 1024,
-            videoLimit: 0,
-            allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/avif"],
-            maxImagePixels: 100 * 1000 * 1000,
-            maxVideoDurationSec: 0,
-        },
-        element_sheet: {
-            maxSizeBytes: 20 * 1024 * 1024, // 20 MB
-            imageLimit: 20 * 1024 * 1024,
-            videoLimit: 0,
-            allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/avif"],
-            maxImagePixels: 100 * 1000 * 1000,
-            maxVideoDurationSec: 0,
-        },
+        character_reference: toLegacyProfile(CHARACTER_DETAIL_UPLOAD_POLICY),
+        character_sheet: toLegacyProfile(CHARACTER_SHEET_UPLOAD_POLICY),
+        character_detail: toLegacyProfile(CHARACTER_DETAIL_UPLOAD_POLICY),
+        element_reference: toLegacyProfile(ELEMENT_REFERENCE_UPLOAD_POLICY),
+        element_sheet: toLegacyProfile(ELEMENT_SHEET_UPLOAD_POLICY),
         video_reference: {
             maxSizeBytes: 100 * 1024 * 1024, // 100 MB
             imageLimit: 0,
@@ -79,9 +109,14 @@ export class SourcePolicy {
     };
 
     /**
-     * Retrieves policy configuration by purpose name
+     * Retrieves policy configuration by purpose name.
+     * @deprecated Compatibility shim during expand-contract migration; scheduled for removal in Ticket 10.
+     * Import frozen UploadPolicy constants from UploadPolicy.js instead.
      */
     static getProfile(purpose = "default") {
+        if (purpose && typeof purpose === "object" && Array.isArray(purpose.allowedTypes)) {
+            return toLegacyProfile(purpose);
+        }
         return this.PROFILES[purpose] || this.PROFILES.default;
     }
 
@@ -91,42 +126,20 @@ export class SourcePolicy {
     static isPrivateOrRestrictedIp(ip) {
         if (!ip || !net.isIP(ip)) return true;
 
-        // IPv6 loopback & link-local
         if (ip === "::1" || ip === "::") return true;
         if (ip.startsWith("fe80:") || ip.startsWith("fc00:") || ip.startsWith("fd00:")) return true;
 
-        // IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1)
         if (ip.startsWith("::ffff:")) {
             return this.isPrivateOrRestrictedIp(ip.substring(7));
         }
 
         if (net.isIPv4(ip)) {
-            const parts = ip.split(".").map(Number);
-            const [a, b] = parts;
-
-            // 0.0.0.0/8 (Broadcast/Current network)
-            if (a === 0) return true;
-
-            // 127.0.0.0/8 (Loopback)
-            if (a === 127) return true;
-
-            // 10.0.0.0/8 (Private RFC 1918)
-            if (a === 10) return true;
-
-            // 172.16.0.0/12 (Private RFC 1918: 172.16.0.0 – 172.31.255.255)
+            const [a, b] = ip.split(".").map(Number);
+            if (a === 0 || a === 127 || a === 10 || a >= 224) return true;
             if (a === 172 && b >= 16 && b <= 31) return true;
-
-            // 192.168.0.0/16 (Private RFC 1918)
             if (a === 192 && b === 168) return true;
-
-            // 169.254.0.0/16 (Link-local & AWS/GCP/Azure Cloud Metadata 169.254.169.254)
             if (a === 169 && b === 254) return true;
-
-            // 100.64.0.0/10 (Carrier-Grade NAT)
             if (a === 100 && b >= 64 && b <= 127) return true;
-
-            // 224.0.0.0/4 (Multicast) & 240.0.0.0/4 (Reserved)
-            if (a >= 224) return true;
         }
 
         return false;
@@ -135,134 +148,71 @@ export class SourcePolicy {
     /**
      * Validates a target URL against SSRF attack vectors.
      * Resolves DNS to ensure no private IPs or cloud metadata endpoints are targeted.
-     *
-     * @param {string} urlString
-     * @returns {Promise<URL>} Validated URL instance
      */
     static async validateUrl(urlString) {
         let parsed;
         try {
             parsed = new URL(urlString);
         } catch {
-            throw new Error(`[SourcePolicy] Invalid URL format: "${urlString}"`);
+            throw new ValidationError(`[SourcePolicy] Invalid URL format: "${urlString}"`);
         }
 
-        // Scheme validation
         if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-            throw new Error(`[SourcePolicy] Prohibited URL protocol: "${parsed.protocol}". Only HTTP and HTTPS are allowed.`);
+            throw new ValidationError(`[SourcePolicy] Prohibited URL protocol: "${parsed.protocol}". Only HTTP and HTTPS are allowed.`);
         }
 
         const hostname = parsed.hostname.toLowerCase();
-
-        // Immediate hostname checks
         if (
             hostname === "localhost" ||
             hostname.endsWith(".localhost") ||
             hostname.endsWith(".local") ||
             hostname.endsWith(".internal")
         ) {
-            throw new Error(`[SourcePolicy] Access to local or internal domain "${hostname}" is forbidden (SSRF protection).`);
+            throw new ValidationError(`[SourcePolicy] Access to local or internal domain "${hostname}" is forbidden (SSRF protection).`);
         }
 
-        // Check if hostname is directly an IP literal
         if (net.isIP(hostname)) {
             if (this.isPrivateOrRestrictedIp(hostname)) {
-                throw new Error(`[SourcePolicy] Access to private/internal IP address "${hostname}" is forbidden (SSRF protection).`);
+                throw new ValidationError(`[SourcePolicy] Access to private/internal IP address "${hostname}" is forbidden (SSRF protection).`);
             }
             return parsed;
         }
 
-        // DNS resolution check
+        await this._verifyResolvedDnsRecords(hostname);
+        return parsed;
+    }
+
+    static async _verifyResolvedDnsRecords(hostname) {
         try {
             const records = await dns.lookup(hostname, { all: true });
             if (!records || !records.length) {
-                throw new Error(`[SourcePolicy] Could not resolve host "${hostname}".`);
+                throw new ValidationError(`[SourcePolicy] Could not resolve host "${hostname}".`);
             }
 
             for (const { address } of records) {
                 if (this.isPrivateOrRestrictedIp(address)) {
-                    throw new Error(
+                    throw new ValidationError(
                         `[SourcePolicy] Target host "${hostname}" resolves to restricted IP "${address}" (SSRF protection).`
                     );
                 }
             }
         } catch (err) {
             if (err.message?.includes("SSRF protection")) throw err;
-            throw new Error(`[SourcePolicy] DNS resolution failed for "${hostname}": ${err.message}`);
+            throw new ValidationError(`[SourcePolicy] DNS resolution failed for "${hostname}": ${err.message}`);
         }
-
-        return parsed;
     }
 
     /**
-     * Validates inspected media metadata against the purpose profile limits.
-     *
-     * @param {Object} inspected
-     * @param {Object} profile
+     * Validates inspected media metadata against the policy/profile limits.
      */
     static validateMetadata(inspected, profile) {
         if (!inspected) {
-            throw new Error("[SourcePolicy] Media inspection failed: no metadata returned.");
+            throw new ValidationError("[SourcePolicy] Media inspection failed: no metadata returned.");
         }
 
-        // 1. MIME Whitelist
-        if (profile.allowedMimeTypes && !profile.allowedMimeTypes.includes(inspected.detectedMime)) {
-            const err = new Error(
-                `[SourcePolicy] File format "${inspected.detectedMime}" is not allowed for this operation. Allowed: ${profile.allowedMimeTypes.join(", ")}`
-            );
-            err.statusCode = 415;
-            err.code = "UNSUPPORTED_MEDIA_TYPE";
-            throw err;
-        }
-
-        // 2. Specific Image Size limit
-        if (inspected.type === "image" && profile.imageLimit && inspected.sizeBytes > profile.imageLimit) {
-            const maxMB = (profile.imageLimit / (1024 * 1024)).toFixed(1);
-            const actualMB = (inspected.sizeBytes / (1024 * 1024)).toFixed(1);
-            const err = new Error(`[SourcePolicy] Image file is too large (${actualMB}MB). Maximum allowed is ${maxMB}MB.`);
-            err.statusCode = 413;
-            err.code = "PAYLOAD_TOO_LARGE";
-            throw err;
-        }
-
-        // 2.1 Overall Size limit
-        if (inspected.sizeBytes && inspected.sizeBytes > profile.maxSizeBytes) {
-            const maxMB = (profile.maxSizeBytes / (1024 * 1024)).toFixed(1);
-            const actualMB = (inspected.sizeBytes / (1024 * 1024)).toFixed(1);
-            const err = new Error(`[SourcePolicy] File is too large (${actualMB}MB). Maximum allowed is ${maxMB}MB.`);
-            err.statusCode = 413;
-            err.code = "PAYLOAD_TOO_LARGE";
-            throw err;
-        }
-
-        // 3. Image Resolution
-        if (inspected.type === "image" && profile.maxImagePixels && inspected.width && inspected.height) {
-            const pixels = inspected.width * inspected.height;
-            if (pixels > profile.maxImagePixels) {
-                const mp = (pixels / 1000000).toFixed(1);
-                const maxMp = (profile.maxImagePixels / 1000000).toFixed(1);
-                throw new Error(`[SourcePolicy] Image resolution is too high (${mp}MP). Maximum allowed is ${maxMp}MP.`);
-            }
-        }
-
-        // 4. Video Duration & Resolution
-        if (inspected.type === "video") {
-            if (profile.maxVideoDurationSec && inspected.durationSec && inspected.durationSec > profile.maxVideoDurationSec) {
-                throw new Error(
-                    `[SourcePolicy] Video duration (${inspected.durationSec}s) exceeds maximum allowed ${profile.maxVideoDurationSec}s.`
-                );
-            }
-
-            if (profile.maxVideoPixels && inspected.width && inspected.height) {
-                const pixels = inspected.width * inspected.height;
-                if (pixels > profile.maxVideoPixels) {
-                    const mp = (pixels / 1000000).toFixed(1);
-                    const maxMp = (profile.maxVideoPixels / 1000000).toFixed(1);
-                    throw new Error(`[SourcePolicy] Video resolution is too high (${mp}MP). Maximum allowed is ${maxMp}MP.`);
-                }
-            }
-        }
-
+        validateAllowedTypeAndMime(inspected, profile);
+        validateByteSizeCaps(inspected, profile);
+        validateDimensionAndDurationCaps(inspected, profile);
         return true;
     }
 }

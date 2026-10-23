@@ -1,68 +1,109 @@
 /**
  * SourceReader
  * Safely streams and buffers input sources (File, Base64, URL).
- * Enforces strict byte-level limits during streaming and validates each redirect against SSRF policy.
+ * Enforces strict per-type byte-level limits during streaming/decoding via early magic-byte sniffing,
+ * and validates each redirect against SSRF policy.
  */
 
 import { SourcePolicy } from "./SourcePolicy.js";
+import { MediaInspector } from "./MediaInspector.js";
+import { DEFAULT_UPLOAD_POLICY } from "./UploadPolicy.js";
+import { ValidationError, createPayloadTooLargeError } from "./MediaUploadErrors.js";
 
-export class SourceReader {
-    /**
-     * Reads a resolved source descriptor and returns verified buffer payload.
-     *
-     * @param {{
-     *   kind: "file" | "base64" | "url",
-     *   buffer?: Buffer,
-     *   value?: string,
-     *   originalName?: string,
-     *   mimeHint?: string | null
-     * }} descriptor
-     * @param {Object} profile - Policy profile containing maxSizeBytes
-     * @returns {Promise<{
-     *   buffer: Buffer,
-     *   sizeBytes: number,
-     *   originalName: string,
-     *   mimeHint: string | null
-     * }>}
-     */
-    static async read(descriptor, profile = SourcePolicy.PROFILES.default) {
-        if (!descriptor || !descriptor.kind) {
-            throw new Error("[SourceReader] Invalid source descriptor.");
-        }
+const MB = 1024 * 1024;
+const MAGIC_HEADER_MIN_BYTES = 32;
+const BASE64_HEADER_SLICE_CHARS = 48; // 48 base64 chars = 36 decoded bytes
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
-        const maxSizeBytes = profile.maxSizeBytes || 100 * 1024 * 1024;
+function resolvePolicyByteLimits(policyOrProfile = DEFAULT_UPLOAD_POLICY) {
+    const imageLimit = policyOrProfile.maxImageSize ?? policyOrProfile.imageLimit ?? 20 * MB;
+    const videoLimit =
+        policyOrProfile.maxVideoSize ??
+        policyOrProfile.videoLimit ??
+        (policyOrProfile.maxSizeBytes ?? 100 * MB);
+    const outerLimit = policyOrProfile.maxSizeBytes ?? Math.max(imageLimit, videoLimit);
+    const allowedTypes =
+        policyOrProfile.allowedTypes ?? (videoLimit > 0 ? ["image", "video"] : ["image"]);
 
-        switch (descriptor.kind) {
-            case "file":
-                return this._readFile(descriptor, maxSizeBytes);
+    return { imageLimit, videoLimit, outerLimit, allowedTypes };
+}
 
-            case "base64":
-                return this._readBase64(descriptor, maxSizeBytes);
-
-            case "url":
-                return this._readUrl(descriptor.value, profile);
-
-            default:
-                throw new Error(`[SourceReader] Cannot read source kind: "${descriptor.kind}".`);
-        }
+function sniffAndResolveByteCap(headerBytes, limits) {
+    let sniffedMime = null;
+    try {
+        sniffedMime = MediaInspector.sniffMagicBytes(headerBytes.subarray(0, MAGIC_HEADER_MIN_BYTES));
+    } catch (sniffErr) {
+        throw new ValidationError(
+            `[SourcePolicy] File format validation failed: ${sniffErr.message}`,
+            { statusCode: 415, code: "UNSUPPORTED_MEDIA_TYPE" }
+        );
     }
 
-    /**
-     * Reads file buffer and checks size limit
-     */
-    static _readFile(descriptor, maxSizeBytes) {
-        const buf = descriptor.buffer;
-        if (!buf || !Buffer.isBuffer(buf)) {
-            throw new Error("[SourceReader] Missing or invalid file buffer.");
+    if (!sniffedMime) {
+        throw new ValidationError(
+            "[SourcePolicy] File format validation failed: unrecognized or unsupported MIME magic-byte signature.",
+            { statusCode: 415, code: "UNSUPPORTED_MEDIA_TYPE" }
+        );
+    }
+
+    const detectedType = sniffedMime.startsWith("video/") ? "video" : "image";
+    if (!limits.allowedTypes.includes(detectedType)) {
+        throw new ValidationError(
+            `[SourcePolicy] File format "${sniffedMime}" is not allowed for this operation.`,
+            { statusCode: 415, code: "UNSUPPORTED_MEDIA_TYPE" }
+        );
+    }
+
+    const effectiveLimit = detectedType === "video" ? limits.videoLimit : limits.imageLimit;
+    return { sniffedMime, detectedType, effectiveLimit };
+}
+
+function estimateBase64DecodedBytes(pureBase64) {
+    if (!pureBase64.length) return 0;
+    const padding = pureBase64.endsWith("==") ? 2 : (pureBase64.endsWith("=") ? 1 : 0);
+    return Math.floor((pureBase64.length * 3) / 4) - padding;
+}
+
+function createStreamExceededError(limitBytes) {
+    const maxMB = (limitBytes / MB).toFixed(1);
+    return new ValidationError(
+        `[SourceReader] File stream exceeded maximum allowed size of ${maxMB}MB during download.`,
+        { statusCode: 413, code: "PAYLOAD_TOO_LARGE" }
+    );
+}
+
+export class SourceReader {
+    static async read(descriptor, policyOrProfile = DEFAULT_UPLOAD_POLICY) {
+        if (!descriptor || !descriptor.kind) {
+            throw new ValidationError("[SourceReader] Invalid source descriptor.", {
+                statusCode: 400,
+                code: "VALIDATION_ERROR",
+            });
         }
 
-        if (buf.length > maxSizeBytes) {
-            const maxMB = (maxSizeBytes / (1024 * 1024)).toFixed(1);
-            const actualMB = (buf.length / (1024 * 1024)).toFixed(1);
-            const err = new Error(`[SourceReader] Uploaded file is too large (${actualMB}MB). Maximum allowed is ${maxMB}MB.`);
-            err.statusCode = 413;
-            err.code = "PAYLOAD_TOO_LARGE";
-            throw err;
+        const limits = resolvePolicyByteLimits(policyOrProfile);
+        if (descriptor.kind === "file") return this._readFile(descriptor, limits);
+        if (descriptor.kind === "base64") return this._readBase64(descriptor, limits);
+        if (descriptor.kind === "url") return this._readUrl(descriptor.value || descriptor.url, limits);
+
+        throw new ValidationError(`[SourceReader] Cannot read source kind: "${descriptor.kind}".`, {
+            statusCode: 400,
+            code: "VALIDATION_ERROR",
+        });
+    }
+
+    static _readFile(descriptor, limits) {
+        const buf = descriptor.buffer;
+        if (!buf || !Buffer.isBuffer(buf) || buf.length === 0) {
+            throw new ValidationError("[SourceReader] Missing or empty file buffer.", {
+                statusCode: 400,
+                code: "VALIDATION_ERROR",
+            });
+        }
+
+        const { effectiveLimit } = sniffAndResolveByteCap(buf.subarray(0, MAGIC_HEADER_MIN_BYTES), limits);
+        if (buf.length > effectiveLimit) {
+            throw createPayloadTooLargeError(buf.length, effectiveLimit, "[SourceReader] Uploaded file");
         }
 
         return {
@@ -74,30 +115,35 @@ export class SourceReader {
     }
 
     /**
-     * Decodes Base64 data and checks size limit
+     * @deprecated Scheduled for removal in Ticket 10 once all frontend callers
+     * migrate to FormData (new File) and mediaId (Project Cache).
      */
-    static _readBase64(descriptor, maxSizeBytes) {
+    static _readBase64(descriptor, limits) {
         const raw = descriptor.value || "";
-        const pureBase64 = raw.includes(",") ? raw.split(",")[1] : raw;
-
-        let buf;
-        try {
-            buf = Buffer.from(pureBase64, "base64");
-        } catch (e) {
-            throw new Error(`[SourceReader] Failed to decode base64 string: ${e.message}`);
+        const pureBase64 = (raw.includes(",") ? raw.split(",")[1] : raw).trim();
+        if (!pureBase64) {
+            throw new ValidationError("[SourceReader] Decoded base64 payload is empty.", {
+                statusCode: 400,
+                code: "VALIDATION_ERROR",
+            });
         }
 
-        if (!buf || buf.length === 0) {
-            throw new Error("[SourceReader] Decoded base64 payload is empty.");
+        const headerBytes = Buffer.from(pureBase64.slice(0, BASE64_HEADER_SLICE_CHARS), "base64");
+        const { effectiveLimit } = sniffAndResolveByteCap(headerBytes, limits);
+        const estimatedBytes = estimateBase64DecodedBytes(pureBase64);
+        if (estimatedBytes > effectiveLimit) {
+            throw createPayloadTooLargeError(estimatedBytes, effectiveLimit, "[SourceReader] Base64 payload");
         }
 
-        if (buf.length > maxSizeBytes) {
-            const maxMB = (maxSizeBytes / (1024 * 1024)).toFixed(1);
-            const actualMB = (buf.length / (1024 * 1024)).toFixed(1);
-            const err = new Error(`[SourceReader] Base64 payload is too large (${actualMB}MB). Maximum allowed is ${maxMB}MB.`);
-            err.statusCode = 413;
-            err.code = "PAYLOAD_TOO_LARGE";
-            throw err;
+        const buf = Buffer.from(pureBase64, "base64");
+        if (!buf.length) {
+            throw new ValidationError("[SourceReader] Decoded base64 payload is empty.", {
+                statusCode: 400,
+                code: "VALIDATION_ERROR",
+            });
+        }
+        if (buf.length > effectiveLimit) {
+            throw createPayloadTooLargeError(buf.length, effectiveLimit, "[SourceReader] Base64 payload");
         }
 
         return {
@@ -109,126 +155,148 @@ export class SourceReader {
     }
 
     /**
-     * Streams remote URL with redirect checks and byte-counting guard.
+     * @deprecated Scheduled for removal in Ticket 10 once all frontend callers
+     * migrate to FormData (new File) and mediaId (Project Cache).
      */
-    static async _readUrl(initialUrl, profile) {
+    static async _readUrl(initialUrl, limits) {
         let currentUrl = initialUrl;
         const maxRedirects = 3;
-        const maxSizeBytes = profile.maxSizeBytes;
 
         for (let hop = 0; hop <= maxRedirects; hop++) {
-            // 1. Validate target URL against SSRF rules before making network call
             const validatedUrl = await SourcePolicy.validateUrl(currentUrl);
+            const { res, controller, timeout } = await this._fetchUrlHop(validatedUrl, currentUrl);
 
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 25000); // 25s timeout
-
-            let res;
-            try {
-                res = await fetch(validatedUrl.toString(), {
-                    signal: controller.signal,
-                    redirect: "manual",
-                    headers: {
-                        "User-Agent": "OpenArt-MediaIngestion/1.0",
-                        Accept: "image/*,video/*;q=0.9,*/*;q=0.5",
-                    },
-                });
-            } catch (err) {
-                clearTimeout(timeout);
-                if (err.name === "AbortError") {
-                    throw new Error(`[SourceReader] Request to "${currentUrl}" timed out after 25 seconds.`);
-                }
-                throw new Error(`[SourceReader] Failed to fetch remote URL: ${err.message}`);
-            }
-
-            // 2. Handle HTTP Redirects manually to re-verify destination
-            if ([301, 302, 303, 307, 308].includes(res.status)) {
-                clearTimeout(timeout);
-                const location = res.headers.get("location");
-                if (!location) {
-                    throw new Error(`[SourceReader] Redirect received without Location header from "${currentUrl}".`);
-                }
-
-                currentUrl = new URL(location, validatedUrl).toString();
-                if (hop === maxRedirects) {
-                    throw new Error(`[SourceReader] Too many redirects (maximum allowed: ${maxRedirects}).`);
-                }
+            if (REDIRECT_STATUSES.has(res.status)) {
+                currentUrl = this._resolveRedirectTarget(res, validatedUrl, currentUrl, hop, maxRedirects, timeout);
                 continue;
             }
 
-            // 3. Status Check
             if (!res.ok) {
                 clearTimeout(timeout);
-                throw new Error(`[SourceReader] Remote server responded with error ${res.status}: ${res.statusText}`);
+                throw new ValidationError(
+                    `[SourceReader] Remote server responded with error ${res.status}: ${res.statusText}`
+                );
             }
 
-            // 4. Pre-check Content-Length header if provided
-            const contentLengthHeader = res.headers.get("content-length");
-            if (contentLengthHeader) {
-                const declaredBytes = Number(contentLengthHeader);
-                if (!isNaN(declaredBytes) && declaredBytes > maxSizeBytes) {
-                    clearTimeout(timeout);
-                    const maxMB = (maxSizeBytes / (1024 * 1024)).toFixed(1);
-                    const actualMB = (declaredBytes / (1024 * 1024)).toFixed(1);
-                    const err = new Error(
-                        `[SourceReader] Remote file size (${actualMB}MB) exceeds maximum limit (${maxMB}MB).`
-                    );
-                    err.statusCode = 413;
-                    err.code = "PAYLOAD_TOO_LARGE";
-                    throw err;
-                }
-            }
-
-            // 5. Stream chunks and enforce byte-counter guard
-            const chunks = [];
-            let totalBytes = 0;
-
-            try {
-                // Node 18+ fetch body is an async iterable / Web ReadableStream
-                for await (const chunk of res.body) {
-                    totalBytes += chunk.length;
-                    if (totalBytes > maxSizeBytes) {
-                        controller.abort();
-                        const maxMB = (maxSizeBytes / (1024 * 1024)).toFixed(1);
-                        const err = new Error(
-                            `[SourceReader] File stream exceeded maximum allowed size of ${maxMB}MB during download.`
-                        );
-                        err.statusCode = 413;
-                        err.code = "PAYLOAD_TOO_LARGE";
-                        throw err;
-                    }
-                    chunks.push(Buffer.from(chunk));
-                }
-            } catch (streamErr) {
-                clearTimeout(timeout);
-                if (streamErr.name === "AbortError" && totalBytes > maxSizeBytes) {
-                    const maxMB = (maxSizeBytes / (1024 * 1024)).toFixed(1);
-                    const err = new Error(`[SourceReader] File stream exceeded maximum allowed size of ${maxMB}MB during download.`);
-                    err.statusCode = 413;
-                    err.code = "PAYLOAD_TOO_LARGE";
-                    throw err;
-                }
-                throw streamErr;
-            } finally {
-                clearTimeout(timeout);
-            }
-
-            const buffer = Buffer.concat(chunks);
-            const mimeHint = res.headers.get("content-type")?.split(";")[0]?.trim() || null;
-
-            // Extract file name from URL pathname
-            const pathname = validatedUrl.pathname;
-            const originalName = pathname.substring(pathname.lastIndexOf("/") + 1) || "remote_media.bin";
-
-            return {
-                buffer,
-                sizeBytes: buffer.length,
-                originalName,
-                mimeHint,
-            };
+            return this._readValidatedUrlResponse({ res, validatedUrl, controller, timeout, limits });
         }
 
-        throw new Error("[SourceReader] Failed to complete download.");
+        throw new ValidationError("[SourceReader] Failed to complete download.");
+    }
+
+    static async _fetchUrlHop(validatedUrl, currentUrl) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 25000);
+        try {
+            const res = await fetch(validatedUrl.toString(), {
+                signal: controller.signal,
+                redirect: "manual",
+                headers: {
+                    "User-Agent": "OpenArt-MediaIngestion/1.0",
+                    Accept: "image/*,video/*;q=0.9,*/*;q=0.5",
+                },
+            });
+            return { res, controller, timeout };
+        } catch (err) {
+            clearTimeout(timeout);
+            if (err.name === "AbortError") {
+                throw new ValidationError(`[SourceReader] Request to "${currentUrl}" timed out after 25 seconds.`);
+            }
+            throw new ValidationError(`[SourceReader] Failed to fetch remote URL: ${err.message}`);
+        }
+    }
+
+    static _resolveRedirectTarget(res, validatedUrl, currentUrl, hop, maxRedirects, timeout) {
+        clearTimeout(timeout);
+        const location = res.headers.get("location");
+        if (!location) {
+            throw new ValidationError(`[SourceReader] Redirect received without Location header from "${currentUrl}".`);
+        }
+        if (hop === maxRedirects) {
+            throw new ValidationError(`[SourceReader] Too many redirects (maximum allowed: ${maxRedirects}).`);
+        }
+        return new URL(location, validatedUrl).toString();
+    }
+
+    static async _readValidatedUrlResponse({ res, validatedUrl, controller, timeout, limits }) {
+        const declaredBytes = Number(res.headers.get("content-length"));
+        if (!Number.isNaN(declaredBytes) && declaredBytes > limits.outerLimit) {
+            clearTimeout(timeout);
+            throw createPayloadTooLargeError(declaredBytes, limits.outerLimit, "[SourceReader] Remote file size");
+        }
+
+        const buffer = await this._consumeUrlStream({ res, controller, timeout, declaredBytes, limits });
+        const mimeHint = res.headers.get("content-type")?.split(";")[0]?.trim() || null;
+        const pathname = validatedUrl.pathname;
+        const originalName = pathname.substring(pathname.lastIndexOf("/") + 1) || "remote_media.bin";
+
+        return { buffer, sizeBytes: buffer.length, originalName, mimeHint };
+    }
+
+    static async _consumeUrlStream({ res, controller, timeout, declaredBytes, limits }) {
+        const state = {
+            chunks: [],
+            totalBytes: 0,
+            headerBuffer: Buffer.alloc(0),
+            headerSniffed: false,
+            activeLimitBytes: limits.outerLimit,
+        };
+
+        try {
+            for await (const rawChunk of res.body) {
+                const chunk = Buffer.isBuffer(rawChunk) ? rawChunk : Buffer.from(rawChunk);
+                this._appendUrlStreamChunk({ chunk, state, controller, declaredBytes, limits });
+            }
+            if (state.totalBytes === 0) {
+                throw new ValidationError("[SourceReader] Remote URL returned an empty response body.", {
+                    statusCode: 400,
+                    code: "VALIDATION_ERROR",
+                });
+            }
+            if (!state.headerSniffed && state.headerBuffer.length > 0) {
+                const { effectiveLimit } = sniffAndResolveByteCap(state.headerBuffer, limits);
+                if (state.totalBytes > effectiveLimit) {
+                    throw createPayloadTooLargeError(state.totalBytes, effectiveLimit, "[SourceReader] Remote file size");
+                }
+            }
+            return Buffer.concat(state.chunks);
+        } catch (streamErr) {
+            if (streamErr instanceof ValidationError) throw streamErr;
+            if (streamErr.name === "AbortError" && state.totalBytes > state.activeLimitBytes) {
+                throw createStreamExceededError(state.activeLimitBytes);
+            }
+            throw new ValidationError(streamErr.message || "[SourceReader] Stream read failed.", {
+                cause: streamErr,
+            });
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
+    static _appendUrlStreamChunk({ chunk, state, controller, declaredBytes, limits }) {
+        if (!state.headerSniffed) {
+            state.headerBuffer = Buffer.concat([state.headerBuffer, chunk]);
+            if (state.headerBuffer.length >= MAGIC_HEADER_MIN_BYTES) {
+                state.headerSniffed = true;
+                const { effectiveLimit } = sniffAndResolveByteCap(
+                    state.headerBuffer.subarray(0, MAGIC_HEADER_MIN_BYTES),
+                    limits
+                );
+                state.activeLimitBytes = effectiveLimit;
+
+                if (!Number.isNaN(declaredBytes) && declaredBytes > state.activeLimitBytes) {
+                    controller.abort();
+                    throw createPayloadTooLargeError(declaredBytes, state.activeLimitBytes, "[SourceReader] Remote file size");
+                }
+            }
+        }
+
+        state.totalBytes += chunk.length;
+        if (state.totalBytes > state.activeLimitBytes) {
+            controller.abort();
+            throw createStreamExceededError(state.activeLimitBytes);
+        }
+        state.chunks.push(chunk);
     }
 }
 

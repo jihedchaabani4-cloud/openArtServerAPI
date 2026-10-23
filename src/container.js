@@ -28,6 +28,7 @@ import { WorkflowLifecycleService } from "#platform/workflow/WorkflowService.js"
 import { MediaService } from "#platform/media/MediaService.js";
 import { BinaryIngestionService } from "#platform/media-ingestion/BinaryIngestionService.js";
 import { MediaIngestionService } from "#platform/media-ingestion/MediaIngestionService.js";
+import { MediaUploadService } from "#platform/media-ingestion/MediaUploadService.js";
 import { CharacterService } from "#domain/character/CharacterService.js";
 import { ElementService } from "#domain/element/ElementService.js";
 import { ElementMediaService } from "#domain/element/ElementMediaService.js";
@@ -207,6 +208,7 @@ export const workflowMediaService = workflowService.mediaService;
 export const mediaService = new MediaService({ db });
 
 export const binaryIngestionService = new BinaryIngestionService({ storageService });
+export const mediaUploadService = new MediaUploadService({ storageService });
 
 export const assetUploadService = new AssetUploadService({
     db,

@@ -607,6 +607,31 @@ describe("MediaUploadService Seam 1 Contract", () => {
             (err) => err instanceof UploadError && err.statusCode === 502
         );
     });
+
+    it("discard() logs and throws UploadError when Supabase remove() returns { error } through StorageService.deleteFiles", async () => {
+        const { StorageService } = await import("../../src/platform/storage/StorageService.js");
+        const mockProvider = {
+            async deleteFiles(paths) {
+                // Simulate SupabaseStorageProvider receiving an error from supabase.storage.from().remove()
+                return {
+                    deletedCount: 0,
+                    failures: paths.map((p) => ({ path: p, error: new Error("Bucket not found in project") })),
+                };
+            },
+        };
+        const storage = new StorageService("generated_images", mockProvider);
+        const service = new MediaUploadService({ storageService: storage });
+
+        await assert.rejects(
+            service.discard(["user-1/uploads/orphan.webp"]),
+            (err) => {
+                assert.ok(err instanceof UploadError);
+                assert.equal(err.statusCode, 502);
+                assert.match(err.message, /Failed to discard 1 storage file\(s\)/);
+                return true;
+            }
+        );
+    });
 });
 
 function buildMultipartStream({ fieldName = "file", filename = "test.png", contentType = "image/png", payloadBuffer }) {

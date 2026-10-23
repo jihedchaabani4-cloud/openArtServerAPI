@@ -12,6 +12,7 @@ import {
     isWorkflowReferenceQuotaError,
 } from "../../src/platform/media-ingestion/MediaUploadErrors.js";
 import { CrudServiceError } from "../../src/utils/crudOperationLog.js";
+import { baseLogger } from "../../src/infrastructure/logging/index.js";
 
 function createMockHarness() {
     const workflows = new Map();
@@ -1101,6 +1102,59 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
 
             const rbRes = await h.service.rollbackAttachedMedia(res.rollbackHandle);
             assert.ok(rbRes && typeof rbRes === "object", "Must return tracking object without throwing");
+        });
+
+        it("storage discard failure logs at error level with workflowId and storageKeys, populating discardFailedKeys while complete is true", async () => {
+            const h = createMockHarness();
+            const wfId = "00000000-0000-0000-0000-000000000002";
+            h.workflows.set(wfId, { id: wfId, user_id: "user-1", project_id: "proj-1" });
+
+            const res = await h.service.attachMediaItems({
+                workflowId: wfId,
+                userId: "user-1",
+                projectId: "proj-1",
+                role: "detail",
+                maxAllowed: 6,
+                items: [
+                    {
+                        kind: "uploaded",
+                        uploadedFile: {
+                            storageKey: "user-1/uploads/fail-discard.png",
+                            url: "https://storage.test/fail-discard.png",
+                            width: 100,
+                            height: 100,
+                            format: "PNG",
+                        },
+                    },
+                ],
+            });
+
+            const errorLogs = [];
+            const origBaseError = baseLogger.error;
+            baseLogger.error = (obj, msg, ...rest) => {
+                errorLogs.push({ obj, msg });
+                return origBaseError.call(baseLogger, obj, msg, ...rest);
+            };
+
+            try {
+                // Storage discard fails
+                h.mediaUploadService.discard = async () => {
+                    throw new Error("Simulated storage discard failure");
+                };
+
+                const rbRes = await h.service.rollbackAttachedMedia(res.rollbackHandle);
+                assert.equal(rbRes.complete, true, "DB operations succeeded so complete must remain true");
+                assert.deepEqual(rbRes.discardFailedKeys, ["user-1/uploads/fail-discard.png"], "discardFailedKeys must contain failed storage keys");
+
+                const discardErrorLog = errorLogs.find(
+                    (l) => l.obj?.operation === "WorkflowMediaService:discardStorage" && l.obj?.status === "error"
+                );
+                assert.ok(discardErrorLog, "Must log at error level on discard failure");
+                assert.equal(discardErrorLog.obj.workflowId, wfId, "Must include workflowId in structured log");
+                assert.deepEqual(discardErrorLog.obj.storageKeys, ["user-1/uploads/fail-discard.png"], "Must include storageKeys in structured log");
+            } finally {
+                baseLogger.error = origBaseError;
+            }
         });
     });
 });

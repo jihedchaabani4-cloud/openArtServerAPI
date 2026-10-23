@@ -49,17 +49,21 @@ export class WorkflowMediaService {
         this.mediaUploadService = mediaUploadService;
     }
 
-    async _discardStorage(keys = []) {
+    async _discardStorage(keys = [], { workflowId = null } = {}) {
         const uniqueKeys = [...new Set((keys || []).filter(Boolean))];
-        if (uniqueKeys.length === 0) return;
+        if (uniqueKeys.length === 0) return [];
         try {
             await this.mediaUploadService.discard(uniqueKeys);
+            return [];
         } catch (err) {
             crudOperationLog({
                 operation: "WorkflowMediaService:discardStorage",
-                status: "warning",
+                status: "error",
+                workflowId,
+                storageKeys: uniqueKeys,
                 message: err?.message,
             });
+            return uniqueKeys;
         }
     }
 
@@ -194,7 +198,7 @@ export class WorkflowMediaService {
             const uploadedKeys = items
                 .filter((it) => it?.kind === "uploaded" && it?.uploadedFile?.storageKey)
                 .map((it) => it.uploadedFile.storageKey);
-            await this._discardStorage(uploadedKeys);
+            await this._discardStorage(uploadedKeys, { workflowId });
             throw new ValidationError(
                 `Invalid maxAllowed value (${maxAllowed}): must be null or an integer >= 0.`,
                 { statusCode: 400, code: "VALIDATION_ERROR" }
@@ -204,12 +208,12 @@ export class WorkflowMediaService {
         // 2. Validate workflowId and userId
         if (!workflowId || typeof workflowId !== "string") {
             const uploadedKeys = items.filter((it) => it?.kind === "uploaded" && it?.uploadedFile?.storageKey).map((it) => it.uploadedFile.storageKey);
-            await this._discardStorage(uploadedKeys);
+            await this._discardStorage(uploadedKeys, { workflowId });
             throw new ValidationError("workflowId is required", { statusCode: 400, code: "VALIDATION_ERROR" });
         }
         if (!userId) {
             const uploadedKeys = items.filter((it) => it?.kind === "uploaded" && it?.uploadedFile?.storageKey).map((it) => it.uploadedFile.storageKey);
-            await this._discardStorage(uploadedKeys);
+            await this._discardStorage(uploadedKeys, { workflowId });
             throw new ValidationError("userId is required", { statusCode: 400, code: "VALIDATION_ERROR" });
         }
 
@@ -238,7 +242,7 @@ export class WorkflowMediaService {
             }
             if (!isAuthorized) {
                 const uploadedKeys = items.filter((it) => it?.kind === "uploaded" && it?.uploadedFile?.storageKey).map((it) => it.uploadedFile.storageKey);
-                await this._discardStorage(uploadedKeys);
+                await this._discardStorage(uploadedKeys, { workflowId });
                 throw new CrudServiceError("Workflow not found", {
                     statusCode: 404,
                     errorCode: "NOT_FOUND",
@@ -262,7 +266,7 @@ export class WorkflowMediaService {
                     });
                 } catch (existingErr) {
                     const uploadedKeys = items.filter((it) => it?.kind === "uploaded" && it?.uploadedFile?.storageKey).map((it) => it.uploadedFile.storageKey);
-                    await this._discardStorage(uploadedKeys);
+                    await this._discardStorage(uploadedKeys, { workflowId });
                     throw existingErr;
                 }
                 resolvedExisting.set(item, resolvedMedia);
@@ -439,10 +443,12 @@ export class WorkflowMediaService {
 
         if (!rollbackHandle || !Array.isArray(rollbackHandle.entries)) {
             return {
+                complete: true,
                 unlinkedMediaIds: [],
                 deletedMediaIds: [],
                 discardedStorageKeys: [],
                 skippedStorageKeys: [],
+                discardFailedKeys: [],
                 restoredPrimaryMediaId: null,
             };
         }
@@ -453,6 +459,7 @@ export class WorkflowMediaService {
         const deletedMediaIds = [];
         const discardedStorageKeys = [];
         const skippedStorageKeys = [];
+        const discardFailedKeys = [];
         let restoredPrimaryMediaId = null;
         let primaryRestoreFailed = false;
         let hasFatalError = false;
@@ -587,7 +594,10 @@ export class WorkflowMediaService {
         }
 
         if (keysToDiscard.length > 0) {
-            await this._discardStorage(keysToDiscard);
+            const failed = await this._discardStorage(keysToDiscard, { workflowId });
+            if (Array.isArray(failed) && failed.length > 0) {
+                discardFailedKeys.push(...failed);
+            }
         }
 
         if (skippedStorageKeys.length > 0) {
@@ -631,6 +641,7 @@ export class WorkflowMediaService {
             deletedCount: deletedMediaIds.length,
             discardedCount: discardedStorageKeys.length,
             skippedCount: skippedStorageKeys.length,
+            discardFailedCount: discardFailedKeys.length,
         });
 
         return {
@@ -639,6 +650,7 @@ export class WorkflowMediaService {
             deletedMediaIds,
             discardedStorageKeys,
             skippedStorageKeys,
+            discardFailedKeys,
             restoredPrimaryMediaId,
         };
     }

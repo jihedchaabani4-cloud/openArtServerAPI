@@ -509,6 +509,7 @@ export class WorkflowMediaService {
 
         // Step 2: Restore or clear primary before deleting media row
         if (primaryModified && !rollbackHandle.primaryRestored) {
+            const primaryEntry = entries.find((e) => e.mediaId === newPrimaryMediaId);
             try {
                 let currentMatches = false;
                 if (this.db.workflows?.conditionalRestorePrimaryMedia) {
@@ -517,7 +518,7 @@ export class WorkflowMediaService {
                         expectedPrimaryMediaId: newPrimaryMediaId,
                         restorePrimaryMediaId: previousPrimaryMediaId || null,
                     }).catch(() => null);
-                    currentMatches = Boolean(res?.updated !== false);
+                    currentMatches = res?.updated === true;
                 } else if (this.db.workflows?.findById) {
                     const wf = await this.db.workflows.findById(workflowId, "primary_media_id").catch(() => null);
                     const currentWfPrimary = wf?.primary_media_id || null;
@@ -546,12 +547,23 @@ export class WorkflowMediaService {
                         restoredPrimaryMediaId = null;
                     }
                 } else {
+                    primaryRestoreFailed = true;
                     restoredPrimaryMediaId = null;
+                    crudOperationLog({
+                        traceId: opTraceId,
+                        operation: "rollbackAttachedMedia:restorePrimary",
+                        status: "error",
+                        workflowId,
+                        mediaId: newPrimaryMediaId,
+                        storageKey: primaryEntry?.storageKey || null,
+                        storageKeys: primaryEntry?.storageKey ? [primaryEntry.storageKey] : [],
+                        previousPrimaryMediaId,
+                        message: "Primary restore conditional match not confirmed; media stays attached and counts toward quota",
+                    });
                 }
                 rollbackHandle.primaryRestored = true;
             } catch (restoreErr) {
                 primaryRestoreFailed = true;
-                const primaryEntry = entries.find((e) => e.mediaId === newPrimaryMediaId);
                 crudOperationLog({
                     traceId: opTraceId,
                     operation: "rollbackAttachedMedia:restorePrimary",
@@ -559,6 +571,7 @@ export class WorkflowMediaService {
                     workflowId,
                     mediaId: newPrimaryMediaId,
                     storageKey: primaryEntry?.storageKey || null,
+                    storageKeys: primaryEntry?.storageKey ? [primaryEntry.storageKey] : [],
                     previousPrimaryMediaId,
                     message: `Primary restore failed; media stays attached and counts toward quota: ${restoreErr?.message}`,
                 });

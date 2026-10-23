@@ -132,6 +132,12 @@ function createMockHarness() {
                     const hasPrimary = workflowMedia.some((wm) => wm.workflow_id === workflowId && wm.is_primary === true);
                     is_primary = !hasPrimary;
                 }
+                if (is_primary) {
+                    const wf = workflows.get(workflowId);
+                    if (wf && !wf.primary_media_id) {
+                        wf.primary_media_id = mediaId;
+                    }
+                }
                 const link = {
                     workflow_id: workflowId,
                     media_id: mediaId,
@@ -1046,6 +1052,157 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
 
             assert.equal(h.workflows.get(wfId).primary_media_id, concurrentMediaId);
             assert.equal(rbRes.restoredPrimaryMediaId, null, "Concurrent primary must be preserved");
+        });
+
+        it("conditionalRestorePrimaryMedia: updated true confirms restore, deletes media and discards storage", async () => {
+            const h = createMockHarness();
+            const wfId = "00000000-0000-0000-0000-000000000001";
+            const prevPrimaryId = "00000000-0000-0000-0000-000000000011";
+
+            h.workflows.set(wfId, { id: wfId, user_id: "user-1", project_id: "proj-1", primary_media_id: prevPrimaryId });
+            h.media.set(prevPrimaryId, { id: prevPrimaryId, user_id: "user-1", project_id: "proj-1", url: "https://storage.test/p.png" });
+            h.workflowMedia.push({ workflow_id: wfId, media_id: prevPrimaryId, role: "detail", is_primary: true });
+
+            h.db.workflows.conditionalRestorePrimaryMedia = async () => ({ updated: true });
+
+            const res = await h.service.attachMediaItems({
+                workflowId: wfId,
+                userId: "user-1",
+                projectId: "proj-1",
+                role: "detail",
+                maxAllowed: 6,
+                setPrimary: true,
+                items: [
+                    {
+                        kind: "uploaded",
+                        uploadedFile: {
+                            storageKey: "user-1/uploads/cond_true.png",
+                            url: "https://storage.test/cond_true.png",
+                            width: 100,
+                            height: 100,
+                            format: "PNG",
+                        },
+                    },
+                ],
+            });
+
+            const rbRes = await h.service.rollbackAttachedMedia(res.rollbackHandle);
+            assert.equal(rbRes.complete, true);
+            assert.ok(rbRes.deletedMediaIds.includes(res.attached[0].media.id));
+            assert.ok(rbRes.discardedStorageKeys.includes("user-1/uploads/cond_true.png"));
+        });
+
+        it("conditionalRestorePrimaryMedia: updated false fails restore confirmation, keeps media row and file, logs at error level", async () => {
+            const h = createMockHarness();
+            const wfId = "00000000-0000-0000-0000-000000000001";
+            const prevPrimaryId = "00000000-0000-0000-0000-000000000011";
+
+            h.workflows.set(wfId, { id: wfId, user_id: "user-1", project_id: "proj-1", primary_media_id: prevPrimaryId });
+            h.media.set(prevPrimaryId, { id: prevPrimaryId, user_id: "user-1", project_id: "proj-1", url: "https://storage.test/p.png" });
+            h.workflowMedia.push({ workflow_id: wfId, media_id: prevPrimaryId, role: "detail", is_primary: true });
+
+            h.db.workflows.conditionalRestorePrimaryMedia = async () => ({ updated: false });
+
+            const errorLogs = [];
+            const origBaseError = baseLogger.error;
+            baseLogger.error = (obj, msg, ...rest) => {
+                errorLogs.push({ obj, msg });
+                return origBaseError.call(baseLogger, obj, msg, ...rest);
+            };
+
+            try {
+                const res = await h.service.attachMediaItems({
+                    workflowId: wfId,
+                    userId: "user-1",
+                    projectId: "proj-1",
+                    role: "detail",
+                    maxAllowed: 6,
+                    setPrimary: true,
+                    items: [
+                        {
+                            kind: "uploaded",
+                            uploadedFile: {
+                                storageKey: "user-1/uploads/cond_false.png",
+                                url: "https://storage.test/cond_false.png",
+                                width: 100,
+                                height: 100,
+                                format: "PNG",
+                            },
+                        },
+                    ],
+                });
+
+                const rbRes = await h.service.rollbackAttachedMedia(res.rollbackHandle);
+                assert.equal(rbRes.complete, false);
+                assert.ok(!rbRes.deletedMediaIds.includes(res.attached[0].media.id));
+                assert.ok(rbRes.skippedStorageKeys.includes("user-1/uploads/cond_false.png"));
+
+                const restoreErrorLog = errorLogs.find(
+                    (l) => l.obj?.operation === "rollbackAttachedMedia:restorePrimary" && l.obj?.status === "error"
+                );
+                assert.ok(restoreErrorLog, "Must log at error level when restore is not confirmed");
+                assert.equal(restoreErrorLog.obj.workflowId, wfId);
+                assert.deepEqual(restoreErrorLog.obj.storageKeys, ["user-1/uploads/cond_false.png"]);
+            } finally {
+                baseLogger.error = origBaseError;
+            }
+        });
+
+        it("conditionalRestorePrimaryMedia: updated undefined fails restore confirmation, keeps media row and file, logs at error level", async () => {
+            const h = createMockHarness();
+            const wfId = "00000000-0000-0000-0000-000000000001";
+            const prevPrimaryId = "00000000-0000-0000-0000-000000000011";
+
+            h.workflows.set(wfId, { id: wfId, user_id: "user-1", project_id: "proj-1", primary_media_id: prevPrimaryId });
+            h.media.set(prevPrimaryId, { id: prevPrimaryId, user_id: "user-1", project_id: "proj-1", url: "https://storage.test/p.png" });
+            h.workflowMedia.push({ workflow_id: wfId, media_id: prevPrimaryId, role: "detail", is_primary: true });
+
+            // Simulates RPC failure or return value where updated is undefined
+            h.db.workflows.conditionalRestorePrimaryMedia = async () => ({});
+
+            const errorLogs = [];
+            const origBaseError = baseLogger.error;
+            baseLogger.error = (obj, msg, ...rest) => {
+                errorLogs.push({ obj, msg });
+                return origBaseError.call(baseLogger, obj, msg, ...rest);
+            };
+
+            try {
+                const res = await h.service.attachMediaItems({
+                    workflowId: wfId,
+                    userId: "user-1",
+                    projectId: "proj-1",
+                    role: "detail",
+                    maxAllowed: 6,
+                    setPrimary: true,
+                    items: [
+                        {
+                            kind: "uploaded",
+                            uploadedFile: {
+                                storageKey: "user-1/uploads/cond_undefined.png",
+                                url: "https://storage.test/cond_undefined.png",
+                                width: 100,
+                                height: 100,
+                                format: "PNG",
+                            },
+                        },
+                    ],
+                });
+
+                const rbRes = await h.service.rollbackAttachedMedia(res.rollbackHandle);
+                assert.equal(rbRes.complete, false, "Must report complete: false when updated is undefined");
+                assert.ok(!rbRes.deletedMediaIds.includes(res.attached[0].media.id));
+                assert.ok(rbRes.skippedStorageKeys.includes("user-1/uploads/cond_undefined.png"));
+
+                const restoreErrorLog = errorLogs.find(
+                    (l) => l.obj?.operation === "rollbackAttachedMedia:restorePrimary" && l.obj?.status === "error"
+                );
+                assert.ok(restoreErrorLog, "Must log at error level when updated is undefined");
+                assert.equal(restoreErrorLog.obj.workflowId, wfId);
+                assert.deepEqual(restoreErrorLog.obj.storageKeys, ["user-1/uploads/cond_undefined.png"]);
+            } finally {
+                baseLogger.error = origBaseError;
+            }
         });
 
         it("if primary restore fails, new primary media is NOT confirmed gone (deleteById and discard are skipped)", async () => {

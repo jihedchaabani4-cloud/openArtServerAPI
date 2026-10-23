@@ -102,8 +102,12 @@ export class MediaUploadService {
 
         try {
             const result = await this.storageService.deleteFiles(uniqueKeys);
-            if (result?.failures?.length > 0) {
-                throw new UploadError(`Failed to discard ${result.failures.length} storage file(s).`);
+            const genuineFailures = (result?.failures || []).filter((f) => {
+                const msg = String(f?.error?.message || f?.message || "").toLowerCase();
+                return !msg.includes("not found") && !msg.includes("nosuchkey") && !msg.includes("404");
+            });
+            if (genuineFailures.length > 0) {
+                throw new UploadError(`Failed to discard ${genuineFailures.length} storage file(s).`);
             }
         } catch (err) {
             crudOperationLog({

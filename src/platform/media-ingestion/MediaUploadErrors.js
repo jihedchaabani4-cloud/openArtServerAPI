@@ -34,6 +34,24 @@ export class QuotaError extends MediaUploadBaseError {
     }
 }
 
+export const WORKFLOW_REFERENCE_QUOTA_PREFIX = "Maximum ";
+export const WORKFLOW_REFERENCE_QUOTA_PATTERN = /Maximum\s+\d+\s+reference\s+images\s+allowed/i;
+
+export function formatWorkflowReferenceQuotaMessage(maxAllowed, currentCount) {
+    return `Maximum ${maxAllowed} reference images allowed per element. Current: ${currentCount}`;
+}
+
+export function isWorkflowReferenceQuotaError(err) {
+    if (!err) return false;
+    if (err.errorCode === "LIMIT_EXCEEDED" || err.code === "LIMIT_EXCEEDED") return true;
+    const msg = String(err.message || "");
+    if (msg.includes("workflow_media_role_check")) return false;
+    if (err.code === "23514" || msg.includes("23514") || WORKFLOW_REFERENCE_QUOTA_PATTERN.test(msg)) {
+        return WORKFLOW_REFERENCE_QUOTA_PATTERN.test(msg);
+    }
+    return false;
+}
+
 export function createPayloadTooLargeError(actualBytes, limitBytes, prefix = "[SourceReader] File size") {
     const maxMB = (limitBytes / (1024 * 1024)).toFixed(1);
     const actualMB = (actualBytes / (1024 * 1024)).toFixed(1);

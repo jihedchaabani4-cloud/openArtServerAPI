@@ -44,10 +44,13 @@ export function formatWorkflowReferenceQuotaMessage(maxAllowed, currentCount) {
 export function isWorkflowReferenceQuotaError(err) {
     if (!err) return false;
     if (err.errorCode === "LIMIT_EXCEEDED" || err.code === "LIMIT_EXCEEDED") return true;
+    if (err.hint === "workflow_media_quota_exceeded") return true;
     const msg = String(err.message || "");
-    if (msg.includes("workflow_media_role_check")) return false;
+    const stderr = String(err.stderr || "");
+    if (msg.includes("workflow_media_quota_exceeded") || stderr.includes("workflow_media_quota_exceeded")) return true;
+    if (msg.includes("workflow_media_role_check") || stderr.includes("workflow_media_role_check")) return false;
     if (err.code === "23514" || msg.includes("23514") || WORKFLOW_REFERENCE_QUOTA_PATTERN.test(msg)) {
-        return WORKFLOW_REFERENCE_QUOTA_PATTERN.test(msg);
+        return WORKFLOW_REFERENCE_QUOTA_PATTERN.test(msg) || WORKFLOW_REFERENCE_QUOTA_PATTERN.test(stderr);
     }
     return false;
 }

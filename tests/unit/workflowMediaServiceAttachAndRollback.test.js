@@ -278,6 +278,51 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
                 () => new WorkflowMediaService({ db: {}, storageService: {}, authService: validAuth, mediaUploadService: { discard: "not-a-func" } }),
                 /WorkflowMediaService requires mediaUploadService with a discard method\./
             );
+
+            // db.workflowMedia.findByMedia validation
+            assert.throws(
+                () => new WorkflowMediaService({ db: {}, storageService: {}, authService: validAuth, mediaUploadService: validUpload }),
+                /WorkflowMediaService requires db\.workflowMedia with findByMedia method\./
+            );
+            assert.throws(
+                () => new WorkflowMediaService({ db: { workflowMedia: {} }, storageService: {}, authService: validAuth, mediaUploadService: validUpload }),
+                /WorkflowMediaService requires db\.workflowMedia with findByMedia method\./
+            );
+            assert.throws(
+                () => new WorkflowMediaService({ db: { workflowMedia: { findByMedia: "not-a-func" } }, storageService: {}, authService: validAuth, mediaUploadService: validUpload }),
+                /WorkflowMediaService requires db\.workflowMedia with findByMedia method\./
+            );
+        });
+
+        it("rejects missing, empty, or anonymous userId with ValidationError (and discards uploaded keys)", async () => {
+            const h = createMockHarness();
+            const wfId = "00000000-0000-0000-0000-000000000001";
+            h.workflows.set(wfId, { id: wfId, user_id: "user-1", project_id: "proj-1" });
+
+            for (const badUser of [null, undefined, "", "anonymous"]) {
+                await assert.rejects(
+                    () => h.service.attachMediaItems({
+                        workflowId: wfId,
+                        userId: badUser,
+                        maxAllowed: null,
+                        items: [{ kind: "uploaded", uploadedFile: { storageKey: `storage/key-${badUser}` } }]
+                    }),
+                    /userId is required and cannot be anonymous/
+                );
+            }
+        });
+
+        it("resolveOwnedSourceMedia rejects missing or anonymous userId with ValidationError", async () => {
+            const h = createMockHarness();
+            for (const badUser of [null, undefined, "", "anonymous"]) {
+                await assert.rejects(
+                    () => h.service.resolveOwnedSourceMedia({
+                        mediaId: "00000000-0000-0000-0000-000000000010",
+                        userId: badUser,
+                    }),
+                    /userId is required and cannot be anonymous/
+                );
+            }
         });
 
         it("rejects undefined, NaN, string, negative, and non-integer maxAllowed with ValidationError (and discards uploaded keys)", async () => {
@@ -778,6 +823,45 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
             assert.ok(discardCall, "Uploaded keys must be discarded on foreign workflow rejection");
             assert.deepEqual(discardCall.keys, ["user-1/uploads/batch-iii.png"]);
         });
+
+        it("fails closed when authService throws: logs at error level and throws 404 with no DB fallback", async () => {
+            const h = createMockHarness();
+            const wfId = "00000000-0000-0000-0000-000000000001";
+            h.workflows.set(wfId, { id: wfId, user_id: "user-1", project_id: "proj-1" });
+            h.authService.verifyWorkflowOwnership = async () => {
+                throw new Error("DB connection dropped in auth service");
+            };
+            // Even though wf in db has user_id matching userId, repository fallback is forbidden!
+            h.db.workflows.getWorkflow = async () => ({ id: wfId, user_id: "user-1" });
+
+            await assert.rejects(
+                () => h.service.attachMediaItems({
+                    workflowId: wfId,
+                    userId: "user-1",
+                    maxAllowed: null,
+                    items: [{ kind: "existing", mediaId: "00000000-0000-0000-0000-000000000010" }]
+                }),
+                (err) => err instanceof CrudServiceError && err.statusCode === 404
+            );
+        });
+
+        it("fails closed (404) if projectId is requested and source project cannot be determined or mismatches", async () => {
+            const h = createMockHarness();
+            const mediaId = "00000000-0000-0000-0000-000000000099";
+            // Source media has no project_id and linked workflow has no project_id
+            h.media.set(mediaId, { id: mediaId, status: "completed" });
+            h.workflowMedia.push({ workflow_id: "wf-no-proj", media_id: mediaId, role: "detail" });
+            h.workflows.set("wf-no-proj", { id: "wf-no-proj", user_id: "user-1" }); // no project_id
+
+            await assert.rejects(
+                () => h.service.resolveOwnedSourceMedia({
+                    mediaId,
+                    projectId: "proj-target",
+                    userId: "user-1",
+                }),
+                (err) => err instanceof CrudServiceError && err.statusCode === 404
+            );
+        });
     });
 
     describe("3. Attachment Success & Handle Contract", () => {
@@ -788,6 +872,7 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
 
             const existingMediaId = "00000000-0000-0000-0000-000000000002";
             h.media.set(existingMediaId, { id: existingMediaId, user_id: "user-1", project_id: "proj-1", url: "https://storage.test/existing.png" });
+            h.workflows.set("wf-prior", { id: "wf-prior", user_id: "user-1", project_id: "proj-1" });
             h.workflowMedia.push({ workflow_id: "wf-prior", media_id: existingMediaId, role: "output", is_primary: true });
 
             const result = await h.service.attachMediaItems({
@@ -911,6 +996,7 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
 
             const existingMediaId = "00000000-0000-0000-0000-000000000002";
             h.media.set(existingMediaId, { id: existingMediaId, user_id: "user-1", project_id: "proj-1", url: "https://storage.test/m2.png" });
+            h.workflows.set("wf-prior", { id: "wf-prior", user_id: "user-1", project_id: "proj-1" });
             h.workflowMedia.push({ workflow_id: "wf-prior", media_id: existingMediaId, role: "output", is_primary: true });
 
             let callCount = 0;

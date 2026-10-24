@@ -40,6 +40,7 @@ describe("Unified Shared-Media Orphan Reaping & Attach Protocol", () => {
           return { unlinked: true, is_orphan: false, storage_url: null, remaining_links: 1 };
         },
         unlinkByWorkflow: async () => {},
+        findByMedia: async () => [],
       },
       workflows: {
         updatePrimaryMedia: async () => {},

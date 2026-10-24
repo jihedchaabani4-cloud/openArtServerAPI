@@ -66,6 +66,7 @@ function baseMockDb({ latestProject = null, latestProjectError = null, workflowD
                 unlinkWorkflowMedia: async () => ({ unlinked: true }),
                 getPrimaryMedia: async () => null,
                 setPrimaryMedia: async () => {},
+                findByMedia: async () => [],
             },
             media: {
                 createMedia: async () => ({ id: "media-1" }),

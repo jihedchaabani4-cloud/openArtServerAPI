@@ -150,6 +150,7 @@ function makeCharacterizeHarness() {
                 if (idx >= 0) workflowMedia.splice(idx, 1);
                 return { unlinked: idx >= 0 };
             },
+            findByMedia: async (mediaId) => workflowMedia.filter((w) => w.media_id === mediaId),
         },
     };
 

@@ -651,6 +651,7 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
         },
         workflowMedia: {
           countLinksForMedia: async (mediaId) => (mediaId === "m-linked-1" ? 2 : 0),
+          findByMedia: async () => [],
         },
       },
       storageService: {

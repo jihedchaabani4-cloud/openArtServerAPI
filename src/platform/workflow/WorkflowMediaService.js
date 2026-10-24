@@ -47,6 +47,9 @@ export class WorkflowMediaService {
         if (!mediaUploadService || typeof mediaUploadService.discard !== "function") {
             throw new Error("WorkflowMediaService requires mediaUploadService with a discard method.");
         }
+        if (!db?.workflowMedia || typeof db.workflowMedia.findByMedia !== "function") {
+            throw new Error("WorkflowMediaService requires db.workflowMedia with findByMedia method.");
+        }
         this.db = db;
         this.storageService = storageService;
         this.authService = effectiveAuth;
@@ -112,6 +115,13 @@ export class WorkflowMediaService {
      * Throws 404 NOT_FOUND on missing or cross-tenant access.
      */
     async resolveOwnedSourceMedia({ mediaId, workflowId = null, userId = null, projectId = null, req = null } = {}) {
+        if (!userId || userId === "anonymous") {
+            throw new ValidationError("userId is required and cannot be anonymous", {
+                statusCode: 400,
+                code: "VALIDATION_ERROR",
+            });
+        }
+
         const targetId = mediaId || workflowId;
         if (!targetId) {
             throw new CrudServiceError("mediaId or workflowId is required", {
@@ -143,125 +153,90 @@ export class WorkflowMediaService {
             });
         }
 
-        // Verify workflow_media link presence and load parent workflow context if needed
-        let links = [];
-        if (typeof this.db.workflowMedia?.findByMedia === "function") {
-            links = await this.db.workflowMedia.findByMedia(sourceMedia.id).catch(() => []);
-            if (!Array.isArray(links) || links.length === 0) {
-                throw new CrudServiceError("Media not found", {
-                    statusCode: 404,
-                    errorCode: "NOT_FOUND",
-                    mediaId: sourceMedia.id,
-                });
-            }
-            if (workflowId && !links.some((l) => (l.workflow_id || l.workflowId) === workflowId)) {
-                throw new CrudServiceError("Media not found", {
-                    statusCode: 404,
-                    errorCode: "NOT_FOUND",
-                    mediaId: sourceMedia.id,
-                });
-            }
-            const linkedWfId = (workflowId && links.find((l) => (l.workflow_id || l.workflowId) === workflowId)?.workflow_id) || links[0]?.workflow_id;
-            if (!sourceWf && linkedWfId && this.db.workflows?.getWorkflow) {
-                sourceWf = await this.db.workflows.getWorkflow(linkedWfId).catch(() => null);
-            }
+        // Verify workflow_media link presence (fail-closed)
+        const links = await this.db.workflowMedia.findByMedia(sourceMedia.id).catch(() => []);
+        if (!Array.isArray(links) || links.length === 0) {
+            throw new CrudServiceError("Media not found", {
+                statusCode: 404,
+                errorCode: "NOT_FOUND",
+                mediaId: sourceMedia.id,
+            });
+        }
+        if (workflowId && !links.some((l) => (l.workflow_id || l.workflowId) === workflowId)) {
+            throw new CrudServiceError("Media not found", {
+                statusCode: 404,
+                errorCode: "NOT_FOUND",
+                mediaId: sourceMedia.id,
+            });
+        }
+        const linkedWfId = (workflowId && links.find((l) => (l.workflow_id || l.workflowId) === workflowId)?.workflow_id) || links[0]?.workflow_id;
+        if (!sourceWf && linkedWfId && this.db.workflows?.getWorkflow) {
+            sourceWf = await this.db.workflows.getWorkflow(linkedWfId).catch(() => null);
         }
 
-        // Ownership verification: media -> workflow -> project -> user (fail closed)
-        if (userId && userId !== "anonymous") {
-            let isAuthorized = false;
+        // Ownership verification: authService is the single authority (fail-closed, no DB fallbacks)
+        let isAuthorized = false;
 
-            // Direct check on media if authService provides verifyMediaOwnership
-            if (this.authService && typeof this.authService.verifyMediaOwnership === "function") {
-                isAuthorized = await this.authService.verifyMediaOwnership(sourceMedia.id, userId, req).catch(() => false);
+        if (workflowId) {
+            try {
+                isAuthorized = await this.authService.verifyWorkflowOwnership(workflowId, userId, req);
+            } catch (authErr) {
+                logger.error({
+                    operation: "resolveOwnedSourceMedia:verifyWorkflowOwnership:error",
+                    workflowId,
+                    userId,
+                    error: authErr?.message,
+                }, "Workflow authorization check threw an error; failing closed");
+                isAuthorized = false;
             }
-
-            // Direct check on media record if it has user_id
-            if (!isAuthorized && sourceMedia.user_id && sourceMedia.user_id === userId) {
-                isAuthorized = true;
-            }
-
-            // If sourceWorkflowId is explicitly specified, verify that specific workflow's ownership
-            if (workflowId) {
+        } else {
+            // If sourceWorkflowId is NULL, verify ownership through linked workflows via authService
+            for (const link of links) {
+                const lWfId = link.workflow_id || link.workflowId;
+                if (!lWfId) continue;
                 let wfAuth = false;
-                if (this.authService && typeof this.authService.verifyWorkflowOwnership === "function") {
-                    wfAuth = await this.authService.verifyWorkflowOwnership(workflowId, userId, req).catch(() => false);
-                }
-                if (!wfAuth) {
-                    let wf = null;
-                    if (typeof this.db.workflows?.getWorkflow === "function") {
-                        wf = await this.db.workflows.getWorkflow(workflowId).catch(() => null);
-                    } else if (typeof this.db.workflows?.findById === "function") {
-                        wf = await this.db.workflows.findById(workflowId).catch(() => null);
-                    }
-                    if (wf) {
-                        if (wf.user_id === userId) {
-                            wfAuth = true;
-                            sourceWf = wf;
-                        } else if (wf.project_id && typeof this.db.projects?.findByUser === "function") {
-                            const ownedProj = await this.db.projects.findByUser(userId, wf.project_id).catch(() => []);
-                            if (Array.isArray(ownedProj) && ownedProj.length > 0) {
-                                wfAuth = true;
-                                sourceWf = wf;
-                            }
-                        }
-                    }
+                try {
+                    wfAuth = await this.authService.verifyWorkflowOwnership(lWfId, userId, req);
+                } catch (authErr) {
+                    logger.error({
+                        operation: "resolveOwnedSourceMedia:verifyWorkflowOwnership:error",
+                        linkedWfId: lWfId,
+                        userId,
+                        error: authErr?.message,
+                    }, "Workflow authorization check threw an error; failing closed");
+                    wfAuth = false;
                 }
                 if (wfAuth) {
                     isAuthorized = true;
-                } else {
-                    isAuthorized = false;
+                    break;
                 }
-            } else {
-                // If sourceWorkflowId is NULL, verify ownership through media -> workflow -> project -> user
-                if (!isAuthorized && Array.isArray(links) && links.length > 0) {
-                    for (const link of links) {
-                        const linkedWfId = link.workflow_id || link.workflowId;
-                        if (!linkedWfId) continue;
-                        let wfAuth = false;
-                        if (this.authService && typeof this.authService.verifyWorkflowOwnership === "function") {
-                            wfAuth = await this.authService.verifyWorkflowOwnership(linkedWfId, userId, req).catch(() => false);
-                        }
-                        if (!wfAuth) {
-                            let linkedWf = null;
-                            if (typeof this.db.workflows?.getWorkflow === "function") {
-                                linkedWf = await this.db.workflows.getWorkflow(linkedWfId).catch(() => null);
-                            } else if (typeof this.db.workflows?.findById === "function") {
-                                linkedWf = await this.db.workflows.findById(linkedWfId).catch(() => null);
-                            }
-                            if (linkedWf) {
-                                if (linkedWf.user_id === userId) {
-                                    wfAuth = true;
-                                    sourceWf = linkedWf;
-                                } else if (linkedWf.project_id && typeof this.db.projects?.findByUser === "function") {
-                                    const ownedProj = await this.db.projects.findByUser(userId, linkedWf.project_id).catch(() => []);
-                                    if (Array.isArray(ownedProj) && ownedProj.length > 0) {
-                                        wfAuth = true;
-                                        sourceWf = linkedWf;
-                                    }
-                                }
-                            }
-                        }
-                        if (wfAuth) {
-                            isAuthorized = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if (!isAuthorized) {
-                throw new CrudServiceError("Media not found", {
-                    statusCode: 404,
-                    errorCode: "NOT_FOUND",
-                    mediaId: sourceMedia.id,
-                });
             }
         }
 
-        // Project boundary verification (cross-project)
-        const ownerProjectId = sourceMedia.project_id || sourceWf?.project_id;
-        if (projectId && ownerProjectId && ownerProjectId !== projectId) {
+        if (!isAuthorized) {
+            throw new CrudServiceError("Media not found", {
+                statusCode: 404,
+                errorCode: "NOT_FOUND",
+                mediaId: sourceMedia.id,
+            });
+        }
+
+        // Project boundary verification: resolve project from media, sourceWf, or linked workflows
+        let ownerProjectId = sourceMedia.project_id || sourceWf?.project_id || null;
+        if (!ownerProjectId && Array.isArray(links)) {
+            for (const link of links) {
+                const wfId = link.workflow_id || link.workflowId;
+                if (!wfId) continue;
+                const linkedWf = (this.db.workflows?.getWorkflow && await this.db.workflows.getWorkflow(wfId).catch(() => null))
+                    || (this.db.workflows?.findById && await this.db.workflows.findById(wfId).catch(() => null));
+                if (linkedWf?.project_id) {
+                    ownerProjectId = linkedWf.project_id;
+                    break;
+                }
+            }
+        }
+
+        if (projectId && (!ownerProjectId || ownerProjectId !== projectId)) {
             throw new CrudServiceError("Media not found", {
                 statusCode: 404,
                 errorCode: "NOT_FOUND",
@@ -316,9 +291,9 @@ export class WorkflowMediaService {
             await this._discardUploadedItems(items, workflowId);
             throw new ValidationError("workflowId is required", { statusCode: 400, code: "VALIDATION_ERROR" });
         }
-        if (!userId) {
+        if (!userId || userId === "anonymous") {
             await this._discardUploadedItems(items, workflowId);
-            throw new ValidationError("userId is required", { statusCode: 400, code: "VALIDATION_ERROR" });
+            throw new ValidationError("userId is required and cannot be anonymous", { statusCode: 400, code: "VALIDATION_ERROR" });
         }
 
         // 3. Verify workflow ownership
@@ -326,22 +301,13 @@ export class WorkflowMediaService {
         try {
             isAuthorized = await this.authService.verifyWorkflowOwnership(workflowId, userId, req);
         } catch (authErr) {
-            // If authService threw an infrastructure error (e.g. in-memory test double without DB client),
-            // check repository directly and fail closed if unverified
-            let wf = null;
-            if (typeof this.db?.workflows?.getWorkflow === "function") {
-                wf = await this.db.workflows.getWorkflow(workflowId).catch(() => null);
-            } else if (typeof this.db?.workflows?.findById === "function") {
-                wf = await this.db.workflows.findById(workflowId).catch(() => null);
-            }
-            if (wf) {
-                if (wf.user_id === userId) {
-                    isAuthorized = true;
-                } else if (wf.project_id && typeof this.db?.projects?.findByUser === "function") {
-                    const ownedProj = await this.db.projects.findByUser(userId, wf.project_id).catch(() => []);
-                    isAuthorized = Array.isArray(ownedProj) && ownedProj.length > 0;
-                }
-            }
+            logger.error({
+                operation: "attachMediaItems:authError",
+                workflowId,
+                userId,
+                error: authErr?.message,
+            }, "Workflow authorization check threw an error; failing closed");
+            isAuthorized = false;
         }
         if (!isAuthorized) {
             await this._discardUploadedItems(items, workflowId);

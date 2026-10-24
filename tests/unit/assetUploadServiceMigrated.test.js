@@ -501,6 +501,7 @@ describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaS
                     orderEvents.push({ step: "unlink", mediaId });
                     unlinkedItems.push({ workflowId, mediaId, role });
                 },
+                findByMedia: async () => [],
             },
             workflows: {
                 createWorkflow: async (wf) => {

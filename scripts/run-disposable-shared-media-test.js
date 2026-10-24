@@ -17,13 +17,29 @@ const PG_USER = "postgres";
 const TEMP_DATA_DIR = path.join(os.tmpdir(), `pg_test_shared_media_${Date.now()}`);
 
 function runPsql(sql, role = "postgres") {
-  const env = { ...process.env, PGUSER: role, PGPORT: String(PG_PORT), PGHOST: "127.0.0.1", PGCLIENTENCODING: "UTF8" };
+  const env = {
+    ...process.env,
+    PGUSER: role,
+    PGPORT: String(PG_PORT),
+    PGHOST: "127.0.0.1",
+    PGCLIENTENCODING: "UTF8",
+    LC_ALL: "C",
+    LC_MESSAGES: "C",
+    LANGUAGE: "en",
+  };
   const res = execFileSync("psql", ["-d", "postgres", "-X", "-q", "-A", "-t", "-c", sql], {
     env,
     encoding: "utf8",
     stdio: ["pipe", "pipe", "pipe"],
   });
   return res.trim();
+}
+
+function extractHint(err) {
+  if (err?.hint) return err.hint;
+  const combined = `${err?.message || ""}\n${err?.stderr || ""}`;
+  const m = combined.match(/(?:HINT|ASTUCE)\s*:\s*([^\r\n]+)/i);
+  return m ? m[1].trim() : null;
 }
 
 function runPsqlTable(sql, role = "postgres") {
@@ -369,10 +385,15 @@ async function main() {
       }
     }
     if (!quotaExceeded) throw new Error("Expected quota limit check violation on 7th attachment");
+    const hint27 = extractHint(quotaErr);
+    if (hint27 !== "workflow_media_quota_exceeded") {
+      throw new Error(`Expected hint 'workflow_media_quota_exceeded' on 2.7, got '${hint27}'`);
+    }
+    quotaErr.hint = hint27;
     if (!isWorkflowReferenceQuotaError(quotaErr)) {
       throw new Error(`Expected isWorkflowReferenceQuotaError(quotaErr) to be true, got false. Error: ${quotaErr?.message}`);
     }
-    console.log("  ✔ PASS 2.7: 7th attachment rejected with SQLSTATE 23514 (check_violation) and recognized by isWorkflowReferenceQuotaError");
+    console.log("  ✔ PASS 2.7: 7th attachment rejected with SQLSTATE 23514 (check_violation), HINT 'workflow_media_quota_exceeded', and recognized by isWorkflowReferenceQuotaError");
 
     // SCENARIO 3: Canonical Composite PK, Multi-Role Attach & Zero Auto-Promotion
     console.log("\n► SCENARIO 3: Canonical Composite PK, Multi-Role Attach & Zero Auto-Promotion");
@@ -413,10 +434,15 @@ async function main() {
     if (!invalidRoleRejected) {
       throw new Error("Expected invalid role attachment to be rejected by check constraint!");
     }
+    const roleHint = extractHint(roleErr);
+    if (roleHint) {
+      throw new Error(`Expected role check violation to have NO hint, got '${roleHint}'`);
+    }
+    roleErr.hint = roleHint;
     if (isWorkflowReferenceQuotaError(roleErr)) {
       throw new Error(`Expected isWorkflowReferenceQuotaError(roleErr) to be false for role check violation, got true! Error: ${roleErr?.message}`);
     }
-    console.log("  ✔ PASS 3.3: Invalid role string rejected by canonical check constraint (SQLSTATE 23514) and NOT recognized as QuotaError");
+    console.log("  ✔ PASS 3.3: Invalid role string rejected by canonical check constraint (SQLSTATE 23514), has no hint, and NOT recognized as QuotaError");
 
     // 3.4: Attach second media as 'detail'
     const mOther = runPsqlScalar(`INSERT INTO public.media (url) VALUES ('https://storage.test/other_detail.png') RETURNING id;`, "service_role");
@@ -629,6 +655,11 @@ async function main() {
     if (!workerBQuotaError) {
       throw new Error("Expected Worker B to fail quota limit check when Worker A fills the 6th slot!");
     }
+    const hint63 = extractHint(workerBQuotaError);
+    if (hint63 !== "workflow_media_quota_exceeded") {
+      throw new Error(`Expected hint 'workflow_media_quota_exceeded' on 6.3, got '${hint63}'`);
+    }
+    workerBQuotaError.hint = hint63;
     if (!isWorkflowReferenceQuotaError(workerBQuotaError)) {
       throw new Error(`Expected Worker B error to be recognized as QuotaError, got: ${workerBQuotaError?.message}`);
     }
@@ -794,13 +825,23 @@ async function main() {
 
     const mPri7 = runPsqlScalar(`INSERT INTO public.media (url) VALUES ('https://storage.test/pri_7.png') RETURNING id;`, "service_role");
     let quotaExceededFalse = false;
+    let quotaErr95 = null;
     try {
       runPsql(`SET ROLE service_role; SELECT public.attach_workflow_reference_media('${wfAutoPri}', '${mPri7}', 'detail', 6, false);`);
     } catch (err) {
+      quotaErr95 = err;
       if (err.message.includes("Maximum 6 reference images allowed")) quotaExceededFalse = true;
     }
     if (!quotaExceededFalse) throw new Error("Expected quota 23514 to be raised on 7th attachment with p_auto_primary=false");
-    console.log("  ✔ PASS 9.5: Quota enforcement (23514) identical and unaffected by p_auto_primary=false");
+    const hint95 = extractHint(quotaErr95);
+    if (hint95 !== "workflow_media_quota_exceeded") {
+      throw new Error(`Expected hint 'workflow_media_quota_exceeded' on 9.5, got '${hint95}'`);
+    }
+    quotaErr95.hint = hint95;
+    if (!isWorkflowReferenceQuotaError(quotaErr95)) {
+      throw new Error(`Expected 9.5 error to be recognized as QuotaError, got: ${quotaErr95?.message}`);
+    }
+    console.log("  ✔ PASS 9.5: Quota enforcement (23514) identical with HINT 'workflow_media_quota_exceeded' and unaffected by p_auto_primary=false");
 
     // 9.6: Return jsonb keys identical across 4-arg and 5-arg calls, including current_count
     const expectedKeys = ["current_count", "is_existing", "is_primary", "max_allowed", "media_id", "role", "workflow_id"];

@@ -102,6 +102,7 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
         const originalDbWorkflowsFindById = container.db.workflows.findById;
         const originalDbWorkflowsGetWorkflow = container.db.workflows.getWorkflow;
         const originalDbMediaCreate = container.db.media.createMedia;
+        const originalVerifyWorkflowOwnership = container.workflowMediaService.authService.verifyWorkflowOwnership;
 
         const VALID_PNG_BUFFER = Buffer.from(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
@@ -133,6 +134,7 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
             container.db.workflows.findById = async () => mockWf;
             container.db.workflows.getWorkflow = async () => mockWf;
             container.db.workflows.deleteById = async () => ({ deleted: true });
+            container.workflowMediaService.authService.verifyWorkflowOwnership = async (id, uid) => (uid === "user-wiring-1");
 
             // Simulate failure inside attachMediaItems (e.g. media insert failure or attach RPC failure)
             container.db.media.createMedia = async () => {
@@ -166,6 +168,7 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
             container.db.workflows.getWorkflow = originalDbWorkflowsGetWorkflow;
             container.db.workflows.deleteById = originalDbWorkflowsDeleteById;
             container.db.media.createMedia = originalDbMediaCreate;
+            container.workflowMediaService.authService.verifyWorkflowOwnership = originalVerifyWorkflowOwnership;
         }
     });
 });

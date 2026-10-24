@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import express from "express";
 import http from "node:http";
 import apiRouter from "../../src/api/routes.js";
-import { db, walletService, useCaseService, folderService } from "../../src/container.js";
+import { db, walletService, useCaseService, folderService, workflowService } from "../../src/container.js";
 import { supabase } from "../../lib/supabase.js";
 import { V1StorageBridge } from "../../src/v2/services/v1StorageBridge.js";
 import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "../../src/queue/redis.js";
@@ -16,12 +16,20 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
   let server;
   let baseUrl;
   let origGetUser;
+  let origVerifyWorkflowOwnership;
 
   let projects = [];
   let folders = [];
   let workflows = [];
   let media = [];
   let creditHolds = [];
+    origVerifyWorkflowOwnership = workflowService.authService.verifyWorkflowOwnership;
+    workflowService.authService.verifyWorkflowOwnership = async (wfId, userId) => {
+      const wf = workflows.find((w) => w.id === wfId);
+      if (!wf) return false;
+      const proj = projects.find((p) => p.id === wf.project_id);
+      return Boolean(proj && proj.user_id === userId);
+    };
 
   before(async () => {
     origGetUser = supabase.auth.getUser;
@@ -54,6 +62,7 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
 
   after(async () => {
     supabase.auth.getUser = origGetUser;
+    if (origVerifyWorkflowOwnership) workflowService.authService.verifyWorkflowOwnership = origVerifyWorkflowOwnership;
     try {
       server?.closeAllConnections?.();
       await new Promise((resolve) => server.close(resolve));

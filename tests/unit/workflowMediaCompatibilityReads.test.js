@@ -84,15 +84,12 @@ describe("B3: workflow_media junction readers, tenant isolation & candidate libr
     assert.deepEqual(rows, []);
   });
 
-  it("WorkflowRepository.getPrimaryMedia queries workflow.primary_media_id then workflow_media ONLY (no media.workflow_id fallback)", async () => {
+  it("WorkflowRepository.getPrimaryMedia queries workflow_media with is_primary = true ONLY (no media.workflow_id fallback)", async () => {
     const calls = [];
     const repo = new WorkflowRepository();
     repo.client = () => ({
       from(table) {
         calls.push(table);
-        if (table === "workflow") {
-          return makeQuery({ data: { primary_media_id: null }, error: null });
-        }
         if (table === "workflow_media") {
           return makeQuery({ data: null, error: null });
         }
@@ -103,7 +100,7 @@ describe("B3: workflow_media junction readers, tenant isolation & candidate libr
     const media = await repo.getPrimaryMedia("wf-unpinned");
 
     assert.equal(media, null);
-    assert.deepEqual(calls, ["workflow", "workflow_media"]);
+    assert.deepEqual(calls, ["workflow_media"]);
   });
 
   it("MediaRepository.findLatestByWorkflow and findMediaByIdOrWorkflow query workflow_media without media.workflow_id", async () => {
@@ -195,6 +192,8 @@ describe("B3: workflow_media junction readers, tenant isolation & candidate libr
         workflowId: "wf-many",
         role: n === 10 ? "sheet" : "output",
         mediaRole: n === 10 ? "sheet" : "output",
+        is_primary: n === 11,
+        isPrimary: n === 11,
         step_id: n === 10 ? "character_sheet" : "image_generation",
         generation_config_id: "cfg-1",
         url: `https://cdn.example.com/img-${n}.png`,
@@ -218,7 +217,6 @@ describe("B3: workflow_media junction readers, tenant isolation & candidate libr
               project_id: "proj-1",
               session_id: "sess-1",
               display_name: "Hero Character",
-              variation_index: 0,
               primary_media_id: "m-11",
               favorited: false,
               workflow_type: "CHARACTER",
@@ -229,7 +227,6 @@ describe("B3: workflow_media junction readers, tenant isolation & candidate libr
               project_id: "proj-1",
               session_id: "sess-1",
               display_name: "Unpinned Generation",
-              variation_index: 0,
               primary_media_id: null,
               favorited: false,
               workflow_type: "IMAGE",
@@ -303,7 +300,7 @@ describe("B3: workflow_media junction readers, tenant isolation & candidate libr
     assert.equal(entryUnpinned.candidates[0].id, "m-unpinned-1");
   });
 
-  it("CharacterMediaService._resolveSourceMedia and ElementMediaService._resolveSourceMedia reject unlinked media (0 workflow_media links) with 404", async () => {
+  it("CharacterMediaService._resolveSourceMedia rejects unlinked media (0 workflow_media links) with 404", async () => {
     const mockDb = {
       media: {
         findById: async (id) => ({
@@ -322,15 +319,9 @@ describe("B3: workflow_media junction readers, tenant isolation & candidate libr
     };
 
     const charService = new CharacterMediaService({ db: mockDb, storageService: {} });
-    const elemService = new ElementMediaService({ db: mockDb, storageService: {} });
 
     await assert.rejects(
       () => charService._resolveSourceMedia("m-orphan-1", { userId: "user-1", projectId: "proj-1" }),
-      (err) => err.statusCode === 404
-    );
-
-    await assert.rejects(
-      () => elemService._resolveSourceMedia("m-orphan-1", { userId: "user-1", projectId: "proj-1" }),
       (err) => err.statusCode === 404
     );
   });
@@ -344,7 +335,6 @@ describe("B3: workflow_media junction readers, tenant isolation & candidate libr
         project_id: "proj-bench-1",
         session_id: "sess-bench-1",
         display_name: `Workflow Asset #${wfNum}`,
-        variation_index: 0,
         primary_media_id: `m-wf-${wfNum}-1`,
         favorited: wfNum % 5 === 0,
         workflow_type: wfNum <= 5 ? "CHARACTER" : "IMAGE",

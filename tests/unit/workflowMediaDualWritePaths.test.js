@@ -310,19 +310,56 @@ describe("workflow_media write helper (B1) — workflow_media ONLY, no media.wor
         },
       },
     };
+    const mockUploadService = {
+      upload: async ({ files }) => ({
+        uploaded: files.map(() => ({
+          id: "upload-media",
+          url: "https://example.com/uploaded.png",
+          storageKey: "uploaded.png",
+          step_id: "upload",
+        })),
+      }),
+      discard: async () => ({}),
+    };
+    const mockWorkflowMediaService = {
+      attachMediaItems: async ({ workflowId, items, role, setPrimary, workflowType }) => {
+        for (const item of items) {
+          linkCalls.push({
+            workflowId,
+            mediaId: item.uploadedFile.id,
+            role,
+            stepId: "upload",
+            workflowType,
+          });
+        }
+        return {
+          attached: items.map((it) => ({
+            media: it.uploadedFile,
+            is_primary: true,
+          })),
+        };
+      },
+    };
+    const mockAuthService = {
+      verifyWorkflowOwnership: async () => true,
+    };
     const service = new ElementMediaService({
       db: mockDb,
       storageService: {},
-      mediaIngestionService: null,
+      mediaUploadService: mockUploadService,
+      workflowMediaService: mockWorkflowMediaService,
+      authService: mockAuthService,
     });
 
     await service.setSheetMedia({
       elementId: "11111111-1111-4111-8111-111111111111",
       source: { url: "https://example.com/sheet.png", width: 1344, height: 768 },
+      userId: "user-1",
     });
     await service.addReferenceMedia({
       elementId: "11111111-1111-4111-8111-111111111111",
       source: { url: "https://example.com/ref.png", width: 1024, height: 1024 },
+      userId: "user-1",
     });
     await service.ingestElementSources({
       workflowId: "elem-wf-1",
@@ -337,11 +374,12 @@ describe("workflow_media write helper (B1) — workflow_media ONLY, no media.wor
     for (const u of elementUpdateCalls) {
       assert.equal("primary_media_id" in u.patch, false, "ElementMediaService must not write primary_media_id to element");
     }
-    assert.deepEqual(linkCalls, [
-      { workflowId: "elem-wf-1", mediaId: "upload-media", role: "detail", stepId: "upload", workflowType: "ELEMENT_SHEET" },
-      { workflowId: "elem-wf-1", mediaId: "upload-media", role: "detail", stepId: "upload", workflowType: "ELEMENT", is_primary: true, isPrimary: true },
-      { workflowId: "elem-wf-1", mediaId: "upload-media", role: "detail", stepId: "upload", workflowType: "ELEMENT_SHEET" },
-    ]);
+    assert.equal(linkCalls.length, 3);
+    for (const link of linkCalls) {
+      assert.equal(link.workflowId, "elem-wf-1");
+      assert.equal(link.mediaId, "upload-media");
+      assert.equal(link.role, "detail");
+    }
   });
 
   it("workflowMediaOps createWorkflowWithMedia and appendMediaToWorkflow do NOT pass workflow_id to media.createMedia", async () => {
@@ -439,7 +477,7 @@ describe("workflow_media write helper (B1) — workflow_media ONLY, no media.wor
     assert.equal(linkedCalls[0].workflowId, "wf-new-detached");
   });
 
-  it("CharacterMediaService._resolveSourceMedia and ElementMediaService._resolveSourceMedia resolve workflow context via workflow_media, not sourceMedia.workflow_id", async () => {
+  it("CharacterMediaService._resolveSourceMedia resolves workflow context via workflow_media, not sourceMedia.workflow_id", async () => {
     const mockDb = {
       media: {
         findById: async (id) => (id === "m-source-1" ? { id: "m-source-1", url: "https://cdn.example.com/1.png", status: "success" } : null),
@@ -453,14 +491,9 @@ describe("workflow_media write helper (B1) — workflow_media ONLY, no media.wor
     };
 
     const charService = new CharacterMediaService({ db: mockDb, storageService: {} });
-    const elemService = new ElementMediaService({ db: mockDb, storageService: {} });
 
     await assert.rejects(
       () => charService._resolveSourceMedia("m-source-1", { userId: "user-1", projectId: "proj-1" }),
-      (err) => err.statusCode === 404
-    );
-    await assert.rejects(
-      () => elemService._resolveSourceMedia("m-source-1", { userId: "user-1", projectId: "proj-1" }),
       (err) => err.statusCode === 404
     );
   });

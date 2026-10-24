@@ -331,10 +331,48 @@ describe("Canonical Primary-Media Persistence & WorkflowMedia Contract", () => {
         };
 
         const { ElementMediaService } = await import("../../src/domain/element/ElementMediaService.js");
+        let uploadCalled = false;
+        const mockUploadService = {
+            upload: async ({ files }) => {
+                uploadCalled = true;
+                return {
+                    uploaded: files.map((f, i) => ({
+                        id: "media-elem-" + (i + 1),
+                        url: "https://storage.example.com/binary.png",
+                        storageKey: "binary.png",
+                        step_id: "upload",
+                    })),
+                };
+            },
+            discard: async () => ({}),
+        };
+        const mockWorkflowMediaService = {
+            attachMediaItems: async ({ workflowId, items, role }) => {
+                for (const item of items) {
+                    linkCalls.push({
+                        workflowId,
+                        mediaId: item.uploadedFile.id,
+                        role,
+                    });
+                }
+                return {
+                    attached: items.map((it) => ({
+                        media: it.uploadedFile,
+                        is_primary: true,
+                    })),
+                };
+            },
+        };
+        const mockAuthService = {
+            verifyWorkflowOwnership: async () => true,
+        };
+
         const elemMediaService = new ElementMediaService({
             db: mockDb,
             storageService: {},
-            mediaIngestionService: mockIngestionService,
+            mediaUploadService: mockUploadService,
+            workflowMediaService: mockWorkflowMediaService,
+            authService: mockAuthService,
         });
 
         const result = await elemMediaService.ingestElementSources({
@@ -344,8 +382,7 @@ describe("Canonical Primary-Media Persistence & WorkflowMedia Contract", () => {
             userId: "user-1",
         });
 
-        assert.ok(ingestBinaryCalled, "ElementMediaService must call ingestBinary");
-        assert.ok(mediaCreated, "ElementMediaService must own db.media.createMedia");
+        assert.ok(uploadCalled, "ElementMediaService must call mediaUploadService.upload");
         assert.equal(linkCalls.length, 1, "Must link to workflow_media");
         assert.equal(linkCalls[0].role, "detail", "Element relationship role must be canonically 'detail'");
         assert.equal(result.mediaRecords[0].id, "media-elem-1");

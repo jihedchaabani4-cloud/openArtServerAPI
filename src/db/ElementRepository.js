@@ -32,7 +32,7 @@ function normalizeGuidelines(value) {
 
 /**
  * Build a strict partial-update patch — only fields present in `updates` are included.
- * Allowed writable fields: name, description, guidelines, workflow_id, element_type, source_images.
+ * Allowed writable fields: name, description, guidelines, workflow_id, element_type.
  */
 function buildPatch(updates = {}) {
     const patch = {};
@@ -50,9 +50,6 @@ function buildPatch(updates = {}) {
     }
     if (updates.element_type !== undefined) {
         patch.element_type = updates.element_type;
-    }
-    if (updates.source_images !== undefined) {
-        patch.source_images = updates.source_images;
     }
     if (updates.workflow_id !== undefined) {
         patch.workflow_id = updates.workflow_id;
@@ -129,6 +126,17 @@ export class ElementRepository {
         return data || [];
     }
 
+    async findByWorkflowIds(workflowIds = []) {
+        const ids = Array.isArray(workflowIds) ? workflowIds.filter(Boolean) : [];
+        if (!ids.length) return [];
+        const { data, error } = await supabase
+            .from("element")
+            .select("*")
+            .in("workflow_id", ids);
+        if (error) throw error;
+        return data || [];
+    }
+
     /**
      * Resolve by element.id or workflow_id — tries both if the value is a UUID.
      */
@@ -148,11 +156,9 @@ export class ElementRepository {
     async create(payload) {
         const insertPayload = {
             guidelines:    "",
-            source_images: [],
             ...buildPatch(payload),
             // Pass through fields not covered by buildPatch whitelist
             ...(payload.element_type ? { element_type: payload.element_type } : {}),
-            ...(payload.source_images ? { source_images: payload.source_images } : {}),
         };
 
         const { data, error } = await supabase

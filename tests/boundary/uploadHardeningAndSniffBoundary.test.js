@@ -629,18 +629,26 @@ describe("RC1.4-D2.3 — Upload Hardening and Sniff Boundary Tests", () => {
     });
 
     it("TEST D2.3-f7: Multipart route /api/v2/elements/:id/images rejects forged payloads", async () => {
-      for (const [name, buf] of Object.entries(forgedPayloads)) {
-        const formData = new FormData();
-        const blob = new Blob([buf], { type: "image/png" });
-        formData.append("file", blob, `fake_${name.toLowerCase()}.png`);
+      const { elementMediaService } = await import("../../src/container.js");
+      const origAssert = elementMediaService.assertUploadAllowed;
+      elementMediaService.assertUploadAllowed = async () => ({ allowed: true });
 
-        const res = await fetch(`${baseUrl}/api/v2/elements/00000000-0000-0000-0000-000000000001/images`, {
-          method: "POST",
-          headers: { Authorization: "Bearer test-valid-user-1" },
-          body: formData,
-        });
+      try {
+        for (const [name, buf] of Object.entries(forgedPayloads)) {
+          const formData = new FormData();
+          const blob = new Blob([buf], { type: "image/png" });
+          formData.append("file", blob, `fake_${name.toLowerCase()}.png`);
 
-        assert.equal(res.status, 415, `/api/v2/elements/:id/images multipart must reject forged ${name} with 415`);
+          const res = await fetch(`${baseUrl}/api/v2/elements/00000000-0000-0000-0000-000000000001/images`, {
+            method: "POST",
+            headers: { Authorization: "Bearer test-valid-user-1" },
+            body: formData,
+          });
+
+          assert.equal(res.status, 415, `/api/v2/elements/:id/images multipart must reject forged ${name} with 415`);
+        }
+      } finally {
+        elementMediaService.assertUploadAllowed = origAssert;
       }
     });
 

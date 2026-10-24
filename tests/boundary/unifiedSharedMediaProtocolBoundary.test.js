@@ -99,7 +99,9 @@ describe("Unified Shared-Media Orphan Reaping & Attach Protocol", () => {
     const service = new ElementMediaService({
       db: mockDb,
       storageService: mockStorage,
-      mediaUploadService: { discard: async () => ({}) },
+      mediaUploadService: { upload: async () => ({ files: [] }), discard: async () => ({}) },
+      workflowMediaService: { attachMediaItems: async () => ({}) },
+      authService: { verifyWorkflowOwnership: async () => true },
     });
 
     const res = await service.removeReferenceMedia({

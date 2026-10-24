@@ -194,19 +194,34 @@ describe("Workflow ID resolution to media relation in Character & Element servic
       },
     };
 
+    const mockUploadService = {
+      upload: async () => ({ uploaded: [] }),
+      discard: async () => ({}),
+    };
+    const mockWorkflowMediaService = {
+      attachMediaItems: async ({ workflowId, projectId, userId, role, items }) => {
+        linkedPayload = {
+          workflowId,
+          mediaId: mockSourceMedia.id,
+          role,
+        };
+        return {
+          attached: [{
+            media: mockSourceMedia,
+            is_primary: true,
+          }],
+        };
+      },
+    };
+    const mockAuthService = {
+      verifyWorkflowOwnership: async () => true,
+    };
     const service = new ElementMediaService({
       db: mockDb,
       storageService: {},
-      mediaIngestionService: {
-        ingest: async () => ({
-          media: mockSourceMedia,
-          isNew: false,
-          mediaId: mockSourceMedia.id,
-          url: mockSourceMedia.url,
-          width: 1024,
-          height: 1024,
-        }),
-      },
+      mediaUploadService: mockUploadService,
+      workflowMediaService: mockWorkflowMediaService,
+      authService: mockAuthService,
     });
 
     const result = await service.addReferenceMedia({
@@ -221,7 +236,7 @@ describe("Workflow ID resolution to media relation in Character & Element servic
     assert.equal(linkedPayload.workflowId, "elem-wf-1");
     assert.equal(linkedPayload.mediaId, "media-elem-source-456");
     assert.equal(linkedPayload.role, "detail");
-    assert.deepEqual(updatedElement.patch.source_images, ["media-elem-source-456"]);
+    assert.equal(updatedElement, null, "Must NOT update element.source_images (ADR-0009)");
   });
 
   it("CharacterMediaService.removeDetailMedia unlinks workflow_media and keeps source media intact when linked from another workflow", async () => {
@@ -396,7 +411,22 @@ describe("Workflow ID resolution to media relation in Character & Element servic
       },
     };
 
-    const service = new ElementMediaService({ db: mockDb, storageService: {} });
+    const service = new ElementMediaService({
+      db: mockDb,
+      storageService: {},
+      mediaUploadService: { upload: async () => ({ uploaded: [] }), discard: async () => ({}) },
+      workflowMediaService: {
+        attachMediaItems: async () => {
+          const err = new Error("Media not found");
+          err.statusCode = 404;
+          err.errorCode = "MEDIA_NOT_FOUND";
+          throw err;
+        },
+      },
+      authService: {
+        verifyWorkflowOwnership: async (wfId, uId) => uId === "user-1",
+      },
+    });
 
     await assert.rejects(
       async () => {

@@ -17,17 +17,32 @@ describe("Ticket 04: ElementMediaService workflow_media link hardening", () => {
       },
     };
 
-    const mockIngestionService = {
-      ingest: async ({ workflowId, stepId }) => ({
-        media: { id: "media-ingested-1", step_id: stepId },
-        url: "https://storage.example.com/sheet.png",
-      }),
-    };
-
     const service = new ElementMediaService({
       db: mockDb,
       storageService: {},
-      mediaIngestionService: mockIngestionService,
+      mediaUploadService: {
+        upload: async ({ files }) => ({
+          uploaded: [{ id: "media-ingested-1", url: "https://storage.example.com/sheet.png", storageKey: "sheet.png" }],
+        }),
+        discard: async () => ({}),
+      },
+      workflowMediaService: {
+        attachMediaItems: async ({ workflowId, items, role }) => {
+          for (const item of items) {
+            linkCalls.push({
+              workflowId,
+              mediaId: item.uploadedFile.id,
+              role,
+            });
+          }
+          return {
+            attached: items.map((it) => ({ media: it.uploadedFile, is_primary: true })),
+          };
+        },
+      },
+      authService: {
+        verifyWorkflowOwnership: async () => true,
+      },
     });
 
     await service.ingestElementSources({

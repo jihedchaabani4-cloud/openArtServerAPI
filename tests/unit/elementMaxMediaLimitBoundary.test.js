@@ -4,6 +4,7 @@ import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js
 import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
 import { ElementService } from "../../src/domain/element/ElementService.js";
 import { createPreUploadElementCapacityGuard } from "../../src/middleware/elementUploadGuard.js";
+import { CrudServiceError } from "../../src/utils/crudOperationLog.js";
 
 describe("Element Maximum 6 Reference Media Boundary & Enforcement", () => {
     let repo;
@@ -72,7 +73,78 @@ describe("Element Maximum 6 Reference Media Boundary & Enforcement", () => {
             workflowMedia: repo,
         };
 
-        mediaService = new ElementMediaService({ db: mockDb });
+        const mockUploadService = {
+            upload: async ({ files, policy, userId }) => {
+                const uploaded = files.map((f, idx) => {
+                    const row = {
+                        id: `m-${mediaStore.length + 1}`,
+                        status: "completed",
+                        url: typeof f === "string" ? f : `https://example.com/upload-${idx + 1}.png`,
+                        storageKey: `${userId}/${policy?.storageFolder || "element-references"}/upload-${idx + 1}.png`,
+                        step_id: "upload",
+                    };
+                    mediaStore.push(row);
+                    return row;
+                });
+                return { uploaded, files: uploaded };
+            },
+            discard: async () => {},
+        };
+
+        let attachMutex = Promise.resolve();
+        const mockWorkflowMediaService = {
+            attachMediaItems: async ({ workflowId, projectId, userId, role = "detail", maxAllowed = 6, items = [] }) => {
+                const release = attachMutex;
+                let nextResolve;
+                attachMutex = new Promise((resolve) => { nextResolve = resolve; });
+                await release;
+                try {
+                    const currentCount = (await repo.findByWorkflow(workflowId)).filter((l) => !l.role || l.role === "detail").length;
+                    if (maxAllowed !== null && currentCount + items.length > maxAllowed) {
+                        throw new CrudServiceError(`Maximum ${maxAllowed} reference images allowed per element`, {
+                            statusCode: 400,
+                            errorCode: "LIMIT_EXCEEDED",
+                        });
+                    }
+                    const attached = [];
+                    for (const item of items) {
+                        const mId = item.kind === "existing" ? item.mediaId : item.uploadedFile.id;
+                        const mediaRow = mediaStore.find((m) => m.id === mId) || { id: mId, url: item.uploadedFile?.url };
+                        const link = await repo.linkMedia({
+                            workflowId,
+                            mediaId: mId,
+                            role,
+                            stepId: "upload",
+                            is_primary: false,
+                        });
+                        attached.push({
+                            kind: item.kind,
+                            media: mediaRow,
+                            link,
+                        });
+                    }
+                    return { attached };
+                } finally {
+                    nextResolve();
+                }
+            },
+        };
+
+        const mockAuthService = {
+            verifyWorkflowOwnership: async (wfId, uId) => {
+                const elem = elementsStore.find((e) => e.workflow_id === wfId || e.id === wfId);
+                if (elem?.user_id && elem.user_id !== uId) return false;
+                return true;
+            },
+        };
+
+        mediaService = new ElementMediaService({
+            db: mockDb,
+            storageService: {},
+            mediaUploadService: mockUploadService,
+            workflowMediaService: mockWorkflowMediaService,
+            authService: mockAuthService,
+        });
         elementService = new ElementService({ db: mockDb, mediaService });
     });
 

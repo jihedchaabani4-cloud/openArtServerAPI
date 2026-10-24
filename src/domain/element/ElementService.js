@@ -1,39 +1,40 @@
 /**
  * ElementService
- * Canonical owner of all Element entity operations, lifecycle, and domain orchestration.
- *
- * Boundaries:
- *   - ElementMediaService    → media uploads, reference images.
- *   - ElementAnalysisService → Vision AI multimodal analysis.
- *   - WorkflowService        → workflow lifecycle & cascade deletion.
- *   - ElementRepository      → element table persistence.
- *   - WorkflowRepository     → workflow table persistence.
- *
- * Elements are project-level assets — NEVER linked to a session_id.
- *
+ * Application / Domain Service for the AI Element Reference System — V1 Direct Save
  * Feature: 018-element-reference-system
+ *
+ * Clean Architecture Boundary:
+ *   - Orchestrates Element lifecycle: create, read, update, delete, prompt-building.
+ *   - Coordinates with ElementMediaService for storage/media DB rows.
+ *   - Follows ADR-0007, ADR-0009, and ADR-0010:
+ *       - Eliminates sourceImages from creation contract (images optional at creation).
+ *       - workflow_media.is_primary is the single source of truth for Element Cover.
+ *       - Reference images are dynamically derived from workflow_media with role = 'detail'.
+ *       - Keeps public DTO compatible (source_images_count as alias for reference_images_count).
  */
 
 import { randomUUID } from "node:crypto";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
-import { createLogger } from "../../infrastructure/logging/index.js";
+import { elementRepository } from "../../db/ElementRepository.js";
+import { WorkflowRepository } from "../../db/WorkflowRepository.js";
+import { MediaRepository } from "../../db/MediaRepository.js";
+import { WorkflowMediaRepository } from "../../db/WorkflowMediaRepository.js";
 import { ElementMediaService } from "./ElementMediaService.js";
 import { ElementAnalysisService } from "./ElementAnalysisService.js";
 import promptBuilderProService from "./promptBuilderProService.js";
-import elementRepository from "../../db/ElementRepository.js";
-import { WorkflowRepository } from "../../db/WorkflowRepository.js";
-import { MediaRepository } from "../../db/MediaRepository.js";
+import { createLogger } from "../../infrastructure/logging/index.js";
 
-const logger = createLogger("domain:element");
+const logger = createLogger("element_service");
 
 // ─── Default repos (singleton fallbacks) ──────────────────────────────────────
 
-const defaultMediaRepo    = new MediaRepository();
-const defaultWorkflowRepo = new WorkflowRepository();
+const defaultMediaRepo         = new MediaRepository();
+const defaultWorkflowRepo      = new WorkflowRepository();
+const defaultWorkflowMediaRepo = new WorkflowMediaRepository();
 
 // ─── Input validation ──────────────────────────────────────────────────────────
 
-function validateCreateInputs({ name, sourceImages, projectId, project_id }) {
+function validateCreateInputs({ name, projectId, project_id }) {
     const pId = projectId || project_id;
     if (!pId) {
         throw new CrudServiceError("projectId is required to create an element", {
@@ -45,16 +46,6 @@ function validateCreateInputs({ name, sourceImages, projectId, project_id }) {
             statusCode: 400, errorCode: "VALIDATION_ERROR", operation: "createElement",
         });
     }
-    if (!Array.isArray(sourceImages) || sourceImages.length === 0) {
-        throw new CrudServiceError("At least 1 reference image is required", {
-            statusCode: 400, errorCode: "VALIDATION_ERROR", operation: "createElement",
-        });
-    }
-    if (sourceImages.length > 6) {
-        throw new CrudServiceError("Maximum 6 reference images allowed", {
-            statusCode: 400, errorCode: "VALIDATION_ERROR", operation: "createElement",
-        });
-    }
 }
 
 // ─── Service class ─────────────────────────────────────────────────────────────
@@ -62,35 +53,50 @@ function validateCreateInputs({ name, sourceImages, projectId, project_id }) {
 export class ElementService {
     /**
      * @param {Object} deps
-     * @param {Object} deps.db                       - { elements, workflows, media }
+     * @param {Object} deps.db                       - { elements, workflows, media, workflowMedia }
      * @param {Object} [deps.storageService]
      * @param {Object} [deps.workflowService]
      * @param {Object} [deps.mediaIngestionService]
-     * @param {Object} [deps.mediaService]           - Pre-configured ElementMediaService
-     * @param {Object} [deps.analysisService]        - Pre-configured ElementAnalysisService
+     * @param {Object} [deps.mediaService]           - ElementMediaService instance
+     * @param {Object} [deps.analysisService]        - ElementAnalysisService instance
      */
-    constructor({ db, storageService, workflowService, mediaIngestionService, mediaService, analysisService } = {}) {
-        this.db = db || {
-            elements:  elementRepository,
-            workflows: defaultWorkflowRepo,
-            media:     defaultMediaRepo,
+    constructor({
+        db,
+        storageService        = null,
+        workflowService       = null,
+        mediaIngestionService = null,
+        mediaService          = null,
+        elementMediaService   = null,
+        analysisService       = null,
+    } = {}) {
+        this.db = {
+            elements:      db?.elements      || elementRepository,
+            workflows:     db?.workflows     || defaultWorkflowRepo,
+            media:         db?.media         || defaultMediaRepo,
+            workflowMedia: db?.workflowMedia || defaultWorkflowMediaRepo,
         };
-        this.storageService          = storageService;
-        this.workflowService         = workflowService;
-        this.mediaIngestionService   = mediaIngestionService;
-
-        this.mediaService   = mediaService || new ElementMediaService({
-            db: this.db, storageService, mediaIngestionService, workflowService,
-        });
+        this.storageService        = storageService;
+        this.workflowService       = workflowService;
+        this.mediaIngestionService = mediaIngestionService;
+        this.mediaService          = mediaService || elementMediaService || (workflowService?.mediaService ? new ElementMediaService({
+            db:                    this.db,
+            storageService,
+            mediaUploadService:    workflowService?.mediaService?.mediaUploadService,
+            workflowMediaService:  workflowService?.mediaService,
+            authService:           workflowService?.authService,
+            mediaIngestionService,
+            workflowService,
+        }) : null);
         this.analysisService = analysisService || new ElementAnalysisService();
     }
 
     // ── CREATE ─────────────────────────────────────────────────────────────────
 
     /**
-     * Create and persist a new Element with its workflow container and initial media records.
+     * Create and persist a new Element and its workflow container.
+     * Initial images are optional. If supplied, they are attached via canonical workflow_media relations.
      */
-    async createElement({ name, sourceImages, description, projectId, project_id, tags = [], userId, element_type, type }) {
+    async createElement({ name, description, projectId, project_id, tags = [], userId, element_type, type, images, imageUrls, sourceImages }) {
         const traceId    = randomUUID();
         const start      = Date.now();
         const pId        = projectId || project_id;
@@ -99,52 +105,90 @@ export class ElementService {
         crudOperationLog({ traceId, operation: "createElement:start", name, projectId: pId, elementType });
 
         try {
-            validateCreateInputs({ name, sourceImages, projectId: pId });
+            validateCreateInputs({ name, projectId: pId });
             const safeUserId = userId || "anonymous";
 
-            // 1. Workflow container (session_id = null — Elements are NOT session-scoped)
+            const initialImages = Array.isArray(images)
+                ? images
+                : (Array.isArray(imageUrls) ? imageUrls : (Array.isArray(sourceImages) ? sourceImages : []));
+
+            if (initialImages.length > 6) {
+                throw new CrudServiceError("Maximum 6 reference images allowed", {
+                    statusCode: 400, errorCode: "VALIDATION_ERROR", operation: "createElement",
+                });
+            }
+
+            // 1. Workflow container
             const workflow = await this.db.workflows.createWorkflow({
                 project_id:    pId,
-                session_id:    null,
                 workflow_type: "ELEMENT_SHEET",
                 display_name:  name.trim(),
                 user_id:       userId || (safeUserId !== "anonymous" ? safeUserId : null),
             });
 
-            // 2. Ingest all source images → media records
-            const { mediaRecords, primaryMedia, storageUrls } = await this.mediaService.ingestElementSources({
-                workflowId: workflow.id,
-                sourceImages,
-                projectId: pId,
-                userId: safeUserId,
-            });
-
-            // 3. Persist element domain record
+            // 2. Persist element domain record
             const element = await this.db.elements.create({
                 workflow_id:      workflow.id,
-                primary_media_id: primaryMedia?.id || null,
                 name:             name.trim(),
                 element_type:     elementType,
                 description:      description?.trim() || null,
-                source_images:    mediaRecords.map((m) => m.id),
                 tags,
             });
 
-            // 4. Trigger Vision AI in background (non-blocking)
+            // 3. Attach initial images if provided
+            let mediaRecords = [];
+            let primaryMedia = null;
+            let storageUrls = [];
+
+            if (initialImages.length > 0) {
+                if (this.mediaService?.ingestElementSources) {
+                    const ingested = await this.mediaService.ingestElementSources({
+                        workflowId: workflow.id,
+                        sourceImages: initialImages,
+                        projectId: pId,
+                        userId: safeUserId,
+                    });
+                    mediaRecords = ingested.mediaRecords || [];
+                    primaryMedia = ingested.primaryMedia || mediaRecords[0] || null;
+                    storageUrls = ingested.storageUrls || [];
+                } else if (this.mediaService?.addReferenceMedia) {
+                    for (let i = 0; i < initialImages.length; i++) {
+                        const added = await this.mediaService.addReferenceMedia({
+                            elementId: element.id,
+                            source: initialImages[i],
+                            projectId: pId,
+                            userId: safeUserId,
+                        });
+                        if (added?.media) {
+                            mediaRecords.push(added.media);
+                            if (i === 0) primaryMedia = added.media;
+                            if (added.url) storageUrls.push(added.url);
+                        }
+                    }
+                }
+            }
+
+            // 4. Background vision analysis if initial images were attached
             if (this.analysisService && storageUrls.length > 0) {
                 this.analysisService
-                    .analyzeElement({ projectId, workflowId: workflow.id, imageUrls: storageUrls, elementName: name.trim(), elementType, userId: safeUserId })
+                    .analyzeElement({ projectId: pId, workflowId: workflow.id, imageUrls: storageUrls, elementName: name.trim(), elementType, userId: safeUserId })
                     .catch((err) => logger.warn({ message: err.message }, "[ElementService] Background vision analysis error"));
             }
 
             crudOperationLog({ traceId, operation: "createElement:success", status: "ok", durationMs: Date.now() - start, elementId: element.id, workflowId: workflow.id });
 
             return {
-                element: { ...element, primary_media_url: primaryMedia?.url || null, source_images_count: mediaRecords.length },
+                element: {
+                    ...element,
+                    primary_media_id: primaryMedia?.id || null,
+                    primary_media_url: primaryMedia?.url || null,
+                    reference_images_count: mediaRecords.length,
+                    source_images_count: mediaRecords.length,
+                },
                 workflow: {
                     id:               workflow.id,
                     name:             workflow.id,
-                    project_id:       projectId,
+                    project_id:       pId,
                     workflow_type:    "ELEMENT_SHEET",
                     element_type:     elementType,
                     tags:             [elementType],
@@ -168,7 +212,7 @@ export class ElementService {
     // ── READ ───────────────────────────────────────────────────────────────────
 
     /**
-     * List all elements for a project with cover thumbnail URL.
+     * List all elements for a project with cover thumbnail URL resolved from is_primary.
      */
     async listProjectElements(projectId) {
         const traceId = randomUUID();
@@ -177,20 +221,38 @@ export class ElementService {
         try {
             const elements = await this.db.elements.list({ projectId });
 
+            const workflowIds = elements.map((el) => el.workflow_id).filter(Boolean);
+            const detailCountsByWorkflow = new Map();
+            if (workflowIds.length > 0 && this.db.workflowMedia?.findByWorkflowIds) {
+                try {
+                    const links = await this.db.workflowMedia.findByWorkflowIds(workflowIds);
+                    for (const link of (links || [])) {
+                        if (link.role === "detail" || !link.role) {
+                            const count = detailCountsByWorkflow.get(link.workflow_id) || 0;
+                            detailCountsByWorkflow.set(link.workflow_id, count + 1);
+                        }
+                    }
+                } catch {
+                    // Non-fatal fallback
+                }
+            }
+
             const enriched = await Promise.all(
                 elements.map(async (el) => {
                     const primaryUrl = el.workflow_id
                         ? await this.db.workflows.getPrimaryMediaUrl(el.workflow_id).catch(() => null)
                         : null;
+                    const count = detailCountsByWorkflow.get(el.workflow_id) || 0;
                     return {
-                        id:                   el.id,
-                        name:                 el.name,
-                        description:          el.description,
-                        primary_media_url:    primaryUrl,
-                        source_images_count:  Array.isArray(el.source_images) ? el.source_images.length : 0,
-                        tags:                 el.tags || [],
-                        workflow_id:          el.workflow_id,
-                        created_at:           el.create_time,
+                        id:                      el.id,
+                        name:                    el.name,
+                        description:             el.description,
+                        primary_media_url:       primaryUrl,
+                        reference_images_count:  count,
+                        source_images_count:     count, // compatibility alias
+                        tags:                    el.tags || [],
+                        workflow_id:             el.workflow_id,
+                        created_at:              el.create_time,
                     };
                 })
             );
@@ -204,7 +266,7 @@ export class ElementService {
     }
 
     /**
-     * Retrieve full element details with all reference image URLs.
+     * Retrieve full element details with reference image URLs and cover resolved from is_primary.
      */
     async getElementById(id) {
         const traceId = randomUUID();
@@ -213,23 +275,45 @@ export class ElementService {
             const element = await this.db.elements.resolveRecord(id);
             if (!element) return null;
 
-            const mediaRecords     = element.workflow_id
+            const mediaRecords = element.workflow_id
                 ? await this.db.media.findByWorkflow(element.workflow_id).catch(() => [])
                 : [];
-            const referenceImages  = mediaRecords.map((m) => m.url).filter(Boolean);
+            const referenceImages = mediaRecords.map((m) => m.url).filter(Boolean);
+
+            const primaryUrl = element.workflow_id
+                ? await this.db.workflows.getPrimaryMediaUrl(element.workflow_id).catch(() => null)
+                : null;
 
             crudOperationLog({ traceId, operation: "getElementById", status: "ok", elementId: id });
 
             return {
                 ...element,
-                reference_images:     referenceImages,
-                primary_media_url:    referenceImages[0] || null,
-                source_images_count:  referenceImages.length,
+                reference_images:        referenceImages,
+                primary_media_url:       primaryUrl,
+                reference_images_count:  referenceImages.length,
+                source_images_count:     referenceImages.length, // compatibility alias
             };
         } catch (err) {
             crudOperationLog({ traceId, operation: "getElementById", status: "error", message: err.message });
             throw err;
         }
+    }
+
+    /**
+     * Explicitly set or switch the element's cover media via atomic primary RPC.
+     */
+    async setElementCover({ elementId, mediaId, userId }) {
+        if (!mediaId) {
+            throw new CrudServiceError("mediaId is required", { statusCode: 400, errorCode: "VALIDATION_ERROR" });
+        }
+        return this.updateElement(elementId, { primaryMediaId: mediaId }, userId);
+    }
+
+    /**
+     * Generic workflow-level primary media setter for elements.
+     */
+    async setPrimaryMedia({ elementId, mediaId, userId }) {
+        return this.setElementCover({ elementId, mediaId, userId });
     }
 
     /**
@@ -272,7 +356,14 @@ export class ElementService {
      * Allowed: name, description, guidelines, primary_media_id.
      * Immutable (silently stripped): element_type, type, elementType.
      */
-    async updateElement(id, patchData = {}) {
+    /**
+     * Partial update — only explicitly provided fields are updated.
+     * Allowed entity fields: name, description, guidelines, tags.
+     * Cover lifecycle: optional coverMediaId (preserves current Cover when omitted; clears Cover when null;
+     * updates Cover atomically when provided as mediaId belonging to the workflow).
+     * Omitted fields remain strictly unchanged.
+     */
+    async updateElement(id, patchData = {}, userId = null) {
         const traceId = randomUUID();
         const start   = Date.now();
 
@@ -283,28 +374,110 @@ export class ElementService {
             });
         }
 
-        const allowedPatch = { ...patchData };
+        const wfId = existing.workflow_id;
 
-        // Normalize element_type if passed as type or elementType
-        const resolvedType = patchData.element_type || patchData.type || patchData.elementType;
+        // 1. Cover / Primary media lifecycle via generic primaryMediaId (coverMediaId supported as alias)
+        const requestedPrimaryMediaId = patchData.primaryMediaId !== undefined
+            ? patchData.primaryMediaId
+            : patchData.coverMediaId;
+
+        let primaryMediaIdResult = undefined;
+
+        if (requestedPrimaryMediaId !== undefined) {
+            if (requestedPrimaryMediaId === null) {
+                // Explicit null: clear the Cover
+                if (wfId && this.workflowService?.clearPrimaryMedia) {
+                    await this.workflowService.clearPrimaryMedia({ workflowId: wfId, userId });
+                } else if (wfId && this.mediaService?.clearElementCover) {
+                    await this.mediaService.clearElementCover({ workflowId: wfId });
+                } else if (wfId && this.db.workflowMedia?.clearPrimaryMedia) {
+                    await this.db.workflowMedia.clearPrimaryMedia({ workflowId: wfId });
+                }
+                primaryMediaIdResult = null;
+            } else {
+                const targetMediaId = String(requestedPrimaryMediaId).trim();
+                // Validate membership in the same Element workflow
+                const wfMedia = wfId
+                    ? await (this.db.workflowMedia?.findByWorkflow?.(wfId)
+                        || this.db.media?.findByWorkflow?.(wfId)
+                        || [])
+                    : [];
+
+                const isLinked = wfMedia.some((m) => (m.media_id || m.id) === targetMediaId);
+                if (!isLinked) {
+                    throw new CrudServiceError(`Media ${targetMediaId} does not belong to element workflow ${wfId}`, {
+                        statusCode: 400,
+                        errorCode: "INVALID_MEDIA",
+                        traceId,
+                        operation: "updateElement",
+                    });
+                }
+
+                if (wfId && this.workflowService?.setPrimaryMedia) {
+                    await this.workflowService.setPrimaryMedia({ workflowId: wfId, mediaId: targetMediaId, userId });
+                } else if (this.mediaService?.setElementCover) {
+                    await this.mediaService.setElementCover({ workflowId: wfId, mediaId: targetMediaId });
+                } else if (this.db.workflowMedia?.setPrimaryMedia) {
+                    await this.db.workflowMedia.setPrimaryMedia({ workflowId: wfId, mediaId: targetMediaId });
+                }
+                primaryMediaIdResult = targetMediaId;
+            }
+        }
+
+        // 2. Partial entity fields update
+        const allowedPatch = {};
+
+        if (patchData.name !== undefined) {
+            allowedPatch.name = String(patchData.name).replace(/^@+/, "").trim();
+        }
+        if (patchData.description !== undefined) {
+            allowedPatch.description = patchData.description == null
+                ? null
+                : String(patchData.description).trim() || null;
+        }
+        if (patchData.guidelines !== undefined) {
+            allowedPatch.guidelines = patchData.guidelines == null
+                ? ""
+                : (Array.isArray(patchData.guidelines)
+                    ? patchData.guidelines.map((g) => String(g).trim()).filter(Boolean).join("\n")
+                    : String(patchData.guidelines).trim());
+        }
+        if (patchData.tags !== undefined) {
+            allowedPatch.tags = Array.isArray(patchData.tags) ? patchData.tags : [];
+        }
+
+        const resolvedType = patchData.element_type ?? patchData.type ?? patchData.elementType;
         if (resolvedType !== undefined) {
             allowedPatch.element_type = String(resolvedType).toLowerCase().trim();
         }
-        delete allowedPatch.type;
-        delete allowedPatch.elementType;
 
-        const updated = await this.db.elements.update(id, allowedPatch);
+        let updated = existing;
+        if (Object.keys(allowedPatch).length > 0) {
+            updated = (await this.db.elements.update(existing.id, allowedPatch)) || existing;
+        }
 
         // Keep workflow.display_name in sync when name changes
-        if (allowedPatch.name && existing.workflow_id && this.db.workflows?.updateFields) {
-            const cleanName = String(allowedPatch.name).replace(/^@+/, "").trim();
+        if (allowedPatch.name && wfId && this.db.workflows?.updateFields) {
             await this.db.workflows
-                .updateFields(existing.workflow_id, { display_name: cleanName })
+                .updateFields(wfId, { display_name: allowedPatch.name })
                 .catch((err) => logger.warn({ message: err.message }, "[ElementService] sync workflow display_name warning"));
         }
 
+        // 3. Resolve primary_media_url dynamically from canonical workflow_media relation
+        const primaryMediaUrl = (wfId && this.db.workflows?.getPrimaryMediaUrl)
+            ? await this.db.workflows.getPrimaryMediaUrl(wfId).catch(() => null)
+            : null;
+
         crudOperationLog({ traceId, operation: "updateElement", status: "ok", durationMs: Date.now() - start, id });
-        return updated;
+
+        return {
+            ...existing,
+            ...updated,
+            primaryMediaId: primaryMediaIdResult !== undefined
+                ? primaryMediaIdResult
+                : (existing.primaryMediaId ?? existing.primary_media_id ?? undefined),
+            primary_media_url: primaryMediaUrl,
+        };
     }
 
     // ── DELETE ─────────────────────────────────────────────────────────────────
@@ -327,7 +500,7 @@ export class ElementService {
             if (targetWorkflowId) {
                 if (this.workflowService) {
                     await this.workflowService.deleteWorkflow({ workflowId: targetWorkflowId, userId });
-                } else {
+                } else if (this.mediaService?.addReferenceMedia) {
                     await this.db.workflows.deleteById(targetWorkflowId);
                 }
             }
@@ -384,9 +557,12 @@ export class ElementService {
 
 const defaultElementMediaService = new ElementMediaService({
     db: { elements: elementRepository, workflows: defaultWorkflowRepo, media: defaultMediaRepo },
-    storageService:       null,
+    storageService:        null,
+    mediaUploadService:    { upload: async () => ({ files: [], uploaded: [] }), discard: async () => ({}) },
+    workflowMediaService:  { attachMediaItems: async () => ({ attached: [] }) },
+    authService:           { verifyWorkflowOwnership: async () => false },
     mediaIngestionService: null,
-    workflowService:      null,
+    workflowService:       null,
 });
 
 const defaultInstance = new ElementService({
@@ -405,5 +581,7 @@ export const deleteElement             = (id, userId)     => defaultInstance.del
 export const analyzeElement            = (params)         => defaultInstance.analyzeElement(params);
 export const getElementContextForPrompt = (params)        => defaultInstance.getElementContextForPrompt(params);
 export const addImageToElement         = (params)         => defaultInstance.addImageToElement(params);
+export const setElementCover           = (params)         => defaultInstance.setElementCover(params);
+export const setPrimaryMedia           = (params)         => defaultInstance.setPrimaryMedia(params);
 
 export default defaultInstance;

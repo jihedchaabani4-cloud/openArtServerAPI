@@ -259,7 +259,7 @@ describe("Generic Workflow Primary Media — Centralize and Reuse Canonical Cont
 
     it("6. Element PATCH /api/v2/elements/:id with primaryMediaId switches Cover atomically", async () => {
         const mockDb = createMockDb();
-        const mediaService = new ElementMediaService({ db: mockDb });
+        const mediaService = createTestElementMediaService(mockDb);
         const elementService = new ElementService({ db: mockDb, mediaService });
 
         const { element } = await elementService.createElement({
@@ -300,7 +300,7 @@ describe("Generic Workflow Primary Media — Centralize and Reuse Canonical Cont
 
     it("7. Element PATCH without primaryMediaId strictly preserves current Cover", async () => {
         const mockDb = createMockDb();
-        const mediaService = new ElementMediaService({ db: mockDb });
+        const mediaService = createTestElementMediaService(mockDb);
         const elementService = new ElementService({ db: mockDb, mediaService });
 
         const { element } = await elementService.createElement({
@@ -329,7 +329,7 @@ describe("Generic Workflow Primary Media — Centralize and Reuse Canonical Cont
 
     it("8. Element PATCH with primaryMediaId: null explicitly clears the Cover", async () => {
         const mockDb = createMockDb();
-        const mediaService = new ElementMediaService({ db: mockDb });
+        const mediaService = createTestElementMediaService(mockDb);
         const elementService = new ElementService({ db: mockDb, mediaService });
 
         const { element } = await elementService.createElement({
@@ -360,7 +360,7 @@ describe("Generic Workflow Primary Media — Centralize and Reuse Canonical Cont
 
     it("9. Initial assignment (first upload) does NOT overwrite an established primary", async () => {
         const mockDb = createMockDb();
-        const mediaService = new ElementMediaService({ db: mockDb });
+        const mediaService = createTestElementMediaService(mockDb);
         const elementService = new ElementService({ db: mockDb, mediaService });
 
         const { element } = await elementService.createElement({
@@ -392,7 +392,7 @@ describe("Generic Workflow Primary Media — Centralize and Reuse Canonical Cont
 
     it("10. Deleting primary media does NOT auto-promote another media; primary_media_url becomes null", async () => {
         const mockDb = createMockDb();
-        const mediaService = new ElementMediaService({ db: mockDb });
+        const mediaService = createTestElementMediaService(mockDb);
         const elementService = new ElementService({ db: mockDb, mediaService });
 
         const { element } = await elementService.createElement({
@@ -462,3 +462,48 @@ describe("Generic Workflow Primary Media — Centralize and Reuse Canonical Cont
         }
     });
 });
+function createTestElementMediaService(mockDb) {
+    const mockUploadService = {
+        upload: async ({ files }) => ({
+            uploaded: files.map((f, idx) => {
+                const url = typeof f === "string" ? f : (f?.url || "https://example.com/uploaded.png");
+                return { id: "media-upload-" + Date.now() + "-" + (idx + 1), url, step_id: "upload" };
+            }),
+        }),
+        discard: async () => ({}),
+    };
+    const mockWorkflowMediaService = {
+        attachMediaItems: async ({ workflowId, items, role = "detail", autoPrimary = true }) => {
+            const attached = [];
+            for (const item of items) {
+                const existing = await mockDb.workflowMedia.findByWorkflow(workflowId);
+                const isFirst = existing.length === 0;
+                const isPrimary = isFirst && autoPrimary;
+                const m = await mockDb.media.createMedia({
+                    url: item.uploadedFile?.url || "https://example.com/m.png",
+                    step_id: "upload",
+                });
+                const link = await mockDb.workflowMedia.linkMedia({
+                    workflowId,
+                    mediaId: m.id,
+                    role,
+                    is_primary: isPrimary,
+                });
+                attached.push({ media: m, link, is_primary: isPrimary });
+            }
+            return { attached };
+        },
+    };
+    const mockAuthService = {
+        verifyWorkflowOwnership: async () => true,
+    };
+    return new ElementMediaService({
+        db: mockDb,
+        storageService: {},
+        mediaUploadService: mockUploadService,
+        workflowMediaService: mockWorkflowMediaService,
+        authService: mockAuthService,
+    });
+}
+
+

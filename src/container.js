@@ -268,6 +268,9 @@ export const characterService = new CharacterService({
 export const elementMediaService = new ElementMediaService({
     db,
     storageService,
+    mediaUploadService,
+    workflowMediaService,
+    authService: workflowService.authService,
     mediaIngestionService,
     workflowService,
 });

@@ -101,7 +101,7 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
     assert.equal(res.status, "processing");
     const createdMedia = mediaTable.get(res.placeholderMedia.id);
     assert.equal(createdMedia.status, "processing");
-    assert.equal(createdMedia.step_id, "character_sheet");
+    assert.equal(createdMedia.step_id, "image_generation");
 
     const sheetLinks = workflowMediaTable.filter(
       (wm) => wm.workflow_id === "char-wf-success-1" && wm.media_id === res.placeholderMedia.id
@@ -183,7 +183,7 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
     );
     assert.equal(orphanedProcessing.length, 0, "No media should remain in 'processing' without a workflow_media link");
 
-    const failedPlaceholder = allMedia.find((m) => m.step_id === "character_sheet" && m.status === "failed");
+    const failedPlaceholder = allMedia.find((m) => m.step_id === "image_generation" && m.status === "failed");
     assert.ok(failedPlaceholder, "Failed placeholder media must be marked with status 'failed'");
   });
 
@@ -337,6 +337,35 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
     const elementMediaService = new ElementMediaService({
       db: dbWithoutWorkflowMedia,
       storageService: {},
+      mediaUploadService: {
+        upload: async ({ files }) => ({
+          uploaded: files.map((f, i) => {
+            const m = { id: "m-sheet-" + (i + 1), url: f, step_id: "upload" };
+            mediaTable.set(m.id, m);
+            return m;
+          }),
+        }),
+        discard: async () => ({}),
+      },
+      workflowMediaService: {
+        attachMediaItems: async ({ workflowId, items, role = "detail" }) => {
+          const attached = [];
+          for (const item of items) {
+            const m = item.uploadedFile;
+            const link = {
+              workflow_id: workflowId,
+              media_id: m.id,
+              role,
+            };
+            workflowMediaTable.push(link);
+            attached.push({ media: m, link, is_primary: true });
+          }
+          return { attached };
+        },
+      },
+      authService: {
+        verifyWorkflowOwnership: async () => true,
+      },
     });
 
     const elementService = new ElementService({

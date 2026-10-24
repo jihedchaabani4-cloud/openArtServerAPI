@@ -70,13 +70,22 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
             "assetUploadService.workflowMediaService must hold root mediaUploadService"
         );
 
-        // 5. ElementMediaService -> workflowService -> mediaService
+        // 5. ElementMediaService: direct wiring to root upload, attach seam, and auth services
         assert.ok(container.elementMediaService, "container.elementMediaService must be instantiated");
-        assert.ok(container.elementMediaService.workflowService, "elementMediaService must receive workflowService");
         assert.equal(
-            container.elementMediaService.workflowService.mediaService.mediaUploadService,
+            container.elementMediaService.mediaUploadService,
             rootUploadService,
-            "elementMediaService.workflowService.mediaService must hold root mediaUploadService"
+            "elementMediaService.mediaUploadService must hold root mediaUploadService"
+        );
+        assert.equal(
+            container.elementMediaService.workflowMediaService,
+            container.workflowMediaService,
+            "elementMediaService.workflowMediaService must hold container workflowMediaService"
+        );
+        assert.equal(
+            container.elementMediaService.authService,
+            container.workflowService.authService,
+            "elementMediaService.authService must hold container authService"
         );
 
         // 6. CharacterService -> workflowService -> mediaService

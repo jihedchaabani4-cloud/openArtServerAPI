@@ -532,6 +532,9 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
 
     let elemLinkCount = 1; // Shared at first
     const elemMediaService = new ElementMediaService({
+      mediaUploadService: { upload: async () => ({ uploaded: [] }), discard: async () => ({}) },
+      workflowMediaService: { attachMediaItems: async () => ({ attached: [] }) },
+      authService: { verifyWorkflowOwnership: async () => true },
       db: {
         elements: {
           resolveRecord: async () => ({

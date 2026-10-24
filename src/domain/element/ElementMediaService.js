@@ -50,6 +50,9 @@ export class ElementMediaService {
         workflowMediaService,
         authService,
     } = {}) {
+        if (!db) {
+            throw new Error("ElementMediaService requires db");
+        }
         if (!mediaUploadService || typeof mediaUploadService.upload !== "function") {
             throw new Error("ElementMediaService requires mediaUploadService with an upload method");
         }

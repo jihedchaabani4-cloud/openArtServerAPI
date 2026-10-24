@@ -287,7 +287,6 @@ export const elementService = new ElementService({
     db,
     storageService,
     workflowService,
-    mediaIngestionService,
     mediaService: elementMediaService,
     analysisService: new ElementAnalysisService(),
 });

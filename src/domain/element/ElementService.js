@@ -56,7 +56,6 @@ export class ElementService {
      * @param {Object} deps.db                       - { elements, workflows, media, workflowMedia }
      * @param {Object} [deps.storageService]
      * @param {Object} [deps.workflowService]
-     * @param {Object} [deps.mediaIngestionService]
      * @param {Object} [deps.mediaService]           - ElementMediaService instance
      * @param {Object} [deps.analysisService]        - ElementAnalysisService instance
      */
@@ -64,7 +63,6 @@ export class ElementService {
         db,
         storageService        = null,
         workflowService       = null,
-        mediaIngestionService = null,
         mediaService          = null,
         elementMediaService   = null,
         analysisService       = null,
@@ -77,7 +75,6 @@ export class ElementService {
         };
         this.storageService        = storageService;
         this.workflowService       = workflowService;
-        this.mediaIngestionService = mediaIngestionService;
         const resolvedMediaService = mediaService || elementMediaService;
         if (!resolvedMediaService) {
             throw new Error("ElementService requires mediaService (ElementMediaService)");

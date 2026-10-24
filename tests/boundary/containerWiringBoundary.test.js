@@ -6,6 +6,7 @@ import { MediaUploadService } from "../../src/platform/media-ingestion/MediaUplo
 import { WorkflowLifecycleService } from "../../src/platform/workflow/WorkflowService.js";
 import { WorkflowService as WorkflowServiceBase } from "../../src/platform/workflow/WorkflowServiceBase.js";
 import { ElementService } from "../../src/domain/element/ElementService.js";
+import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
 import { CharacterService } from "../../src/domain/character/CharacterService.js";
 import { CharacterMediaService } from "../../src/domain/character/CharacterMediaService.js";
 
@@ -205,6 +206,21 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
             () => new ElementService({ db: {} }),
             (err) => err.message.includes("ElementService requires mediaService"),
             "ElementService constructor must throw if mediaService is missing"
+        );
+        assert.strictEqual(
+            container.elementService.mediaIngestionService,
+            undefined,
+            "container.elementService.mediaIngestionService must be removed"
+        );
+        assert.throws(
+            () => new ElementMediaService({
+                storageService: {},
+                mediaUploadService: { upload: () => {} },
+                workflowMediaService: { attachMediaItems: () => {} },
+                authService: { verifyWorkflowOwnership: () => {} },
+            }),
+            (err) => err.message.includes("ElementMediaService requires db"),
+            "ElementMediaService constructor must throw if db is missing"
         );
     });
 

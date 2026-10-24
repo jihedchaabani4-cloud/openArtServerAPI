@@ -271,11 +271,13 @@ export class WorkflowMediaService {
         const resolvedExisting = new Map();
         for (const item of items) {
             if (item.kind === "existing") {
-                const mediaId = item.mediaId || item.media_id || item.workflowId || item.workflow_id;
+                const mediaId = item.mediaId || item.media_id;
+                const sourceWorkflowId = item.workflowId || item.workflow_id || null;
                 let resolvedMedia;
                 try {
                     resolvedMedia = await this.resolveOwnedSourceMedia({
-                        mediaId,
+                        mediaId: mediaId || sourceWorkflowId,
+                        workflowId: sourceWorkflowId,
                         userId,
                         projectId,
                         req,

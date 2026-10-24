@@ -523,6 +523,75 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
             assert.ok(discardCall);
             assert.deepEqual(discardCall.keys, ["user-1/uploads/batch1.png"]);
         });
+
+        it("cross-tenant / source container isolation: rejects existing item when specified source workflowId does not link to media, discarding uploaded keys", async () => {
+            const h = createMockHarness();
+            const targetWfId = "00000000-0000-0000-0000-000000000001";
+            h.workflows.set(targetWfId, { id: targetWfId, user_id: "user-1", project_id: "proj-1" });
+
+            const validSourceWfId = "00000000-0000-0000-0000-000000000002";
+            h.workflows.set(validSourceWfId, { id: validSourceWfId, user_id: "user-1", project_id: "proj-1" });
+
+            const unlinkedWfId = "00000000-0000-0000-0000-000000000099";
+            h.workflows.set(unlinkedWfId, { id: unlinkedWfId, user_id: "user-1", project_id: "proj-1" });
+
+            const ownedMediaId = "00000000-0000-0000-0000-000000000003";
+            h.media.set(ownedMediaId, {
+                id: ownedMediaId,
+                user_id: "user-1",
+                project_id: "proj-1",
+                url: "https://storage.test/owned.png",
+            });
+            // Link media ONLY to validSourceWfId
+            h.workflowMedia.push({
+                workflow_id: validSourceWfId,
+                media_id: ownedMediaId,
+                role: "output",
+                is_primary: true,
+            });
+
+            await assert.rejects(
+                async () => {
+                    await h.service.attachMediaItems({
+                        workflowId: targetWfId,
+                        userId: "user-1",
+                        projectId: "proj-1",
+                        role: "detail",
+                        maxAllowed: 6,
+                        items: [
+                            {
+                                kind: "uploaded",
+                                uploadedFile: {
+                                    storageKey: "user-1/uploads/test-isolation.png",
+                                    url: "https://storage.test/test-isolation.png",
+                                    width: 100,
+                                    height: 100,
+                                    format: "PNG",
+                                },
+                            },
+                            {
+                                kind: "existing",
+                                mediaId: ownedMediaId,
+                                workflowId: unlinkedWfId, // specified workflow does NOT have this media!
+                            },
+                        ],
+                    });
+                },
+                (err) => {
+                    assert.equal(err.statusCode, 404, "Must return 404 when media is not linked to specified source workflow");
+                    return true;
+                }
+            );
+
+            // Verify uploaded key was safely discarded
+            const discardCall = h.callLog.find((c) => c.op === "mediaUploadService.discard");
+            assert.ok(discardCall, "Must discard uploaded files on source workflow isolation failure");
+            assert.deepEqual(discardCall.keys, ["user-1/uploads/test-isolation.png"]);
+
+            // Verify zero attachments created in target workflow
+            const targetLinks = h.workflowMedia.filter((m) => m.workflow_id === targetWfId);
+            assert.equal(targetLinks.length, 0, "No media should be attached to target workflow");
+        });
     });
 
     describe("3. Attachment Success & Handle Contract", () => {

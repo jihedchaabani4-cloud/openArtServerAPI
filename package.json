@@ -36,7 +36,10 @@
         "start:wallet-worker": "node src/workers/walletWorker.js",
         "dev:wallet-worker": "nodemon --delay 1500 src/workers/walletWorker.js",
         "dev": "npm run dev:api",
-        "dev:full": "concurrently \"npm run dev:api\" \"npm run dev:worker\""
+        "dev:full": "concurrently \"npm run dev:api\" \"npm run dev:worker\"",
+        "gate": "node scripts/gate.cjs",
+        "catalog": "node scripts/gen-service-catalog.cjs",
+        "arch": "node scripts/arch-check.cjs"
     },
     "dependencies": {
         "@fal-ai/client": "^1.9.4",

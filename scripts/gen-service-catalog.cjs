@@ -1,0 +1,138 @@
+#!/usr/bin/env node
+'use strict';
+// Generates docs/agents/service-catalog.md from the code (best-effort regex parsing).
+// Only the "Owns" column is human text: it comes from a header line `@owns <one sentence>` in the service file.
+//   node scripts/gen-service-catalog.cjs          write the catalog
+//   node scripts/gen-service-catalog.cjs --check  exit 1 if the committed catalog is stale
+const fs = require('fs');
+const path = require('path');
+
+const ROOT = path.resolve(__dirname, '..');
+const OUT = path.join(ROOT, 'docs', 'agents', 'service-catalog.md');
+const SKIP = new Set(['node_modules', '.git', 'coverage', 'dist', 'build', '.next', 'docs', 'supabase', 'tests', 'test', '__tests__', 'scripts']);
+const rel = (p) => path.relative(ROOT, p).split(path.sep).join('/');
+
+function walk(dir, out = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) { if (!SKIP.has(e.name)) walk(full, out); }
+    else if (/\.(c|m)?js$/.test(e.name) && !/\.(test|spec)\./.test(e.name)) out.push(full);
+  }
+  return out;
+}
+
+// Index just after the matching close brace of the block that opens at `open`.
+function matchBrace(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '{') depth++;
+    else if (text[i] === '}') { depth--; if (depth === 0) return i + 1; }
+  }
+  return text.length;
+}
+
+const stripNoise = (l) => l.replace(/(['"`])(?:\\.|(?!\1).)*\1/g, '""').replace(/\/\/.*$/, '');
+
+function splitTop(s) {
+  const parts = []; let depth = 0; let cur = '';
+  for (const ch of s) {
+    if ('({['.includes(ch)) depth++;
+    if (')}]'.includes(ch)) depth--;
+    if (ch === ',' && depth === 0) { parts.push(cur); cur = ''; } else cur += ch;
+  }
+  if (cur.trim()) parts.push(cur);
+  return parts;
+}
+
+function parseService(file) {
+  const text = fs.readFileSync(file, 'utf8');
+  const base = path.basename(file).replace(/\.(c|m)?js$/, '');
+  const classes = [...text.matchAll(/^[ \t]*(?:export\s+(?:default\s+)?)?class\s+(\w+)/gm)];
+  const cm = classes.find((m) => m[1] === base) || classes[0];
+  const owns = ((text.match(/@owns[ \t]+([^\n\r]+)/) || [])[1] || '').replace(/\*\/\s*$/, '').trim();
+  const info = { file: rel(file), name: cm ? cm[1] : base, owns, deps: [], methods: [] };
+  if (!cm) return info;
+
+  const open = text.indexOf('{', cm.index + cm[0].length);
+  const body = text.slice(open + 1, matchBrace(text, open) - 1);
+
+  const ctor = body.match(/constructor\s*\(([\s\S]*?)\)\s*\{/);
+  if (ctor) {
+    const params = ctor[1];
+    const ctorOpen = body.indexOf('{', ctor.index + ctor[0].length - 1);
+    const ctorBody = body.slice(ctorOpen, matchBrace(body, ctorOpen));
+    if (params.includes('{')) {
+      const s = params.indexOf('{');
+      const inner = params.slice(s + 1, matchBrace(params, s) - 1);
+      info.deps = splitTop(inner).map((p) => p.split('=')[0].split(':')[0].trim()).filter((n) => /^\w+$/.test(n));
+    } else {
+      const assigned = [...ctorBody.matchAll(/this\.(\w+)\s*=/g)].map((m) => m[1]);
+      info.deps = assigned.length ? assigned : params.split(',').map((p) => p.split('=')[0].trim()).filter(Boolean);
+    }
+    info.deps = [...new Set(info.deps)];
+  }
+
+  const KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'return', 'function', 'constructor', 'else', 'do', 'try']);
+  let depth = 0;
+  for (const line of body.split(/\r?\n/)) {
+    if (depth === 0) {
+      const m = line.match(/^\s*(static\s+)?(async\s+)?\*?\s*([A-Za-z_$][\w$]*)\s*\([^)]*\)?.*\{\s*$/) || line.match(/^\s*(static\s+)?(async\s+)?\*?\s*([A-Za-z_$][\w$]*)\s*\(/);
+      if (m && !KEYWORDS.has(m[3]) && !m[3].startsWith('_')) info.methods.push((m[1] ? 'static ' : '') + m[3]);
+    }
+    const clean = stripNoise(line);
+    depth += (clean.match(/\{/g) || []).length - (clean.match(/\}/g) || []).length;
+  }
+  info.methods = [...new Set(info.methods)];
+  return info;
+}
+
+function build() {
+  const all = walk(ROOT);
+  const texts = new Map(all.map((f) => [f, fs.readFileSync(f, 'utf8')]));
+  const services = all.filter((f) => /Service\.(c|m)?js$/.test(f)).map(parseService)
+    .sort((a, b) => a.file.localeCompare(b.file));
+
+  const cell = (s) => (s || '-').replace(/\|/g, '\\|');
+  const code = (arr) => (arr.length ? arr.map((x) => '`' + x + '`').join(', ') : '-');
+  const rows = services.map((s) => {
+    const registered = [];
+    let refs = 0;
+    for (const [f, t] of texts) {
+      if (rel(f) === s.file) continue;
+      if (new RegExp(`new\\s+${s.name}\\s*\\(`).test(t)) registered.push(rel(f));
+      if (new RegExp(`\\b${s.name}\\b`).test(t)) refs++;
+    }
+    const folder = path.posix.dirname(s.file);
+    return `| \`${s.name}\` | \`${folder}\` | ${cell(s.owns)} | ${code(s.methods)} | ${code(s.deps)} | ${code(registered)} | ${refs} |`;
+  });
+
+  const missing = services.filter((s) => !s.owns).length;
+  return [
+    '<!-- GENERATED by scripts/gen-service-catalog.cjs. Do not edit by hand. Run: npm run catalog -->',
+    '# Service catalog',
+    '',
+    'Look here BEFORE creating or changing a service. Owner exists -> extend it. No owner -> create one (docs/agents/rules/services.md).',
+    'Methods and dependencies are parsed from the code (best effort). "Owns" comes from the `@owns` line in each file.',
+    '',
+    '| Service | Folder | Owns | Public methods | Constructor deps | Registered in (new X) | Referenced by (files) |',
+    '|---|---|---|---|---|---|---|',
+    ...rows,
+    '',
+    `Services: ${services.length}. Without @owns: ${missing}.`,
+    '',
+  ].join('\n');
+}
+
+const next = build();
+if (process.argv.includes('--check')) {
+  const cur = fs.existsSync(OUT) ? fs.readFileSync(OUT, 'utf8').replace(/\r\n/g, '\n') : '';
+  if (cur !== next) {
+    console.error('service-catalog.md is stale or missing. Run: npm run catalog   (and commit the result)');
+    process.exit(1);
+  }
+  console.log('service catalog: up to date');
+} else {
+  fs.mkdirSync(path.dirname(OUT), { recursive: true });
+  fs.writeFileSync(OUT, next);
+  console.log('wrote ' + rel(OUT));
+}

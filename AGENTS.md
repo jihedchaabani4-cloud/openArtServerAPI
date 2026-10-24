@@ -1,22 +1,18 @@
-## Project rules
-- Before any task, read docs/plan/00_CORE.md and the phase file the human names. The plan files win over any Spec Kit file.
-- One commit per task. Failing test first. Full hermetic `npm test` before every commit (no .env, no network, no real DB).
-- Secrets scan on `git diff --cached` before every commit.
-- Use the structured logger, never console.*. Never log secrets, tokens or prompts.
-- Never push, tag, merge, or edit anything under my-app/.
-- Every id from a client must be ownership-checked and project-scoped. Cross-tenant access returns 404, never 403.
-- Additive migrations only. Never rename existing tables, columns, classes or routes.
+# apiOpenArt (backend)
 
-## Architecture rules
-- Routes and controllers only: parse the request, call ONE service method, map the result to HTTP. No business logic, no direct db/supabase calls, no ownership logic inside routes or controllers.
-- Each concern lives in ONE service (folders -> FolderService, asset move/listing -> the existing workflow/generation service, etc.). Before writing code, search for the existing service and extend it. Create a new service only if no existing one owns that concern.
-- Services call repositories; repositories only talk to the DB, always scoped by user and project.
-- No duplicated logic: if the same check or rule appears in two places, move it into the owning service and call it from both.
-- A service has a short header comment: what it owns, and its public methods.
-- Refactors that move code are a separate task with their own commit and no behavior change; existing tests must pass unchanged.
+Root rules apply (see ../AGENTS.md). This file adds backend specifics only.
 
-<!-- SPECKIT START -->
-For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan
-at specs/033-prompt-bar-platform/plan.md
-<!-- SPECKIT END -->
+## Commands
+- `npm run gate` before every commit (arch-check, catalog, doc paths, secrets, full npm test). `npm run gate -- --fast` skips npm test while iterating.
+- `npm run catalog` regenerates docs/agents/service-catalog.md. Commit it with the service change.
+- `npm run arch` shows rule counts. `node scripts/arch-check.cjs --report` lists every violation.
+- Real-Postgres SQL gate (manual, not CI): `node scripts/run-disposable-shared-media-test.js`.
+
+## Layers (calls go down only)
+route -> controller -> service -> repository -> DB. A service reaches another service only through a constructor-injected dependency.
+Details: ../docs/agents/rules/services.md. Concern -> owner: ../docs/agents/maps/backend-map.md.
+
+## Every new *Service.js
+- Header comment with a line `@owns <one sentence>` and its public methods.
+- Constructor throws if a dependency is missing. Register it in the container + a wiring test.
+- Run `npm run catalog`.

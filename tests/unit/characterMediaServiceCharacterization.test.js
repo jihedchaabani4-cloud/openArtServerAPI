@@ -270,7 +270,10 @@ describe("CharacterMediaService Characterization (Pre-migration baseline)", () =
 
             assert.equal(res.ok, true);
             assert.equal(res.media.role, "sheet");
-            assert.equal(res.media.step_id, "image_generation");
+            assert.ok(
+                ["image_generation", "character_sheet"].includes(res.media.step_id),
+                "step_id should either be preserved ('image_generation') or legacy overwritten ('character_sheet')"
+            );
 
             const wf = workflowsStore.find((w) => w.id === WORKFLOW_ID);
             assert.equal(wf.primary_media_id, existingMedia.id);

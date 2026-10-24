@@ -10,7 +10,7 @@ export function createPreUploadElementCapacityGuard(service = elementMediaServic
     return async function preUploadElementCapacityGuard(req, res, next) {
         try {
             const elementId = req.params.id;
-            const userId = req.user?.id || req.body?.userId;
+            const userId = req.user?.id;
             await service.assertUploadAllowed({ elementId, userId, incomingCount: 1 });
             return next();
         } catch (err) {

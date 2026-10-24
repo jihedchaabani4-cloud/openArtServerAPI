@@ -372,7 +372,7 @@ describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMedia
             });
 
             assert.equal(uploadCalls.length, 1);
-            assert.equal(uploadCalls[0].policy, ELEMENT_SHEET_UPLOAD_POLICY);
+            assert.equal(uploadCalls[0].policy, ELEMENT_REFERENCE_UPLOAD_POLICY);
             assert.equal(attachCalls.length, 1);
             assert.equal(attachCalls[0].role, "detail");
             assert.equal(attachCalls[0].maxAllowed, 6);
@@ -497,6 +497,44 @@ describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMedia
             );
 
             assert.equal(discardCalls.length, 0, "Pre-existing mediaId must never have storage discarded");
+        });
+    });
+
+    describe("5. Ownership & Capacity Guard Hardening (STD-02, STD-03)", () => {
+        it("assertUploadAllowed: unauthenticated / anonymous -> 401", async () => {
+            await assert.rejects(
+                () => service.assertUploadAllowed({ elementId: ELEMENT_ID, userId: null }),
+                (err) => err.statusCode === 401 && err.errorCode === "UNAUTHORIZED"
+            );
+            await assert.rejects(
+                () => service.assertUploadAllowed({ elementId: ELEMENT_ID, userId: "anonymous" }),
+                (err) => err.statusCode === 401 && err.errorCode === "UNAUTHORIZED"
+            );
+        });
+
+        it("assertUploadAllowed: cross-tenant access -> 404", async () => {
+            await assert.rejects(
+                () => service.assertUploadAllowed({ elementId: ELEMENT_ID, userId: "foreign-user" }),
+                (err) => err.statusCode === 404 && err.errorCode === "NOT_FOUND"
+            );
+        });
+
+        it("removeReferenceMedia: unauthenticated / anonymous -> 401", async () => {
+            await assert.rejects(
+                () => service.removeReferenceMedia({ elementId: ELEMENT_ID, mediaId: "m-1", userId: null }),
+                (err) => err.statusCode === 401 && err.errorCode === "UNAUTHORIZED"
+            );
+            await assert.rejects(
+                () => service.removeReferenceMedia({ elementId: ELEMENT_ID, mediaId: "m-1", userId: "anonymous" }),
+                (err) => err.statusCode === 401 && err.errorCode === "UNAUTHORIZED"
+            );
+        });
+
+        it("removeReferenceMedia: cross-tenant access -> 404", async () => {
+            await assert.rejects(
+                () => service.removeReferenceMedia({ elementId: ELEMENT_ID, mediaId: "m-1", userId: "foreign-user" }),
+                (err) => err.statusCode === 404 && err.errorCode === "NOT_FOUND"
+            );
         });
     });
 });

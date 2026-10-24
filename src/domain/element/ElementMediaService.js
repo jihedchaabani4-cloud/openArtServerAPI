@@ -126,7 +126,7 @@ export class ElementMediaService {
 
         const uploadResult = await this.mediaUploadService.upload({
             files: sourceImages,
-            policy: ELEMENT_SHEET_UPLOAD_POLICY,
+            policy: ELEMENT_REFERENCE_UPLOAD_POLICY,
             maxFiles: maxAllowed,
             userId,
         });
@@ -269,18 +269,18 @@ export class ElementMediaService {
 
         const wfId = element.workflow_id || elementId;
 
+        if (!userId || userId === "anonymous") {
+            throw new CrudServiceError("Authentication required", {
+                statusCode: 401,
+                errorCode: "UNAUTHORIZED",
+                traceId,
+                operation: "assertUploadAllowed",
+            });
+        }
+
         // Cross-tenant ownership check - returns 404 (not 403) to prevent enumeration
-        if (userId && userId !== "anonymous") {
-            const isAuthorized = await this.authService.verifyWorkflowOwnership(wfId, userId);
-            if (!isAuthorized) {
-                throw new CrudServiceError(`Element not found: ${elementId}`, {
-                    statusCode: 404,
-                    errorCode: "NOT_FOUND",
-                    traceId,
-                    operation: "assertUploadAllowed",
-                });
-            }
-        } else if (element.user_id && userId && element.user_id !== userId) {
+        const isAuthorized = await this.authService.verifyWorkflowOwnership(wfId, userId);
+        if (!isAuthorized) {
             throw new CrudServiceError(`Element not found: ${elementId}`, {
                 statusCode: 404,
                 errorCode: "NOT_FOUND",
@@ -532,6 +532,25 @@ export class ElementMediaService {
             const wfId = element?.workflow_id || elementId || null;
             if (!wfId) {
                 throw new CrudServiceError("workflowId could not be resolved for element", {
+                    statusCode: 404,
+                    errorCode: "NOT_FOUND",
+                    traceId,
+                    operation: "removeReferenceMedia",
+                });
+            }
+
+            if (!userId || userId === "anonymous") {
+                throw new CrudServiceError("Authentication required", {
+                    statusCode: 401,
+                    errorCode: "UNAUTHORIZED",
+                    traceId,
+                    operation: "removeReferenceMedia",
+                });
+            }
+
+            const isAuthorized = await this.authService.verifyWorkflowOwnership(wfId, userId, req);
+            if (!isAuthorized) {
+                throw new CrudServiceError(`Element not found: ${elementId}`, {
                     statusCode: 404,
                     errorCode: "NOT_FOUND",
                     traceId,

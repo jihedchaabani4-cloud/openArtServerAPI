@@ -123,6 +123,22 @@ describe("Generic Workflow Primary Media — Centralize and Reuse Canonical Cont
                     }
                     return false;
                 },
+                unlinkAndReapOrphan: async ({ workflowId, mediaId }) => {
+                    const idx = workflowMedia.findIndex((wm) => wm.workflow_id === workflowId && wm.media_id === mediaId);
+                    if (idx === -1) return { unlinked: false, is_orphan: false };
+                    const [removed] = workflowMedia.splice(idx, 1);
+                    const remaining = workflowMedia.filter((wm) => wm.media_id === mediaId).length;
+                    return {
+                        unlinked: true,
+                        is_orphan: remaining === 0,
+                        was_primary: Boolean(removed.is_primary),
+                    };
+                },
+                unlink: async ({ workflowId, mediaId }) => {
+                    const idx = workflowMedia.findIndex((wm) => wm.workflow_id === workflowId && wm.media_id === mediaId);
+                    if (idx !== -1) workflowMedia.splice(idx, 1);
+                    return { unlinked: idx !== -1 };
+                },
             },
             _store: { workflows, elements, media, workflowMedia },
         };

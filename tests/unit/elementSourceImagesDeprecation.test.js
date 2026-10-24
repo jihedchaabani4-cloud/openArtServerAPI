@@ -174,6 +174,10 @@ describe("ADR-0009: element.source_images deprecation & decoupling", () => {
             unlinkCalls.push(payload);
             return 1;
           },
+          unlinkAndReapOrphan: async (payload) => {
+            unlinkCalls.push(payload);
+            return { unlinked: true, is_orphan: false };
+          },
         },
         media: {
           findById: async (id) => ({ id, url: "https://example.com/img.png" }),

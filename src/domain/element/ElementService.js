@@ -78,13 +78,7 @@ export class ElementService {
         this.storageService        = storageService;
         this.workflowService       = workflowService;
         this.mediaIngestionService = mediaIngestionService;
-        this.mediaService          = mediaService || elementMediaService || (workflowService?.mediaService ? new ElementMediaService({
-            db:                    this.db,
-            storageService,
-            mediaUploadService:    workflowService?.mediaService?.mediaUploadService,
-            workflowMediaService:  workflowService?.mediaService,
-            authService:           workflowService?.authService,
-        }) : null);
+        this.mediaService          = mediaService || elementMediaService || null;
         this.analysisService = analysisService || new ElementAnalysisService();
     }
 
@@ -498,7 +492,7 @@ export class ElementService {
             if (targetWorkflowId) {
                 if (this.workflowService) {
                     await this.workflowService.deleteWorkflow({ workflowId: targetWorkflowId, userId });
-                } else if (this.mediaService?.addReferenceMedia) {
+                } else {
                     await this.db.workflows.deleteById(targetWorkflowId);
                 }
             }

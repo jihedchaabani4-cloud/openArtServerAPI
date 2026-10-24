@@ -108,6 +108,12 @@ describe("Element Canonical Cover via workflow_media.is_primary & sourceImages E
                     if (idx >= 0) workflowMedia.splice(idx, 1);
                     return true;
                 },
+                unlinkAndReapOrphan: async ({ workflowId, mediaId }) => {
+                    const idx = workflowMedia.findIndex((wm) => (!workflowId || wm.workflow_id === workflowId) && wm.media_id === mediaId);
+                    if (idx >= 0) workflowMedia.splice(idx, 1);
+                    const remaining = workflowMedia.filter((wm) => wm.media_id === mediaId).length;
+                    return { unlinked: idx >= 0, is_orphan: remaining === 0 };
+                },
                 unlinkMedia: async ({ workflowId, mediaId }) => {
                     const idx = workflowMedia.findIndex((wm) => wm.workflow_id === workflowId && wm.media_id === mediaId);
                     if (idx >= 0) workflowMedia.splice(idx, 1);

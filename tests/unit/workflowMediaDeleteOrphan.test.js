@@ -560,6 +560,15 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
             elemOrder.push("unlink");
             elemUnlinkCalls.push(args);
           },
+          unlinkAndReapOrphan: async (args) => {
+            elemOrder.push("unlink");
+            elemUnlinkCalls.push(args);
+            return {
+              unlinked: true,
+              is_orphan: elemLinkCount === 0,
+              storage_url: `https://cdn.example.com/${args.mediaId}.png`,
+            };
+          },
           countLinksForMedia: async () => elemLinkCount,
         },
       },

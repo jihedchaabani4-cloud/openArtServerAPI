@@ -548,4 +548,35 @@ describe("Element Maximum 6 Reference Media Boundary & Enforcement", () => {
         assert.equal(nextCalled, false, "next() must not be called on unauthorized upload");
         assert.equal(responseStatus, 404, "Cross-tenant access must return 404 before file stream");
     });
+
+    it("12. preUploadElementCapacityGuard ignores req.body.userId and rejects unauthenticated request with 401", async () => {
+        const guard = createPreUploadElementCapacityGuard(mediaService);
+        let nextCalled = false;
+        let responseStatus = null;
+        let responseJson = null;
+
+        const mockReq = {
+            params: { id: ELEMENT_ID },
+            body: { userId: "user-limit" },
+            user: null,
+        };
+        const mockRes = {
+            status: (code) => {
+                responseStatus = code;
+                return mockRes;
+            },
+            json: (body) => {
+                responseJson = body;
+                return mockRes;
+            },
+        };
+
+        await guard(mockReq, mockRes, () => {
+            nextCalled = true;
+        });
+
+        assert.equal(nextCalled, false, "next() must not be called when unauthenticated");
+        assert.equal(responseStatus, 401, "Must reject with 401 UNAUTHORIZED");
+        assert.equal(responseJson.code, "UNAUTHORIZED");
+    });
 });

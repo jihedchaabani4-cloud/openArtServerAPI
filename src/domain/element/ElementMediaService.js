@@ -173,8 +173,7 @@ export class ElementMediaService {
     async _determineShouldBePrimary(wfId) {
         if (!wfId) return false;
         try {
-            const existingPrimary = await (this.db.workflowMedia?.getPrimaryMedia?.(wfId)
-                || this.db.workflows?.getPrimaryMedia?.(wfId));
+            const existingPrimary = await this.db.workflowMedia.getPrimaryMedia(wfId);
             return !existingPrimary;
         } catch {
             return false;
@@ -186,13 +185,7 @@ export class ElementMediaService {
      */
     async setElementCover({ workflowId, mediaId }) {
         if (!workflowId || !mediaId) return null;
-        if (this.db.workflowMedia?.setPrimaryMedia) {
-            return this.db.workflowMedia.setPrimaryMedia({ workflowId, mediaId });
-        }
-        if (this.db.workflows?.updatePrimaryMedia) {
-            return this.db.workflows.updatePrimaryMedia(workflowId, mediaId);
-        }
-        return null;
+        return this.db.workflowMedia.setPrimaryMedia({ workflowId, mediaId });
     }
 
     /**
@@ -200,13 +193,7 @@ export class ElementMediaService {
      */
     async clearElementCover({ workflowId }) {
         if (!workflowId) return null;
-        if (this.db.workflowMedia?.clearPrimaryMedia) {
-            return this.db.workflowMedia.clearPrimaryMedia({ workflowId });
-        }
-        if (this.db.workflows?.updateFields) {
-            return this.db.workflows.updateFields(workflowId, { primary_media_id: null });
-        }
-        return null;
+        return this.db.workflowMedia.clearPrimaryMedia({ workflowId });
     }
 
     /**
@@ -592,43 +579,17 @@ export class ElementMediaService {
                         });
                     }
                 }
-            } else {
-                // Legacy sequential fallback for minimal mock harnesses
-                if (this.db?.workflowMedia?.unlink) {
-                    await this.db.workflowMedia.unlink({ workflowId: wfId, mediaId });
-                }
+            } else if (this.db?.workflowMedia?.unlink) {
+                await this.db.workflowMedia.unlink({ workflowId: wfId, mediaId });
                 if (wfId && wasPrimary) {
-                    if (this.db?.workflowMedia?.clearPrimaryMedia) {
-                        await this.db.workflowMedia.clearPrimaryMedia({ workflowId: wfId });
-                    } else if (this.db?.workflows?.updateFields) {
-                        await this.db.workflows.updateFields(wfId, { primary_media_id: null });
-                    }
+                    await this.db.workflowMedia.clearPrimaryMedia?.({ workflowId: wfId });
                 }
-                let remainingLinks = 0;
-                if (this.db?.workflowMedia?.countLinksForMedia) {
-                    remainingLinks = await this.db.workflowMedia.countLinksForMedia(mediaId);
-                } else if (this.db?.workflowMedia?.findByMedia) {
-                    const links = await this.db.workflowMedia.findByMedia(mediaId);
-                    remainingLinks = Array.isArray(links) ? links.length : 0;
-                }
-                if (remainingLinks === 0) {
+                const remaining = await this.db.workflowMedia.countLinksForMedia?.(mediaId);
+                if (remaining === 0) {
+                    await this.db.media?.deleteById?.(mediaId);
                     const mediaRec = await this.db.media?.findById?.(mediaId).catch(() => null);
-                    if (this.db.media?.deleteById) {
-                        await this.db.media.deleteById(mediaId);
-                    } else if (this.db.media?.deleteByIdAndWorkflow) {
-                        await this.db.media.deleteByIdAndWorkflow(mediaId, wfId);
-                    }
                     if (mediaRec?.url && this.storageService?.deleteByUrl) {
-                        await this.storageService.deleteByUrl(mediaRec.url).catch((err) => {
-                            crudOperationLog({
-                                traceId,
-                                operation: "removeReferenceMedia:storageDelete",
-                                status: "warning",
-                                elementId,
-                                mediaId,
-                                message: err.message,
-                            });
-                        });
+                        await this.storageService.deleteByUrl(mediaRec.url).catch(() => {});
                     }
                 }
             }

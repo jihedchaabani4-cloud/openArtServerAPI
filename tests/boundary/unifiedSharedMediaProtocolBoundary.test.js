@@ -55,6 +55,7 @@ describe("Unified Shared-Media Orphan Reaping & Attach Protocol", () => {
     const service = new WorkflowMediaService({
       db: mockDb,
       storageService: mockStorage,
+      authService: { verifyWorkflowOwnership: async () => true },
       mediaUploadService: { discard: async () => ({}) },
     });
 

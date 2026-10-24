@@ -188,7 +188,7 @@ function makeCharacterizeHarness() {
         db,
         storageService: {},
         mediaUploadService,
-        workflowAuthService: authService,
+        authService,
     });
 
     const service = new AssetUploadService({

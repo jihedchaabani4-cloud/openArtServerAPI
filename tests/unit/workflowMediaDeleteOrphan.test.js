@@ -77,6 +77,7 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
     };
 
     const authService = {
+      verifyWorkflowOwnership: async () => true,
       verifyMediaOwnership: async () => authorised,
     };
 
@@ -160,7 +161,7 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
     const service = new WorkflowMediaService({
       db,
       storageService: { deleteByUrl: async () => {} },
-      authService: { verifyMediaOwnership: async () => true },
+      authService: { verifyMediaOwnership: async () => true, verifyWorkflowOwnership: async () => true },
       mediaUploadService: { discard: async () => ({}) },
     });
 
@@ -227,7 +228,7 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
     const service = new WorkflowMediaService({
       db,
       storageService: { deleteByUrl: async () => {} },
-      authService: { verifyMediaOwnership: async () => true },
+      authService: { verifyMediaOwnership: async () => true, verifyWorkflowOwnership: async () => true },
       mediaUploadService: { discard: async () => ({}) },
     });
 
@@ -432,7 +433,7 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
     const service = new WorkflowMediaService({
       db,
       storageService: { deleteByUrl: async () => {} },
-      authService: { verifyMediaOwnership: async () => true },
+      authService: { verifyMediaOwnership: async () => true, verifyWorkflowOwnership: async () => true },
       mediaUploadService: { discard: async () => ({}) },
     });
 
@@ -504,7 +505,7 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
     const service = new WorkflowMediaService({
       db,
       storageService: { deleteByUrl: async () => {} },
-      authService: { verifyMediaOwnership: async () => true },
+      authService: { verifyMediaOwnership: async () => true, verifyWorkflowOwnership: async () => true },
       mediaUploadService: { discard: async () => ({}) },
     });
 
@@ -655,7 +656,7 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
       storageService: {
         deleteByUrl: async () => { deleteByUrlCalled = true; },
       },
-      authService: {},
+      authService: { verifyWorkflowOwnership: async () => true, verifyMediaOwnership: async () => true },
       mediaUploadService: { discard: async () => ({}) },
     });
 

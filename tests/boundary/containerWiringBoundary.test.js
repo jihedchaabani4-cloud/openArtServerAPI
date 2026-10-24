@@ -24,6 +24,17 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
             rootUploadService,
             "workflowService.mediaService must hold the container's mediaUploadService instance"
         );
+        assert.ok(container.workflowService.authService, "workflowService must have authService");
+        assert.equal(
+            container.workflowService.mediaService.authService,
+            container.workflowService.authService,
+            "workflowService.mediaService must hold workflowService.authService"
+        );
+        assert.equal(
+            typeof container.workflowService.mediaService.authService.verifyWorkflowOwnership,
+            "function",
+            "authService must provide verifyWorkflowOwnership"
+        );
 
         // 3. Container exported workflowMediaService alias
         assert.equal(
@@ -35,6 +46,11 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
             container.workflowMediaService.mediaUploadService,
             rootUploadService,
             "container.workflowMediaService must hold root mediaUploadService"
+        );
+        assert.equal(
+            container.workflowMediaService.authService,
+            container.workflowService.authService,
+            "container.workflowMediaService must hold workflowService.authService"
         );
 
         // 4. AssetUploadService and its attached WorkflowMediaService

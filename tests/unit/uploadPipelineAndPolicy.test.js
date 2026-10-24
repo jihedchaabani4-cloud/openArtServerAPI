@@ -248,6 +248,10 @@ describe("Canonical Primary-Media Persistence & WorkflowMedia Contract", () => {
         const mockWfMediaService = new WorkflowMediaService({
             db: mockDb,
             storageService: {},
+            authService: {
+                verifyWorkflowOwnership: async () => true,
+                verifyMediaOwnership: async () => true,
+            },
             mediaUploadService: mockUploadService,
         });
 

@@ -513,7 +513,7 @@ describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaS
             db: integratedDb,
             storageService: mockStorageService,
             mediaUploadService: mockMediaUploadService,
-            workflowAuthService: {
+            authService: {
                 verifyWorkflowOwnership: async () => true,
                 verifyMediaOwnership: async () => true,
             },

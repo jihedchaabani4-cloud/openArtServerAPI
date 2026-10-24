@@ -39,13 +39,17 @@ export class WorkflowMediaService {
      * @param {Object} [deps.authService]       - WorkflowAuthorizationService instance
      * @param {Object} deps.mediaUploadService  - MediaUploadService instance with discard method (required)
      */
-    constructor({ db, storageService, authService = null, mediaUploadService = null } = {}) {
+    constructor({ db, storageService, authService = null, workflowAuthService = null, mediaUploadService = null } = {}) {
+        const effectiveAuth = authService || workflowAuthService;
+        if (!effectiveAuth || typeof effectiveAuth.verifyWorkflowOwnership !== "function") {
+            throw new Error("WorkflowMediaService requires authService with verifyWorkflowOwnership method.");
+        }
         if (!mediaUploadService || typeof mediaUploadService.discard !== "function") {
             throw new Error("WorkflowMediaService requires mediaUploadService with a discard method.");
         }
         this.db = db;
         this.storageService = storageService;
-        this.authService = authService;
+        this.authService = effectiveAuth;
         this.mediaUploadService = mediaUploadService;
     }
 
@@ -235,36 +239,34 @@ export class WorkflowMediaService {
         }
 
         // 3. Verify workflow ownership
-        if (this.authService?.verifyWorkflowOwnership) {
-            let isAuthorized = false;
-            try {
-                isAuthorized = await this.authService.verifyWorkflowOwnership(workflowId, userId, req);
-            } catch (authErr) {
-                // If authService threw an infrastructure error (e.g. no supabase client in mock/hermetic env),
-                // fall back to repository check if available
-                let wf = null;
-                if (typeof this.db?.workflows?.getWorkflow === "function") {
-                    wf = await this.db.workflows.getWorkflow(workflowId).catch(() => null);
-                } else if (typeof this.db?.workflows?.findById === "function") {
-                    wf = await this.db.workflows.findById(workflowId).catch(() => null);
-                }
-                if (wf) {
-                    if (wf.user_id === userId) {
-                        isAuthorized = true;
-                    } else if (wf.project_id && typeof this.db?.projects?.findByUser === "function") {
-                        const ownedProj = await this.db.projects.findByUser(userId, wf.project_id).catch(() => []);
-                        isAuthorized = Array.isArray(ownedProj) && ownedProj.length > 0;
-                    }
+        let isAuthorized = false;
+        try {
+            isAuthorized = await this.authService.verifyWorkflowOwnership(workflowId, userId, req);
+        } catch (authErr) {
+            // If authService threw an infrastructure error (e.g. in-memory test double without DB client),
+            // check repository directly
+            let wf = null;
+            if (typeof this.db?.workflows?.getWorkflow === "function") {
+                wf = await this.db.workflows.getWorkflow(workflowId).catch(() => null);
+            } else if (typeof this.db?.workflows?.findById === "function") {
+                wf = await this.db.workflows.findById(workflowId).catch(() => null);
+            }
+            if (wf) {
+                if (wf.user_id === userId) {
+                    isAuthorized = true;
+                } else if (wf.project_id && typeof this.db?.projects?.findByUser === "function") {
+                    const ownedProj = await this.db.projects.findByUser(userId, wf.project_id).catch(() => []);
+                    isAuthorized = Array.isArray(ownedProj) && ownedProj.length > 0;
                 }
             }
-            if (!isAuthorized) {
-                await this._discardUploadedItems(items, workflowId);
-                throw new CrudServiceError("Workflow not found", {
-                    statusCode: 404,
-                    errorCode: "NOT_FOUND",
-                    workflowId,
-                });
-            }
+        }
+        if (!isAuthorized) {
+            await this._discardUploadedItems(items, workflowId);
+            throw new CrudServiceError("Workflow not found", {
+                statusCode: 404,
+                errorCode: "NOT_FOUND",
+                workflowId,
+            });
         }
 
         // 4. Phase 1 Pre-flight: resolve and validate all "existing" items before ANY createMedia or attach
@@ -534,7 +536,7 @@ export class WorkflowMediaService {
                         currentMatches = true;
                     }
                 } else {
-                    currentMatches = true;
+                    currentMatches = false;
                 }
 
                 if (currentMatches) {
@@ -684,6 +686,7 @@ export class WorkflowMediaService {
             skippedStorageKeys,
             discardFailedKeys,
             restoredPrimaryMediaId,
+            primaryRestoreFailed,
         };
     }
 

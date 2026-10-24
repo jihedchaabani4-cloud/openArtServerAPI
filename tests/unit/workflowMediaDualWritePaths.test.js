@@ -424,7 +424,7 @@ describe("workflow_media write helper (B1) — workflow_media ONLY, no media.wor
         },
       },
       storageService: {},
-      authService: { verifyMediaOwnership: async () => true },
+      authService: { verifyMediaOwnership: async () => true, verifyWorkflowOwnership: async () => true },
       mediaUploadService: { discard: async () => ({}) },
     });
 

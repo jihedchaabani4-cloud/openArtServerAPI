@@ -247,17 +247,35 @@ function createMockHarness() {
 
 describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollback Order", () => {
     describe("1. Contract & Input Validation", () => {
-        it("throws an error at construction if mediaUploadService is missing or lacks a discard method (fail-fast)", () => {
+        it("throws an error at construction if authService or mediaUploadService is missing (fail-fast)", () => {
+            const validAuth = { verifyWorkflowOwnership: async () => true };
+            const validUpload = { discard: async () => {} };
+
+            // authService validation
             assert.throws(
-                () => new WorkflowMediaService({ db: {}, storageService: {} }),
+                () => new WorkflowMediaService({ db: {}, storageService: {}, mediaUploadService: validUpload }),
+                /WorkflowMediaService requires authService with verifyWorkflowOwnership method\./
+            );
+            assert.throws(
+                () => new WorkflowMediaService({ db: {}, storageService: {}, mediaUploadService: validUpload, authService: {} }),
+                /WorkflowMediaService requires authService with verifyWorkflowOwnership method\./
+            );
+            assert.throws(
+                () => new WorkflowMediaService({ db: {}, storageService: {}, mediaUploadService: validUpload, authService: { verifyWorkflowOwnership: "not-a-func" } }),
+                /WorkflowMediaService requires authService with verifyWorkflowOwnership method\./
+            );
+
+            // mediaUploadService validation
+            assert.throws(
+                () => new WorkflowMediaService({ db: {}, storageService: {}, authService: validAuth }),
                 /WorkflowMediaService requires mediaUploadService with a discard method\./
             );
             assert.throws(
-                () => new WorkflowMediaService({ db: {}, storageService: {}, mediaUploadService: {} }),
+                () => new WorkflowMediaService({ db: {}, storageService: {}, authService: validAuth, mediaUploadService: {} }),
                 /WorkflowMediaService requires mediaUploadService with a discard method\./
             );
             assert.throws(
-                () => new WorkflowMediaService({ db: {}, storageService: {}, mediaUploadService: { discard: "not-a-func" } }),
+                () => new WorkflowMediaService({ db: {}, storageService: {}, authService: validAuth, mediaUploadService: { discard: "not-a-func" } }),
                 /WorkflowMediaService requires mediaUploadService with a discard method\./
             );
         });
@@ -1358,6 +1376,61 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
             assert.equal(h.workflows.get(wfId).primary_media_id, null, "primary_media_id must be cleared on rollback");
             assert.equal(h.media.has(attachedMediaId), false, "Media record must be deleted");
             assert.ok(rbRes.discardedStorageKeys.includes("user-1/uploads/auto_primary.png"), "Storage file must be discarded");
+        });
+
+        it("fail-closed rollback: when db.workflows has neither conditionalRestorePrimaryMedia nor findById, fails closed and skips deletion/discard", async () => {
+            const h = createMockHarness();
+            const wfId = "00000000-0000-0000-0000-000000000001";
+            h.workflows.set(wfId, { id: wfId, user_id: "user-1", project_id: "proj-1", primary_media_id: null });
+
+            const res = await h.service.attachMediaItems({
+                workflowId: wfId,
+                userId: "user-1",
+                projectId: "proj-1",
+                role: "detail",
+                maxAllowed: 6,
+                setPrimary: true,
+                items: [
+                    {
+                        kind: "uploaded",
+                        uploadedFile: {
+                            storageKey: "user-1/uploads/fail_closed.png",
+                            url: "https://storage.test/fail_closed.png",
+                            width: 100,
+                            height: 100,
+                            format: "PNG",
+                        },
+                    },
+                ],
+            });
+
+            // Strip inspection methods from db.workflows
+            delete h.db.workflows.conditionalRestorePrimaryMedia;
+            delete h.db.workflows.findById;
+
+            const errorLogs = [];
+            const origBaseError = baseLogger.error;
+            baseLogger.error = (obj, msg, ...rest) => {
+                errorLogs.push({ obj, msg });
+                return origBaseError.call(baseLogger, obj, msg, ...rest);
+            };
+
+            try {
+                const rbRes = await h.service.rollbackAttachedMedia(res.rollbackHandle);
+                assert.equal(rbRes.complete, false, "Must fail closed (complete: false) when primary cannot be confirmed");
+                assert.equal(rbRes.primaryRestoreFailed, true, "primaryRestoreFailed must be true");
+                assert.deepEqual(rbRes.skippedStorageKeys, ["user-1/uploads/fail_closed.png"], "Storage key must be preserved in skippedStorageKeys");
+
+                const restoreErrorLog = errorLogs.find(
+                    (l) => l.obj?.operation === "rollbackAttachedMedia:restorePrimary" && l.obj?.status === "error"
+                );
+                assert.ok(restoreErrorLog, "Must log at error level on primary restore match failure");
+                assert.equal(restoreErrorLog.obj.workflowId, wfId);
+                assert.equal(restoreErrorLog.obj.mediaId, res.attached[0].media.id);
+                assert.equal(restoreErrorLog.obj.storageKey, "user-1/uploads/fail_closed.png");
+            } finally {
+                baseLogger.error = origBaseError;
+            }
         });
     });
 

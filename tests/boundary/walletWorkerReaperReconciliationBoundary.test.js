@@ -181,6 +181,7 @@ describe("Ticket 07: BullMQ Reservation Reaper Worker & Media Deletion Concurren
 
     const mockAuth = {
       verifyMediaOwnership: async () => true,
+      verifyWorkflowOwnership: async () => true,
     };
 
     const service = new WorkflowMediaService({

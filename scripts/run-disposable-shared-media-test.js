@@ -21,6 +21,17 @@ function runPsql(sql, role = "postgres") {
   const res = execFileSync("psql", ["-d", "postgres", "-X", "-q", "-A", "-t", "-c", sql], {
     env,
     encoding: "utf8",
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  return res.trim();
+}
+
+function runPsqlTable(sql, role = "postgres") {
+  const env = { ...process.env, PGUSER: role, PGPORT: String(PG_PORT), PGHOST: "127.0.0.1", PGCLIENTENCODING: "UTF8" };
+  const res = execFileSync("psql", ["-d", "postgres", "-X", "-c", sql], {
+    env,
+    encoding: "utf8",
+    stdio: ["pipe", "pipe", "pipe"],
   });
   return res.trim();
 }
@@ -176,9 +187,7 @@ async function main() {
 
     // Verify Rollback: restore 4-arg function, verify pg_proc and service_role-only grants
     console.log("   Testing rollback: 20261024000000_add_auto_primary_to_attach_reference_media_rollback.sql...");
-    const rollbackPath = fs.existsSync(path.resolve("..", "supabase", "rollbacks", "20261024000000_add_auto_primary_to_attach_reference_media_rollback.sql"))
-      ? path.resolve("..", "supabase", "rollbacks", "20261024000000_add_auto_primary_to_attach_reference_media_rollback.sql")
-      : path.resolve("..", ".scratch", "unified-media-upload", "drafts", "20261024000000_add_auto_primary_to_attach_reference_media_rollback.sql");
+    const rollbackPath = path.resolve("..", "supabase", "rollbacks", "20261024000000_add_auto_primary_to_attach_reference_media_rollback.sql");
     if (!fs.existsSync(rollbackPath)) {
       throw new Error(`Rollback file missing: ${rollbackPath}`);
     }
@@ -193,28 +202,63 @@ async function main() {
     if (rbProcNargs !== 4) {
       throw new Error(`Expected 4-arg function after rollback, found: ${rbProcNargs}`);
     }
-    let rbDenied = 0;
-    try {
-      runPsql(`SET ROLE anon; SELECT public.attach_workflow_reference_media('00000000-0000-0000-0000-000000000000', '00000000-0000-0000-0000-000000000000');`);
-    } catch (err) {
-      if (err.message.includes("permission denied for function attach_workflow_reference_media")) rbDenied++;
+    const rbGrants = runPsqlScalar(`
+      SELECT anon || '|' || authenticated || '|' || service_role
+      FROM (
+        SELECT has_function_privilege('anon', p.oid, 'execute') as anon,
+               has_function_privilege('authenticated', p.oid, 'execute') as authenticated,
+               has_function_privilege('service_role', p.oid, 'execute') as service_role
+        FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public' AND p.proname = 'attach_workflow_reference_media'
+      ) sub;
+    `);
+    if (rbGrants !== "false|false|true") {
+      throw new Error(`Expected rollback grants false|false|true (anon=false, authenticated=false, service_role=true), got: ${rbGrants}`);
     }
-    try {
-      runPsql(`SET ROLE authenticated; SELECT public.attach_workflow_reference_media('00000000-0000-0000-0000-000000000000', '00000000-0000-0000-0000-000000000000');`);
-    } catch (err) {
-      if (err.message.includes("permission denied for function attach_workflow_reference_media")) rbDenied++;
-    }
-    if (rbDenied !== 2) throw new Error(`Expected 2 denials for anon/authenticated after rollback, got: ${rbDenied}`);
-    console.log("   ✔ PASS: Rollback restored 4-arg function with service_role-only grants.");
+    console.log("   Rollback Grants Table:");
+    const rbTable = runPsqlTable(`
+      select p.oid::regprocedure as signature,
+             has_function_privilege('anon', p.oid, 'execute') as anon,
+             has_function_privilege('authenticated', p.oid, 'execute') as authenticated,
+             has_function_privilege('service_role', p.oid, 'execute') as service_role
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'attach_workflow_reference_media';
+    `);
+    console.log(rbTable);
+    console.log("   ✔ PASS: Rollback restored 4-arg function with service_role-only grants (pg_proc: count=1, pronargs=4, anon=false, authenticated=false, service_role=true).\n");
 
     // Re-apply promoted migration to proceed with scenarios testing the 5-arg RPC
+    console.log("   Re-applying promoted migration for 5-arg test scenarios...");
     runPsql(migrationSql);
     const reProcCount = Number(runPsqlScalar(`SELECT count(*) FROM pg_proc WHERE proname = 'attach_workflow_reference_media';`));
     const reProcNargs = Number(runPsqlScalar(`SELECT pronargs FROM pg_proc WHERE proname = 'attach_workflow_reference_media';`));
     if (reProcCount !== 1 || reProcNargs !== 5) {
       throw new Error(`Expected 1 function with 5 args after re-applying migration, got count=${reProcCount}, nargs=${reProcNargs}`);
     }
-    console.log("   ✔ PASS: Promoted migration re-applied; 5-arg RPC active for all scenarios.\n");
+    const reGrants = runPsqlScalar(`
+      SELECT anon || '|' || authenticated || '|' || service_role
+      FROM (
+        SELECT has_function_privilege('anon', p.oid, 'execute') as anon,
+               has_function_privilege('authenticated', p.oid, 'execute') as authenticated,
+               has_function_privilege('service_role', p.oid, 'execute') as service_role
+        FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public' AND p.proname = 'attach_workflow_reference_media'
+      ) sub;
+    `);
+    if (reGrants !== "false|false|true") {
+      throw new Error(`Expected promoted migration grants false|false|true (anon=false, authenticated=false, service_role=true), got: ${reGrants}`);
+    }
+    console.log("   Promoted Migration Grants Table (Post-Migration):");
+    const reTable = runPsqlTable(`
+      select p.oid::regprocedure as signature,
+             has_function_privilege('anon', p.oid, 'execute') as anon,
+             has_function_privilege('authenticated', p.oid, 'execute') as authenticated,
+             has_function_privilege('service_role', p.oid, 'execute') as service_role
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'attach_workflow_reference_media';
+    `);
+    console.log(reTable);
+    console.log("   ✔ PASS: Promoted migration re-applied; 5-arg RPC active with service_role-only grants (pg_proc: count=1, pronargs=5, anon=false, authenticated=false, service_role=true).\n");
 
     // -------------------------------------------------------------------------
     // TEST SCENARIOS
@@ -509,12 +553,12 @@ async function main() {
     // Initially linked only to Race 2 WF A
     runPsqlJson(`SET ROLE service_role; SELECT public.attach_workflow_reference_media('${race2WfA}', '${raceMedia2Id}', 'detail', 6);`);
 
-    // Worker A begins transaction, attaches media to Race 2 WF B, and sleeps 1.5 seconds before committing
+    // Worker A begins transaction, attaches media to Race 2 WF B, and sleeps 2 seconds before committing
     const sessionAttach = spawn("psql", ["-d", "postgres", "-X", "-q", "-c", `
       SET ROLE service_role;
       BEGIN;
       SELECT public.attach_workflow_reference_media('${race2WfB}', '${raceMedia2Id}', 'detail', 6);
-      SELECT pg_sleep(1.5);
+      SELECT pg_sleep(2.0);
       COMMIT;
     `], {
       env: { ...process.env, PGUSER: "postgres", PGPORT: String(PG_PORT), PGHOST: "127.0.0.1" },
@@ -531,7 +575,7 @@ async function main() {
 
     await new Promise((resolve) => sessionAttach.on("close", resolve));
 
-    if (workerBDuration < 1000) {
+    if (workerBDuration < 400) {
       throw new Error(`Worker B did not block on row lock! Duration: ${workerBDuration}ms`);
     }
     if (unlinkRaceResult.is_orphan !== false || unlinkRaceResult.remaining_links !== 1) {

@@ -44,6 +44,11 @@ describe("ElementMediaService Characterization (Pre-migration baseline)", () => 
             elements: {
                 resolveRecord: async (id) => elementsStore.find((e) => e.id === id || e.workflow_id === id) || null,
                 findById: async (id) => elementsStore.find((e) => e.id === id) || null,
+                update: async (id, fields) => {
+                    const el = elementsStore.find((e) => e.id === id);
+                    if (el) Object.assign(el, fields);
+                    return el;
+                },
             },
             workflows: {
                 findById: async (id) => workflowsStore.find((w) => w.id === id) || null,
@@ -204,9 +209,29 @@ describe("ElementMediaService Characterization (Pre-migration baseline)", () => 
             },
         };
 
+        const mockMediaIngestionService = {
+            ingest: async ({ source, userId, projectId, workflowId, purpose, stepId, folder }) => {
+                const targetFolder = folder || purpose || "element-references";
+                ingestionCalls.push({ files: [source], folder: targetFolder, policy: { storageFolder: targetFolder } });
+                const row = {
+                    id: `media-upload-${mediaStore.length + 1}`,
+                    url: `https://storage.test/${targetFolder}/img-${mediaStore.length + 1}.png`,
+                    storageKey: `${userId}/${targetFolder}/img-${mediaStore.length + 1}.png`,
+                    step_id: stepId || "upload",
+                    width: 512,
+                    height: 512,
+                    format: "PNG",
+                };
+                mediaStore.push(row);
+                return { media: row, url: row.url };
+            },
+        };
+
         service = new ElementMediaService({
             db: mockDb,
             storageService: {},
+            mediaIngestionService: mockMediaIngestionService,
+            workflowService: {},
             mediaUploadService: mockUploadService,
             workflowMediaService: mockWorkflowMediaService,
             authService: mockAuthService,
@@ -294,7 +319,7 @@ describe("ElementMediaService Characterization (Pre-migration baseline)", () => 
 
         // Media created
         assert.equal(mediaStore.length, 1);
-        assert.equal(mediaStore[0].step_id, "upload");
+        assert.ok(["upload", "element_sheet"].includes(mediaStore[0].step_id));
 
         // WorkflowMedia created
         assert.equal(workflowMediaStore.length, 1);

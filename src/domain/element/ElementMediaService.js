@@ -284,7 +284,7 @@ export class ElementMediaService {
         const existingLinks = await (this.db.workflowMedia?.findByWorkflow?.(wfId)
             || this.db.media?.findByWorkflow?.(wfId)
             || []);
-        const currentCount = existingLinks.filter((m) => !m.role || m.role === "detail").length;
+        const currentCount = existingLinks.filter((m) => m.role === "detail").length;
         const remainingSlots = Math.max(0, maxAllowed - currentCount);
 
         if (currentCount >= maxAllowed) {
@@ -375,7 +375,7 @@ export class ElementMediaService {
             const existingLinks = await (this.db.workflowMedia?.findByWorkflow?.(wfId)
                 || this.db.media?.findByWorkflow?.(wfId)
                 || []);
-            const detailCount = existingLinks.filter((m) => !m.role || m.role === "detail").length;
+            const detailCount = existingLinks.filter((m) => m.role === "detail").length;
             const remaining = maxAllowed - detailCount;
 
             if (remaining <= 0) {

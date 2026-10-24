@@ -505,6 +505,24 @@ describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMedia
             );
         });
 
+        it("assertUploadAllowed counts strictly role === 'detail' matching RPC, ignoring non-detail roles (red-first)", async () => {
+            // 5 detail links + 1 link with no role (e.g. role: null)
+            mockDb.workflowMedia.findByWorkflow = async () => [
+                { media_id: "m-1", role: "detail" },
+                { media_id: "m-2", role: "detail" },
+                { media_id: "m-3", role: "detail" },
+                { media_id: "m-4", role: "detail" },
+                { media_id: "m-5", role: "detail" },
+                { media_id: "m-sheet", role: null },
+            ];
+
+            // Because role: null is not 'detail', current detail count is 5 (< 6), so assertUploadAllowed must pass
+            const cap = await service.assertUploadAllowed({ elementId: ELEMENT_ID, userId: USER_ID });
+            assert.equal(cap.allowed, true);
+            assert.equal(cap.currentCount, 5, "Only role === 'detail' links must be counted");
+            assert.equal(cap.remainingSlots, 1);
+        });
+
         it("removeReferenceMedia: unauthenticated / anonymous -> 401", async () => {
             await assert.rejects(
                 () => service.removeReferenceMedia({ elementId: ELEMENT_ID, mediaId: "m-1", userId: null }),

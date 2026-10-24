@@ -139,11 +139,9 @@ export class WorkflowMediaService {
             const wfMedia = await this.db.media.findByWorkflow(targetId).catch(() => []);
             sourceMedia = wfMedia.find((m) => m.url && m.status !== "failed") || wfMedia[0] || null;
         }
-        if (this.db.workflows?.getWorkflow) {
-            sourceWf = await this.db.workflows.getWorkflow(targetId).catch(() => null);
-            if (!sourceMedia && sourceWf?.primary_media_id) {
-                sourceMedia = await this.db.media?.findById(sourceWf.primary_media_id).catch(() => null);
-            }
+        sourceWf = await this.db.workflows.getWorkflow(targetId).catch(() => null);
+        if (!sourceMedia && sourceWf?.primary_media_id) {
+            sourceMedia = await this.db.media?.findById(sourceWf.primary_media_id).catch(() => null);
         }
         if (!sourceMedia) {
             throw new CrudServiceError("Media not found", {
@@ -170,7 +168,7 @@ export class WorkflowMediaService {
             });
         }
         const linkedWfId = (workflowId && links.find((l) => (l.workflow_id || l.workflowId) === workflowId)?.workflow_id) || links[0]?.workflow_id;
-        if (!sourceWf && linkedWfId && this.db.workflows?.getWorkflow) {
+        if (!sourceWf && linkedWfId) {
             sourceWf = await this.db.workflows.getWorkflow(linkedWfId).catch(() => null);
         }
 
@@ -227,8 +225,7 @@ export class WorkflowMediaService {
             for (const link of links) {
                 const wfId = link.workflow_id || link.workflowId;
                 if (!wfId) continue;
-                const linkedWf = (this.db.workflows?.getWorkflow && await this.db.workflows.getWorkflow(wfId).catch(() => null))
-                    || (this.db.workflows?.findById && await this.db.workflows.findById(wfId).catch(() => null));
+                const linkedWf = await this.db.workflows.getWorkflow(wfId).catch(() => null);
                 if (linkedWf?.project_id) {
                     ownerProjectId = linkedWf.project_id;
                     break;

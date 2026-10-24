@@ -858,6 +858,22 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
                 (err) => err instanceof CrudServiceError && err.statusCode === 404
             );
         });
+
+        it("resolves the source project through db.workflows.getWorkflow only (no findById probing)", async () => {
+            const h = createMockHarness();
+            const mediaId = "00000000-0000-0000-0000-000000000098";
+            h.media.set(mediaId, { id: mediaId, status: "completed" });
+            h.workflowMedia.push({ workflow_id: "wf-split", media_id: mediaId, role: "detail" });
+            h.workflows.set("wf-split", { id: "wf-split", user_id: "user-1" }); // ownership via authService
+            h.db.workflows.getWorkflow = async () => null; // the one lookup method finds no project
+            // A second lookup method must never be consulted to find the project.
+            h.db.workflows.findById = async (id) => ({ id, user_id: "user-1", project_id: "proj-target" });
+
+            await assert.rejects(
+                () => h.service.resolveOwnedSourceMedia({ mediaId, projectId: "proj-target", userId: "user-1" }),
+                (err) => err instanceof CrudServiceError && err.statusCode === 404
+            );
+        });
     });
 
     describe("3. Attachment Success & Handle Contract", () => {

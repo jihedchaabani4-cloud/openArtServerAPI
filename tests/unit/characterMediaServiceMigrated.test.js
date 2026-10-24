@@ -581,7 +581,7 @@ describe("CharacterMediaService — Migrated to MediaUploadService & WorkflowMed
             assert.ok(uploadCalls[1].policy === CHARACTER_SHEET_UPLOAD_POLICY);
         });
 
-        it("sheet vs detail primary behavior: sheet writes workflows.primary_media_id, detail never writes it; mid-way rollback clears/restores primary_media_id", async () => {
+        it("detail upload/attach never writes primary_media_id", async () => {
             const wf = workflowsStore.find((w) => w.id === WORKFLOW_ID);
             assert.equal(wf.primary_media_id, null);
 
@@ -596,7 +596,28 @@ describe("CharacterMediaService — Migrated to MediaUploadService & WorkflowMed
             const detailLink = workflowMediaStore.find((wm) => wm.media_id === detailRes.media.id);
             assert.equal(detailLink.is_primary, false, "Detail link must have is_primary: false");
 
-            // 2. Sheet upload: writes workflows.primary_media_id, workflow_media.is_primary is true
+            // Detail mid-way failure: rollback must not touch primary_media_id
+            mockWorkflowMediaService.attachMediaItems = async () => {
+                throw new Error("Simulated mid-way detail attach failure");
+            };
+
+            await assert.rejects(
+                () => service.uploadDetailMedia({
+                    characterId: CHARACTER_ID,
+                    file: { buffer: Buffer.from("failing-detail"), originalname: "detail-fail.png" },
+                    userId: USER_ID,
+                    projectId: PROJECT_ID,
+                }),
+                (err) => err.message === "Simulated mid-way detail attach failure"
+            );
+
+            assert.equal(wf.primary_media_id, null, "Detail mid-way failure must never change primary_media_id");
+        });
+
+        it("sheet failure mid-way leaves workflows.primary_media_id NOT pointing to a deleted media (restored to previous)", async () => {
+            const wf = workflowsStore.find((w) => w.id === WORKFLOW_ID);
+
+            // 1. Sheet upload: writes workflows.primary_media_id, workflow_media.is_primary is true
             const sheetRes = await service.uploadSheetMedia({
                 characterId: CHARACTER_ID,
                 file: { buffer: Buffer.from("sheet-bytes"), originalname: "sheet.png" },
@@ -607,7 +628,7 @@ describe("CharacterMediaService — Migrated to MediaUploadService & WorkflowMed
             const sheetLink = workflowMediaStore.find((wm) => wm.media_id === sheetRes.media.id);
             assert.equal(sheetLink.is_primary, true, "Sheet link must have is_primary: true");
 
-            // 3. Mid-way failure rollback restores prior primary_media_id
+            // 2. Mid-way failure rollback restores prior primary_media_id
             const establishedPrimary = sheetRes.media.id;
             mockDb.characters.updateCharacterFields = async () => {
                 throw new Error("Post-attach character status failure");
@@ -624,23 +645,6 @@ describe("CharacterMediaService — Migrated to MediaUploadService & WorkflowMed
             );
 
             assert.equal(wf.primary_media_id, establishedPrimary, "Rollback must restore established primary_media_id and not leave it pointing to deleted media");
-
-            // 4. Detail mid-way failure: rollback must not touch primary_media_id
-            mockWorkflowMediaService.attachMediaItems = async () => {
-                throw new Error("Simulated mid-way detail attach failure");
-            };
-
-            await assert.rejects(
-                () => service.uploadDetailMedia({
-                    characterId: CHARACTER_ID,
-                    file: { buffer: Buffer.from("failing-detail"), originalname: "detail-fail.png" },
-                    userId: USER_ID,
-                    projectId: PROJECT_ID,
-                }),
-                (err) => err.message === "Simulated mid-way detail attach failure"
-            );
-
-            assert.equal(wf.primary_media_id, establishedPrimary, "Detail mid-way failure must never change primary_media_id");
         });
 
         it("CharacterMediaService end-to-end integration with real WorkflowMediaService attaches uploaded and existing items with item.kind and setPrimary: true", async () => {

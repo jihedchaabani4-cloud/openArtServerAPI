@@ -85,27 +85,11 @@ function validateDimensionAndDurationCaps(inspected, profile) {
 export class SourcePolicy {
     static PROFILES = {
         default: toLegacyProfile(DEFAULT_UPLOAD_POLICY),
-        avatar: {
-            maxSizeBytes: 10 * 1024 * 1024, // 10 MB
-            imageLimit: 10 * 1024 * 1024,
-            videoLimit: 0,
-            allowedMimeTypes: ["image/jpeg", "image/png", "image/webp"],
-            maxImagePixels: 50 * 1000 * 1000,
-            maxVideoDurationSec: 0,
-        },
         character_reference: toLegacyProfile(CHARACTER_DETAIL_UPLOAD_POLICY),
         character_sheet: toLegacyProfile(CHARACTER_SHEET_UPLOAD_POLICY),
         character_detail: toLegacyProfile(CHARACTER_DETAIL_UPLOAD_POLICY),
         element_reference: toLegacyProfile(ELEMENT_REFERENCE_UPLOAD_POLICY),
         element_sheet: toLegacyProfile(ELEMENT_SHEET_UPLOAD_POLICY),
-        video_reference: {
-            maxSizeBytes: 100 * 1024 * 1024, // 100 MB
-            imageLimit: 0,
-            videoLimit: 100 * 1024 * 1024,
-            allowedMimeTypes: ["video/mp4", "video/webm", "video/quicktime"],
-            maxVideoDurationSec: 60,
-            maxVideoPixels: 200 * 1000 * 1000,
-        },
     };
 
     /**

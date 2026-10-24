@@ -180,7 +180,7 @@ export class WorkflowMediaRepository extends BaseRepository {
         mediaId,
         media_id,
         role = "detail",
-        maxAllowed = 6,
+        maxAllowed = null,
         autoPrimary = true,
     } = {}) {
         const resolvedWorkflowId = workflowId || workflow_id;

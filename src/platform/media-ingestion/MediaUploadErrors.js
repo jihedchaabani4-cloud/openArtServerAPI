@@ -35,7 +35,7 @@ export class QuotaError extends MediaUploadBaseError {
 }
 
 export const WORKFLOW_REFERENCE_QUOTA_PREFIX = "Maximum ";
-export const WORKFLOW_REFERENCE_QUOTA_PATTERN = /Maximum\s+\d+\s+reference\s+images\s+allowed/i;
+export const WORKFLOW_REFERENCE_QUOTA_PATTERN = /Maximum\s+\d+\s+reference/i;
 
 export function formatWorkflowReferenceQuotaMessage(maxAllowed, currentCount) {
     return `Maximum ${maxAllowed} reference images allowed per element. Current: ${currentCount}`;

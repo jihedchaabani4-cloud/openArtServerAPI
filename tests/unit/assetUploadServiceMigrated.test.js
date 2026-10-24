@@ -200,8 +200,21 @@ describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaS
             /AssetUploadService requires workflowMediaService with an attachMediaItems method\./
         );
         assert.throws(
-            () => new AssetUploadService({ db: {}, mediaUploadService: { upload: async () => {} }, workflowMediaService: {} }),
-            /AssetUploadService requires workflowMediaService with an attachMediaItems method\./
+            () => new AssetUploadService({
+                db: {},
+                mediaUploadService: { upload: async () => {} },
+                workflowMediaService: { attachMediaItems: async () => {} },
+            }),
+            /AssetUploadService requires workflowAuthService with a verifyWorkflowOwnership method\./
+        );
+        assert.throws(
+            () => new AssetUploadService({
+                db: {},
+                mediaUploadService: { upload: async () => {} },
+                workflowMediaService: { attachMediaItems: async () => {} },
+                workflowAuthService: {},
+            }),
+            /AssetUploadService requires workflowAuthService with a verifyWorkflowOwnership method\./
         );
     });
 

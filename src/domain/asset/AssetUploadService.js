@@ -44,6 +44,7 @@ export class AssetUploadService {
         binaryIngestionService = null,
         mediaIngestionService = null,
         workflowAuthService = null,
+        authService = null,
         mediaService = null,
         folderService = null,
         storageService = null,
@@ -54,14 +55,17 @@ export class AssetUploadService {
         if (!workflowMediaService || typeof workflowMediaService.attachMediaItems !== "function") {
             throw new Error("AssetUploadService requires workflowMediaService with an attachMediaItems method.");
         }
+        const effectiveAuth = workflowAuthService || authService;
+        if (!effectiveAuth || typeof effectiveAuth.verifyWorkflowOwnership !== "function") {
+            throw new Error("AssetUploadService requires workflowAuthService with a verifyWorkflowOwnership method.");
+        }
         this.db = db;
         this.mediaUploadService = mediaUploadService;
         this.workflowMediaService = workflowMediaService;
         this.storageService = storageService;
-        this.authService = workflowAuthService || new WorkflowAuthorizationService({ db });
+        this.authService = effectiveAuth;
         this.mediaService = mediaService || new MediaService({ db });
         this.folderService = folderService;
-        this.binaryIngestionService = binaryIngestionService || mediaIngestionService;
     }
 
     /**
@@ -267,39 +271,14 @@ export class AssetUploadService {
                 targetProjectId = latestProject.id;
             }
 
-            // Perform binary upload via MediaUploadService (or legacy binaryIngestionService fallback)
-            let uploadItem;
-            if (this.mediaUploadService) {
-                const uploadResult = await this.mediaUploadService.upload({
-                    files: [source],
-                    policy: DEFAULT_UPLOAD_POLICY,
-                    maxFiles: 1,
-                    userId,
-                });
-                uploadItem = uploadResult.uploaded[0];
-            } else if (this.binaryIngestionService) {
-                const binaryResult = await this.binaryIngestionService.ingestBinary({
-                    source,
-                    userId,
-                    purpose: "default",
-                    displayName,
-                });
-                uploadItem = {
-                    url: binaryResult.url,
-                    storageKey: binaryResult.storageKey || null,
-                    mimeType: binaryResult.mimeType || (binaryResult.type === "video" ? "video/mp4" : "image/webp"),
-                    size: binaryResult.sizeBytes,
-                    type: binaryResult.type,
-                    width: binaryResult.width,
-                    height: binaryResult.height,
-                    ratio: binaryResult.ratio,
-                    format: binaryResult.format,
-                    originalName: binaryResult.originalName || displayName,
-                    inspection: binaryResult.inspection,
-                };
-            } else {
-                throw new Error("No media upload service or binary ingestion service available");
-            }
+            // Perform binary upload via MediaUploadService
+            const uploadResult = await this.mediaUploadService.upload({
+                files: [source],
+                policy: DEFAULT_UPLOAD_POLICY,
+                maxFiles: 1,
+                userId,
+            });
+            const uploadItem = uploadResult.uploaded[0];
 
             // Ensure Workflow container exists
             let targetWorkflowId = workflowId;

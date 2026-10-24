@@ -6,7 +6,7 @@ Methods and dependencies are parsed from the code (best effort). "Owns" comes fr
 
 | Service | Folder | Owns | Public methods | Constructor deps | Registered in (new X) | Referenced by (files) |
 |---|---|---|---|---|---|---|
-| `AssetUploadService` | `src/domain/asset` | - | `uploadAsset` | `db`, `mediaUploadService`, `workflowMediaService`, `binaryIngestionService`, `mediaIngestionService`, `workflowAuthService`, `mediaService`, `folderService`, `storageService` | `src/container.js` | 1 |
+| `AssetUploadService` | `src/domain/asset` | - | `uploadAsset` | `db`, `mediaUploadService`, `workflowMediaService`, `binaryIngestionService`, `mediaIngestionService`, `workflowAuthService`, `authService`, `mediaService`, `folderService`, `storageService` | `src/container.js` | 1 |
 | `CharacterGenerationService` | `src/domain/character` | - | `enqueueSheetGeneration`, `generateDescription` | `db`, `useCaseService` | `src/domain/character/CharacterService.js` | 2 |
 | `CharacterMediaService` | `src/domain/character` | - | `uploadSheetMedia`, `uploadDetailMedia`, `removeDetailMedia` | `db`, `storageService`, `mediaIngestionService` | `src/domain/character/CharacterService.js` | 2 |
 | `CharacterService` | `src/domain/character` | - | `setUseCaseService`, `createCharacter`, `updateCharacter`, `deleteCharacter`, `setCharacterSheetMedia`, `addMediaToCharacter`, `removeMediaFromCharacter`, `generateCharacterSheet`, `generateDescription` | `db`, `storageService`, `workflowService`, `useCaseService`, `mediaIngestionService`, `mediaService`, `generationService` | `src/container.js` | 2 |
@@ -34,7 +34,7 @@ Methods and dependencies are parsed from the code (best effort). "Owns" comes fr
 | `TenantAccessService` | `src/platform/security` | - | `assertProjectOwnership` | `db` | - | 0 |
 | `mediaStorageService` | `src/platform/storage` | - | - | - | - | 0 |
 | `StorageService` | `src/platform/storage` | - | `upload`, `uploadBuffer`, `uploadStream`, `uploadFromUrl`, `delete`, `deleteFiles`, `extractStoragePath`, `deleteByUrl`, `deleteByUrls`, `remove` | `bucketName`, `provider`, `paths` | `src/container.js` | 11 |
-| `WorkflowAuthorizationService` | `src/platform/workflow` | - | `verifyWorkflowOwnership`, `verifyWorkflowOwnershipBulk`, `verifyMediaOwnership` | `db` | `src/domain/asset/AssetUploadService.js`, `src/platform/workflow/WorkflowServiceBase.js` | 3 |
+| `WorkflowAuthorizationService` | `src/platform/workflow` | - | `verifyWorkflowOwnership`, `verifyWorkflowOwnershipBulk`, `verifyMediaOwnership` | `db` | `src/platform/workflow/WorkflowServiceBase.js` | 3 |
 | `WorkflowMediaService` | `src/platform/workflow` | - | `createMediaInWorkflow`, `assignMediaToWorkflow`, `resolveOwnedSourceMedia`, `attachMediaItems`, `rollbackAttachedMedia`, `clearPrimaryMedia`, `setPrimaryMedia`, `detachMedia`, `releaseWorkflowMedia`, `scanOrphanMediaDryRun`, `deleteMedia` | `db`, `storageService`, `authService`, `workflowAuthService`, `mediaUploadService` | `src/platform/workflow/WorkflowServiceBase.js` | 3 |
 | `WorkflowLifecycleService` | `src/platform/workflow` | - | - | - | `src/container.js` | 4 |
 | `QueueDispatchError` | `src/services` | - | - | `name`, `code`, `statusCode`, `cause`, `attempts` | - | 1 |

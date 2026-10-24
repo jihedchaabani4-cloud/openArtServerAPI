@@ -273,7 +273,7 @@ describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMedia
             );
         });
 
-        it("calls mediaUploadService.upload with ELEMENT_SHEET_UPLOAD_POLICY and attaches with setPrimary: true", async () => {
+        it("calls mediaUploadService.upload with ELEMENT_SHEET_UPLOAD_POLICY and attaches with autoPrimary: false and no setPrimary", async () => {
             const res = await service.setSheetMedia({
                 elementId: ELEMENT_ID,
                 file: { buffer: Buffer.from("sheet-img"), mimetype: "image/png" },
@@ -288,63 +288,48 @@ describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMedia
 
             assert.equal(attachCalls.length, 1);
             assert.equal(attachCalls[0].role, "detail");
-            assert.equal(attachCalls[0].setPrimary, true);
+            assert.equal(attachCalls[0].autoPrimary, false);
+            assert.equal(attachCalls[0].setPrimary, undefined);
         });
 
-        it("an old sheet exists, attach of the new sheet fails mid-way -> old sheet/primary restored, new media row deleted, storage discarded, complete === true", async () => {
-            const OLD_SHEET_MEDIA_ID = "00000000-0000-0000-0000-000000000088";
-            let primaryMediaId = OLD_SHEET_MEDIA_ID;
-            let newMediaDeleted = false;
-            let discardedKeys = [];
-            let rollbackSummary = null;
-
-            mockWorkflowMediaService.attachMediaItems = async ({ workflowId, items }) => {
-                const uploadedFile = items[0]?.uploadedFile;
-                const newMediaId = "00000000-0000-0000-0000-000000000099";
-
-                const previousPrimaryMediaId = primaryMediaId;
-                primaryMediaId = newMediaId;
-
-                const rollbackHandle = {
-                    workflowId,
-                    role: "detail",
-                    previousPrimaryMediaId,
-                    primaryModified: true,
-                    newPrimaryMediaId: newMediaId,
-                    entries: [
-                        {
-                            kind: "uploaded",
-                            mediaId: newMediaId,
-                            storageKey: uploadedFile.storageKey,
-                            mediaCreatedInCall: true,
-                            linkCreatedInCall: true,
-                        },
-                    ],
+        it("an element with no primary must NOT auto-promote the sheet (is_primary remains false)", async () => {
+            workflowsStore[0].primary_media_id = null;
+            let capturedAttachParams = null;
+            mockWorkflowMediaService.attachMediaItems = async (params) => {
+                capturedAttachParams = params;
+                return {
+                    attached: [{
+                        media: { id: "00000000-0000-0000-0000-000000000077", url: "https://storage.test/sheet.webp" },
+                        link: { is_primary: false },
+                    }],
                 };
-
-                rollbackSummary = await mockWorkflowMediaService.rollbackAttachedMedia(rollbackHandle);
-
-                throw new CrudServiceError("Database constraint error during sheet attachment", {
-                    statusCode: 500,
-                    errorCode: "ATTACH_FAILED",
-                });
             };
 
-            mockWorkflowMediaService.rollbackAttachedMedia = async (handle) => {
-                primaryMediaId = handle.previousPrimaryMediaId;
-                newMediaDeleted = true;
-                const keys = handle.entries.map((e) => e.storageKey).filter(Boolean);
-                discardedKeys.push(...keys);
+            await service.setSheetMedia({
+                elementId: ELEMENT_ID,
+                file: { buffer: Buffer.from("sheet-img"), mimetype: "image/png" },
+                userId: USER_ID,
+                projectId: PROJECT_ID,
+            });
 
-                return {
-                    complete: true,
-                    unlinkedMediaIds: [handle.newPrimaryMediaId],
-                    deletedMediaIds: [handle.newPrimaryMediaId],
-                    discardedStorageKeys: keys,
-                    skippedStorageKeys: [],
-                    discardFailedKeys: [],
-                    restoredPrimaryMediaId: handle.previousPrimaryMediaId,
-                };
+            assert.equal(capturedAttachParams.autoPrimary, false, "autoPrimary must be false");
+            assert.equal(capturedAttachParams.setPrimary, undefined, "setPrimary must not be set");
+            assert.equal(workflowsStore[0].primary_media_id, "00000000-0000-0000-0000-000000000077", "workflows.primary_media_id updated explicitly");
+        });
+
+        it("sheet failure mid-way leaves workflows.primary_media_id NOT pointing to a deleted media (restored to previous)", async () => {
+            const OLD_SHEET_MEDIA_ID = "00000000-0000-0000-0000-000000000088";
+            workflowsStore[0].primary_media_id = OLD_SHEET_MEDIA_ID;
+
+            let rollbackCalledWithHandle = null;
+            mockWorkflowMediaService.rollbackAttachedMedia = async (handle) => {
+                rollbackCalledWithHandle = handle;
+                return { complete: true, deletedMediaIds: [handle.entries[0]?.mediaId] };
+            };
+
+            // Simulate post-attach failure
+            mockDb.elements.updateElementFields = async () => {
+                throw new Error("Post-attach element update failure");
             };
 
             await assert.rejects(
@@ -354,15 +339,11 @@ describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMedia
                     userId: USER_ID,
                     projectId: PROJECT_ID,
                 }),
-                (err) => err instanceof CrudServiceError && err.statusCode === 500
+                (err) => err.message === "Post-attach element update failure"
             );
 
-            assert.equal(primaryMediaId, OLD_SHEET_MEDIA_ID, "Old sheet primary must be restored");
-            assert.equal(rollbackSummary.restoredPrimaryMediaId, OLD_SHEET_MEDIA_ID);
-            assert.equal(newMediaDeleted, true, "New media row must be deleted");
-            assert.deepEqual(rollbackSummary.deletedMediaIds, ["00000000-0000-0000-0000-000000000099"]);
-            assert.ok(discardedKeys.length > 0, "Uploaded storage file must be discarded");
-            assert.equal(rollbackSummary.complete, true, "Rollback must report complete === true");
+            assert.equal(workflowsStore[0].primary_media_id, OLD_SHEET_MEDIA_ID, "Rollback must restore established primary_media_id");
+            assert.ok(rollbackCalledWithHandle, "WorkflowMediaService.rollbackAttachedMedia must be called on post-attach error");
         });
     });
 

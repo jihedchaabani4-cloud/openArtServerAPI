@@ -157,7 +157,7 @@ describe("ElementMediaService Characterization (Pre-migration baseline)", () => 
         };
 
         const mockWorkflowMediaService = {
-            attachMediaItems: async ({ workflowId, projectId, userId, role = "detail", maxAllowed = 6, items = [], setPrimary = false }) => {
+            attachMediaItems: async ({ workflowId, projectId, userId, role = "detail", maxAllowed = 6, items = [], setPrimary = false, autoPrimary = true }) => {
                 const currentCount = workflowMediaStore.filter((wm) => wm.workflow_id === workflowId && wm.role === role).length;
                 if (maxAllowed !== null && currentCount + items.length > maxAllowed) {
                     throw new CrudServiceError(`Maximum ${maxAllowed} reference images allowed per element`, {
@@ -177,7 +177,7 @@ describe("ElementMediaService Characterization (Pre-migration baseline)", () => 
                         mediaRecord = item.uploadedFile;
                     }
                     const isFirst = workflowMediaStore.filter((wm) => wm.workflow_id === workflowId).length === 0;
-                    const isPrimary = setPrimary || isFirst;
+                    const isPrimary = setPrimary || (autoPrimary && isFirst);
                     if (isPrimary) {
                         for (const wm of workflowMediaStore) {
                             if (wm.workflow_id === workflowId) wm.is_primary = false;
@@ -324,6 +324,7 @@ describe("ElementMediaService Characterization (Pre-migration baseline)", () => 
         // WorkflowMedia created
         assert.equal(workflowMediaStore.length, 1);
         assert.equal(workflowMediaStore[0].role, "detail");
+        assert.equal(workflowMediaStore[0].is_primary, false);
 
         // workflows.primary_media_id updated
         const wf = workflowsStore.find((w) => w.id === WORKFLOW_ID);

@@ -682,6 +682,9 @@ export class ElementMediaService {
                 });
             }
 
+            const existingWf = await this.db.workflows?.findById?.(wfId).catch(() => null);
+            const oldPrimary = existingWf?.primary_media_id || null;
+
             if (mediaId) {
                 const attachResult = await this.workflowMediaService.attachMediaItems({
                     workflowId: wfId,
@@ -689,14 +692,27 @@ export class ElementMediaService {
                     userId,
                     role: "detail",
                     maxAllowed: null,
-                    setPrimary: true,
+                    autoPrimary: false,
                     workflowType: "ELEMENT_SHEET",
                     items: [{ kind: "existing", mediaId }],
                 });
                 const attachedEntry = attachResult.attached?.[0];
 
-                if (this.db.workflows?.updatePrimaryMedia && attachedEntry?.media?.id) {
-                    await this.db.workflows.updatePrimaryMedia(wfId, attachedEntry.media.id).catch(() => null);
+                try {
+                    if (this.db.workflows?.updatePrimaryMedia && attachedEntry?.media?.id) {
+                        await this.db.workflows.updatePrimaryMedia(wfId, attachedEntry.media.id);
+                    }
+                    if (this.db.elements?.updateElementFields) {
+                        await this.db.elements.updateElementFields(elementId, { status: "completed" });
+                    }
+                } catch (postAttachErr) {
+                    if (this.db.workflows?.updatePrimaryMedia) {
+                        await this.db.workflows.updatePrimaryMedia(wfId, oldPrimary).catch(() => null);
+                    }
+                    if (attachResult?.rollbackHandle) {
+                        await this.workflowMediaService.rollbackAttachedMedia(attachResult.rollbackHandle);
+                    }
+                    throw postAttachErr;
                 }
 
                 crudOperationLog({
@@ -742,7 +758,7 @@ export class ElementMediaService {
                 userId,
                 role: "detail",
                 maxAllowed: null,
-                setPrimary: true,
+                autoPrimary: false,
                 workflowType: "ELEMENT_SHEET",
                 items: [{ kind: "uploaded", uploadedFile, stepId: "upload" }],
             });
@@ -750,8 +766,21 @@ export class ElementMediaService {
             const attachedEntry = attachResult.attached?.[0];
             const resolvedUrl = attachedEntry?.media?.url || uploadedFile.url;
 
-            if (this.db.workflows?.updatePrimaryMedia && attachedEntry?.media?.id) {
-                await this.db.workflows.updatePrimaryMedia(wfId, attachedEntry.media.id).catch(() => null);
+            try {
+                if (this.db.workflows?.updatePrimaryMedia && attachedEntry?.media?.id) {
+                    await this.db.workflows.updatePrimaryMedia(wfId, attachedEntry.media.id);
+                }
+                if (this.db.elements?.updateElementFields) {
+                    await this.db.elements.updateElementFields(elementId, { status: "completed" });
+                }
+            } catch (postAttachErr) {
+                if (this.db.workflows?.updatePrimaryMedia) {
+                    await this.db.workflows.updatePrimaryMedia(wfId, oldPrimary).catch(() => null);
+                }
+                if (attachResult?.rollbackHandle) {
+                    await this.workflowMediaService.rollbackAttachedMedia(attachResult.rollbackHandle);
+                }
+                throw postAttachErr;
             }
 
             crudOperationLog({

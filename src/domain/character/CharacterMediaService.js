@@ -110,6 +110,15 @@ export class CharacterMediaService {
                 });
             }
 
+            if (projectId && wf.project_id && wf.project_id !== projectId) {
+                throw new CrudServiceError("Character workflow not found", {
+                    statusCode: 404,
+                    errorCode: "NOT_FOUND",
+                    traceId,
+                    operation: "uploadSheetMedia",
+                });
+            }
+
             const effectiveProjectId = projectId || wf.project_id;
             let items;
 
@@ -246,6 +255,15 @@ export class CharacterMediaService {
 
             const isAuthorized = await this.authService.verifyWorkflowOwnership(wf.id, userId);
             if (!isAuthorized) {
+                throw new CrudServiceError("Character workflow not found", {
+                    statusCode: 404,
+                    errorCode: "NOT_FOUND",
+                    traceId,
+                    operation: "uploadDetailMedia",
+                });
+            }
+
+            if (projectId && wf.project_id && wf.project_id !== projectId) {
                 throw new CrudServiceError("Character workflow not found", {
                     statusCode: 404,
                     errorCode: "NOT_FOUND",
@@ -405,7 +423,7 @@ export class CharacterMediaService {
                     mediaId,
                     role: "detail",
                 });
-                if (reapResult?.unlinked && reapResult.is_orphan) {
+                if (reapResult?.unlinked === true && reapResult.is_orphan === true) {
                     if (this.db.media?.deleteById) {
                         await this.db.media.deleteById(mediaId).catch(() => null);
                     }

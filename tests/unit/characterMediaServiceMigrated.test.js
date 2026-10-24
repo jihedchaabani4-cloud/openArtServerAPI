@@ -511,6 +511,28 @@ describe("CharacterMediaService — Migrated to MediaUploadService & WorkflowMed
                 );
             }
         });
+
+        it("cross-project projectId mismatch -> 404 on uploadSheetMedia and uploadDetailMedia", async () => {
+            await assert.rejects(
+                () => service.uploadSheetMedia({
+                    characterId: CHARACTER_ID,
+                    file: { buffer: Buffer.from("data") },
+                    userId: USER_ID,
+                    projectId: "foreign-project-id",
+                }),
+                (err) => err.statusCode === 404 && err.errorCode === "NOT_FOUND"
+            );
+
+            await assert.rejects(
+                () => service.uploadDetailMedia({
+                    characterId: CHARACTER_ID,
+                    file: { buffer: Buffer.from("data") },
+                    userId: USER_ID,
+                    projectId: "foreign-project-id",
+                }),
+                (err) => err.statusCode === 404 && err.errorCode === "NOT_FOUND"
+            );
+        });
     });
 
     describe("4. Storage Policy & Primary Media Canonical Behavior", () => {

@@ -610,6 +610,174 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
             const targetLinks = h.workflowMedia.filter((m) => m.workflow_id === targetWfId);
             assert.equal(targetLinks.length, 0, "No media should be attached to target workflow");
         });
+
+        it("SOURCE ISOLATION (i): mediaId of another user with NO workflowId throws 404, creates 0 rows, and discards uploaded keys", async () => {
+            const h = createMockHarness();
+            const targetWfId = "00000000-0000-0000-0000-000000000001";
+            h.workflows.set(targetWfId, { id: targetWfId, user_id: "user-1", project_id: "proj-1" });
+
+            // Foreign media owned by attacker (no user_id on media row, linked to attacker's workflow)
+            const foreignMediaId = "00000000-0000-0000-0000-000000000099";
+            h.media.set(foreignMediaId, { id: foreignMediaId, url: "https://storage.test/attacker-media.png" });
+            const attackerWfId = "00000000-0000-0000-0000-000000000088";
+            h.workflows.set(attackerWfId, { id: attackerWfId, user_id: "attacker", project_id: "proj-attacker" });
+            h.workflowMedia.push({ workflow_id: attackerWfId, media_id: foreignMediaId, role: "detail", is_primary: false });
+
+            h.callLog.length = 0;
+            await assert.rejects(
+                async () => {
+                    await h.service.attachMediaItems({
+                        workflowId: targetWfId,
+                        userId: "user-1",
+                        projectId: "proj-1",
+                        role: "detail",
+                        maxAllowed: 6,
+                        items: [
+                            {
+                                kind: "uploaded",
+                                uploadedFile: {
+                                    storageKey: "user-1/uploads/batch-i.png",
+                                    url: "https://storage.test/batch-i.png",
+                                    width: 100,
+                                    height: 100,
+                                    format: "PNG",
+                                },
+                            },
+                            {
+                                kind: "existing",
+                                mediaId: foreignMediaId,
+                                // NO workflowId provided
+                            },
+                        ],
+                    });
+                },
+                (err) => {
+                    assert.equal(err.statusCode, 404, "Foreign media with no workflowId must return 404");
+                    return true;
+                }
+            );
+
+            // Assert zero rows created in target workflow
+            const targetLinks = h.workflowMedia.filter((m) => m.workflow_id === targetWfId);
+            assert.equal(targetLinks.length, 0, "Zero rows must be created in target workflow");
+
+            // Assert uploaded key was safely discarded
+            const discardCall = h.callLog.find((c) => c.op === "mediaUploadService.discard");
+            assert.ok(discardCall, "Uploaded keys must be discarded on foreign media rejection");
+            assert.deepEqual(discardCall.keys, ["user-1/uploads/batch-i.png"]);
+        });
+
+        it("SOURCE ISOLATION (ii): own workflowId but mediaId is not linked to that workflow throws 404, creates 0 rows, and discards uploaded keys", async () => {
+            const h = createMockHarness();
+            const targetWfId = "00000000-0000-0000-0000-000000000001";
+            h.workflows.set(targetWfId, { id: targetWfId, user_id: "user-1", project_id: "proj-1" });
+
+            // User owns source workflow A, but media is actually attached to foreign workflow B
+            const ownSourceWfId = "00000000-0000-0000-0000-000000000002";
+            h.workflows.set(ownSourceWfId, { id: ownSourceWfId, user_id: "user-1", project_id: "proj-1" });
+
+            const foreignMediaId = "00000000-0000-0000-0000-000000000099";
+            h.media.set(foreignMediaId, { id: foreignMediaId, url: "https://storage.test/attacker-media.png" });
+            const attackerWfId = "00000000-0000-0000-0000-000000000088";
+            h.workflows.set(attackerWfId, { id: attackerWfId, user_id: "attacker", project_id: "proj-attacker" });
+            h.workflowMedia.push({ workflow_id: attackerWfId, media_id: foreignMediaId, role: "detail", is_primary: false });
+
+            h.callLog.length = 0;
+            await assert.rejects(
+                async () => {
+                    await h.service.attachMediaItems({
+                        workflowId: targetWfId,
+                        userId: "user-1",
+                        projectId: "proj-1",
+                        role: "detail",
+                        maxAllowed: 6,
+                        items: [
+                            {
+                                kind: "uploaded",
+                                uploadedFile: {
+                                    storageKey: "user-1/uploads/batch-ii.png",
+                                    url: "https://storage.test/batch-ii.png",
+                                    width: 100,
+                                    height: 100,
+                                    format: "PNG",
+                                },
+                            },
+                            {
+                                kind: "existing",
+                                mediaId: foreignMediaId,
+                                workflowId: ownSourceWfId, // Own workflow, but media is NOT linked to it!
+                            },
+                        ],
+                    });
+                },
+                (err) => {
+                    assert.equal(err.statusCode, 404, "Media not linked to own workflow must return 404");
+                    return true;
+                }
+            );
+
+            const targetLinks = h.workflowMedia.filter((m) => m.workflow_id === targetWfId);
+            assert.equal(targetLinks.length, 0, "Zero rows must be created in target workflow");
+
+            const discardCall = h.callLog.find((c) => c.op === "mediaUploadService.discard");
+            assert.ok(discardCall, "Uploaded keys must be discarded on unlinked media rejection");
+            assert.deepEqual(discardCall.keys, ["user-1/uploads/batch-ii.png"]);
+        });
+
+        it("SOURCE ISOLATION (iii): foreign workflowId (media is linked to it, but workflow belongs to another user) throws 404, creates 0 rows, and discards uploaded keys", async () => {
+            const h = createMockHarness();
+            const targetWfId = "00000000-0000-0000-0000-000000000001";
+            h.workflows.set(targetWfId, { id: targetWfId, user_id: "user-1", project_id: "proj-1" });
+
+            // Attacker's workflow and media
+            const attackerWfId = "00000000-0000-0000-0000-000000000088";
+            h.workflows.set(attackerWfId, { id: attackerWfId, user_id: "attacker", project_id: "proj-attacker" });
+
+            const foreignMediaId = "00000000-0000-0000-0000-000000000099";
+            h.media.set(foreignMediaId, { id: foreignMediaId, url: "https://storage.test/attacker-media.png" });
+            h.workflowMedia.push({ workflow_id: attackerWfId, media_id: foreignMediaId, role: "detail", is_primary: false });
+
+            h.callLog.length = 0;
+            await assert.rejects(
+                async () => {
+                    await h.service.attachMediaItems({
+                        workflowId: targetWfId,
+                        userId: "user-1",
+                        projectId: "proj-1",
+                        role: "detail",
+                        maxAllowed: 6,
+                        items: [
+                            {
+                                kind: "uploaded",
+                                uploadedFile: {
+                                    storageKey: "user-1/uploads/batch-iii.png",
+                                    url: "https://storage.test/batch-iii.png",
+                                    width: 100,
+                                    height: 100,
+                                    format: "PNG",
+                                },
+                            },
+                            {
+                                kind: "existing",
+                                mediaId: foreignMediaId,
+                                workflowId: attackerWfId, // Foreign workflowId! Media IS linked, but workflow belongs to attacker!
+                            },
+                        ],
+                    });
+                },
+                (err) => {
+                    assert.equal(err.statusCode, 404, "Foreign workflowId must return 404");
+                    return true;
+                }
+            );
+
+            const targetLinks = h.workflowMedia.filter((m) => m.workflow_id === targetWfId);
+            assert.equal(targetLinks.length, 0, "Zero rows must be created in target workflow");
+
+            const discardCall = h.callLog.find((c) => c.op === "mediaUploadService.discard");
+            assert.ok(discardCall, "Uploaded keys must be discarded on foreign workflow rejection");
+            assert.deepEqual(discardCall.keys, ["user-1/uploads/batch-iii.png"]);
+        });
     });
 
     describe("3. Attachment Success & Handle Contract", () => {

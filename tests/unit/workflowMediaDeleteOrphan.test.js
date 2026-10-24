@@ -272,6 +272,7 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
       workflowService: {
         deleteWorkflow: async ({ workflowId }) => { deletedWorkflowIds.push(workflowId); },
       },
+      mediaService: {},
     });
 
     const elemDeleted = await elemService.deleteElement("elem-del-1", "user-1");
@@ -363,6 +364,7 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
           deleteWorkflowCalled = true;
         },
       },
+      mediaService: {},
     });
 
     const list = await service.listProjectElements("proj-1");

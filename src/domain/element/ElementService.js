@@ -78,7 +78,11 @@ export class ElementService {
         this.storageService        = storageService;
         this.workflowService       = workflowService;
         this.mediaIngestionService = mediaIngestionService;
-        this.mediaService          = mediaService || elementMediaService || null;
+        const resolvedMediaService = mediaService || elementMediaService;
+        if (!resolvedMediaService) {
+            throw new Error("ElementService requires mediaService (ElementMediaService)");
+        }
+        this.mediaService          = resolvedMediaService;
         this.analysisService = analysisService || new ElementAnalysisService();
     }
 

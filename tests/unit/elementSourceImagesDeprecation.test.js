@@ -282,7 +282,7 @@ describe("ADR-0009: element.source_images deprecation & decoupling", () => {
         },
       };
 
-      const service = new ElementService({ db: mockDb });
+      const service = new ElementService({ db: mockDb, mediaService: {} });
 
       const list = await service.listProjectElements("proj-1");
       assert.equal(list.length, 1);

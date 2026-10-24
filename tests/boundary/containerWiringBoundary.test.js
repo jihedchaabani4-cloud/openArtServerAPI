@@ -5,6 +5,7 @@ import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaS
 import { MediaUploadService } from "../../src/platform/media-ingestion/MediaUploadService.js";
 import { WorkflowLifecycleService } from "../../src/platform/workflow/WorkflowService.js";
 import { WorkflowService as WorkflowServiceBase } from "../../src/platform/workflow/WorkflowServiceBase.js";
+import { ElementService } from "../../src/domain/element/ElementService.js";
 
 describe("Container Service Graph & Dependency Wiring Boundary", () => {
     it("asserts that every WorkflowMediaService reachable from the container holds the exact same mediaUploadService instance", () => {
@@ -189,5 +190,19 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
             container.db.media.createMedia = originalDbMediaCreate;
             container.workflowMediaService.authService.verifyWorkflowOwnership = originalVerifyWorkflowOwnership;
         }
+    });
+
+    it("ElementService wiring: elementMediaService is REQUIRED and holds container.elementMediaService instance", () => {
+        assert.ok(container.elementService, "container.elementService must exist");
+        assert.equal(
+            container.elementService.mediaService,
+            container.elementMediaService,
+            "container.elementService.mediaService must hold container.elementMediaService"
+        );
+        assert.throws(
+            () => new ElementService({ db: {} }),
+            (err) => err.message.includes("ElementService requires mediaService"),
+            "ElementService constructor must throw if mediaService is missing"
+        );
     });
 });

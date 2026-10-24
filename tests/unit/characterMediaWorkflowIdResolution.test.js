@@ -42,19 +42,34 @@ describe("Workflow ID resolution to media relation in Character & Element servic
       },
     };
 
+    const mockUploadService = {
+      upload: async () => ({ uploaded: [] }),
+      discard: async () => ({}),
+    };
+    const mockWorkflowMediaService = {
+      attachMediaItems: async ({ workflowId, projectId, userId, role, items }) => {
+        linkedPayload = {
+          workflowId,
+          mediaId: mockSourceMedia.id,
+          role,
+        };
+        return {
+          attached: [{
+            media: mockSourceMedia,
+            is_primary: false,
+          }],
+        };
+      },
+    };
+    const mockAuthService = {
+      verifyWorkflowOwnership: async () => true,
+    };
     const service = new CharacterMediaService({
       db: mockDb,
       storageService: {},
-      mediaIngestionService: {
-        ingest: async () => ({
-          media: mockSourceMedia,
-          isNew: false,
-          mediaId: mockSourceMedia.id,
-          url: mockSourceMedia.url,
-          width: 1024,
-          height: 1024,
-        }),
-      },
+      mediaUploadService: mockUploadService,
+      workflowMediaService: mockWorkflowMediaService,
+      authService: mockAuthService,
     });
 
     // Frontend passes workflow ID as mediaId (architectural contract)
@@ -122,19 +137,34 @@ describe("Workflow ID resolution to media relation in Character & Element servic
       },
     };
 
+    const mockUploadService = {
+      upload: async () => ({ uploaded: [] }),
+      discard: async () => ({}),
+    };
+    const mockWorkflowMediaService = {
+      attachMediaItems: async ({ workflowId, projectId, userId, role, items }) => {
+        linkedPayload = {
+          workflowId,
+          mediaId: mockSourceMedia.id,
+          role,
+        };
+        return {
+          attached: [{
+            media: mockSourceMedia,
+            is_primary: true,
+          }],
+        };
+      },
+    };
+    const mockAuthService = {
+      verifyWorkflowOwnership: async () => true,
+    };
     const service = new CharacterMediaService({
       db: mockDb,
       storageService: {},
-      mediaIngestionService: {
-        ingest: async () => ({
-          media: mockSourceMedia,
-          isNew: false,
-          mediaId: mockSourceMedia.id,
-          url: mockSourceMedia.url,
-          width: 1344,
-          height: 768,
-        }),
-      },
+      mediaUploadService: mockUploadService,
+      workflowMediaService: mockWorkflowMediaService,
+      authService: mockAuthService,
     });
 
     const result = await service.uploadSheetMedia({
@@ -277,6 +307,9 @@ describe("Workflow ID resolution to media relation in Character & Element servic
     const service = new CharacterMediaService({
       db: mockDb,
       storageService: mockStorage,
+      mediaUploadService: { upload: async () => ({}) },
+      workflowMediaService: { attachMediaItems: async () => ({}) },
+      authService: { verifyWorkflowOwnership: async () => true },
     });
 
     const result = await service.removeDetailMedia({
@@ -321,7 +354,23 @@ describe("Workflow ID resolution to media relation in Character & Element servic
       },
     };
 
-    const service = new CharacterMediaService({ db: mockDb, storageService: {} });
+    const service = new CharacterMediaService({
+      db: mockDb,
+      storageService: {},
+      mediaUploadService: { upload: async () => ({}) },
+      workflowMediaService: {
+        attachMediaItems: async ({ userId, items }) => {
+          const media = items?.[0]?.mediaId ? mockVictimMedia : null;
+          if (media && media.user_id !== userId) {
+            const err = new Error("Media not found");
+            err.statusCode = 404;
+            throw err;
+          }
+          return { attached: [{ media }] };
+        },
+      },
+      authService: { verifyWorkflowOwnership: async () => true },
+    });
 
     await assert.rejects(
       async () => {
@@ -365,7 +414,23 @@ describe("Workflow ID resolution to media relation in Character & Element servic
       },
     };
 
-    const service = new CharacterMediaService({ db: mockDb, storageService: {} });
+    const service = new CharacterMediaService({
+      db: mockDb,
+      storageService: {},
+      mediaUploadService: { upload: async () => ({}) },
+      workflowMediaService: {
+        attachMediaItems: async ({ projectId, items }) => {
+          const media = items?.[0]?.mediaId ? mockOtherProjMedia : null;
+          if (media && media.project_id !== projectId) {
+            const err = new Error("Media not found");
+            err.statusCode = 404;
+            throw err;
+          }
+          return { attached: [{ media }] };
+        },
+      },
+      authService: { verifyWorkflowOwnership: async () => true },
+    });
 
     await assert.rejects(
       async () => {

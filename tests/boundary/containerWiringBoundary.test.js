@@ -6,6 +6,8 @@ import { MediaUploadService } from "../../src/platform/media-ingestion/MediaUplo
 import { WorkflowLifecycleService } from "../../src/platform/workflow/WorkflowService.js";
 import { WorkflowService as WorkflowServiceBase } from "../../src/platform/workflow/WorkflowServiceBase.js";
 import { ElementService } from "../../src/domain/element/ElementService.js";
+import { CharacterService } from "../../src/domain/character/CharacterService.js";
+import { CharacterMediaService } from "../../src/domain/character/CharacterMediaService.js";
 
 describe("Container Service Graph & Dependency Wiring Boundary", () => {
     it("asserts that every WorkflowMediaService reachable from the container holds the exact same mediaUploadService instance", () => {
@@ -203,6 +205,46 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
             () => new ElementService({ db: {} }),
             (err) => err.message.includes("ElementService requires mediaService"),
             "ElementService constructor must throw if mediaService is missing"
+        );
+    });
+
+    it("CharacterService & CharacterMediaService wiring: characterMediaService is REQUIRED and holds container singletons", () => {
+        assert.ok(container.characterMediaService, "container.characterMediaService must exist");
+        assert.ok(
+            container.characterMediaService instanceof CharacterMediaService,
+            "container.characterMediaService must be instance of CharacterMediaService"
+        );
+        assert.equal(
+            container.characterMediaService.mediaUploadService,
+            container.mediaUploadService,
+            "characterMediaService.mediaUploadService must hold container mediaUploadService"
+        );
+        assert.equal(
+            container.characterMediaService.workflowMediaService,
+            container.workflowMediaService,
+            "characterMediaService.workflowMediaService must hold container workflowMediaService"
+        );
+        assert.equal(
+            container.characterMediaService.authService,
+            container.workflowService.authService,
+            "characterMediaService.authService must hold container authService"
+        );
+
+        assert.ok(container.characterService, "container.characterService must exist");
+        assert.equal(
+            container.characterService.mediaService,
+            container.characterMediaService,
+            "container.characterService.mediaService must hold container.characterMediaService"
+        );
+        assert.throws(
+            () => new CharacterService({ db: {} }),
+            (err) => err.message.includes("CharacterService requires mediaService"),
+            "CharacterService constructor must throw if mediaService is missing"
+        );
+        assert.throws(
+            () => new CharacterMediaService({ db: {} }),
+            (err) => err.message.includes("CharacterMediaService requires storageService"),
+            "CharacterMediaService constructor must throw if required dependencies are missing"
         );
     });
 });

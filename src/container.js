@@ -30,6 +30,7 @@ import { BinaryIngestionService } from "#platform/media-ingestion/BinaryIngestio
 import { MediaIngestionService } from "#platform/media-ingestion/MediaIngestionService.js";
 import { MediaUploadService } from "#platform/media-ingestion/MediaUploadService.js";
 import { CharacterService } from "#domain/character/CharacterService.js";
+import { CharacterMediaService } from "#domain/character/CharacterMediaService.js";
 import { ElementService } from "#domain/element/ElementService.js";
 import { ElementMediaService } from "#domain/element/ElementMediaService.js";
 import { ElementAnalysisService } from "#domain/element/ElementAnalysisService.js";
@@ -257,12 +258,21 @@ export const legacyMediaIngestAdapter = {
     },
 };
 
+export const characterMediaService = new CharacterMediaService({
+    db,
+    storageService,
+    mediaUploadService,
+    workflowMediaService,
+    authService: workflowService.authService,
+});
+
 export const characterService = new CharacterService({
     db,
     storageService,
     workflowService,
     useCaseService,
     mediaIngestionService,
+    mediaService: characterMediaService,
 });
 
 export const elementMediaService = new ElementMediaService({

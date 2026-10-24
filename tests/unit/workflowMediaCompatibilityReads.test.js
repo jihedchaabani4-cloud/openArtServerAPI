@@ -5,6 +5,7 @@ import { WorkflowRepository } from "../../src/db/WorkflowRepository.js";
 import { ProjectReadService } from "../../src/domain/project/ProjectReadService.js";
 import { GenerationService } from "../../src/domain/generation/GenerationService.js";
 import { CharacterMediaService } from "../../src/domain/character/CharacterMediaService.js";
+import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
 import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
 
 function makeQuery(result, onCall = () => {}) {
@@ -318,7 +319,19 @@ describe("B3: workflow_media junction readers, tenant isolation & candidate libr
       },
     };
 
-    const charService = new CharacterMediaService({ db: mockDb, storageService: {} });
+    const workflowMediaService = new WorkflowMediaService({
+      db: mockDb,
+      storageService: {},
+      mediaUploadService: { discard: async () => ({}) },
+      authService: { verifyMediaOwnership: async () => true, verifyWorkflowOwnership: async () => true },
+    });
+    const charService = new CharacterMediaService({
+      db: mockDb,
+      storageService: {},
+      mediaUploadService: { upload: async () => ({}) },
+      workflowMediaService,
+      authService: { verifyWorkflowOwnership: async () => true },
+    });
 
     await assert.rejects(
       () => charService._resolveSourceMedia("m-orphan-1", { userId: "user-1", projectId: "proj-1" }),

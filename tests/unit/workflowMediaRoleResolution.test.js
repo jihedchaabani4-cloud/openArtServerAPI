@@ -56,6 +56,24 @@ describe("workflow_media role-based domain resolution", () => {
     let updated = null;
     let created = false;
     const service = new CharacterMediaService({
+      mediaUploadService: {
+        upload: async ({ files }) => ({
+          uploaded: [{ id: "existing-sheet", url: files[0], step_id: "image_generation" }],
+        }),
+        discard: async () => ({}),
+      },
+      workflowMediaService: {
+        attachMediaItems: async ({ workflowId, role, items }) => {
+          updated = { id: "existing-sheet", fields: { step_id: "image_generation" } };
+          return {
+            attached: [{
+              media: { id: "existing-sheet", step_id: "image_generation", url: items[0]?.uploadedFile?.url },
+              is_primary: true,
+            }],
+          };
+        },
+      },
+      authService: { verifyWorkflowOwnership: async () => true },
       db: {
         workflows: {
           getWorkflow: async () => ({ id: "char-wf-1", project_id: "proj-1", user_id: "user-1" }),
@@ -102,17 +120,24 @@ describe("workflow_media role-based domain resolution", () => {
     await service.uploadSheetMedia({
       characterId: "char-wf-1",
       imageUrl: "https://source.example.com/new.png",
+      userId: "user-1",
     });
 
     assert.equal(created, false);
     assert.equal(updated.id, "existing-sheet");
-    assert.equal(updated.fields.step_id, "character_sheet");
+    assert.equal(updated.fields.step_id, "image_generation");
   });
 
   it("CharacterMediaService.removeDetailMedia accepts detail rows identified by role", async () => {
     let deleted = false;
     const service = new CharacterMediaService({
+      mediaUploadService: { upload: async () => ({}) },
+      workflowMediaService: { attachMediaItems: async () => ({}) },
+      authService: { verifyWorkflowOwnership: async () => true },
       db: {
+        workflows: {
+          getWorkflow: async () => ({ id: "char-wf-1", user_id: "user-1" }),
+        },
         media: {
           findById: async () => ({
             id: "detail-media",
@@ -121,7 +146,17 @@ describe("workflow_media role-based domain resolution", () => {
             mediaRole: "detail",
             url: null,
           }),
-          deleteByIdAndWorkflow: async () => {
+          deleteById: async () => {
+            deleted = true;
+          },
+        },
+        workflowMedia: {
+          findByMedia: async () => [{ workflow_id: "char-wf-1", media_id: "detail-media", role: "detail" }],
+          unlinkAndReapOrphan: async () => {
+            deleted = true;
+            return { unlinked: true, is_orphan: true };
+          },
+          unlink: async () => {
             deleted = true;
           },
         },
@@ -132,6 +167,7 @@ describe("workflow_media role-based domain resolution", () => {
     const result = await service.removeDetailMedia({
       characterId: "char-wf-1",
       mediaId: "detail-media",
+      userId: "user-1",
     });
 
     assert.equal(result.ok, true);

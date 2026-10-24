@@ -163,6 +163,9 @@ describe("Shared-Media Lifecycle Regression & Hardening", () => {
     it("CharacterMediaService.removeDetailMedia: does NOT clear primary when removed media is non-primary", async () => {
         const clearCalls = [];
         const service = new CharacterMediaService({
+            mediaUploadService: { upload: async () => ({}) },
+            workflowMediaService: { attachMediaItems: async () => ({}) },
+            authService: { verifyWorkflowOwnership: async () => true },
             db: {
                 workflows: {
                     getWorkflow: async (id) => ({ id, user_id: "u1" }),
@@ -194,6 +197,9 @@ describe("Shared-Media Lifecycle Regression & Hardening", () => {
     it("CharacterMediaService.removeDetailMedia: clears primary only when removed media IS primary", async () => {
         const clearCalls = [];
         const service = new CharacterMediaService({
+            mediaUploadService: { upload: async () => ({}) },
+            workflowMediaService: { attachMediaItems: async () => ({}) },
+            authService: { verifyWorkflowOwnership: async () => true },
             db: {
                 workflows: {
                     getWorkflow: async (id) => ({ id, user_id: "u1" }),

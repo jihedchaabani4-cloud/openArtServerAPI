@@ -274,24 +274,46 @@ describe("D2.6 — Media Ratio & Dimension Preservation Boundary Tests", () => {
       },
     };
 
-    const mockIngestion = {
-      ingest: async () => ({
-        url: "https://storage.example.com/character-16-9.png",
-        width: 1344,
-        height: 768,
-        ratio: "16:9",
+    const mockUploadService = {
+      upload: async () => ({
+        uploaded: [{
+          url: "https://storage.example.com/character-16-9.png",
+          width: 1344,
+          height: 768,
+          ratio: "16:9",
+          storageKey: "user-1/character-details/detail.png",
+        }],
       }),
+      discard: async () => ({}),
+    };
+    const mockWorkflowMediaService = {
+      attachMediaItems: async ({ items }) => {
+        const uploadedFile = items[0].uploadedFile;
+        createdMediaRow = {
+          id: "media-detail-1",
+          url: uploadedFile.url,
+          width: uploadedFile.width,
+          height: uploadedFile.height,
+        };
+        return { attached: [{ media: createdMediaRow }] };
+      },
+    };
+    const mockAuthService = {
+      verifyWorkflowOwnership: async () => true,
     };
 
     const service = new CharacterMediaService({
       db: mockDb,
       storageService: {},
-      mediaIngestionService: mockIngestion,
+      mediaUploadService: mockUploadService,
+      workflowMediaService: mockWorkflowMediaService,
+      authService: mockAuthService,
     });
 
     const res = await service.uploadDetailMedia({
       characterId: "char-123",
       imageUrl: "https://example.com/input.png",
+      userId: "user-1",
     });
 
     assert.ok(res.ok);

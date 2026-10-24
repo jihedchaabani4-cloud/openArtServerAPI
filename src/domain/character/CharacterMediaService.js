@@ -2,43 +2,61 @@
  * CharacterMediaService
  * Dedicated Domain Service owning character media storage and database orchestration.
  * Handles turnaround body sheet uploads, detail reference images, and media cleanup.
+ *
+ * Architecture Boundary (ADR-0012):
+ *   - Uploads binary files exclusively via MediaUploadService (CHARACTER_SHEET_UPLOAD_POLICY / CHARACTER_DETAIL_UPLOAD_POLICY).
+ *   - Attaches and unlinks media exclusively via WorkflowMediaService (atomic RPC attach_workflow_reference_media).
+ *   - Enforces CHARACTER_MAX_DETAIL_MEDIA = 5 atomically on new detail attachments.
+ *   - Dual-writes legacy workflows.primary_media_id for sheet media only (scheduled for removal in ADR-0007 Ticket 12).
  */
 
 import { randomUUID } from "node:crypto";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
-import { resolveMediaMetadata } from "../../platform/media/mediaMetadataResolver.js";
-import { createMediaInWorkflow } from "../../db/workflowMediaLinker.js";
-import { inferWorkflowMediaRole } from "../../db/workflowMediaRole.js";
+import {
+    CHARACTER_SHEET_UPLOAD_POLICY,
+    CHARACTER_DETAIL_UPLOAD_POLICY,
+} from "../../platform/media-ingestion/UploadPolicy.js";
+import { CHARACTER_MAX_DETAIL_MEDIA } from "../../config/characterConfig.js";
+
+export { CHARACTER_MAX_DETAIL_MEDIA };
 
 export class CharacterMediaService {
     /**
      * @param {Object} deps
-     * @param {Object} deps.db                     - Repository map (db.workflows, db.media, db.characters, db.projects)
-     * @param {Object} deps.storageService         - StorageService instance for Supabase uploads
-     * @param {Object} [deps.mediaIngestionService] - MediaIngestionService instance
+     * @param {Object} deps.db                   - Repository map (db.workflows, db.media, db.characters, db.workflowMedia)
+     * @param {Object} deps.storageService       - StorageService instance for cleanup
+     * @param {Object} deps.mediaUploadService   - MediaUploadService instance
+     * @param {Object} deps.workflowMediaService - WorkflowMediaService instance
+     * @param {Object} deps.authService          - AuthService / WorkflowSecurity instance
      */
-    constructor({ db, storageService, mediaIngestionService = null }) {
+    constructor({ db, storageService, mediaUploadService, workflowMediaService, authService }) {
+        if (!db) {
+            throw new Error("CharacterMediaService requires db");
+        }
+        if (!storageService) {
+            throw new Error("CharacterMediaService requires storageService");
+        }
+        if (!mediaUploadService || typeof mediaUploadService.upload !== "function") {
+            throw new Error("CharacterMediaService requires mediaUploadService with upload method");
+        }
+        if (!workflowMediaService || typeof workflowMediaService.attachMediaItems !== "function") {
+            throw new Error("CharacterMediaService requires workflowMediaService with attachMediaItems method");
+        }
+        if (!authService || typeof authService.verifyWorkflowOwnership !== "function") {
+            throw new Error("CharacterMediaService requires authService with verifyWorkflowOwnership method");
+        }
+
         this.db = db;
         this.storageService = storageService;
-        this.mediaIngestionService = mediaIngestionService;
-    }
-
-    /**
-     * Resolves file extension based on mime type
-     */
-    _resolveExtension(mimetype) {
-        if (!mimetype) return "jpg";
-        if (mimetype.includes("png")) return "png";
-        if (mimetype.includes("webp")) return "webp";
-        if (mimetype.includes("gif")) return "gif";
-        if (mimetype.includes("avif")) return "avif";
-        return "jpg";
+        this.mediaUploadService = mediaUploadService;
+        this.workflowMediaService = workflowMediaService;
+        this.authService = authService;
     }
 
     /**
      * Set or upload the primary 3-view turnaround sheet media for a character.
-     * Uploads to Supabase storage path `character-sheets/...`, updates workflow primary_media_id,
-     * and marks workflow & character status as completed.
+     * Uploads via MediaUploadService (CHARACTER_SHEET_UPLOAD_POLICY) and attaches via WorkflowMediaService (role: "sheet").
+     * Preserves legacy workflows.primary_media_id dual-write until Ticket 12 (ADR-0007).
      */
     async uploadSheetMedia({ characterId, mediaId, imageUrl, file, projectId, userId }) {
         const traceId = randomUUID();
@@ -63,6 +81,14 @@ export class CharacterMediaService {
                     operation: "uploadSheetMedia",
                 });
             }
+            if (!userId || userId === "anonymous") {
+                throw new CrudServiceError("Authentication required", {
+                    statusCode: 401,
+                    errorCode: "UNAUTHORIZED",
+                    traceId,
+                    operation: "uploadSheetMedia",
+                });
+            }
 
             const wf = await this.db.workflows.getWorkflow(characterId).catch(() => null);
             if (!wf) {
@@ -74,211 +100,66 @@ export class CharacterMediaService {
                 });
             }
 
-            const effectiveProjectId = projectId || wf.project_id;
-            const safeUserId = userId || wf.user_id || "anonymous";
-
-            let resolvedUrl = imageUrl;
-            let resolvedWidth = 1344;
-            let resolvedHeight = 768;
-
-            // Direct Asset/Workflow ID resolution to media relation
-            if (mediaId) {
-                const sourceMedia = await this._resolveSourceMedia(mediaId, {
-                    userId: safeUserId,
-                    projectId: effectiveProjectId,
-                });
-                if (sourceMedia) {
-                    await createMediaInWorkflow(this.db, {
-                        workflowId: wf.id,
-                        mediaId: sourceMedia.id,
-                        role: "sheet",
-                        stepId: "character_sheet",
-                        workflowType: wf.workflow_type || "CHARACTER",
-                        operation: "uploadSheetMedia:linkWorkflowMedia",
-                    });
-                    await this.db.workflows.updatePrimaryMedia(wf.id, sourceMedia.id).catch((err) => {
-                        crudOperationLog({
-                            traceId,
-                            operation: "uploadSheetMedia:updatePrimaryMedia",
-                            status: "warning",
-                            characterId,
-                            mediaId: sourceMedia.id,
-                            message: err.message,
-                        });
-                    });
-                    await this.db.characters.updateCharacterFields(characterId, {
-                        status: "completed",
-                    }).catch((err) => {
-                        crudOperationLog({
-                            traceId,
-                            operation: "uploadSheetMedia:updateCharacterFields",
-                            status: "warning",
-                            characterId,
-                            message: err?.message,
-                        });
-                    });
-
-                    crudOperationLog({
-                        traceId,
-                        operation: "uploadSheetMedia",
-                        status: "ok",
-                        durationMs: Date.now() - start,
-                        characterId,
-                        mediaId: sourceMedia.id,
-                    });
-
-                    return {
-                        media: {
-                            ...sourceMedia,
-                            workflow_id: wf.id,
-                            workflowId: wf.id,
-                            role: "sheet",
-                            mediaRole: "sheet",
-                            step_id: "character_sheet",
-                        },
-                        ok: true,
-                        url: sourceMedia.url,
-                    };
-                }
-            }
-
-            // Ingestion via Canonical MediaIngestionService
-            if (this.mediaIngestionService) {
-                const source = file || mediaId || imageUrl;
-                const ingested = await this.mediaIngestionService.ingest({
-                    source,
-                    userId: safeUserId,
-                    projectId: effectiveProjectId,
-                    workflowId: wf.id,
-                    purpose: "character_sheet",
-                    folder: "character-sheets",
-                    skipMediaCreate: true,
-                    imageUrl,
-                });
-                resolvedUrl = ingested.url;
-                resolvedWidth = ingested.width || 1344;
-                resolvedHeight = ingested.height || 768;
-            } else {
-                // Fallback Case A: Multipart file upload (buffer)
-                if (file && file.buffer) {
-                    const newMediaId = randomUUID();
-                    const ext = this._resolveExtension(file.mimetype);
-                    const storagePath = this.storageService.paths.characterSheet(safeUserId, characterId, newMediaId, ext);
-                    crudOperationLog({ traceId, operation: "uploadSheetMedia:storageUpload", status: "ok", characterId });
-                    resolvedUrl = await this.storageService.upload(storagePath, file.buffer);
-                }
-                // Fallback Case B: Base64 data URL
-                else if (imageUrl && imageUrl.startsWith("data:")) {
-                    const newMediaId = randomUUID();
-                    const ext = imageUrl.startsWith("data:image/png")
-                        ? "png"
-                        : imageUrl.startsWith("data:image/webp")
-                        ? "webp"
-                        : "jpg";
-                    const storagePath = this.storageService.paths.characterSheet(safeUserId, characterId, newMediaId, ext);
-                    crudOperationLog({ traceId, operation: "uploadSheetMedia:storageUpload", status: "ok", characterId });
-                    resolvedUrl = await this.storageService.upload(storagePath, imageUrl);
-                }
-                // Fallback Case C: Existing Media ID from project library
-                else if (mediaId) {
-                    const sourceMedia = await this._resolveSourceMedia(mediaId, { userId: safeUserId, projectId: effectiveProjectId });
-                    if (sourceMedia && sourceMedia.url) {
-                        resolvedUrl = sourceMedia.url;
-                        resolvedWidth = sourceMedia.width || 1344;
-                        resolvedHeight = sourceMedia.height || 768;
-                    } else if (imageUrl) {
-                        resolvedUrl = imageUrl;
-                    } else {
-                        throw new CrudServiceError(`Media or Workflow with ID ${mediaId} not found`, {
-                            statusCode: 404,
-                            errorCode: "NOT_FOUND",
-                            traceId,
-                            operation: "uploadSheetMedia",
-                        });
-                    }
-                }
-                // Fallback Case D: External HTTP image URL
-                else if (imageUrl && (imageUrl.startsWith("http://") || imageUrl.startsWith("https://"))) {
-                    try {
-                        const newMediaId = randomUUID();
-                        const storagePath = this.storageService.paths.characterSheet(safeUserId, characterId, newMediaId, "jpg");
-                        resolvedUrl = await this.storageService.uploadFromUrl(storagePath, imageUrl);
-                    } catch (urlErr) {
-                        crudOperationLog({
-                            traceId,
-                            operation: "uploadSheetMedia:uploadFromUrl",
-                            status: "warning",
-                            characterId,
-                            message: urlErr.message,
-                        });
-                        resolvedUrl = imageUrl;
-                    }
-                }
-            }
-
-            // 1. Check for existing sheet media on this workflow
-            const existingMedia = await this.db.media.findByWorkflow(wf.id).catch(() => []);
-            const sheetMedia = existingMedia.find((m) => (
-                inferWorkflowMediaRole({
-                    role: m.mediaRole || m.role,
-                    stepId: m.step_id,
-                    workflowType: wf.workflow_type || "CHARACTER",
-                }) === "sheet"
-            ));
-
-            let mediaRow;
-            if (sheetMedia) {
-                mediaRow = await this.db.media.updateFields(sheetMedia.id, {
-                    url: resolvedUrl,
-                    status: "success",
-                    error_message: null,
-                    width: resolvedWidth,
-                    height: resolvedHeight,
-                    step_id: "character_sheet",
-                    project_id: wf.project_id || effectiveProjectId,
-                });
-            } else {
-                mediaRow = await this.db.media.createMedia({
-                    project_id: wf.project_id || effectiveProjectId,
-                    url: resolvedUrl,
-                    step_id: "character_sheet",
-                    width: resolvedWidth,
-                    height: resolvedHeight,
-                    status: "success",
-                    error_message: null,
-                });
-                await createMediaInWorkflow(this.db, {
-                    workflowId: wf.id,
-                    mediaId: mediaRow?.id,
-                    stepId: "character_sheet",
-                    workflowType: wf.workflow_type || "CHARACTER",
-                    operation: "uploadSheetMedia:linkWorkflowMedia",
-                });
-            }
-
-            // 2. Clean up any failed media placeholders
-            for (const m of existingMedia) {
-                if (m.id !== mediaRow.id && (m.status === "failed" || m.status === "error" || !m.url)) {
-                    await this.db.media.deleteByIdAndWorkflow(m.id, wf.id).catch(() => null);
-                }
-            }
-
-            // 3. Update workflow: set primary_media_id (workflow table has primary_media_id column)
-            await this.db.workflows.updatePrimaryMedia(wf.id, mediaRow.id).catch((err) => {
-                crudOperationLog({
+            const isAuthorized = await this.authService.verifyWorkflowOwnership(wf.id, userId);
+            if (!isAuthorized) {
+                throw new CrudServiceError("Character workflow not found", {
+                    statusCode: 404,
+                    errorCode: "NOT_FOUND",
                     traceId,
-                    operation: "uploadSheetMedia:updatePrimaryMedia",
-                    status: "warning",
-                    characterId,
-                    mediaId: mediaRow.id,
-                    message: err.message,
+                    operation: "uploadSheetMedia",
                 });
+            }
+
+            const effectiveProjectId = projectId || wf.project_id;
+            let items;
+
+            if (file || imageUrl) {
+                const uploadSource = file || imageUrl;
+                const uploadRes = await this.mediaUploadService.upload({
+                    files: [uploadSource],
+                    policy: CHARACTER_SHEET_UPLOAD_POLICY,
+                    maxFiles: 1,
+                    userId,
+                });
+                items = [{
+                    uploadedFile: uploadRes.uploaded[0],
+                    originalName: file?.originalname || file?.name,
+                }];
+            } else {
+                items = [{ mediaId }];
+            }
+
+            const attachRes = await this.workflowMediaService.attachMediaItems({
+                workflowId: wf.id,
+                projectId: effectiveProjectId,
+                userId,
+                role: "sheet",
+                maxAllowed: null,
+                autoPrimary: true,
+                items,
             });
 
-            // 4. Update characters table status
-            await this.db.characters.updateCharacterFields(characterId, {
-                status: "completed",
-            }).catch(() => null);
+            const attachedMedia = attachRes.attached[0].media;
+            const oldPrimary = wf.primary_media_id || null;
+
+            try {
+                if (this.db.workflows?.updatePrimaryMedia) {
+                    await this.db.workflows.updatePrimaryMedia(wf.id, attachedMedia.id);
+                }
+                if (this.db.characters?.updateCharacterFields) {
+                    await this.db.characters.updateCharacterFields(characterId, {
+                        status: "completed",
+                    });
+                }
+            } catch (postAttachErr) {
+                if (this.db.workflows?.updatePrimaryMedia) {
+                    await this.db.workflows.updatePrimaryMedia(wf.id, oldPrimary).catch(() => null);
+                }
+                if (attachRes?.rollbackHandle) {
+                    await this.workflowMediaService.rollbackAttachedMedia(attachRes.rollbackHandle);
+                }
+                throw postAttachErr;
+            }
 
             crudOperationLog({
                 traceId,
@@ -286,17 +167,28 @@ export class CharacterMediaService {
                 status: "ok",
                 durationMs: Date.now() - start,
                 characterId,
-                mediaId: mediaRow.id,
+                mediaId: attachedMedia.id,
             });
 
-            return { media: { ...mediaRow, url: resolvedUrl }, ok: true, url: resolvedUrl };
+            return {
+                media: {
+                    ...attachedMedia,
+                    workflow_id: wf.id,
+                    workflowId: wf.id,
+                    role: "sheet",
+                    mediaRole: "sheet",
+                    step_id: attachedMedia.step_id || "upload",
+                },
+                ok: true,
+                url: attachedMedia.url,
+            };
         } catch (err) {
             crudOperationLog({
                 traceId,
                 operation: "uploadSheetMedia",
                 status: "error",
                 durationMs: Date.now() - start,
-                errorCode: err.errorCode || 500,
+                errorCode: err.errorCode || err.statusCode || 500,
                 message: err.message,
             });
             throw err;
@@ -304,8 +196,9 @@ export class CharacterMediaService {
     }
 
     /**
-     * Attach a detail reference image to a character (step_id: "character_detail").
-     * Uploads to Supabase storage path `character-details/...` and creates a media row.
+     * Attach a detail reference image to a character (role: "detail", step_id: "upload").
+     * Enforces CHARACTER_MAX_DETAIL_MEDIA = 5 fail-fast before upload and atomically inside attachMediaItems.
+     * Never writes to workflows.primary_media_id.
      */
     async uploadDetailMedia({ characterId, mediaId, imageUrl, file, projectId, userId }) {
         const traceId = randomUUID();
@@ -330,6 +223,14 @@ export class CharacterMediaService {
                     operation: "uploadDetailMedia",
                 });
             }
+            if (!userId || userId === "anonymous") {
+                throw new CrudServiceError("Authentication required", {
+                    statusCode: 401,
+                    errorCode: "UNAUTHORIZED",
+                    traceId,
+                    operation: "uploadDetailMedia",
+                });
+            }
 
             const wf = await this.db.workflows.getWorkflow(characterId).catch(() => null);
             if (!wf) {
@@ -341,148 +242,63 @@ export class CharacterMediaService {
                 });
             }
 
+            const isAuthorized = await this.authService.verifyWorkflowOwnership(wf.id, userId);
+            if (!isAuthorized) {
+                throw new CrudServiceError("Character workflow not found", {
+                    statusCode: 404,
+                    errorCode: "NOT_FOUND",
+                    traceId,
+                    operation: "uploadDetailMedia",
+                });
+            }
+
             const effectiveProjectId = projectId || wf.project_id;
-            const safeUserId = userId || wf.user_id || "anonymous";
 
-            let resolvedUrl = imageUrl;
-            let resolvedWidth = null;
-            let resolvedHeight = null;
-
-            // Direct Asset/Workflow ID resolution to media relation
-            if (mediaId) {
-                const sourceMedia = await this._resolveSourceMedia(mediaId, {
-                    userId: safeUserId,
-                    projectId: effectiveProjectId,
+            // Fail-fast quota remaining check
+            const links = await (this.db.workflowMedia?.findByWorkflow?.(wf.id)
+                || this.db.media?.findByWorkflow?.(wf.id)
+                || []);
+            const currentDetailCount = Array.isArray(links)
+                ? links.filter((l) => (l.role || l.mediaRole) === "detail").length
+                : 0;
+            const remaining = CHARACTER_MAX_DETAIL_MEDIA - currentDetailCount;
+            if (remaining <= 0) {
+                throw new CrudServiceError("Maximum 5 detail images allowed per character", {
+                    statusCode: 400,
+                    errorCode: "LIMIT_EXCEEDED",
+                    traceId,
+                    operation: "uploadDetailMedia",
                 });
-                if (sourceMedia) {
-                    await createMediaInWorkflow(this.db, {
-                        workflowId: wf.id,
-                        mediaId: sourceMedia.id,
-                        role: "detail",
-                        stepId: "character_detail",
-                        workflowType: wf.workflow_type || "CHARACTER",
-                        operation: "uploadDetailMedia:linkWorkflowMedia",
-                    });
-                    crudOperationLog({
-                        traceId,
-                        operation: "uploadDetailMedia",
-                        status: "ok",
-                        durationMs: Date.now() - start,
-                        characterId,
-                        newMediaId: sourceMedia.id,
-                    });
-                    return {
-                        ok: true,
-                        media: {
-                            ...sourceMedia,
-                            workflow_id: wf.id,
-                            workflowId: wf.id,
-                            role: "detail",
-                            mediaRole: "detail",
-                            step_id: "character_detail",
-                        },
-                        url: sourceMedia.url,
-                    };
-                }
             }
 
-            // Ingestion via Canonical MediaIngestionService
-            if (this.mediaIngestionService) {
-                const source = file || mediaId || imageUrl;
-                const ingested = await this.mediaIngestionService.ingest({
-                    source,
-                    userId: safeUserId,
-                    projectId: effectiveProjectId,
-                    workflowId: wf.id,
-                    purpose: "character_detail",
-                    folder: "character-details",
-                    skipMediaCreate: true,
-                    imageUrl,
+            let items;
+            if (file || imageUrl) {
+                const uploadSource = file || imageUrl;
+                const uploadRes = await this.mediaUploadService.upload({
+                    files: [uploadSource],
+                    policy: CHARACTER_DETAIL_UPLOAD_POLICY,
+                    maxFiles: remaining,
+                    userId,
                 });
-                resolvedUrl = ingested.url;
-                resolvedWidth = ingested.width;
-                resolvedHeight = ingested.height;
+                items = [{
+                    uploadedFile: uploadRes.uploaded[0],
+                    originalName: file?.originalname || file?.name,
+                }];
             } else {
-                // Fallback Case A: Multipart file upload (buffer)
-                if (file && file.buffer) {
-                    const newMediaId = randomUUID();
-                    const ext = this._resolveExtension(file.mimetype);
-                    const storagePath = this.storageService.paths.characterDetail(safeUserId, characterId, newMediaId, ext);
-                    crudOperationLog({ traceId, operation: "uploadDetailMedia:storageUpload", status: "ok", characterId });
-                    resolvedUrl = await this.storageService.upload(storagePath, file.buffer);
-                }
-                // Fallback Case B: Base64 data URL
-                else if (imageUrl && imageUrl.startsWith("data:")) {
-                    const newMediaId = randomUUID();
-                    const ext = imageUrl.startsWith("data:image/png")
-                        ? "png"
-                        : imageUrl.startsWith("data:image/webp")
-                        ? "webp"
-                        : "jpg";
-                    const storagePath = this.storageService.paths.characterDetail(safeUserId, characterId, newMediaId, ext);
-                    crudOperationLog({ traceId, operation: "uploadDetailMedia:storageUpload", status: "ok", characterId });
-                    resolvedUrl = await this.storageService.upload(storagePath, imageUrl);
-                }
-                // Fallback Case C: Existing Media ID from library
-                else if (mediaId) {
-                    const sourceMedia = await this._resolveSourceMedia(mediaId, { userId: safeUserId, projectId: effectiveProjectId });
-                    if (sourceMedia && sourceMedia.url) {
-                        resolvedUrl = sourceMedia.url;
-                        resolvedWidth = sourceMedia.width;
-                        resolvedHeight = sourceMedia.height;
-                    } else if (imageUrl) {
-                        resolvedUrl = imageUrl;
-                    } else {
-                        throw new CrudServiceError(`Media or Workflow with ID ${mediaId} not found`, {
-                            statusCode: 404,
-                            errorCode: "NOT_FOUND",
-                            traceId,
-                            operation: "uploadDetailMedia",
-                        });
-                    }
-                }
-                // Fallback Case D: External HTTP URL
-                else if (imageUrl && (imageUrl.startsWith("http://") || imageUrl.startsWith("https://"))) {
-                    try {
-                        const newMediaId = randomUUID();
-                        const storagePath = this.storageService.paths.characterDetail(safeUserId, characterId, newMediaId, "jpg");
-                        resolvedUrl = await this.storageService.uploadFromUrl(storagePath, imageUrl);
-                    } catch (urlErr) {
-                        crudOperationLog({
-                            traceId,
-                            operation: "uploadDetailMedia:uploadFromUrl",
-                            status: "warning",
-                            characterId,
-                            message: urlErr.message,
-                        });
-                        resolvedUrl = imageUrl;
-                    }
-                }
+                items = [{ mediaId }];
             }
 
-            const meta = resolveMediaMetadata({
-                width: resolvedWidth,
-                height: resolvedHeight,
-            });
-            resolvedWidth = meta.width;
-            resolvedHeight = meta.height;
-
-            const mediaRow = await this.db.media.createMedia({
-                project_id: effectiveProjectId,
-                url: resolvedUrl,
-                step_id: "character_detail",
-                width: resolvedWidth,
-                height: resolvedHeight,
-                status: "success",
-                error_message: null,
-            });
-            await createMediaInWorkflow(this.db, {
+            const attachRes = await this.workflowMediaService.attachMediaItems({
                 workflowId: wf.id,
-                mediaId: mediaRow?.id,
-                stepId: "character_detail",
-                workflowType: wf.workflow_type || "CHARACTER",
-                operation: "uploadDetailMedia:linkWorkflowMedia",
+                projectId: effectiveProjectId,
+                userId,
+                role: "detail",
+                maxAllowed: CHARACTER_MAX_DETAIL_MEDIA,
+                autoPrimary: false,
+                items,
             });
+
+            const attachedMedia = attachRes.attached[0].media;
 
             crudOperationLog({
                 traceId,
@@ -490,17 +306,28 @@ export class CharacterMediaService {
                 status: "ok",
                 durationMs: Date.now() - start,
                 characterId,
-                newMediaId: mediaRow.id,
+                newMediaId: attachedMedia.id,
             });
 
-            return { media: { ...mediaRow, url: resolvedUrl }, ok: true, url: resolvedUrl };
+            return {
+                media: {
+                    ...attachedMedia,
+                    workflow_id: wf.id,
+                    workflowId: wf.id,
+                    role: "detail",
+                    mediaRole: "detail",
+                    step_id: attachedMedia.step_id || "upload",
+                },
+                ok: true,
+                url: attachedMedia.url,
+            };
         } catch (err) {
             crudOperationLog({
                 traceId,
                 operation: "uploadDetailMedia",
                 status: "error",
                 durationMs: Date.now() - start,
-                errorCode: err.errorCode || 500,
+                errorCode: err.errorCode || err.statusCode || 500,
                 message: err.message,
             });
             throw err;
@@ -517,20 +344,42 @@ export class CharacterMediaService {
         crudOperationLog({ traceId, operation: "removeDetailMedia", characterId, mediaId });
 
         try {
+            if (!characterId || !mediaId) {
+                throw new CrudServiceError("characterId and mediaId are required", {
+                    statusCode: 400,
+                    errorCode: "VALIDATION_ERROR",
+                    traceId,
+                    operation: "removeDetailMedia",
+                });
+            }
+            if (!userId || userId === "anonymous") {
+                throw new CrudServiceError("Authentication required", {
+                    statusCode: 401,
+                    errorCode: "UNAUTHORIZED",
+                    traceId,
+                    operation: "removeDetailMedia",
+                });
+            }
+
             const wf = await this.db.workflows?.getWorkflow?.(characterId).catch(() => null);
             const resolvedWfId = wf?.id || characterId;
+
+            const isAuthorized = await this.authService.verifyWorkflowOwnership(resolvedWfId, userId);
+            if (!isAuthorized) {
+                throw new CrudServiceError(`Character not found: ${characterId}`, {
+                    statusCode: 404,
+                    errorCode: "NOT_FOUND",
+                    traceId,
+                    operation: "removeDetailMedia",
+                });
+            }
+
             const mediaRec = await this.db.media.findById(mediaId, "id, url, step_id").catch(() => null);
             const wfLinks = this.db?.workflowMedia?.findByMedia
                 ? await this.db.workflowMedia.findByMedia(mediaId).catch(() => [])
                 : [];
             const wfLink = wfLinks.find((r) => r.workflow_id === resolvedWfId);
-            const mediaRole = mediaRec || wfLink
-                ? inferWorkflowMediaRole({
-                    role: wfLink?.role || mediaRec?.mediaRole || mediaRec?.role,
-                    stepId: mediaRec?.step_id,
-                    workflowType: "CHARACTER",
-                })
-                : null;
+            const mediaRole = wfLink?.role || mediaRec?.mediaRole || mediaRec?.role;
             if (mediaRec && mediaRole && mediaRole !== "detail") {
                 throw new CrudServiceError("Cannot delete non-detail media with removeDetailMedia", {
                     statusCode: 400,
@@ -540,45 +389,57 @@ export class CharacterMediaService {
                 });
             }
 
-            if (this.db?.workflowMedia?.unlink) {
+            // Check if this media was primary before unlinking
+            let wasPrimary = false;
+            if (resolvedWfId && this.db?.workflowMedia?.getPrimaryMedia) {
+                const currentPrimary = await this.db.workflowMedia.getPrimaryMedia(resolvedWfId).catch(() => null);
+                const currentPrimaryId = currentPrimary?.media_id || currentPrimary?.id;
+                wasPrimary = Boolean(currentPrimaryId && currentPrimaryId === mediaId);
+            }
+
+            // Atomic unlink and orphan reaping protocol
+            if (typeof this.db?.workflowMedia?.unlinkAndReapOrphan === "function") {
+                const reapResult = await this.db.workflowMedia.unlinkAndReapOrphan({
+                    workflowId: resolvedWfId,
+                    mediaId,
+                    role: "detail",
+                });
+                if (reapResult?.unlinked && reapResult.is_orphan) {
+                    if (this.db.media?.deleteById) {
+                        await this.db.media.deleteById(mediaId).catch(() => null);
+                    }
+                    const storageUrl = reapResult.storage_url || mediaRec?.url;
+                    if (storageUrl && this.storageService?.deleteByUrl) {
+                        await this.storageService.deleteByUrl(storageUrl).catch((err) => {
+                            crudOperationLog({
+                                traceId,
+                                operation: "removeDetailMedia:storageDelete",
+                                status: "warning",
+                                characterId,
+                                mediaId,
+                                message: err.message,
+                            });
+                        });
+                    }
+                }
+            } else if (this.db?.workflowMedia?.unlink) {
                 await this.db.workflowMedia.unlink({
                     workflowId: resolvedWfId,
                     mediaId,
                     role: "detail",
-                }).catch(() => null);
-            }
-
-            let remainingLinks = 0;
-            if (this.db?.workflowMedia?.countLinksForMedia) {
-                remainingLinks = await this.db.workflowMedia.countLinksForMedia(mediaId).catch(() => 0);
-            }
-
-            if (wf?.primary_media_id === mediaId) {
-                if (this.db.workflows?.updatePrimaryMedia) {
-                    await this.db.workflows.updatePrimaryMedia(resolvedWfId, null).catch(() => null);
-                } else if (this.db.workflows?.updateFields) {
-                    await this.db.workflows.updateFields(resolvedWfId, { primary_media_id: null }).catch(() => null);
+                });
+                if (wasPrimary) {
+                    await this.db.workflowMedia.clearPrimaryMedia?.({ workflowId: resolvedWfId });
+                    await this.db.workflows?.updateFields?.(resolvedWfId, { primary_media_id: null });
                 }
-            }
-
-            if (remainingLinks === 0) {
-                if (this.db.media?.deleteByIdAndWorkflow) {
-                    await this.db.media.deleteByIdAndWorkflow(mediaId, resolvedWfId);
-                } else if (this.db.media?.deleteById) {
-                    await this.db.media.deleteById(mediaId);
-                }
-
-                if (mediaRec?.url && this.storageService?.deleteByUrl) {
-                    await this.storageService.deleteByUrl(mediaRec.url).catch((err) => {
-                        crudOperationLog({
-                            traceId,
-                            operation: "removeDetailMedia:storageDelete",
-                            status: "warning",
-                            characterId,
-                            mediaId,
-                            message: err.message,
-                        });
-                    });
+                const remaining = await this.db.workflowMedia.countLinksForMedia?.(mediaId);
+                if (remaining === 0) {
+                    if (this.db.media?.deleteById) {
+                        await this.db.media.deleteById(mediaId);
+                    }
+                    if (mediaRec?.url && this.storageService?.deleteByUrl) {
+                        await this.storageService.deleteByUrl(mediaRec.url).catch(() => {});
+                    }
                 }
             }
 
@@ -598,7 +459,7 @@ export class CharacterMediaService {
                 operation: "removeDetailMedia",
                 status: "error",
                 durationMs: Date.now() - start,
-                errorCode: err.errorCode || 500,
+                errorCode: err.errorCode || err.statusCode || 500,
                 message: err.message,
             });
             throw err;
@@ -606,65 +467,16 @@ export class CharacterMediaService {
     }
 
     /**
-     * Internal helper to find source media across media and workflow tables,
-     * enforcing tenant (user) and project boundary isolation.
+     * Resolve owned source media via WorkflowMediaService.
+     * Preserved as internal delegation for backward-compatibility with tests.
      */
-    async _resolveSourceMedia(mediaId, { userId = null, projectId = null } = {}) {
-        if (!mediaId) return null;
-        let sourceMedia = await this.db.media.findById(mediaId).catch(() => null);
-        let sourceWf = null;
-        if (!sourceMedia && this.db.media.findMediaByIdOrWorkflow) {
-            sourceMedia = await this.db.media.findMediaByIdOrWorkflow(mediaId).catch(() => null);
-        }
-        if (!sourceMedia && this.db.media.findByWorkflow) {
-            const wfMedia = await this.db.media.findByWorkflow(mediaId).catch(() => []);
-            sourceMedia = wfMedia.find((m) => m.url && m.status !== "failed") || wfMedia[0] || null;
-        }
-        if (this.db.workflows?.getWorkflow) {
-            sourceWf = await this.db.workflows.getWorkflow(mediaId).catch(() => null);
-            if (!sourceMedia && sourceWf?.primary_media_id) {
-                sourceMedia = await this.db.media.findById(sourceWf.primary_media_id).catch(() => null);
-            }
-        }
-        if (!sourceMedia) return null;
-
-        // Verify workflow_media link presence and load parent workflow context if needed
-        if (typeof this.db.workflowMedia?.findByMedia === "function") {
-            const links = await this.db.workflowMedia.findByMedia(sourceMedia.id).catch(() => []);
-            if (!Array.isArray(links) || links.length === 0) {
-                throw new CrudServiceError("Media not found", {
-                    statusCode: 404,
-                    errorCode: "MEDIA_NOT_FOUND",
-                    mediaId,
-                });
-            }
-            const linkedWfId = links[0]?.workflow_id;
-            if (!sourceWf && linkedWfId && this.db.workflows?.getWorkflow) {
-                sourceWf = await this.db.workflows.getWorkflow(linkedWfId).catch(() => null);
-            }
-        }
-
-        // Ownership verification (cross-tenant)
-        const ownerUserId = sourceMedia.user_id || sourceWf?.user_id;
-        if (userId && userId !== "anonymous" && ownerUserId && ownerUserId !== userId) {
-            throw new CrudServiceError("Media not found", {
-                statusCode: 404,
-                errorCode: "MEDIA_NOT_FOUND",
-                mediaId,
-            });
-        }
-
-        // Project boundary verification (cross-project)
-        const ownerProjectId = sourceMedia.project_id || sourceWf?.project_id;
-        if (projectId && ownerProjectId && ownerProjectId !== projectId) {
-            throw new CrudServiceError("Media not found", {
-                statusCode: 404,
-                errorCode: "MEDIA_NOT_FOUND",
-                mediaId,
-            });
-        }
-
-        return sourceMedia;
+    async _resolveSourceMedia(mediaId, { userId = null, projectId = null, req = null } = {}) {
+        return this.workflowMediaService.resolveOwnedSourceMedia({
+            mediaId,
+            userId,
+            projectId,
+            req,
+        });
     }
 }
 

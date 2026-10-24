@@ -252,24 +252,55 @@ describe("workflow_media write helper (B1) — workflow_media ONLY, no media.wor
       userId: "user-1",
     });
 
+    const mockUploadService = {
+      upload: async ({ files }) => ({
+        uploaded: files.map(() => ({
+          id: "upload-media",
+          url: "https://example.com/uploaded.png",
+          storageKey: "uploaded.png",
+          step_id: "upload",
+        })),
+      }),
+      discard: async () => ({}),
+    };
+    const mockWorkflowMediaService = {
+      attachMediaItems: async ({ workflowId, items, role }) => {
+        for (const item of items) {
+          linkCalls.push({
+            workflowId,
+            mediaId: item.uploadedFile.id,
+            role,
+            stepId: "upload",
+            workflowType: "CHARACTER",
+          });
+        }
+        return {
+          attached: items.map((it) => ({
+            media: it.uploadedFile,
+            is_primary: role === "sheet",
+          })),
+        };
+      },
+    };
+    const mockAuthService = {
+      verifyWorkflowOwnership: async () => true,
+    };
     const mediaService = new CharacterMediaService({
       db: mockDb,
       storageService: {},
-      mediaIngestionService: {
-        ingest: async () => ({
-          url: "https://storage.example.com/detail.png",
-          width: 1344,
-          height: 768,
-        }),
-      },
+      mediaUploadService: mockUploadService,
+      workflowMediaService: mockWorkflowMediaService,
+      authService: mockAuthService,
     });
     await mediaService.uploadSheetMedia({
       characterId: "char-wf-1",
       imageUrl: "https://example.com/sheet.png",
+      userId: "user-1",
     });
     await mediaService.uploadDetailMedia({
       characterId: "char-wf-1",
       imageUrl: "https://example.com/detail.png",
+      userId: "user-1",
     });
 
     for (const call of mediaCreateCalls) {
@@ -490,7 +521,26 @@ describe("workflow_media write helper (B1) — workflow_media ONLY, no media.wor
       },
     };
 
-    const charService = new CharacterMediaService({ db: mockDb, storageService: {} });
+    const mockAuthService = {
+      verifyWorkflowOwnership: async (wfId, uid) => {
+        const wf = await mockDb.workflows.getWorkflow(wfId);
+        return Boolean(wf && wf.user_id === uid);
+      },
+      verifyMediaOwnership: async () => true,
+    };
+    const workflowMediaService = new WorkflowMediaService({
+      db: mockDb,
+      storageService: {},
+      mediaUploadService: { discard: async () => ({}) },
+      authService: mockAuthService,
+    });
+    const charService = new CharacterMediaService({
+      db: mockDb,
+      storageService: {},
+      mediaUploadService: { upload: async () => ({}) },
+      workflowMediaService,
+      authService: mockAuthService,
+    });
 
     await assert.rejects(
       () => charService._resolveSourceMedia("m-source-1", { userId: "user-1", projectId: "proj-1" }),

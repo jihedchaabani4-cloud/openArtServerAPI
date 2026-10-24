@@ -148,7 +148,9 @@ describe("Unified Shared-Media Orphan Reaping & Attach Protocol", () => {
     const service = new CharacterMediaService({
       db: mockDb,
       storageService: mockStorage,
-      mediaUploadService: { discard: async () => ({}) },
+      mediaUploadService: { upload: async () => ({}), discard: async () => ({}) },
+      workflowMediaService: { attachMediaItems: async () => ({}) },
+      authService: { verifyWorkflowOwnership: async () => true },
     });
 
     const res = await service.removeDetailMedia({
@@ -165,13 +167,13 @@ describe("Unified Shared-Media Orphan Reaping & Attach Protocol", () => {
     assert.equal(res.ok, true);
   });
 
-  it("ATTACH-GENERIC-1: Character existing-media attach uses attachMedia without element quota", async () => {
+  it("ATTACH-GENERIC-1: Character existing-media attach uses attachMediaItems with CHARACTER_MAX_DETAIL_MEDIA quota", async () => {
     let attachCalled = null;
 
-    const mockWorkflowMedia = {
-      attachMedia: async (params) => {
+    const mockWorkflowMediaService = {
+      attachMediaItems: async (params) => {
         attachCalled = params;
-        return { workflow_id: "char-wf-attach", media_id: "m-source-1", role: "detail", is_primary: false };
+        return { attached: [{ media: { id: "m-source-1" } }] };
       },
     };
 
@@ -179,7 +181,9 @@ describe("Unified Shared-Media Orphan Reaping & Attach Protocol", () => {
       workflows: {
         getWorkflow: async () => ({ id: "char-wf-attach", project_id: "p-1", user_id: "u-1" }),
       },
-      workflowMedia: mockWorkflowMedia,
+      workflowMedia: {
+        findByWorkflow: async () => [],
+      },
       media: {
         findById: async () => ({ id: "m-source-1", url: "https://storage.local/m1.png", step_id: "upload" }),
       },
@@ -187,8 +191,11 @@ describe("Unified Shared-Media Orphan Reaping & Attach Protocol", () => {
 
     const service = new CharacterMediaService({
       db: mockDb,
+      storageService: {},
+      mediaUploadService: { upload: async () => ({}) },
+      workflowMediaService: mockWorkflowMediaService,
+      authService: { verifyWorkflowOwnership: async () => true },
     });
-    service._resolveSourceMedia = async () => ({ id: "m-source-1", url: "https://storage.local/m1.png", step_id: "upload" });
 
     const res = await service.uploadDetailMedia({
       characterId: "char-wf-attach",
@@ -197,11 +204,11 @@ describe("Unified Shared-Media Orphan Reaping & Attach Protocol", () => {
       projectId: "p-1",
     });
 
-    assert.ok(attachCalled, "attachMedia must be invoked for existing media");
+    assert.ok(attachCalled, "attachMediaItems must be invoked for existing media");
     assert.equal(attachCalled.workflowId, "char-wf-attach");
-    assert.equal(attachCalled.mediaId, "m-source-1");
+    assert.equal(attachCalled.items[0].mediaId, "m-source-1");
     assert.equal(attachCalled.role, "detail");
-    assert.equal(attachCalled.maxAllowed, null, "Character attach must NOT have element quota");
+    assert.equal(attachCalled.maxAllowed, 5, "Character attach must pass CHARACTER_MAX_DETAIL_MEDIA quota");
     assert.equal(res.ok, true);
   });
 

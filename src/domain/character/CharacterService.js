@@ -28,13 +28,17 @@ export class CharacterService {
      * @param {Object} [deps.mediaService]       - Optional pre-configured CharacterMediaService
      * @param {Object} [deps.generationService]  - Optional pre-configured CharacterGenerationService
      */
-    constructor({ db, storageService, workflowService, useCaseService, mediaIngestionService, mediaService, generationService }) {
+    constructor({ db, storageService, workflowService, useCaseService, mediaIngestionService, mediaService, characterMediaService, generationService } = {}) {
         this.db = db;
         this.storageService = storageService;
         this.workflowService = workflowService;
         this.mediaIngestionService = mediaIngestionService;
 
-        this.mediaService = mediaService || new CharacterMediaService({ db, storageService, mediaIngestionService });
+        const resolvedMediaService = mediaService || characterMediaService;
+        if (!resolvedMediaService) {
+            throw new Error("CharacterService requires mediaService (CharacterMediaService)");
+        }
+        this.mediaService = resolvedMediaService;
         this.generationService = generationService || new CharacterGenerationService({ db, useCaseService });
     }
 

@@ -281,6 +281,7 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
     assert.deepEqual(deletedWorkflowIds, ["wf-elem-del-1"]);
 
     const charService = new CharacterService({
+      mediaService: {},
       db: {
         workflows: {
           getWorkflow: async (id) => ({ id, user_id: "user-1", project_id: "proj-1", workflow_type: "CHARACTER" }),
@@ -607,6 +608,9 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
     // Case C: CharacterMediaService.removeDetailMedia with countLinksForMedia = 0 and db.media.deleteById
     const charOrder = [];
     const charMediaService = new CharacterMediaService({
+      mediaUploadService: { upload: async () => ({}) },
+      workflowMediaService: { attachMediaItems: async () => ({}) },
+      authService: { verifyWorkflowOwnership: async () => true },
       db: {
         workflows: {
           getWorkflow: async (id) => ({ id, primary_media_id: "m-char-det-1" }),

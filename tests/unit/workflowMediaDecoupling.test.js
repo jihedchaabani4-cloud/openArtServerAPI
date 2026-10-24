@@ -17,6 +17,21 @@ describe("ADR-0008 Decoupling media.step_id (provenance) from workflow_media.rol
     };
 
     const service = new CharacterMediaService({
+      mediaUploadService: { upload: async () => ({ uploaded: [] }), discard: async () => ({}) },
+      workflowMediaService: {
+        attachMediaItems: async ({ workflowId, items, role = "sheet" }) => {
+          linkedRole = role;
+          linkedStepId = existingMedia.step_id;
+          return {
+            attached: [{
+              media: existingMedia,
+              link: { workflow_id: workflowId, media_id: existingMedia.id, role },
+              is_primary: true,
+            }],
+          };
+        },
+      },
+      authService: { verifyWorkflowOwnership: async () => true },
       db: {
         workflows: {
           getWorkflow: async () => ({ id: "char-wf-1", user_id: "user-1", project_id: "proj-1", workflow_type: "CHARACTER" }),
@@ -29,6 +44,7 @@ describe("ADR-0008 Decoupling media.step_id (provenance) from workflow_media.rol
           findById: async () => existingMedia,
         },
         workflowMedia: {
+          findByWorkflow: async () => [],
           findByMedia: async () => [{ workflow_id: "source-wf-1", role: "output" }],
           linkMedia: async (opts) => {
             linkedRole = opts.role;
@@ -60,6 +76,26 @@ describe("ADR-0008 Decoupling media.step_id (provenance) from workflow_media.rol
     let linkedRole = null;
 
     const service = new CharacterMediaService({
+      mediaUploadService: {
+        upload: async ({ files }) => ({
+          uploaded: [{ id: "new-media-1", url: "https://cdn.example.com/new.png", step_id: "upload" }],
+        }),
+        discard: async () => ({}),
+      },
+      workflowMediaService: {
+        attachMediaItems: async ({ workflowId, items, role = "sheet" }) => {
+          linkedRole = role;
+          createdMediaRow = { id: "new-media-1", step_id: "upload", url: "https://cdn.example.com/new.png" };
+          return {
+            attached: [{
+              media: createdMediaRow,
+              link: { workflow_id: workflowId, media_id: createdMediaRow.id, role },
+              is_primary: true,
+            }],
+          };
+        },
+      },
+      authService: { verifyWorkflowOwnership: async () => true },
       db: {
         workflows: {
           getWorkflow: async () => ({ id: "char-wf-2", user_id: "user-1", project_id: "proj-1", workflow_type: "CHARACTER" }),
@@ -76,6 +112,7 @@ describe("ADR-0008 Decoupling media.step_id (provenance) from workflow_media.rol
           },
         },
         workflowMedia: {
+          findByWorkflow: async () => [],
           linkMedia: async (opts) => {
             linkedRole = opts.role;
             return { ...opts, ok: true };
@@ -106,6 +143,26 @@ describe("ADR-0008 Decoupling media.step_id (provenance) from workflow_media.rol
     let linkedRole = null;
 
     const service = new CharacterMediaService({
+      mediaUploadService: {
+        upload: async ({ files }) => ({
+          uploaded: [{ id: "detail-media-1", url: "https://cdn.example.com/detail.png", step_id: "upload" }],
+        }),
+        discard: async () => ({}),
+      },
+      workflowMediaService: {
+        attachMediaItems: async ({ workflowId, items, role = "detail" }) => {
+          linkedRole = role;
+          createdMediaRow = { id: "detail-media-1", step_id: "upload", url: "https://cdn.example.com/detail.png" };
+          return {
+            attached: [{
+              media: createdMediaRow,
+              link: { workflow_id: workflowId, media_id: createdMediaRow.id, role },
+              is_primary: false,
+            }],
+          };
+        },
+      },
+      authService: { verifyWorkflowOwnership: async () => true },
       db: {
         workflows: {
           getWorkflow: async () => ({ id: "char-wf-3", user_id: "user-1", project_id: "proj-1", workflow_type: "CHARACTER" }),
@@ -117,6 +174,7 @@ describe("ADR-0008 Decoupling media.step_id (provenance) from workflow_media.rol
           },
         },
         workflowMedia: {
+          findByWorkflow: async () => [],
           linkMedia: async (opts) => {
             linkedRole = opts.role;
             return { ...opts, ok: true };

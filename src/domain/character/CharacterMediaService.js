@@ -484,19 +484,6 @@ export class CharacterMediaService {
             throw err;
         }
     }
-
-    /**
-     * Resolve owned source media via WorkflowMediaService.
-     * Preserved as internal delegation for backward-compatibility with tests.
-     */
-    async _resolveSourceMedia(mediaId, { userId = null, projectId = null, req = null } = {}) {
-        return this.workflowMediaService.resolveOwnedSourceMedia({
-            mediaId,
-            userId,
-            projectId,
-            req,
-        });
-    }
 }
 
 export default CharacterMediaService;

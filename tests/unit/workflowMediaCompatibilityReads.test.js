@@ -301,7 +301,7 @@ describe("B3: workflow_media junction readers, tenant isolation & candidate libr
     assert.equal(entryUnpinned.candidates[0].id, "m-unpinned-1");
   });
 
-  it("CharacterMediaService._resolveSourceMedia rejects unlinked media (0 workflow_media links) with 404", async () => {
+  it("WorkflowMediaService.resolveOwnedSourceMedia rejects unlinked media (0 workflow_media links) with 404", async () => {
     const mockDb = {
       media: {
         findById: async (id) => ({
@@ -325,16 +325,9 @@ describe("B3: workflow_media junction readers, tenant isolation & candidate libr
       mediaUploadService: { discard: async () => ({}) },
       authService: { verifyMediaOwnership: async () => true, verifyWorkflowOwnership: async () => true },
     });
-    const charService = new CharacterMediaService({
-      db: mockDb,
-      storageService: {},
-      mediaUploadService: { upload: async () => ({}) },
-      workflowMediaService,
-      authService: { verifyWorkflowOwnership: async () => true },
-    });
 
     await assert.rejects(
-      () => charService._resolveSourceMedia("m-orphan-1", { userId: "user-1", projectId: "proj-1" }),
+      () => workflowMediaService.resolveOwnedSourceMedia({ mediaId: "m-orphan-1", userId: "user-1", projectId: "proj-1" }),
       (err) => err.statusCode === 404
     );
   });

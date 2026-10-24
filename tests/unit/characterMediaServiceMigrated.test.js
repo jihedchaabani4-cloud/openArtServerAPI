@@ -369,6 +369,27 @@ describe("CharacterMediaService — Migrated to MediaUploadService & WorkflowMed
             assert.equal(uploadCalls.length, 0, "Upload must not be called");
             assert.equal(workflowMediaStore.filter((wm) => wm.workflow_id === WORKFLOW_ID && wm.role === "detail").length, 7);
         });
+
+        it("atomic maxAllowed = 5 enforced by WorkflowMediaService.attachMediaItems (even if pre-check sees fewer)", async () => {
+            for (let i = 1; i <= 5; i++) {
+                workflowMediaStore.push({
+                    workflow_id: WORKFLOW_ID,
+                    media_id: `m-detail-${i}`,
+                    role: "detail",
+                });
+            }
+            mockDb.workflowMedia.findByWorkflow = async () => workflowMediaStore.slice(0, 4);
+
+            await assert.rejects(
+                () => service.uploadDetailMedia({
+                    characterId: CHARACTER_ID,
+                    file: { buffer: Buffer.from("race-detail"), originalname: "race.png" },
+                    userId: USER_ID,
+                    projectId: PROJECT_ID,
+                }),
+                (err) => err instanceof CrudServiceError && err.statusCode === 400 && err.errorCode === "LIMIT_EXCEEDED"
+            );
+        });
     });
 
     describe("2. Rollback Integrity & Mid-Way Failures", () => {

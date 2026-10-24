@@ -508,7 +508,7 @@ describe("workflow_media write helper (B1) — workflow_media ONLY, no media.wor
     assert.equal(linkedCalls[0].workflowId, "wf-new-detached");
   });
 
-  it("CharacterMediaService._resolveSourceMedia resolves workflow context via workflow_media, not sourceMedia.workflow_id", async () => {
+  it("WorkflowMediaService.resolveOwnedSourceMedia resolves workflow context via workflow_media, not sourceMedia.workflow_id", async () => {
     const mockDb = {
       media: {
         findById: async (id) => (id === "m-source-1" ? { id: "m-source-1", url: "https://cdn.example.com/1.png", status: "success" } : null),
@@ -534,16 +534,9 @@ describe("workflow_media write helper (B1) — workflow_media ONLY, no media.wor
       mediaUploadService: { discard: async () => ({}) },
       authService: mockAuthService,
     });
-    const charService = new CharacterMediaService({
-      db: mockDb,
-      storageService: {},
-      mediaUploadService: { upload: async () => ({}) },
-      workflowMediaService,
-      authService: mockAuthService,
-    });
 
     await assert.rejects(
-      () => charService._resolveSourceMedia("m-source-1", { userId: "user-1", projectId: "proj-1" }),
+      () => workflowMediaService.resolveOwnedSourceMedia({ mediaId: "m-source-1", userId: "user-1", projectId: "proj-1" }),
       (err) => err.statusCode === 404
     );
   });

@@ -11,6 +11,7 @@ import {
     CHARACTER_SHEET_UPLOAD_POLICY,
     CHARACTER_DETAIL_UPLOAD_POLICY,
 } from "../../src/platform/media-ingestion/UploadPolicy.js";
+import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
 
 describe("CharacterMediaService — Migrated to MediaUploadService & WorkflowMediaService (Ticket 06)", () => {
     let mockDb;
@@ -149,7 +150,7 @@ describe("CharacterMediaService — Migrated to MediaUploadService & WorkflowMed
         };
 
         mockWorkflowMediaService = {
-            attachMediaItems: async ({ workflowId, projectId, userId, role = "detail", maxAllowed = null, autoPrimary = false, items = [] }) => {
+            attachMediaItems: async ({ workflowId, projectId, userId, role = "detail", maxAllowed = null, setPrimary = false, autoPrimary = false, items = [] }) => {
                 const existing = workflowMediaStore.filter((wm) => wm.workflow_id === workflowId && wm.role === role);
                 if (maxAllowed !== null && existing.length + items.length > maxAllowed) {
                     const err = new CrudServiceError(`Maximum ${maxAllowed} ${role} media allowed`, {
@@ -159,18 +160,23 @@ describe("CharacterMediaService — Migrated to MediaUploadService & WorkflowMed
                     throw err;
                 }
 
+                const currentWf = workflowsStore.find((w) => w.id === workflowId);
+                const previousPrimaryMediaId = currentWf?.primary_media_id || null;
+
                 const attached = [];
                 for (const item of items) {
                     let mediaRecord;
                     let linkCreatedInCall = false;
                     let mediaCreatedInCall = false;
 
-                    if (item.mediaId) {
+                    if (item.kind === "existing") {
+                        if (!item.mediaId) throw new Error("mediaId is required for kind: 'existing'");
                         mediaRecord = mediaStore.find((m) => m.id === item.mediaId);
                         if (!mediaRecord || (mediaRecord.user_id && mediaRecord.user_id !== userId)) {
                             throw new CrudServiceError("Media not found", { statusCode: 404, errorCode: "NOT_FOUND" });
                         }
-                    } else if (item.uploadedFile) {
+                    } else if (item.kind === "uploaded") {
+                        if (!item.uploadedFile) throw new Error("uploadedFile is required for kind: 'uploaded'");
                         mediaRecord = {
                             id: `00000000-0000-0000-0000-00000000009${mediaStore.length + 1}`,
                             url: item.uploadedFile.url,
@@ -181,9 +187,11 @@ describe("CharacterMediaService — Migrated to MediaUploadService & WorkflowMed
                         };
                         mediaStore.push(mediaRecord);
                         mediaCreatedInCall = true;
+                    } else {
+                        throw new Error(`Item must specify kind ('uploaded' | 'existing')`);
                     }
 
-                    const isPrimary = Boolean(autoPrimary && (existing.length === 0 || role === "sheet"));
+                    const isPrimary = Boolean(setPrimary || (autoPrimary && existing.length === 0));
                     const linkRecord = {
                         workflow_id: workflowId,
                         media_id: mediaRecord.id,
@@ -194,6 +202,7 @@ describe("CharacterMediaService — Migrated to MediaUploadService & WorkflowMed
                     linkCreatedInCall = true;
 
                     attached.push({
+                        kind: item.kind,
                         media: mediaRecord,
                         link: linkRecord,
                         is_primary: isPrimary,
@@ -203,10 +212,19 @@ describe("CharacterMediaService — Migrated to MediaUploadService & WorkflowMed
                     });
                 }
 
+                let primaryModified = false;
+                if (setPrimary && attached.length > 0) {
+                    const targetMediaId = attached[attached.length - 1].media.id;
+                    primaryModified = true;
+                    if (currentWf) currentWf.primary_media_id = targetMediaId;
+                }
+
                 return {
                     attached,
                     rollbackHandle: {
                         workflowId,
+                        previousPrimaryMediaId,
+                        primaryModified,
                         entries: attached,
                     },
                 };
@@ -215,6 +233,11 @@ describe("CharacterMediaService — Migrated to MediaUploadService & WorkflowMed
                 const unlinked = [];
                 const deleted = [];
                 const discarded = [];
+
+                if (handle?.primaryModified && handle?.workflowId) {
+                    const currentWf = workflowsStore.find((w) => w.id === handle.workflowId);
+                    if (currentWf) currentWf.primary_media_id = handle.previousPrimaryMediaId || null;
+                }
 
                 if (handle?.entries) {
                     for (const entry of handle.entries) {
@@ -575,6 +598,109 @@ describe("CharacterMediaService — Migrated to MediaUploadService & WorkflowMed
             );
 
             assert.equal(wf.primary_media_id, establishedPrimary, "Detail mid-way failure must never change primary_media_id");
+        });
+
+        it("CharacterMediaService end-to-end integration with real WorkflowMediaService attaches uploaded and existing items with item.kind and setPrimary: true", async () => {
+            const realMediaList = [];
+            const realLinks = [];
+            let wfPrimary = null;
+
+            const realWfMediaSvc = new WorkflowMediaService({
+                db: {
+                    workflows: {
+                        getWorkflow: async () => ({ id: WORKFLOW_ID, project_id: PROJECT_ID, user_id: USER_ID }),
+                        findById: async () => ({ id: WORKFLOW_ID, project_id: PROJECT_ID, user_id: USER_ID, primary_media_id: wfPrimary }),
+                        updatePrimaryMedia: async (wId, mId) => { wfPrimary = mId; },
+                        updateFields: async (wId, f) => { if (f.primary_media_id !== undefined) wfPrimary = f.primary_media_id; },
+                    },
+                    workflowMedia: {
+                        findByMedia: async (mId) => realLinks.filter((l) => l.media_id === mId),
+                        findByWorkflow: async (wId) => realLinks.filter((l) => l.workflow_id === wId),
+                        getPrimaryMedia: async () => realLinks.find((l) => l.is_primary) || null,
+                        setPrimaryMedia: async ({ mediaId }) => {
+                            realLinks.forEach((l) => { l.is_primary = (l.media_id === mediaId); });
+                        },
+                        attachReferenceMedia: async ({ workflowId, mediaId, role, is_primary = false }) => {
+                            const link = { workflow_id: workflowId, media_id: mediaId, role, is_primary: Boolean(is_primary), is_existing: false };
+                            realLinks.push(link);
+                            return link;
+                        },
+                        unlink: async ({ workflowId, mediaId }) => {
+                            const idx = realLinks.findIndex((l) => l.workflow_id === workflowId && l.media_id === mediaId);
+                            if (idx !== -1) realLinks.splice(idx, 1);
+                        },
+                    },
+                    media: {
+                        createMedia: async (payload) => {
+                            const rec = { id: `m-real-${realMediaList.length + 1}`, status: "completed", ...payload };
+                            realMediaList.push(rec);
+                            return rec;
+                        },
+                        findById: async (id) => realMediaList.find((m) => m.id === id) || null,
+                        deleteById: async (id) => {
+                            const idx = realMediaList.findIndex((m) => m.id === id);
+                            if (idx !== -1) realMediaList.splice(idx, 1);
+                        },
+                    },
+                },
+                storageService: {
+                    deleteByUrl: async () => {},
+                },
+                mediaUploadService: {
+                    discard: async () => {},
+                },
+                authService: {
+                    verifyWorkflowOwnership: async () => true,
+                    verifyMediaOwnership: async () => true,
+                },
+            });
+
+            const integrationService = new CharacterMediaService({
+                db: {
+                    workflows: {
+                        getWorkflow: async () => ({ id: WORKFLOW_ID, project_id: PROJECT_ID, user_id: USER_ID }),
+                        updatePrimaryMedia: async (wId, mId) => { wfPrimary = mId; },
+                    },
+                    workflowMedia: {
+                        findByWorkflow: async () => realLinks.filter((l) => l.workflow_id === WORKFLOW_ID),
+                    },
+                    characters: {
+                        updateCharacterFields: async () => {},
+                    },
+                    media: {
+                        findById: async (id) => realMediaList.find((m) => m.id === id) || null,
+                    },
+                },
+                storageService: {
+                    deleteByUrl: async () => {},
+                },
+                mediaUploadService: mockUploadService,
+                workflowMediaService: realWfMediaSvc,
+                authService: mockAuthService,
+            });
+
+            // 1. Upload sheet via real WorkflowMediaService: verifies kind: 'uploaded' and setPrimary: true
+            const sheetRes = await integrationService.uploadSheetMedia({
+                characterId: WORKFLOW_ID,
+                file: { buffer: Buffer.from("real-sheet"), originalname: "sheet.png" },
+                userId: USER_ID,
+                projectId: PROJECT_ID,
+            });
+            assert.ok(sheetRes.ok);
+            assert.equal(wfPrimary, sheetRes.media.id);
+            assert.equal(realLinks.find((l) => l.media_id === sheetRes.media.id)?.is_primary, true);
+
+            // 2. Upload detail via real WorkflowMediaService: verifies kind: 'uploaded' and detail isolation
+            const detailRes = await integrationService.uploadDetailMedia({
+                characterId: WORKFLOW_ID,
+                file: { buffer: Buffer.from("real-detail"), originalname: "detail.png" },
+                userId: USER_ID,
+                projectId: PROJECT_ID,
+            });
+            assert.ok(detailRes.ok);
+            assert.equal(realLinks.find((l) => l.media_id === detailRes.media.id)?.role, "detail");
+            assert.equal(realLinks.find((l) => l.media_id === detailRes.media.id)?.is_primary, false);
+            assert.equal(wfPrimary, sheetRes.media.id, "Detail attach must not alter sheet primary cover");
         });
     });
 });

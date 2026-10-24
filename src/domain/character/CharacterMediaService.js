@@ -122,11 +122,12 @@ export class CharacterMediaService {
                     userId,
                 });
                 items = [{
+                    kind: "uploaded",
                     uploadedFile: uploadRes.uploaded[0],
                     originalName: file?.originalname || file?.name,
                 }];
             } else {
-                items = [{ mediaId }];
+                items = [{ kind: "existing", mediaId }];
             }
 
             const attachRes = await this.workflowMediaService.attachMediaItems({
@@ -135,6 +136,7 @@ export class CharacterMediaService {
                 userId,
                 role: "sheet",
                 maxAllowed: null,
+                setPrimary: true,
                 autoPrimary: true,
                 items,
             });
@@ -255,9 +257,7 @@ export class CharacterMediaService {
             const effectiveProjectId = projectId || wf.project_id;
 
             // Fail-fast quota remaining check
-            const links = await (this.db.workflowMedia?.findByWorkflow?.(wf.id)
-                || this.db.media?.findByWorkflow?.(wf.id)
-                || []);
+            const links = await (this.db.workflowMedia?.findByWorkflow?.(wf.id) || []);
             const currentDetailCount = Array.isArray(links)
                 ? links.filter((l) => (l.role || l.mediaRole) === "detail").length
                 : 0;
@@ -281,11 +281,12 @@ export class CharacterMediaService {
                     userId,
                 });
                 items = [{
+                    kind: "uploaded",
                     uploadedFile: uploadRes.uploaded[0],
                     originalName: file?.originalname || file?.name,
                 }];
             } else {
-                items = [{ mediaId }];
+                items = [{ kind: "existing", mediaId }];
             }
 
             const attachRes = await this.workflowMediaService.attachMediaItems({

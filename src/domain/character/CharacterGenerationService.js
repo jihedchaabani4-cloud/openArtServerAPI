@@ -71,7 +71,7 @@ export class CharacterGenerationService {
             try {
                 placeholderMedia = await this.db.media.createMedia({
                     project_id: projectId,
-                    step_id: "character_sheet",
+                    step_id: "image_generation",
                     status: "processing",
                     url: null,
                     width: 1344,
@@ -80,7 +80,8 @@ export class CharacterGenerationService {
                 const linkResult = await createMediaInWorkflow(this.db, {
                     workflowId: resolvedWorkflowId,
                     mediaId: placeholderMedia?.id,
-                    stepId: "character_sheet",
+                    role: "sheet",
+                    stepId: "image_generation",
                     workflowType: "CHARACTER",
                     operation: "enqueueSheetGeneration:linkWorkflowMedia",
                 });

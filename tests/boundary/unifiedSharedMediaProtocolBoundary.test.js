@@ -206,6 +206,7 @@ describe("Unified Shared-Media Orphan Reaping & Attach Protocol", () => {
 
     assert.ok(attachCalled, "attachMediaItems must be invoked for existing media");
     assert.equal(attachCalled.workflowId, "char-wf-attach");
+    assert.equal(attachCalled.items[0].kind, "existing");
     assert.equal(attachCalled.items[0].mediaId, "m-source-1");
     assert.equal(attachCalled.role, "detail");
     assert.equal(attachCalled.maxAllowed, 5, "Character attach must pass CHARACTER_MAX_DETAIL_MEDIA quota");

@@ -164,11 +164,11 @@ describe("CharacterMediaService Characterization (Pre-migration baseline)", () =
         };
 
         const mockWorkflowMediaService = {
-            attachMediaItems: async ({ workflowId, projectId, userId, role, items, autoPrimary }) => {
+            attachMediaItems: async ({ workflowId, projectId, userId, role, items, autoPrimary, setPrimary }) => {
                 const attached = [];
                 for (const item of items) {
                     let mediaRecord;
-                    if (item.mediaId) {
+                    if (item.kind === "existing") {
                         mediaRecord = mediaStore.find((m) => m.id === item.mediaId);
                         if (!mediaRecord || (mediaRecord.user_id && mediaRecord.user_id !== userId)) {
                             const err = new CrudServiceError("Media not found", {
@@ -177,17 +177,19 @@ describe("CharacterMediaService Characterization (Pre-migration baseline)", () =
                             });
                             throw err;
                         }
-                    } else if (item.uploadedFile) {
+                    } else if (item.kind === "uploaded") {
                         mediaRecord = {
                             id: `00000000-0000-0000-0000-00000000009${mediaStore.length + 1}`,
-                            url: item.uploadedFile.url,
+                            url: item.uploadedFile?.url,
                             user_id: userId,
                             project_id: projectId,
                             step_id: "upload",
                         };
                         mediaStore.push(mediaRecord);
+                    } else {
+                        throw new Error(`Item must specify kind ('uploaded' | 'existing')`);
                     }
-                    const isPrimary = Boolean(autoPrimary || role === "sheet");
+                    const isPrimary = Boolean(setPrimary || autoPrimary || role === "sheet");
                     workflowMediaStore.push({
                         workflow_id: workflowId,
                         media_id: mediaRecord.id,
@@ -195,6 +197,7 @@ describe("CharacterMediaService Characterization (Pre-migration baseline)", () =
                         is_primary: isPrimary,
                     });
                     attached.push({
+                        kind: item.kind,
                         media: mediaRecord,
                         is_primary: isPrimary,
                     });

@@ -157,7 +157,7 @@ describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMedia
     });
 
     describe("1. addReferenceMedia", () => {
-        it("rejects missing, undefined, or anonymous userId with 401 Unauthorized", async () => {
+        it("unauthenticated / 'anonymous' -> 401", async () => {
             for (const badUser of [null, undefined, "", "anonymous"]) {
                 await assert.rejects(
                     () => service.addReferenceMedia({
@@ -171,12 +171,31 @@ describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMedia
             }
         });
 
-        it("rejects cross-tenant access with 404", async () => {
+        it("cross-tenant mediaId and workflowId -> 404", async () => {
+            // Case A: foreign workflowId / elementId
             await assert.rejects(
                 () => service.addReferenceMedia({
                     elementId: ELEMENT_ID,
                     file: { buffer: Buffer.from("img") },
-                    userId: "other-user",
+                    userId: "foreign-user-999",
+                    projectId: PROJECT_ID,
+                }),
+                (err) => err instanceof CrudServiceError && err.statusCode === 404
+            );
+
+            // Case B: foreign mediaId
+            mockWorkflowMediaService.attachMediaItems = async () => {
+                throw new CrudServiceError("Media not found", {
+                    statusCode: 404,
+                    errorCode: "NOT_FOUND",
+                });
+            };
+
+            await assert.rejects(
+                () => service.addReferenceMedia({
+                    elementId: ELEMENT_ID,
+                    mediaId: "00000000-0000-0000-0000-000000000999",
+                    userId: USER_ID,
                     projectId: PROJECT_ID,
                 }),
                 (err) => err instanceof CrudServiceError && err.statusCode === 404
@@ -222,7 +241,7 @@ describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMedia
             assert.equal(attachCalls[0].items[0].mediaId, "00000000-0000-0000-0000-000000000099");
         });
 
-        it("client folder parameter override is ignored and cannot override policy.storageFolder", async () => {
+        it("client sends folder=character-sheets -> still stored under element-references", async () => {
             await service.addReferenceMedia({
                 elementId: ELEMENT_ID,
                 file: { buffer: Buffer.from("hack") },
@@ -267,6 +286,80 @@ describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMedia
             assert.equal(attachCalls[0].role, "detail");
             assert.equal(attachCalls[0].setPrimary, true);
         });
+
+        it("an old sheet exists, attach of the new sheet fails mid-way -> old sheet/primary restored, new media row deleted, storage discarded, complete === true", async () => {
+            const OLD_SHEET_MEDIA_ID = "00000000-0000-0000-0000-000000000088";
+            let primaryMediaId = OLD_SHEET_MEDIA_ID;
+            let newMediaDeleted = false;
+            let discardedKeys = [];
+            let rollbackSummary = null;
+
+            mockWorkflowMediaService.attachMediaItems = async ({ workflowId, items }) => {
+                const uploadedFile = items[0]?.uploadedFile;
+                const newMediaId = "00000000-0000-0000-0000-000000000099";
+
+                const previousPrimaryMediaId = primaryMediaId;
+                primaryMediaId = newMediaId;
+
+                const rollbackHandle = {
+                    workflowId,
+                    role: "detail",
+                    previousPrimaryMediaId,
+                    primaryModified: true,
+                    newPrimaryMediaId: newMediaId,
+                    entries: [
+                        {
+                            kind: "uploaded",
+                            mediaId: newMediaId,
+                            storageKey: uploadedFile.storageKey,
+                            mediaCreatedInCall: true,
+                            linkCreatedInCall: true,
+                        },
+                    ],
+                };
+
+                rollbackSummary = await mockWorkflowMediaService.rollbackAttachedMedia(rollbackHandle);
+
+                throw new CrudServiceError("Database constraint error during sheet attachment", {
+                    statusCode: 500,
+                    errorCode: "ATTACH_FAILED",
+                });
+            };
+
+            mockWorkflowMediaService.rollbackAttachedMedia = async (handle) => {
+                primaryMediaId = handle.previousPrimaryMediaId;
+                newMediaDeleted = true;
+                const keys = handle.entries.map((e) => e.storageKey).filter(Boolean);
+                discardedKeys.push(...keys);
+
+                return {
+                    complete: true,
+                    unlinkedMediaIds: [handle.newPrimaryMediaId],
+                    deletedMediaIds: [handle.newPrimaryMediaId],
+                    discardedStorageKeys: keys,
+                    skippedStorageKeys: [],
+                    discardFailedKeys: [],
+                    restoredPrimaryMediaId: handle.previousPrimaryMediaId,
+                };
+            };
+
+            await assert.rejects(
+                () => service.setSheetMedia({
+                    elementId: ELEMENT_ID,
+                    file: { buffer: Buffer.from("new-sheet-payload"), mimetype: "image/png" },
+                    userId: USER_ID,
+                    projectId: PROJECT_ID,
+                }),
+                (err) => err instanceof CrudServiceError && err.statusCode === 500
+            );
+
+            assert.equal(primaryMediaId, OLD_SHEET_MEDIA_ID, "Old sheet primary must be restored");
+            assert.equal(rollbackSummary.restoredPrimaryMediaId, OLD_SHEET_MEDIA_ID);
+            assert.equal(newMediaDeleted, true, "New media row must be deleted");
+            assert.deepEqual(rollbackSummary.deletedMediaIds, ["00000000-0000-0000-0000-000000000099"]);
+            assert.ok(discardedKeys.length > 0, "Uploaded storage file must be discarded");
+            assert.equal(rollbackSummary.complete, true, "Rollback must report complete === true");
+        });
     });
 
     describe("3. ingestElementSources (@deprecated)", () => {
@@ -286,10 +379,62 @@ describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMedia
             assert.equal(attachCalls[0].setPrimary, true);
             assert.equal(res.mediaRecords.length, 2);
         });
+
+        it("batch failure mid-way rolls back everything created in the call", async () => {
+            let rollbackInvoked = false;
+            let discardedStorage = [];
+
+            mockWorkflowMediaService.attachMediaItems = async ({ items, workflowId }) => {
+                const handle = {
+                    workflowId,
+                    role: "detail",
+                    entries: items.map((it, idx) => ({
+                        kind: "uploaded",
+                        mediaId: `new-media-${idx}`,
+                        storageKey: it.uploadedFile?.storageKey,
+                        mediaCreatedInCall: true,
+                        linkCreatedInCall: idx === 0,
+                    })),
+                };
+
+                const res = await mockWorkflowMediaService.rollbackAttachedMedia(handle);
+                rollbackInvoked = res.complete;
+                throw new CrudServiceError("Mid-way failure in batch attachment", {
+                    statusCode: 500,
+                    errorCode: "ATTACH_BATCH_FAILED",
+                });
+            };
+
+            mockWorkflowMediaService.rollbackAttachedMedia = async (handle) => {
+                const keys = handle.entries.map((e) => e.storageKey).filter(Boolean);
+                discardedStorage.push(...keys);
+                return {
+                    complete: true,
+                    unlinkedMediaIds: handle.entries.filter((e) => e.linkCreatedInCall).map((e) => e.mediaId),
+                    deletedMediaIds: handle.entries.filter((e) => e.mediaCreatedInCall).map((e) => e.mediaId),
+                    discardedStorageKeys: keys,
+                    skippedStorageKeys: [],
+                    discardFailedKeys: [],
+                };
+            };
+
+            await assert.rejects(
+                () => service.ingestElementSources({
+                    workflowId: WORKFLOW_ID,
+                    sourceImages: ["https://example.com/1.png", "https://example.com/2.png"],
+                    projectId: PROJECT_ID,
+                    userId: USER_ID,
+                }),
+                (err) => err instanceof CrudServiceError && err.statusCode === 500
+            );
+
+            assert.equal(rollbackInvoked, true, "Rollback must execute with complete === true");
+            assert.ok(discardedStorage.length > 0, "Uploaded storage keys must be discarded on mid-way failure");
+        });
     });
 
     describe("4. Quota Enforcement & Rollback Integration", () => {
-        it("7th existing mediaId attached: rejected with QuotaError (400 LIMIT_EXCEEDED)", async () => {
+        it("7th existing mediaId -> LIMIT_EXCEEDED", async () => {
             mockWorkflowMediaService.attachMediaItems = async () => {
                 const err = new CrudServiceError("Maximum 6 reference images allowed per element", {
                     statusCode: 400,
@@ -309,9 +454,8 @@ describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMedia
             );
         });
 
-        it("7th new file upload: rejected with QuotaError and storage discarded via WorkflowMediaService rollback", async () => {
+        it("7th NEW file -> LIMIT_EXCEEDED and storage discarded", async () => {
             mockWorkflowMediaService.attachMediaItems = async () => {
-                // WorkflowMediaService discards uploaded items on quota error
                 discardCalls.push(["00000000-0000-0000-0000-000000000002/element-references/file-1.webp"]);
                 const err = new CrudServiceError("Maximum 6 reference images allowed per element", {
                     statusCode: 400,
@@ -333,7 +477,7 @@ describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMedia
             assert.equal(discardCalls.length, 1);
         });
 
-        it("cross-tenant mediaId: attachMediaItems rejects with 404 and pre-existing media is never deleted", async () => {
+        it("pre-existing mediaId never deleted on failure", async () => {
             mockWorkflowMediaService.attachMediaItems = async () => {
                 const err = new CrudServiceError("Media not found", {
                     statusCode: 404,

@@ -87,6 +87,16 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
             container.workflowService.authService,
             "elementMediaService.authService must hold container authService"
         );
+        assert.equal(
+            container.elementMediaService.mediaIngestionService,
+            undefined,
+            "elementMediaService.mediaIngestionService must be removed"
+        );
+        assert.equal(
+            container.elementMediaService.workflowService,
+            undefined,
+            "elementMediaService.workflowService must be removed"
+        );
 
         // 6. CharacterService -> workflowService -> mediaService
         assert.ok(container.characterService, "container.characterService must be instantiated");

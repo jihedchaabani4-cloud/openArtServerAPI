@@ -41,8 +41,6 @@ export class ElementMediaService {
      * @param {Object} deps.mediaUploadService   - MediaUploadService instance (upload, discard)
      * @param {Object} deps.workflowMediaService - WorkflowMediaService instance (attachMediaItems, rollbackAttachedMedia)
      * @param {Object} deps.authService          - WorkflowAuthorizationService instance (verifyWorkflowOwnership)
-     * @param {Object} [deps.mediaIngestionService] - Optional legacy MediaIngestionService instance
-     * @param {Object} [deps.workflowService]    - Optional WorkflowLifecycleService instance
      */
     constructor({
         db,
@@ -50,8 +48,6 @@ export class ElementMediaService {
         mediaUploadService,
         workflowMediaService,
         authService,
-        mediaIngestionService = null,
-        workflowService = null,
     } = {}) {
         if (!mediaUploadService || typeof mediaUploadService.upload !== "function") {
             throw new Error("ElementMediaService requires mediaUploadService with an upload method");
@@ -68,8 +64,6 @@ export class ElementMediaService {
         this.mediaUploadService = mediaUploadService;
         this.workflowMediaService = workflowMediaService;
         this.authService = authService;
-        this.mediaIngestionService = mediaIngestionService;
-        this.workflowService = workflowService;
     }
 
     /**
@@ -598,27 +592,23 @@ export class ElementMediaService {
                     remainingLinks = Array.isArray(links) ? links.length : 0;
                 }
                 if (remainingLinks === 0) {
-                    if (this.workflowService?.deleteMedia && !this.db?.workflowMedia?.countLinksForMedia) {
-                        await this.workflowService.deleteMedia({ mediaId, userId, req });
-                    } else {
-                        const mediaRec = await this.db.media?.findById?.(mediaId).catch(() => null);
-                        if (this.db.media?.deleteById) {
-                            await this.db.media.deleteById(mediaId);
-                        } else if (this.db.media?.deleteByIdAndWorkflow) {
-                            await this.db.media.deleteByIdAndWorkflow(mediaId, wfId);
-                        }
-                        if (mediaRec?.url && this.storageService?.deleteByUrl) {
-                            await this.storageService.deleteByUrl(mediaRec.url).catch((err) => {
-                                crudOperationLog({
-                                    traceId,
-                                    operation: "removeReferenceMedia:storageDelete",
-                                    status: "warning",
-                                    elementId,
-                                    mediaId,
-                                    message: err.message,
-                                });
+                    const mediaRec = await this.db.media?.findById?.(mediaId).catch(() => null);
+                    if (this.db.media?.deleteById) {
+                        await this.db.media.deleteById(mediaId);
+                    } else if (this.db.media?.deleteByIdAndWorkflow) {
+                        await this.db.media.deleteByIdAndWorkflow(mediaId, wfId);
+                    }
+                    if (mediaRec?.url && this.storageService?.deleteByUrl) {
+                        await this.storageService.deleteByUrl(mediaRec.url).catch((err) => {
+                            crudOperationLog({
+                                traceId,
+                                operation: "removeReferenceMedia:storageDelete",
+                                status: "warning",
+                                elementId,
+                                mediaId,
+                                message: err.message,
                             });
-                        }
+                        });
                     }
                 }
             }

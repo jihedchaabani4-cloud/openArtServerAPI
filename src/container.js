@@ -271,8 +271,6 @@ export const elementMediaService = new ElementMediaService({
     mediaUploadService,
     workflowMediaService,
     authService: workflowService.authService,
-    mediaIngestionService,
-    workflowService,
 });
 
 export const elementService = new ElementService({

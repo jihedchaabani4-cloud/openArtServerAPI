@@ -84,8 +84,6 @@ export class ElementService {
             mediaUploadService:    workflowService?.mediaService?.mediaUploadService,
             workflowMediaService:  workflowService?.mediaService,
             authService:           workflowService?.authService,
-            mediaIngestionService,
-            workflowService,
         }) : null);
         this.analysisService = analysisService || new ElementAnalysisService();
     }
@@ -561,8 +559,6 @@ const defaultElementMediaService = new ElementMediaService({
     mediaUploadService:    { upload: async () => ({ files: [], uploaded: [] }), discard: async () => ({}) },
     workflowMediaService:  { attachMediaItems: async () => ({ attached: [] }) },
     authService:           { verifyWorkflowOwnership: async () => false },
-    mediaIngestionService: null,
-    workflowService:       null,
 });
 
 const defaultInstance = new ElementService({

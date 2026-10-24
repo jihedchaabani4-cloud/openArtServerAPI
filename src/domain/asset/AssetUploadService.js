@@ -41,10 +41,9 @@ export class AssetUploadService {
         db,
         mediaUploadService,
         workflowMediaService,
+        authService,
         binaryIngestionService = null,
         mediaIngestionService = null,
-        workflowAuthService = null,
-        authService = null,
         mediaService = null,
         folderService = null,
         storageService = null,
@@ -55,15 +54,14 @@ export class AssetUploadService {
         if (!workflowMediaService || typeof workflowMediaService.attachMediaItems !== "function") {
             throw new Error("AssetUploadService requires workflowMediaService with an attachMediaItems method.");
         }
-        const effectiveAuth = workflowAuthService || authService;
-        if (!effectiveAuth || typeof effectiveAuth.verifyWorkflowOwnership !== "function") {
-            throw new Error("AssetUploadService requires workflowAuthService with a verifyWorkflowOwnership method.");
+        if (!authService || typeof authService.verifyWorkflowOwnership !== "function") {
+            throw new Error("AssetUploadService requires authService with a verifyWorkflowOwnership method.");
         }
         this.db = db;
         this.mediaUploadService = mediaUploadService;
         this.workflowMediaService = workflowMediaService;
         this.storageService = storageService;
-        this.authService = effectiveAuth;
+        this.authService = authService;
         this.mediaService = mediaService || new MediaService({ db });
         this.folderService = folderService;
     }

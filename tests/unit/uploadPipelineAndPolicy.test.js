@@ -259,7 +259,7 @@ describe("Canonical Primary-Media Persistence & WorkflowMedia Contract", () => {
             db: mockDb,
             mediaUploadService: mockUploadService,
             workflowMediaService: mockWfMediaService,
-            workflowAuthService: mockWfMediaService.authService,
+            authService: mockWfMediaService.authService,
             mediaService,
         });
 

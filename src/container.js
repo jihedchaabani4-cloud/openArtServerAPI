@@ -220,7 +220,7 @@ export const assetUploadService = new AssetUploadService({
     mediaUploadService,
     workflowMediaService,
     binaryIngestionService,
-    workflowAuthService: workflowService.authService,
+    authService: workflowService.authService,
     mediaService,
     folderService,
     storageService,

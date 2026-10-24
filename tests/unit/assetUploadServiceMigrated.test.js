@@ -173,7 +173,7 @@ function createHarness({
         db: mockDb,
         mediaUploadService: mockMediaUploadService,
         workflowMediaService: mockWorkflowMediaService,
-        workflowAuthService: mockWorkflowAuthService,
+        authService: mockWorkflowAuthService,
     });
 
     return {
@@ -205,16 +205,26 @@ describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaS
                 mediaUploadService: { upload: async () => {} },
                 workflowMediaService: { attachMediaItems: async () => {} },
             }),
-            /AssetUploadService requires workflowAuthService with a verifyWorkflowOwnership method\./
+            /AssetUploadService requires authService with a verifyWorkflowOwnership method\./
         );
         assert.throws(
             () => new AssetUploadService({
                 db: {},
                 mediaUploadService: { upload: async () => {} },
                 workflowMediaService: { attachMediaItems: async () => {} },
-                workflowAuthService: {},
+                authService: {},
             }),
-            /AssetUploadService requires workflowAuthService with a verifyWorkflowOwnership method\./
+            /AssetUploadService requires authService with a verifyWorkflowOwnership method\./
+        );
+        // Single dependency key: the legacy workflowAuthService alias does not satisfy authService
+        assert.throws(
+            () => new AssetUploadService({
+                db: {},
+                mediaUploadService: { upload: async () => {} },
+                workflowMediaService: { attachMediaItems: async () => {} },
+                workflowAuthService: { verifyWorkflowOwnership: async () => true },
+            }),
+            /AssetUploadService requires authService with a verifyWorkflowOwnership method\./
         );
     });
 
@@ -538,7 +548,7 @@ describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaS
             workflowMediaService: realWorkflowMediaService,
             mediaUploadService: mockMediaUploadService,
             storageService: mockStorageService,
-            workflowAuthService: {
+            authService: {
                 verifyWorkflowOwnership: async () => true,
                 verifyMediaOwnership: async () => true,
             },
@@ -598,7 +608,7 @@ describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaS
             db: h.mockDb,
             mediaUploadService,
             workflowMediaService: h.mockWorkflowMediaService,
-            workflowAuthService: {
+            authService: {
                 verifyWorkflowOwnership: async () => true,
                 verifyMediaOwnership: async () => true,
             },

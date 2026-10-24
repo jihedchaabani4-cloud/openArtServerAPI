@@ -198,7 +198,7 @@ function makeCharacterizeHarness() {
         workflowMediaService,
         binaryIngestionService: ingest,
         mediaService: new MediaService({ db }),
-        workflowAuthService: authService,
+        authService: authService,
     });
 
     return { service, db, ingest, workflows, media, workflowMedia, projects, folders };

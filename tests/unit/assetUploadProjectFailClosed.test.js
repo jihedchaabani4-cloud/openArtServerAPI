@@ -106,7 +106,7 @@ function makeService(mockDb, ingest, { storageService = null } = {}) {
         db: mockDb.db,
         storageService,
         mediaUploadService,
-        workflowAuthService: {
+        authService: {
             verifyMediaOwnership: async () => true,
             verifyWorkflowOwnership: async () => true,
         },
@@ -119,7 +119,7 @@ function makeService(mockDb, ingest, { storageService = null } = {}) {
         binaryIngestionService: ingest.stub,
         mediaService: new MediaService({ db: mockDb.db }),
         storageService,
-        workflowAuthService: {
+        authService: {
             verifyMediaOwnership: async () => true,
             verifyWorkflowOwnership: async () => true,
         },

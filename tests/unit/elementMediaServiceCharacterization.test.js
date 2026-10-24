@@ -305,7 +305,7 @@ describe("ElementMediaService Characterization (Pre-migration baseline)", () => 
         assert.equal(elementLinks[0].is_primary, true);
     });
 
-    it("3. setSheetMedia (new file upload): uses folder element-sheets, step_id upload, role detail, updates workflows.primary_media_id", async () => {
+    it("3. setSheetMedia (new file upload): uses folder element-sheets, step_id upload, role sheet, updates workflows.primary_media_id", async () => {
         const res = await service.setSheetMedia({
             elementId: ELEMENT_ID,
             file: { buffer: Buffer.from("sheet-img"), mimetype: "image/png" },
@@ -323,7 +323,7 @@ describe("ElementMediaService Characterization (Pre-migration baseline)", () => 
 
         // WorkflowMedia created
         assert.equal(workflowMediaStore.length, 1);
-        assert.equal(workflowMediaStore[0].role, "detail");
+        assert.equal(workflowMediaStore[0].role, "sheet");
         assert.equal(workflowMediaStore[0].is_primary, false);
 
         // workflows.primary_media_id updated

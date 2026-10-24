@@ -252,10 +252,9 @@ describe("Shared-Media Lifecycle Regression & Hardening", () => {
                     deleteById: async () => { mediaDeleted = true; },
                 },
                 workflowMedia: {
-                    unlink: async () => {
+                    unlinkAndReapOrphan: async () => {
                         throw new Error("PostgreSQL connection terminated unexpectedly");
                     },
-                    countLinksForMedia: async () => 0,
                 },
             },
             storageService: {
@@ -273,7 +272,7 @@ describe("Shared-Media Lifecycle Regression & Hardening", () => {
         assert.equal(storageDeleted, false, "Storage must NOT be deleted if unlink throws");
     });
 
-    it("ElementMediaService.removeReferenceMedia: DB error in countLinksForMedia propagates and does NOT delete media", async () => {
+    it("ElementMediaService.removeReferenceMedia: DB error in unlinkAndReapOrphan propagates and does NOT delete media", async () => {
         let mediaDeleted = false;
         let storageDeleted = false;
 
@@ -294,9 +293,8 @@ describe("Shared-Media Lifecycle Regression & Hardening", () => {
                     deleteById: async () => { mediaDeleted = true; },
                 },
                 workflowMedia: {
-                    unlink: async () => {},
-                    countLinksForMedia: async () => {
-                        throw new Error("Database timeout counting links");
+                    unlinkAndReapOrphan: async () => {
+                        throw new Error("Database timeout executing unlink_and_reap_orphan");
                     },
                 },
             },
@@ -307,8 +305,8 @@ describe("Shared-Media Lifecycle Regression & Hardening", () => {
 
         await assert.rejects(
             () => service.removeReferenceMedia({ elementId: "elem-1", mediaId: "m-1", userId: "u1" }),
-            (err) => err.message.includes("Database timeout counting links"),
-            "Database error in countLinksForMedia must propagate to caller"
+            (err) => err.message.includes("Database timeout executing unlink_and_reap_orphan"),
+            "Database error in unlinkAndReapOrphan must propagate to caller"
         );
 
         assert.equal(mediaDeleted, false, "Media must NOT be deleted if link count query fails");

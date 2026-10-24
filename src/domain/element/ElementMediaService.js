@@ -582,19 +582,6 @@ export class ElementMediaService {
                         });
                     }
                 }
-            } else if (this.db?.workflowMedia?.unlink) {
-                await this.db.workflowMedia.unlink({ workflowId: wfId, mediaId });
-                if (wfId && wasPrimary) {
-                    await this.db.workflowMedia.clearPrimaryMedia?.({ workflowId: wfId });
-                }
-                const remaining = await this.db.workflowMedia.countLinksForMedia?.(mediaId);
-                if (remaining === 0) {
-                    await this.db.media?.deleteById?.(mediaId);
-                    const mediaRec = await this.db.media?.findById?.(mediaId).catch(() => null);
-                    if (mediaRec?.url && this.storageService?.deleteByUrl) {
-                        await this.storageService.deleteByUrl(mediaRec.url).catch(() => {});
-                    }
-                }
             }
 
             crudOperationLog({
@@ -690,7 +677,7 @@ export class ElementMediaService {
                     workflowId: wfId,
                     projectId: effectiveProjectId,
                     userId,
-                    role: "detail",
+                    role: "sheet",
                     maxAllowed: null,
                     autoPrimary: false,
                     workflowType: "ELEMENT_SHEET",
@@ -756,7 +743,7 @@ export class ElementMediaService {
                 workflowId: wfId,
                 projectId: effectiveProjectId,
                 userId,
-                role: "detail",
+                role: "sheet",
                 maxAllowed: null,
                 autoPrimary: false,
                 workflowType: "ELEMENT_SHEET",

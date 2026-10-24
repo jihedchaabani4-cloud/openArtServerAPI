@@ -406,10 +406,12 @@ describe("workflow_media write helper (B1) — workflow_media ONLY, no media.wor
       assert.equal("primary_media_id" in u.patch, false, "ElementMediaService must not write primary_media_id to element");
     }
     assert.equal(linkCalls.length, 3);
+    assert.equal(linkCalls[0].role, "sheet", "setSheetMedia uses role: sheet per keep-old decision");
+    assert.equal(linkCalls[1].role, "detail", "addReferenceMedia uses role: detail");
+    assert.equal(linkCalls[2].role, "detail", "ingestElementSources uses role: detail");
     for (const link of linkCalls) {
       assert.equal(link.workflowId, "elem-wf-1");
       assert.equal(link.mediaId, "upload-media");
-      assert.equal(link.role, "detail");
     }
   });
 

@@ -287,9 +287,81 @@ describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMedia
             assert.equal(uploadCalls[0].policy.storageFolder, "element-sheets");
 
             assert.equal(attachCalls.length, 1);
-            assert.equal(attachCalls[0].role, "detail");
+            assert.equal(attachCalls[0].role, "sheet", "New sheet rows must use role 'sheet' per keep-old quota decision");
             assert.equal(attachCalls[0].autoPrimary, false);
             assert.equal(attachCalls[0].setPrimary, undefined);
+        });
+
+        it("Scenario A (keep-old): element with 1 sheet + 5 references allows adding a 6th reference", async () => {
+            // Attach 1 sheet (role: "sheet")
+            await service.setSheetMedia({
+                elementId: ELEMENT_ID,
+                file: { buffer: Buffer.from("sheet-img"), mimetype: "image/png" },
+                userId: USER_ID,
+                projectId: PROJECT_ID,
+            });
+
+            // Mock DB finding 1 sheet + 5 detail references
+            mockDb.workflowMedia.findByWorkflow = async () => [
+                { id: "s-1", media_id: "m-sheet", role: "sheet", is_primary: false },
+                { id: "r-1", media_id: "m-ref-1", role: "detail", is_primary: false },
+                { id: "r-2", media_id: "m-ref-2", role: "detail", is_primary: false },
+                { id: "r-3", media_id: "m-ref-3", role: "detail", is_primary: false },
+                { id: "r-4", media_id: "m-ref-4", role: "detail", is_primary: false },
+                { id: "r-5", media_id: "m-ref-5", role: "detail", is_primary: false },
+            ];
+
+            // 6th reference upload must pass assertUploadAllowed
+            const capacity = await service.assertUploadAllowed({
+                elementId: ELEMENT_ID,
+                userId: USER_ID,
+            });
+            assert.equal(capacity.allowed, true);
+            assert.equal(capacity.currentCount, 5, "Sheet (role: sheet) must not be counted as a detail slot");
+            assert.equal(capacity.remainingSlots, 1);
+
+            // Adding 6th reference must succeed
+            const addRes = await service.addReferenceMedia({
+                elementId: ELEMENT_ID,
+                file: { buffer: Buffer.from("ref-6"), mimetype: "image/png" },
+                userId: USER_ID,
+            });
+            assert.equal(addRes.ok, true);
+        });
+
+        it("Scenario D2 (keep-old): replace sheet twice, sheets do not consume detail quota", async () => {
+            // Replace sheet twice
+            await service.setSheetMedia({
+                elementId: ELEMENT_ID,
+                file: { buffer: Buffer.from("sheet-1"), mimetype: "image/png" },
+                userId: USER_ID,
+                projectId: PROJECT_ID,
+            });
+            await service.setSheetMedia({
+                elementId: ELEMENT_ID,
+                file: { buffer: Buffer.from("sheet-2"), mimetype: "image/png" },
+                userId: USER_ID,
+                projectId: PROJECT_ID,
+            });
+
+            // 2 sheets exist in workflow_media, both role "sheet", plus 5 detail references
+            mockDb.workflowMedia.findByWorkflow = async () => [
+                { id: "s-1", media_id: "m-sheet-1", role: "sheet", is_primary: false },
+                { id: "s-2", media_id: "m-sheet-2", role: "sheet", is_primary: false },
+                { id: "r-1", media_id: "m-ref-1", role: "detail", is_primary: false },
+                { id: "r-2", media_id: "m-ref-2", role: "detail", is_primary: false },
+                { id: "r-3", media_id: "m-ref-3", role: "detail", is_primary: false },
+                { id: "r-4", media_id: "m-ref-4", role: "detail", is_primary: false },
+                { id: "r-5", media_id: "m-ref-5", role: "detail", is_primary: false },
+            ];
+
+            const capacity = await service.assertUploadAllowed({
+                elementId: ELEMENT_ID,
+                userId: USER_ID,
+            });
+            assert.equal(capacity.allowed, true);
+            assert.equal(capacity.currentCount, 5, "Neither replaced sheet takes a detail slot");
+            assert.equal(capacity.remainingSlots, 1);
         });
 
         it("an element with no primary must NOT auto-promote the sheet (is_primary remains false)", async () => {

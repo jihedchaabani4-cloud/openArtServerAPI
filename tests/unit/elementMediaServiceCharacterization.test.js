@@ -290,10 +290,7 @@ describe("ElementMediaService Characterization (Pre-migration baseline)", () => 
 
         assert.equal(res.ok, true);
         assert.equal(ingestionCalls.length, 1);
-        assert.ok(
-            ingestionCalls[0].folder === "element-sheets" || ingestionCalls[0].folder === "element-references",
-            "Folder is element-sheets in legacy code and element-references under ELEMENT_REFERENCE_UPLOAD_POLICY in migrated code"
-        );
+        assert.equal(ingestionCalls[0].folder, "element-sheets");
 
         // Media created
         assert.equal(mediaStore.length, 1);
@@ -319,10 +316,7 @@ describe("ElementMediaService Characterization (Pre-migration baseline)", () => 
         assert.equal(res.mediaRecords.length, 2);
         assert.equal(ingestionCalls.length, 1, "Batch upload executes in a single call");
         assert.equal(ingestionCalls[0].files.length, 2);
-        assert.ok(
-            ingestionCalls[0].folder === "element-sheets" || ingestionCalls[0].folder === "element-references",
-            "Folder is element-sheets in legacy code and element-references under ELEMENT_REFERENCE_UPLOAD_POLICY in migrated code"
-        );
+        assert.equal(ingestionCalls[0].folder, "element-sheets");
 
         // Role detail
         assert.equal(workflowMediaStore.length, 2);

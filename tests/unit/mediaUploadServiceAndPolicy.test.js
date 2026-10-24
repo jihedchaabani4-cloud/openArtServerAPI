@@ -6,6 +6,7 @@ import {
     DEFAULT_UPLOAD_POLICY,
     ELEMENT_REFERENCE_UPLOAD_POLICY,
     ELEMENT_SHEET_UPLOAD_POLICY,
+    ELEMENT_SOURCES_UPLOAD_POLICY,
     CHARACTER_SHEET_UPLOAD_POLICY,
     CHARACTER_DETAIL_UPLOAD_POLICY,
 } from "../../src/platform/media-ingestion/UploadPolicy.js";
@@ -105,6 +106,11 @@ describe("UploadPolicy frozen presets & error hierarchy", () => {
         assert.deepEqual(ELEMENT_SHEET_UPLOAD_POLICY.allowedTypes, ["image"]);
         assert.equal(ELEMENT_SHEET_UPLOAD_POLICY.maxFilesPerRequest, 1);
         assert.equal(ELEMENT_SHEET_UPLOAD_POLICY.storageFolder, "element-sheets");
+
+        assert.ok(Object.isFrozen(ELEMENT_SOURCES_UPLOAD_POLICY));
+        assert.deepEqual(ELEMENT_SOURCES_UPLOAD_POLICY.allowedTypes, ["image"]);
+        assert.equal(ELEMENT_SOURCES_UPLOAD_POLICY.maxFilesPerRequest, 6);
+        assert.equal(ELEMENT_SOURCES_UPLOAD_POLICY.storageFolder, "element-sheets");
 
         assert.deepEqual(CHARACTER_SHEET_UPLOAD_POLICY.allowedTypes, ["image"]);
         assert.equal(CHARACTER_SHEET_UPLOAD_POLICY.maxFilesPerRequest, 1);

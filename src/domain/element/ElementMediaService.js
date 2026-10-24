@@ -18,6 +18,7 @@ import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog
 import {
     ELEMENT_REFERENCE_UPLOAD_POLICY,
     ELEMENT_SHEET_UPLOAD_POLICY,
+    ELEMENT_SOURCES_UPLOAD_POLICY,
 } from "../../platform/media-ingestion/UploadPolicy.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -126,7 +127,7 @@ export class ElementMediaService {
 
         const uploadResult = await this.mediaUploadService.upload({
             files: sourceImages,
-            policy: ELEMENT_REFERENCE_UPLOAD_POLICY,
+            policy: ELEMENT_SOURCES_UPLOAD_POLICY,
             maxFiles: maxAllowed,
             userId,
         });

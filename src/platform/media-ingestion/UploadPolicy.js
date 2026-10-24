@@ -64,6 +64,12 @@ export const ELEMENT_SHEET_UPLOAD_POLICY = freezePolicy({
     storageFolder: "element-sheets",
 });
 
+export const ELEMENT_SOURCES_UPLOAD_POLICY = freezePolicy({
+    ...ELEMENT_REFERENCE_UPLOAD_POLICY,
+    maxFilesPerRequest: 6,
+    storageFolder: "element-sheets",
+});
+
 export const CHARACTER_SHEET_UPLOAD_POLICY = freezePolicy({
     ...ELEMENT_REFERENCE_UPLOAD_POLICY,
     maxFilesPerRequest: 1,
@@ -80,6 +86,7 @@ export const UPLOAD_POLICIES = Object.freeze({
     DEFAULT_UPLOAD_POLICY,
     ELEMENT_REFERENCE_UPLOAD_POLICY,
     ELEMENT_SHEET_UPLOAD_POLICY,
+    ELEMENT_SOURCES_UPLOAD_POLICY,
     CHARACTER_SHEET_UPLOAD_POLICY,
     CHARACTER_DETAIL_UPLOAD_POLICY,
 });

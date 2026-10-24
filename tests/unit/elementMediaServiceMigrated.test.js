@@ -3,7 +3,11 @@ process.env.NODE_ENV = "test";
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
-import { ELEMENT_REFERENCE_UPLOAD_POLICY, ELEMENT_SHEET_UPLOAD_POLICY } from "../../src/platform/media-ingestion/UploadPolicy.js";
+import {
+    ELEMENT_REFERENCE_UPLOAD_POLICY,
+    ELEMENT_SHEET_UPLOAD_POLICY,
+    ELEMENT_SOURCES_UPLOAD_POLICY,
+} from "../../src/platform/media-ingestion/UploadPolicy.js";
 import { CrudServiceError } from "../../src/utils/crudOperationLog.js";
 
 describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMediaService (Ticket 05)", () => {
@@ -372,7 +376,8 @@ describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMedia
             });
 
             assert.equal(uploadCalls.length, 1);
-            assert.equal(uploadCalls[0].policy, ELEMENT_REFERENCE_UPLOAD_POLICY);
+            assert.equal(uploadCalls[0].policy, ELEMENT_SOURCES_UPLOAD_POLICY);
+            assert.equal(uploadCalls[0].policy.storageFolder, "element-sheets");
             assert.equal(attachCalls.length, 1);
             assert.equal(attachCalls[0].role, "detail");
             assert.equal(attachCalls[0].maxAllowed, 6);

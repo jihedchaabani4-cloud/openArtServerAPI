@@ -132,12 +132,8 @@ function createMockHarness() {
                     const hasPrimary = workflowMedia.some((wm) => wm.workflow_id === workflowId && wm.is_primary === true);
                     is_primary = !hasPrimary;
                 }
-                if (is_primary) {
-                    const wf = workflows.get(workflowId);
-                    if (wf && !wf.primary_media_id) {
-                        wf.primary_media_id = mediaId;
-                    }
-                }
+                // Faithful to attach_workflow_reference_media: writes workflow_media.is_primary only,
+                // never workflows.primary_media_id.
                 const link = {
                     workflow_id: workflowId,
                     media_id: mediaId,
@@ -1590,10 +1586,11 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
             assert.ok(!rbRes.deletedMediaIds.includes(res.attached[0].media.id));
         });
 
-        it("auto-primary: empty workflow, no setPrimary, a later caller step fails, and workflows.primary_media_id must not reference a deleted media row", async () => {
+        it("auto-primary: empty workflow, no setPrimary, a later caller step fails -> link removed, media deleted, storage discarded, complete === true, no leftover is_primary", async () => {
             const h = createMockHarness();
             const wfId = "00000000-0000-0000-0000-000000000001";
             h.workflows.set(wfId, { id: wfId, user_id: "user-1", project_id: "proj-1", primary_media_id: null });
+            h.storageFiles.add("user-1/uploads/auto_primary.png");
 
             const res = await h.service.attachMediaItems({
                 workflowId: wfId,
@@ -1616,20 +1613,22 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
                 ],
             });
 
-            assert.equal(res.attached[0].is_primary, true, "First item becomes primary via RPC/mock");
+            assert.equal(res.attached[0].is_primary, true, "RPC auto-primary sets workflow_media.is_primary on the first link");
             const attachedMediaId = res.attached[0].media.id;
+            assert.equal(h.workflows.get(wfId).primary_media_id, null, "RPC never writes workflows.primary_media_id");
 
-            // Simulate caller step 2 writing workflows.primary_media_id
-            await h.db.workflows.updatePrimaryMedia(wfId, attachedMediaId);
-            assert.equal(h.workflows.get(wfId).primary_media_id, attachedMediaId);
-
-            // Caller step 3 fails -> calls rollbackAttachedMedia
+            // A later caller step fails -> caller calls rollbackAttachedMedia
             const rbRes = await h.service.rollbackAttachedMedia(res.rollbackHandle);
 
-            // workflows.primary_media_id must NOT point to the deleted media row
-            assert.equal(h.workflows.get(wfId).primary_media_id, null, "primary_media_id must be cleared on rollback");
-            assert.equal(h.media.has(attachedMediaId), false, "Media record must be deleted");
-            assert.ok(rbRes.discardedStorageKeys.includes("user-1/uploads/auto_primary.png"), "Storage file must be discarded");
+            assert.equal(rbRes.complete, true, "Rollback must be complete");
+            assert.deepEqual(rbRes.unlinkedMediaIds, [attachedMediaId], "Link must be removed");
+            assert.equal(h.workflowMedia.some((w) => w.workflow_id === wfId), false, "No workflow_media row may remain");
+            assert.equal(h.workflowMedia.some((w) => w.is_primary === true), false, "No leftover is_primary");
+            assert.equal(h.media.has(attachedMediaId), false, "Media row must be deleted");
+            assert.deepEqual(rbRes.discardedStorageKeys, ["user-1/uploads/auto_primary.png"], "Storage must be discarded");
+            assert.equal(h.storageFiles.has("user-1/uploads/auto_primary.png"), false);
+            assert.deepEqual(rbRes.skippedStorageKeys, []);
+            assert.equal(h.workflows.get(wfId).primary_media_id, null);
         });
 
         it("fail-closed rollback: when db.workflows has neither conditionalRestorePrimaryMedia nor findById, fails closed and skips deletion/discard", async () => {

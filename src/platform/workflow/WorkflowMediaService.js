@@ -411,10 +411,8 @@ export class WorkflowMediaService {
 
                     entry.linkCreatedInCall = !attachRes.is_existing;
                     entry.is_existing = Boolean(attachRes.is_existing);
-                    if (attachRes.is_primary) {
-                        rollbackHandle.primaryModified = true;
-                        rollbackHandle.newPrimaryMediaId = mediaRecord.id;
-                    }
+                    // RPC auto-primary writes workflow_media.is_primary only (never workflows.primary_media_id);
+                    // unlinking the created row in rollback removes it, so no primary restore is tracked here.
 
                     attached.push({
                         kind: "uploaded",
@@ -450,10 +448,6 @@ export class WorkflowMediaService {
                     entry.mediaId = sourceMedia.id;
                     entry.linkCreatedInCall = !attachRes.is_existing;
                     entry.is_existing = Boolean(attachRes.is_existing);
-                    if (attachRes.is_primary) {
-                        rollbackHandle.primaryModified = true;
-                        rollbackHandle.newPrimaryMediaId = sourceMedia.id;
-                    }
 
                     attached.push({
                         kind: "existing",

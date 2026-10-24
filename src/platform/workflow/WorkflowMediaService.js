@@ -39,9 +39,8 @@ export class WorkflowMediaService {
      * @param {Object} [deps.authService]       - WorkflowAuthorizationService instance
      * @param {Object} deps.mediaUploadService  - MediaUploadService instance with discard method (required)
      */
-    constructor({ db, storageService, authService = null, workflowAuthService = null, mediaUploadService = null } = {}) {
-        const effectiveAuth = authService || workflowAuthService;
-        if (!effectiveAuth || typeof effectiveAuth.verifyWorkflowOwnership !== "function") {
+    constructor({ db, storageService, authService, mediaUploadService = null } = {}) {
+        if (!authService || typeof authService.verifyWorkflowOwnership !== "function") {
             throw new Error("WorkflowMediaService requires authService with verifyWorkflowOwnership method.");
         }
         if (!mediaUploadService || typeof mediaUploadService.discard !== "function") {
@@ -52,7 +51,7 @@ export class WorkflowMediaService {
         }
         this.db = db;
         this.storageService = storageService;
-        this.authService = effectiveAuth;
+        this.authService = authService;
         this.mediaUploadService = mediaUploadService;
     }
 

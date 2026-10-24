@@ -260,6 +260,16 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
                 () => new WorkflowMediaService({ db: {}, storageService: {}, mediaUploadService: validUpload, authService: { verifyWorkflowOwnership: "not-a-func" } }),
                 /WorkflowMediaService requires authService with verifyWorkflowOwnership method\./
             );
+            // Single dependency key: the legacy workflowAuthService alias does not satisfy authService
+            assert.throws(
+                () => new WorkflowMediaService({
+                    db: { workflowMedia: { findByMedia: async () => [] } },
+                    storageService: {},
+                    mediaUploadService: validUpload,
+                    workflowAuthService: validAuth,
+                }),
+                /WorkflowMediaService requires authService with verifyWorkflowOwnership method\./
+            );
 
             // mediaUploadService validation
             assert.throws(

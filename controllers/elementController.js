@@ -7,7 +7,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { elementService, elementMediaService } from "../src/container.js";
+import { elementService, elementMediaService, trashService } from "../src/container.js";
 import { assertOwns } from "../src/platform/security/ownership.js";
 
 // ─── Logging helpers ──────────────────────────────────────────────────────────
@@ -155,15 +155,20 @@ export async function deleteElement(req, res) {
     const op      = "DELETE /api/v2/elements/:id";
 
     try {
-        const userId = req.user?.id;
-        if (userId) {
-            await assertOwns("element", req.params.id, userId);
-        }
-
-        await elementService.deleteElement(req.params.id, req.user?.id);
+        const result = await trashService.requestDelete({
+            kind: "element",
+            id: req.params.id,
+            userId: req.user?.id,
+            req,
+        });
 
         logOk(traceId, op, start);
-        return res.json({ status: "success", deleted: true, id: req.params.id });
+        return res.json({
+            status: "success",
+            deleted: true,
+            id: req.params.id,
+            ...(result?.trashed ? { trashed: true } : {}),
+        });
     } catch (err) {
         return res.status(logErr(traceId, op, start, err)).json({ error: true, message: err.message });
     }

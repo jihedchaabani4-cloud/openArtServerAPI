@@ -1,4 +1,4 @@
-import { workflowService, projectReadService, characterService, elementService } from "../src/container.js";
+import { workflowService, projectReadService, characterService, elementService, trashService } from "../src/container.js";
 import { createLogger } from "../src/infrastructure/logging/index.js";
 
 const controllerLogger = createLogger("controller");
@@ -40,13 +40,14 @@ export const deleteWorkflow = async (req, res) => {
     const userId = req.user.id;
 
     try {
-        const result = await workflowService.deleteWorkflow({ workflowId: id, userId, req });
+        const result = await trashService.requestDelete({ kind: "workflow", id, userId, req });
 
         return res.json({
             ok: true,
             deleted_workflow_id: result.workflowId,
             deleted_media_count: result.deletedMediaCount || 0,
             storage_failures:    result.storageFailures?.length || 0,
+            ...(result.trashed ? { trashed: true } : {}),
         });
     } catch (err) {
         return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
@@ -59,8 +60,8 @@ export const bulkDeleteWorkflows = async (req, res) => {
     const workflow_ids = req.body?.workflow_ids;
 
     try {
-        const result = await workflowService.bulkDeleteWorkflows({
-            workflowIds: workflow_ids,
+        const result = await trashService.requestDeleteMany({
+            ids: workflow_ids,
             userId,
             req,
         });
@@ -70,6 +71,7 @@ export const bulkDeleteWorkflows = async (req, res) => {
             workflow_ids: result.workflow_ids,
             count:        result.count,
             results:      result.results,
+            ...(result.trashed ? { trashed: true } : {}),
         });
     } catch (err) {
         return res.status(err.statusCode || 500).json({ ok: false, message: err.message });

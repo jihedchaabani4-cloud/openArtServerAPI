@@ -19,7 +19,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { characterService } from "../../src/container.js";
+import { characterService, trashService } from "../../src/container.js";
 import {
     createCharacter,
     generateCharacterSheet,
@@ -68,7 +68,7 @@ describe("Controller 5xx masking boundary (character controller)", () => {
         { name: "createCharacter", method: "createCharacter", handler: createCharacter, req: { body: { project_id: "proj-1", name: "Character" } } },
         { name: "generateCharacterSheet", method: "generateCharacterSheet", handler: generateCharacterSheet, req: { params: { characterId: "char-1" } } },
         { name: "updateCharacter", method: "updateCharacter", handler: updateCharacter, req: { params: { characterId: "char-1" } } },
-        { name: "deleteCharacter", method: "deleteCharacter", handler: deleteCharacter, req: { params: { characterId: "char-1" } } },
+        { name: "deleteCharacter", service: trashService, method: "requestDelete", handler: deleteCharacter, req: { params: { characterId: "char-1" } } },
         { name: "addMediaToCharacter", method: "addMediaToCharacter", handler: addMediaToCharacter, req: { params: { characterId: "char-1" }, body: { mediaId: "media-1" } } },
         { name: "removeMediaFromCharacter", method: "removeMediaFromCharacter", handler: removeMediaFromCharacter, req: { params: { characterId: "char-1", mediaId: "media-1" } } },
         { name: "setCharacterSheetMedia", method: "setCharacterSheetMedia", handler: setCharacterSheetMedia, req: { params: { characterId: "char-1" }, body: { mediaId: "media-1" } } },
@@ -79,7 +79,7 @@ describe("Controller 5xx masking boundary (character controller)", () => {
     for (const sample of maskedCases) {
         it(`masks internal 5xx details in ${sample.name}`, async () => {
             const err = leakyError();
-            const restore = makeStubThrow(characterService, sample.method, err);
+            const restore = makeStubThrow(sample.service || characterService, sample.method, err);
             try {
                 const res = fakeRes();
                 await sample.handler(fakeReq(sample.req), res);
@@ -103,7 +103,7 @@ describe("Controller 5xx masking boundary (character controller)", () => {
             statusCode: 404,
             errorCode: "CHARACTER_NOT_FOUND",
         });
-        const restore = makeStubThrow(characterService, "deleteCharacter", err);
+        const restore = makeStubThrow(trashService, "requestDelete", err);
         try {
             const res = fakeRes();
             await deleteCharacter(fakeReq({ params: { characterId: "char-1" } }), res);

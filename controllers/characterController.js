@@ -1,4 +1,4 @@
-import { characterService } from "../src/container.js";
+import { characterService, trashService } from "../src/container.js";
 import { createLogger } from "../src/infrastructure/logging/index.js";
 import { safePublicRouteError } from "../src/utils/safePublicRouteError.js";
 
@@ -132,7 +132,7 @@ export async function deleteCharacter(req, res) {
     try {
         const { characterId } = req.params;
         const userId = req.user.id;
-        const result = await characterService.deleteCharacter({ characterId, userId, req });
+        const result = await trashService.requestDelete({ kind: "character", id: characterId, userId, req });
         return res.json({ ok: true, ...result });
     } catch (err) {
         controllerLogger.error({ characterId: req.params?.characterId, err }, `deleteCharacter error: ${err.message}`);

@@ -276,7 +276,13 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
     });
 
     const elemDeleted = await elemService.deleteElement("elem-del-1", "user-1");
-    assert.equal(elemDeleted, true);
+    assert.deepEqual(elemDeleted, {
+      workflowId: "wf-elem-del-1",
+      unlinkedMediaCount: 0,
+      deletedOrphanCount: 0,
+      deletedMediaCount: 0,
+      storageFailures: [],
+    });
     assert.deepEqual(deletedElementIds, ["elem-del-1"]);
     assert.deepEqual(deletedWorkflowIds, ["wf-elem-del-1"]);
 
@@ -288,6 +294,7 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
           deleteById: async (id) => { deletedWorkflowIds.push(id); },
         },
         characters: {
+          findByCharacterId: async (id) => ({ id, workflow_id: id }),
           deleteById: async (id) => { deletedCharacterIds.push(id); },
         },
       },
@@ -390,8 +397,242 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
     assert.equal(findByWorkflowCalled, false);
 
     const delRes = await service.deleteElement("11111111-1111-4111-8111-111111111111", "user-1");
-    assert.equal(delRes, true);
+    assert.deepEqual(delRes, {
+      workflowId: "11111111-1111-4111-8111-111111111111",
+      unlinkedMediaCount: 0,
+      deletedOrphanCount: 0,
+      deletedMediaCount: 0,
+      storageFailures: [],
+    });
     assert.equal(deleteWorkflowCalled, false, "deleteElement must not call deleteWorkflow when workflow_id is null");
+  });
+
+  it("T0 (STD-08/STD-10): ElementService.deleteElement deletes the workflow BEFORE deleting the element row, keeps the element row if deleteWorkflow fails, and throws if workflowService is missing", async () => {
+    const callOrder = [];
+    const elemService = new ElementService({
+      db: {
+        elements: {
+          resolveRecord: async (id) => ({ id: "elem-order-1", workflow_id: "wf-elem-order-1", name: "Ordered Prop" }),
+          deleteById: async (id) => {
+            callOrder.push(`deleteElementRow:${id}`);
+            return { id };
+          },
+        },
+        workflows: {
+          deleteById: async () => {
+            callOrder.push("directDbWorkflowDelete");
+          },
+        },
+        media: {},
+      },
+      workflowService: {
+        deleteWorkflow: async ({ workflowId, userId }) => {
+          callOrder.push(`deleteWorkflow:${workflowId}:${userId}`);
+          return {
+            workflowId,
+            unlinkedMediaCount: 2,
+            deletedOrphanCount: 1,
+            deletedMediaCount: 1,
+            storageFailures: [],
+          };
+        },
+      },
+      mediaService: {},
+    });
+
+    const result = await elemService.deleteElement("elem-order-1", "user-order-1");
+    assert.deepEqual(callOrder, [
+      "deleteWorkflow:wf-elem-order-1:user-order-1",
+      "deleteElementRow:elem-order-1",
+    ], "workflowService.deleteWorkflow must run BEFORE db.elements.deleteById");
+    assert.deepEqual(result, {
+      workflowId: "wf-elem-order-1",
+      unlinkedMediaCount: 2,
+      deletedOrphanCount: 1,
+      deletedMediaCount: 1,
+      storageFailures: [],
+    });
+
+    // Partial failure: deleteWorkflow rejects -> element row is KEPT
+    let elementRowDeletedOnFailure = false;
+    const failingElemService = new ElementService({
+      db: {
+        elements: {
+          resolveRecord: async () => ({ id: "elem-fail-1", workflow_id: "wf-elem-fail-1", name: "Keep On Fail" }),
+          deleteById: async () => {
+            elementRowDeletedOnFailure = true;
+          },
+        },
+        workflows: {},
+        media: {},
+      },
+      workflowService: {
+        deleteWorkflow: async () => {
+          throw new Error("deleteWorkflow failed mid-reap");
+        },
+      },
+      mediaService: {},
+    });
+
+    await assert.rejects(
+      () => failingElemService.deleteElement("elem-fail-1", "user-1"),
+      /deleteWorkflow failed mid-reap/
+    );
+    assert.equal(elementRowDeletedOnFailure, false, "element row must be kept when deleteWorkflow rejects");
+
+    // Missing workflowService on non-null workflow_id -> throws and never falls back to db.workflows.deleteById
+    let fallbackWorkflowDeleteCalled = false;
+    let elementDeletedWithoutWfService = false;
+    const noWfServiceElem = new ElementService({
+      db: {
+        elements: {
+          resolveRecord: async () => ({ id: "elem-nowf-1", workflow_id: "wf-elem-nowf-1", name: "No Fallback" }),
+          deleteById: async () => {
+            elementDeletedWithoutWfService = true;
+          },
+        },
+        workflows: {
+          deleteById: async () => {
+            fallbackWorkflowDeleteCalled = true;
+          },
+        },
+        media: {},
+      },
+      workflowService: null,
+      mediaService: {},
+    });
+
+    await assert.rejects(
+      () => noWfServiceElem.deleteElement("elem-nowf-1", "user-1"),
+      /ElementService\.deleteElement requires workflowService/
+    );
+    assert.equal(fallbackWorkflowDeleteCalled, false, "must never call db.workflows.deleteById fallback");
+    assert.equal(elementDeletedWithoutWfService, false, "must not delete element row when workflowService is missing");
+  });
+
+  it("T0 (STD-08): CharacterService.deleteCharacter deletes the workflow BEFORE deleting the characters row, keeps the characters row if deleteWorkflow fails, and handles orphan characters with workflow_id = null", async () => {
+    const callOrder = [];
+    const charService = new CharacterService({
+      mediaService: {},
+      db: {
+        workflows: {
+          getWorkflow: async (id) => ({ id, user_id: "user-char-1", project_id: "proj-1", workflow_type: "CHARACTER" }),
+        },
+        characters: {
+          findByCharacterId: async (id) => ({ id, user_id: "user-char-1", project_id: "proj-1", workflow_id: id }),
+          deleteById: async (id) => {
+            callOrder.push(`deleteCharacterRow:${id}`);
+            return true;
+          },
+        },
+      },
+      workflowService: {
+        deleteWorkflow: async ({ workflowId }) => {
+          callOrder.push(`deleteWorkflow:${workflowId}`);
+          return {
+            workflowId,
+            unlinkedMediaCount: 3,
+            deletedOrphanCount: 2,
+            deletedMediaCount: 2,
+            storageFailures: [],
+          };
+        },
+      },
+    });
+
+    const delResult = await charService.deleteCharacter({ characterId: "char-order-1" });
+    assert.deepEqual(callOrder, [
+      "deleteWorkflow:char-order-1",
+      "deleteCharacterRow:char-order-1",
+    ], "workflowService.deleteWorkflow must run BEFORE db.characters.deleteById");
+    assert.deepEqual(delResult, {
+      workflowId: "char-order-1",
+      unlinkedMediaCount: 3,
+      deletedOrphanCount: 2,
+      deletedMediaCount: 2,
+      storageFailures: [],
+    });
+
+    // Partial failure: deleteWorkflow rejects -> characters row is KEPT
+    let charRowDeletedOnFailure = false;
+    const failingCharService = new CharacterService({
+      mediaService: {},
+      db: {
+        workflows: {},
+        characters: {
+          findByCharacterId: async (id) => ({ id, user_id: "user-char-1", project_id: "proj-1", workflow_id: id }),
+          deleteById: async () => {
+            charRowDeletedOnFailure = true;
+          },
+        },
+      },
+      workflowService: {
+        deleteWorkflow: async () => {
+          throw new Error("character workflow delete failed");
+        },
+      },
+    });
+
+    await assert.rejects(
+      () => failingCharService.deleteCharacter({ characterId: "char-fail-1" }),
+      /character workflow delete failed/
+    );
+    assert.equal(charRowDeletedOnFailure, false, "characters row must be kept when deleteWorkflow rejects");
+
+    // Missing workflowService on non-null workflow_id -> throws and keeps characters row
+    let charRowDeletedWithoutWfService = false;
+    const noWfCharService = new CharacterService({
+      mediaService: {},
+      db: {
+        workflows: {},
+        characters: {
+          findByCharacterId: async (id) => ({ id, user_id: "user-char-1", project_id: "proj-1", workflow_id: id }),
+          deleteById: async () => {
+            charRowDeletedWithoutWfService = true;
+          },
+        },
+      },
+      workflowService: null,
+    });
+
+    await assert.rejects(
+      () => noWfCharService.deleteCharacter({ characterId: "char-nowf-1" }),
+      /CharacterService\.deleteCharacter requires workflowService/
+    );
+    assert.equal(charRowDeletedWithoutWfService, false, "characters row must be kept when workflowService is missing");
+
+    // Orphan character (workflow_id === null): deletes characters row directly without calling deleteWorkflow
+    let orphanDeleteWorkflowCalled = false;
+    const deletedOrphanCharIds = [];
+    const orphanCharService = new CharacterService({
+      mediaService: {},
+      db: {
+        workflows: {},
+        characters: {
+          findByCharacterId: async (id) => ({ id, user_id: "user-char-1", project_id: "proj-1", workflow_id: null }),
+          deleteById: async (id) => {
+            deletedOrphanCharIds.push(id);
+            return true;
+          },
+        },
+      },
+      workflowService: {
+        deleteWorkflow: async () => {
+          orphanDeleteWorkflowCalled = true;
+        },
+      },
+    });
+
+    const orphanRes = await orphanCharService.deleteCharacter({ characterId: "char-orphan-1" });
+    assert.equal(orphanDeleteWorkflowCalled, false, "deleteCharacter must not call deleteWorkflow when workflow_id is null");
+    assert.deepEqual(deletedOrphanCharIds, ["char-orphan-1"]);
+    assert.deepEqual(orphanRes, {
+      workflowId: "char-orphan-1",
+      unlinkedMediaCount: 0,
+      deletedOrphanCount: 0,
+      deletedMediaCount: 0,
+      storageFailures: [],
+    });
   });
 
   it("Test 1 (B4b): deleting a character's turnaround sheet sets primary_media_id to null while remaining detail photos remain unpinned", async () => {

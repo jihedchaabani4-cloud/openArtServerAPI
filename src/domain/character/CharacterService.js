@@ -354,11 +354,18 @@ export class CharacterService {
                 await assertOwns("character", characterId, userId);
             }
 
-            await this.db.characters.deleteById(characterId).catch((charDeleteErr) => {
-                console.warn(`⚠️ [CharacterService] deleteCharacter row notice:`, charDeleteErr.message);
-            });
+            const charRecord = await this.db.characters.findByCharacterId(characterId);
+            const targetWorkflowId = charRecord ? charRecord.workflow_id : characterId;
 
-            const result = await this.workflowService.deleteWorkflow({ workflowId: characterId, userId, req });
+            let result = null;
+            if (targetWorkflowId) {
+                if (!this.workflowService) {
+                    throw new Error("CharacterService.deleteCharacter requires workflowService");
+                }
+                result = await this.workflowService.deleteWorkflow({ workflowId: targetWorkflowId, userId, req });
+            }
+
+            await this.db.characters.deleteById(charRecord?.id || characterId);
 
             crudOperationLog({
                 traceId,
@@ -368,7 +375,13 @@ export class CharacterService {
                 characterId,
             });
 
-            return result;
+            return result || {
+                workflowId: charRecord?.id || characterId,
+                unlinkedMediaCount: 0,
+                deletedOrphanCount: 0,
+                deletedMediaCount: 0,
+                storageFailures: [],
+            };
         } catch (err) {
             crudOperationLog({
                 traceId,

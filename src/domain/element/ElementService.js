@@ -484,22 +484,29 @@ export class ElementService {
 
         try {
             const element = await this.db.elements.resolveRecord(id);
+            const elementId = element?.id || null;
             const targetWorkflowId = element ? element.workflow_id : id;
 
-            if (element) {
-                await this.db.elements.deleteById(element.id);
+            let wfResult = null;
+            if (targetWorkflowId) {
+                if (!this.workflowService) {
+                    throw new Error("ElementService.deleteElement requires workflowService");
+                }
+                wfResult = await this.workflowService.deleteWorkflow({ workflowId: targetWorkflowId, userId });
             }
 
-            if (targetWorkflowId) {
-                if (this.workflowService) {
-                    await this.workflowService.deleteWorkflow({ workflowId: targetWorkflowId, userId });
-                } else {
-                    await this.db.workflows.deleteById(targetWorkflowId);
-                }
+            if (elementId) {
+                await this.db.elements.deleteById(elementId);
             }
 
             crudOperationLog({ traceId, operation: "deleteElement", status: "ok", durationMs: Date.now() - start, id });
-            return true;
+            return {
+                workflowId: targetWorkflowId || elementId || id,
+                unlinkedMediaCount: wfResult?.unlinkedMediaCount || 0,
+                deletedOrphanCount: wfResult?.deletedOrphanCount || 0,
+                deletedMediaCount: wfResult?.deletedMediaCount || 0,
+                storageFailures: wfResult?.storageFailures || [],
+            };
         } catch (err) {
             crudOperationLog({ traceId, operation: "deleteElement", status: "error", durationMs: Date.now() - start, message: err.message });
             throw err;

@@ -202,6 +202,11 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
             container.elementMediaService,
             "container.elementService.mediaService must hold container.elementMediaService"
         );
+        assert.equal(
+            container.elementService.workflowService,
+            container.workflowService,
+            "container.elementService.workflowService must hold container.workflowService"
+        );
         assert.throws(
             () => new ElementService({ db: {} }),
             (err) => err.message.includes("ElementService requires mediaService"),
@@ -251,6 +256,11 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
             container.characterService.mediaService,
             container.characterMediaService,
             "container.characterService.mediaService must hold container.characterMediaService"
+        );
+        assert.equal(
+            container.characterService.workflowService,
+            container.workflowService,
+            "container.characterService.workflowService must hold container.workflowService"
         );
         assert.throws(
             () => new CharacterService({ db: {} }),

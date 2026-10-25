@@ -1,5 +1,6 @@
 import { BaseRepository } from "./BaseRepository.js";
 import { supabase } from "../../lib/supabase.js";
+import { trashRepository } from "./TrashRepository.js";
 import { createLogger } from "../infrastructure/logging/index.js";
 
 const workflowRepositoryLogger = createLogger("workflow_repository");
@@ -106,7 +107,14 @@ export class WorkflowRepository extends BaseRepository {
         query = query.eq("project_id", project_id);
         const { data, error } = await query;
         if (error) throw error;
-        return data;
+        const rows = data || [];
+        if (!rows.length) return rows;
+        const candidateIds = rows.map((row) => row.id).filter(Boolean);
+        const trashedSet = await trashRepository.getTrashedWorkflowIdSet({
+            workflowIds: candidateIds,
+            client: supabase,
+        });
+        return trashedSet.size > 0 ? rows.filter((row) => !trashedSet.has(row.id)) : rows;
     }
 
     /**
@@ -179,11 +187,19 @@ export class WorkflowRepository extends BaseRepository {
     async findByProjectsPaginated(projectIds, { limit = 30, offset = 0 } = {}) {
         if (!projectIds || projectIds.length === 0) return { workflows: [], total: 0 };
 
+        const trashedSet = await trashRepository.getTrashedWorkflowIdSet({
+            client: this.client(),
+        });
+        const trashedExpr = trashedSet.size > 0 ? `(${[...trashedSet].join(",")})` : null;
+
         // Total count
         let countQ = this.client()
             .from(this.tableName)
             .select("id", { count: "exact", head: true })
             .in("project_id", projectIds);
+        if (trashedExpr && typeof countQ.not === "function") {
+            countQ = countQ.not("id", "in", trashedExpr);
+        }
         const { count: total, error: countErr } = await countQ;
         if (countErr) throw countErr;
 
@@ -191,13 +207,22 @@ export class WorkflowRepository extends BaseRepository {
         let dataQ = this.client()
             .from(this.tableName)
             .select("id, project_id, display_name, favorited, workflow_type, create_time")
-            .in("project_id", projectIds)
+            .in("project_id", projectIds);
+        if (trashedExpr && typeof dataQ.not === "function") {
+            dataQ = dataQ.not("id", "in", trashedExpr);
+        }
+        dataQ = dataQ
             .order("create_time", { ascending: false })
             .range(Number(offset), Number(offset) + Number(limit) - 1);
         const { data: workflows, error: dataErr } = await dataQ;
         if (dataErr) throw dataErr;
 
-        return { workflows: workflows || [], total: total || 0 };
+        const filteredWorkflows =
+            trashedSet.size > 0
+                ? (workflows || []).filter((w) => !trashedSet.has(w.id))
+                : workflows || [];
+
+        return { workflows: filteredWorkflows, total: total || 0 };
     }
 
     /**
@@ -214,7 +239,13 @@ export class WorkflowRepository extends BaseRepository {
             .in("project_id", projectIds)
             .maybeSingle();
         if (error) throw error;
-        return data || null;
+        if (!data) return null;
+        const trashedSet = await trashRepository.getTrashedWorkflowIdSet({
+            workflowIds: [data.id || workflowId],
+            client: this.client(),
+        });
+        if (trashedSet.has(data.id || workflowId)) return null;
+        return data;
     }
 
     /**
@@ -321,10 +352,17 @@ export class WorkflowRepository extends BaseRepository {
     }
 
     async listProjectAssets(projectId, { folderIds = null, folderIdNull = false, limit = 50, cursor = null } = {}) {
+        const trashedSet = await trashRepository.getTrashedWorkflowIdSet({
+            client: this.client(),
+        });
         let query = this.client()
             .from(this.tableName)
             .select("*")
             .eq("project_id", projectId);
+
+        if (trashedSet.size > 0 && typeof query.not === "function") {
+            query = query.not("id", "in", `(${[...trashedSet].join(",")})`);
+        }
 
         if (folderIdNull) {
             query = query.is("folder_id", null);
@@ -343,6 +381,7 @@ export class WorkflowRepository extends BaseRepository {
 
         const { data, error } = await query;
         if (error) throw error;
-        return data || [];
+        const rows = data || [];
+        return trashedSet.size > 0 ? rows.filter((row) => !trashedSet.has(row.id)) : rows;
     }
 }

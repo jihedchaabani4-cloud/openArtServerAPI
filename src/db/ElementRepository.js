@@ -9,6 +9,7 @@
  */
 
 import { supabase } from "../../lib/supabase.js";
+import { trashRepository } from "./TrashRepository.js";
 import { createLogger } from "../infrastructure/logging/index.js";
 
 const elementRepositoryLogger = createLogger("element_repository");
@@ -92,7 +93,16 @@ export class ElementRepository {
             .eq("project_id", projectId);
         if (wfErr) throw wfErr;
 
-        const workflowIds = (workflows || []).map((w) => w.id);
+        const candidateIds = (workflows || []).map((w) => w.id).filter(Boolean);
+        if (!candidateIds.length) return null;
+
+        const trashedSet = await trashRepository.getTrashedWorkflowIdSet({
+            workflowIds: candidateIds,
+            client: supabase,
+        });
+        const workflowIds = trashedSet.size > 0
+            ? candidateIds.filter((id) => !trashedSet.has(id))
+            : candidateIds;
         if (!workflowIds.length) return null;
 
         const { data, error } = await supabase
@@ -114,7 +124,16 @@ export class ElementRepository {
             .eq("project_id", projectId);
         if (wfErr) throw wfErr;
 
-        const workflowIds = (workflows || []).map((w) => w.id);
+        const candidateIds = (workflows || []).map((w) => w.id).filter(Boolean);
+        if (!candidateIds.length) return [];
+
+        const trashedSet = await trashRepository.getTrashedWorkflowIdSet({
+            workflowIds: candidateIds,
+            client: supabase,
+        });
+        const workflowIds = trashedSet.size > 0
+            ? candidateIds.filter((id) => !trashedSet.has(id))
+            : candidateIds;
         if (!workflowIds.length) return [];
 
         const { data, error } = await supabase

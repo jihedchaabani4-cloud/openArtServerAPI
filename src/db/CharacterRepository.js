@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "../../lib/supabase.js";
 import { BaseRepository } from "./BaseRepository.js";
+import { trashRepository } from "./TrashRepository.js";
 
 /**
  * CharacterRepository — Dedicated Repository for Characters.
@@ -81,6 +82,33 @@ export class CharacterRepository extends BaseRepository {
             .delete()
             .or(`id.eq.${id},workflow_id.eq.${id}`);
         if (error) throw error;
+    }
+
+    async findByProjectOrWorkflowIds({ projectId, workflowIds = [] } = {}) {
+        let query = this.client().from("characters").select("*");
+        const ids = Array.isArray(workflowIds) ? workflowIds.filter(Boolean) : [];
+        if (projectId && ids.length > 0) {
+            query = query.or(`project_id.eq.${projectId},workflow_id.in.(${ids.join(",")})`);
+        } else if (projectId) {
+            query = query.eq("project_id", projectId);
+        } else if (ids.length > 0) {
+            query = query.in("workflow_id", ids);
+        } else {
+            return [];
+        }
+        const { data, error } = await query;
+        if (error) throw error;
+        const rows = data || [];
+        if (!rows.length) return [];
+        const candidateWfIds = rows.flatMap((c) => [c.workflow_id, c.id]).filter(Boolean);
+        const trashedSet = await trashRepository.getTrashedWorkflowIdSet({
+            workflowIds: candidateWfIds,
+            client: this.client(),
+        });
+        if (trashedSet.size === 0) return rows;
+        return rows.filter(
+            (c) => !(c.workflow_id && trashedSet.has(c.workflow_id)) && !(c.id && trashedSet.has(c.id))
+        );
     }
 }
 

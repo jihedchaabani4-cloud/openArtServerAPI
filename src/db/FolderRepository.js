@@ -1,4 +1,5 @@
-import { supabase } from "../../lib/supabase.js";
+import { supabase, supabaseAdmin } from "../../lib/supabase.js";
+import { trashRepository } from "./TrashRepository.js";
 
 /**
  * Data access layer for hierarchical folder management.
@@ -6,7 +7,7 @@ import { supabase } from "../../lib/supabase.js";
  * Intentionally does NOT extend BaseRepository to avoid exposing unscoped query/delete methods.
  */
 export class FolderRepository {
-  constructor(client = supabase) {
+  constructor(client = (supabaseAdmin || supabase)) {
     this.dbClient = client;
     this.tableName = "folders";
   }
@@ -169,14 +170,26 @@ export class FolderRepository {
 
     const { data, error } = await this.client()
       .from("workflow")
-      .select("folder_id")
+      .select("id, folder_id")
       .eq("project_id", projectId)
       .not("folder_id", "is", null);
 
     if (error) throw error;
 
+    const rows = data || [];
+    if (!rows.length) return {};
+
+    const candidateWfIds = rows.map((row) => row.id).filter(Boolean);
+    const trashedSet = candidateWfIds.length
+      ? await trashRepository.getTrashedWorkflowIdSet({
+          workflowIds: candidateWfIds,
+          client: this.client(),
+        })
+      : new Set();
+
     const counts = {};
-    for (const row of data || []) {
+    for (const row of rows) {
+      if (row.id && trashedSet.has(row.id)) continue;
       if (row.folder_id) {
         counts[row.folder_id] = (counts[row.folder_id] || 0) + 1;
       }

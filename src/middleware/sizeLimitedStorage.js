@@ -9,7 +9,7 @@
  * - Enforces per-user concurrent upload limits (default 2, configurable via central config).
  */
 
-import { RATE_LIMIT_POLICIES } from "../config/rateLimitPolicies.js";
+import { RATE_LIMIT_POLICIES, DEFAULT_MAX_CONCURRENT_UPLOADS } from "../config/rateLimitPolicies.js";
 import { MediaInspector } from "../platform/media-ingestion/MediaInspector.js";
 
 const activeUploadsByUser = new Map();
@@ -19,7 +19,7 @@ function getMaxConcurrentUploads() {
     return (
         Number(process.env.MAX_CONCURRENT_UPLOADS_PER_USER) ||
         RATE_LIMIT_POLICIES?.concurrentUploads?.limit ||
-        2
+        DEFAULT_MAX_CONCURRENT_UPLOADS
     );
 }
 

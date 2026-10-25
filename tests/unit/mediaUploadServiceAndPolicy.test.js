@@ -781,7 +781,7 @@ describe("createUploadMiddleware(policy) Seam 1 Contract (Ticket 02a)", () => {
     it("preserves 429 TOO_MANY_CONCURRENT_UPLOADS and 503 SERVICE_UNAVAILABLE (in-flight RAM cap) when configured with an UploadPolicy", async () => {
         const mw = createUploadMiddleware(ELEMENT_REFERENCE_UPLOAD_POLICY);
 
-        // Hold 2 active uploads open for the same user (default concurrency limit = 2)
+        // Hold 3 active uploads open for the same user (default concurrency limit = 3)
         const boundary = "----OpenArtHoldBoundary";
         const makeOpenReq = () => {
             const req = new PassThrough();
@@ -803,27 +803,30 @@ describe("createUploadMiddleware(policy) Seam 1 Contract (Ticket 02a)", () => {
 
         const openReq1 = makeOpenReq();
         const openReq2 = makeOpenReq();
+        const openReq3 = makeOpenReq();
         const p1 = invokeMiddleware(mw, openReq1);
         const p2 = invokeMiddleware(mw, openReq2);
+        const p3 = invokeMiddleware(mw, openReq3);
 
-        // Wait a tick for Busboy/Multer to enter _handleFile on both streams
+        // Wait a tick for Busboy/Multer to enter _handleFile on all 3 streams
         await new Promise((r) => setTimeout(r, 20));
 
-        // 3rd concurrent upload for the same user -> 429 TOO_MANY_CONCURRENT_UPLOADS
-        const req3 = buildMultipartStream({
-            filename: "third.png",
+        // 4th concurrent upload for the same user -> 429 TOO_MANY_CONCURRENT_UPLOADS
+        const req4 = buildMultipartStream({
+            filename: "fourth.png",
             contentType: "image/png",
             payloadBuffer: VALID_PNG_1X1,
         });
-        req3.user = { id: "user-concurrent-1" };
-        const res3 = await invokeMiddleware(mw, req3);
-        assert.equal(res3.status, 429);
-        assert.equal(res3.body?.code, "TOO_MANY_CONCURRENT_UPLOADS");
+        req4.user = { id: "user-concurrent-1" };
+        const res4 = await invokeMiddleware(mw, req4);
+        assert.equal(res4.status, 429);
+        assert.equal(res4.body?.code, "TOO_MANY_CONCURRENT_UPLOADS");
 
-        // Cleanly close the two open streams
+        // Cleanly close the three open streams
         openReq1.end(`\r\n--${boundary}--\r\n`);
         openReq2.end(`\r\n--${boundary}--\r\n`);
-        await Promise.all([p1, p2]);
+        openReq3.end(`\r\n--${boundary}--\r\n`);
+        await Promise.all([p1, p2, p3]);
 
         // Verify 503 SERVICE_UNAVAILABLE when MAX_IN_FLIGHT_UPLOAD_BYTES is exceeded
         const origMaxInFlight = process.env.MAX_IN_FLIGHT_UPLOAD_BYTES;

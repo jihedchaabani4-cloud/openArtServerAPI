@@ -401,27 +401,30 @@ describe("RC1.4-D2.3 — Upload Hardening and Sniff Boundary Tests", () => {
       const user = "concurrent-test-user";
       const jpegHeader = createSampleBytes("jpeg");
 
-      // Create two hanging streams that stay open
+      // Create three hanging streams that stay open (concurrency limit = 3)
       const stream1 = new Readable({ read() { this.push(jpegHeader); } });
       const stream2 = new Readable({ read() { this.push(jpegHeader); } });
       const stream3 = new Readable({ read() { this.push(jpegHeader); } });
+      const stream4 = new Readable({ read() { this.push(jpegHeader); } });
 
       storage._handleFile({ user: { id: user } }, { mimetype: "image/jpeg", stream: stream1 }, () => {});
       storage._handleFile({ user: { id: user } }, { mimetype: "image/jpeg", stream: stream2 }, () => {});
+      storage._handleFile({ user: { id: user } }, { mimetype: "image/jpeg", stream: stream3 }, () => {});
 
-      // 3rd upload should immediately return 429
+      // 4th upload should immediately return 429
       await new Promise((resolve) => {
-        storage._handleFile({ user: { id: user } }, { mimetype: "image/jpeg", stream: stream3 }, (err) => {
-          assert.ok(err, "3rd concurrent upload must fail");
+        storage._handleFile({ user: { id: user } }, { mimetype: "image/jpeg", stream: stream4 }, (err) => {
+          assert.ok(err, "4th concurrent upload must fail");
           assert.equal(err.statusCode, 429);
           assert.equal(err.code, "TOO_MANY_CONCURRENT_UPLOADS");
           resolve();
         });
       });
 
-      // Close stream1 and stream2 to release concurrency
+      // Close stream1, stream2, and stream3 to release concurrency
       stream1.push(null);
       stream2.push(null);
+      stream3.push(null);
     });
   });
 

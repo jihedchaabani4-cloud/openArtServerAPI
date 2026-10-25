@@ -17,6 +17,8 @@
  *   all instances, switch to Redis store (RATE_LIMIT_STORE=redis).
  * ─────────────────────────────────────────────────────────────────────────────
  */
+export const DEFAULT_MAX_CONCURRENT_UPLOADS = 3;
+
 export const RATE_LIMIT_POLICIES = {
   /** POST /api/images/generated */
   imageGeneration: {
@@ -100,7 +102,7 @@ export const RATE_LIMIT_POLICIES = {
 
   /** Per-user concurrent upload limit (configurable via MAX_CONCURRENT_UPLOADS_PER_USER, default 2) */
   concurrentUploads: {
-    limit: Number(process.env.MAX_CONCURRENT_UPLOADS_PER_USER) || 2,
+    limit: Number(process.env.MAX_CONCURRENT_UPLOADS_PER_USER) || DEFAULT_MAX_CONCURRENT_UPLOADS,
     keyBy: "user",
   },
 

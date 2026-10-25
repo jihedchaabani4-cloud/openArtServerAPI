@@ -11,6 +11,9 @@
 import multer from "multer";
 import { SourcePolicy } from "../platform/media-ingestion/SourcePolicy.js";
 import { createSizeLimitedMemoryStorage } from "./sizeLimitedStorage.js";
+import { createLogger } from "../infrastructure/logging/index.js";
+
+const logger = createLogger("upload-middleware");
 
 export function resolveMiddlewarePolicy(policyOrPurpose) {
     if (policyOrPurpose && typeof policyOrPurpose === "object" && Array.isArray(policyOrPurpose.allowedTypes)) {
@@ -69,6 +72,24 @@ function sendMiddlewareError(err, req, res, next, resolvedPolicy) {
             message: isImage
                 ? `Image file exceeds maximum allowed size of ${limitMB}MB`
                 : err.message || "File exceeds maximum allowed size",
+        });
+    }
+
+    if (err.name === "MulterError" || err instanceof multer.MulterError) {
+        logger.warn(
+            {
+                event: "upload.multer_validation_error",
+                multerCode: err.code,
+                userId: req.user?.id,
+                projectId: req.body?.project_id || req.body?.projectId,
+            },
+            `[UPLOAD] Multer validation rejected: ${err.code}`
+        );
+
+        return res.status(400).json({
+            ok: false,
+            code: "VALIDATION_ERROR",
+            message: err.message || "Invalid upload request",
         });
     }
 

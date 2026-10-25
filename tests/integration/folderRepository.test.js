@@ -29,6 +29,10 @@ describe("FolderRepository Integration & Isolation (Task F-T3)", () => {
             filters.push({ col, op: "eq", val });
             return builder;
           },
+          in(col, vals) {
+            filters.push({ col, op: "in", val: new Set(vals || []) });
+            return builder;
+          },
           not(col, op, val) {
             filters.push({ col, op: "not", val });
             return builder;
@@ -59,7 +63,12 @@ describe("FolderRepository Integration & Isolation (Task F-T3)", () => {
           },
           async then(resolve, reject) {
             try {
-              const targetStore = tableName === "folders" ? mockStorage : workflowStorage;
+              const targetStore =
+                tableName === "folders"
+                  ? mockStorage
+                  : tableName === "trash"
+                    ? []
+                    : workflowStorage;
 
               if (insertData) {
                 const inserted = {
@@ -113,6 +122,7 @@ describe("FolderRepository Integration & Isolation (Task F-T3)", () => {
               let filtered = targetStore.filter((row) => {
                 return filters.every((f) => {
                   if (f.op === "eq") return row[f.col] === f.val;
+                  if (f.op === "in") return f.val.has(row[f.col]);
                   if (f.op === "not") return row[f.col] !== f.val;
                   return true;
                 });

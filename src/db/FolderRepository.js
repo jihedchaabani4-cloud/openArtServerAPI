@@ -183,6 +183,7 @@ export class FolderRepository {
     const trashedSet = candidateWfIds.length
       ? await trashRepository.getTrashedWorkflowIdSet({
           workflowIds: candidateWfIds,
+          userId,
           client: this.client(),
         })
       : new Set();

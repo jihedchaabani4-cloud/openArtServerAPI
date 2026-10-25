@@ -86,36 +86,7 @@ export class ElementRepository {
         return data || null;
     }
 
-    async findByName(name, projectId) {
-        const { data: workflows, error: wfErr } = await supabase
-            .from("workflow")
-            .select("id")
-            .eq("project_id", projectId);
-        if (wfErr) throw wfErr;
-
-        const candidateIds = (workflows || []).map((w) => w.id).filter(Boolean);
-        if (!candidateIds.length) return null;
-
-        const trashedSet = await trashRepository.getTrashedWorkflowIdSet({
-            workflowIds: candidateIds,
-            client: supabase,
-        });
-        const workflowIds = trashedSet.size > 0
-            ? candidateIds.filter((id) => !trashedSet.has(id))
-            : candidateIds;
-        if (!workflowIds.length) return null;
-
-        const { data, error } = await supabase
-            .from("element")
-            .select("*")
-            .in("workflow_id", workflowIds)
-            .ilike("name", name)
-            .maybeSingle();
-        if (error) throw error;
-        return data || null;
-    }
-
-    async list({ projectId }) {
+    async #getActiveProjectWorkflowIds(projectId) {
         if (!projectId) return [];
 
         const { data: workflows, error: wfErr } = await supabase
@@ -131,9 +102,27 @@ export class ElementRepository {
             workflowIds: candidateIds,
             client: supabase,
         });
-        const workflowIds = trashedSet.size > 0
+        return trashedSet.size > 0
             ? candidateIds.filter((id) => !trashedSet.has(id))
             : candidateIds;
+    }
+
+    async findByName(name, projectId) {
+        const workflowIds = await this.#getActiveProjectWorkflowIds(projectId);
+        if (!workflowIds.length) return null;
+
+        const { data, error } = await supabase
+            .from("element")
+            .select("*")
+            .in("workflow_id", workflowIds)
+            .ilike("name", name)
+            .maybeSingle();
+        if (error) throw error;
+        return data || null;
+    }
+
+    async list({ projectId }) {
+        const workflowIds = await this.#getActiveProjectWorkflowIds(projectId);
         if (!workflowIds.length) return [];
 
         const { data, error } = await supabase

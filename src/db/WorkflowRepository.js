@@ -179,6 +179,25 @@ export class WorkflowRepository extends BaseRepository {
         return null;
     }
 
+    async #getProjectTrashedWorkflowIdSet(projectIds) {
+        const cleanProjectIds = Array.isArray(projectIds) ? projectIds.filter(Boolean) : [];
+        if (!cleanProjectIds.length) return new Set();
+
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("id")
+            .in("project_id", cleanProjectIds);
+        if (error) throw error;
+
+        const candidateIds = (data || []).map((row) => row.id).filter(Boolean);
+        if (!candidateIds.length) return new Set();
+
+        return trashRepository.getTrashedWorkflowIdSet({
+            workflowIds: candidateIds,
+            client: this.client(),
+        });
+    }
+
     /**
      * Paginated workflow query scoped to multiple project IDs.
      * Returns { workflows, total } for library listing.
@@ -187,9 +206,7 @@ export class WorkflowRepository extends BaseRepository {
     async findByProjectsPaginated(projectIds, { limit = 30, offset = 0 } = {}) {
         if (!projectIds || projectIds.length === 0) return { workflows: [], total: 0 };
 
-        const trashedSet = await trashRepository.getTrashedWorkflowIdSet({
-            client: this.client(),
-        });
+        const trashedSet = await this.#getProjectTrashedWorkflowIdSet(projectIds);
         const trashedExpr = trashedSet.size > 0 ? `(${[...trashedSet].join(",")})` : null;
 
         // Total count
@@ -197,7 +214,7 @@ export class WorkflowRepository extends BaseRepository {
             .from(this.tableName)
             .select("id", { count: "exact", head: true })
             .in("project_id", projectIds);
-        if (trashedExpr && typeof countQ.not === "function") {
+        if (trashedExpr) {
             countQ = countQ.not("id", "in", trashedExpr);
         }
         const { count: total, error: countErr } = await countQ;
@@ -208,7 +225,7 @@ export class WorkflowRepository extends BaseRepository {
             .from(this.tableName)
             .select("id, project_id, display_name, favorited, workflow_type, create_time")
             .in("project_id", projectIds);
-        if (trashedExpr && typeof dataQ.not === "function") {
+        if (trashedExpr) {
             dataQ = dataQ.not("id", "in", trashedExpr);
         }
         dataQ = dataQ
@@ -217,12 +234,7 @@ export class WorkflowRepository extends BaseRepository {
         const { data: workflows, error: dataErr } = await dataQ;
         if (dataErr) throw dataErr;
 
-        const filteredWorkflows =
-            trashedSet.size > 0
-                ? (workflows || []).filter((w) => !trashedSet.has(w.id))
-                : workflows || [];
-
-        return { workflows: filteredWorkflows, total: total || 0 };
+        return { workflows: workflows || [], total: total || 0 };
     }
 
     /**
@@ -352,15 +364,13 @@ export class WorkflowRepository extends BaseRepository {
     }
 
     async listProjectAssets(projectId, { folderIds = null, folderIdNull = false, limit = 50, cursor = null } = {}) {
-        const trashedSet = await trashRepository.getTrashedWorkflowIdSet({
-            client: this.client(),
-        });
+        const trashedSet = await this.#getProjectTrashedWorkflowIdSet([projectId]);
         let query = this.client()
             .from(this.tableName)
             .select("*")
             .eq("project_id", projectId);
 
-        if (trashedSet.size > 0 && typeof query.not === "function") {
+        if (trashedSet.size > 0) {
             query = query.not("id", "in", `(${[...trashedSet].join(",")})`);
         }
 
@@ -381,7 +391,6 @@ export class WorkflowRepository extends BaseRepository {
 
         const { data, error } = await query;
         if (error) throw error;
-        const rows = data || [];
-        return trashedSet.size > 0 ? rows.filter((row) => !trashedSet.has(row.id)) : rows;
+        return data || [];
     }
 }

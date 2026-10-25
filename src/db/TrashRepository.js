@@ -81,40 +81,29 @@ export class TrashRepository {
     }
 
     /**
-     * Returns trashed workflow_ids scoped to optional workflowIds and/or userId.
+     * Returns trashed workflow_ids scoped to workflowIds and/or userId.
      */
     async listWorkflowIds({ workflowIds = null, userId = null, client = null } = {}) {
+        const cleanIds = Array.isArray(workflowIds)
+            ? [...new Set(workflowIds.filter(Boolean))]
+            : null;
+        if (cleanIds && !cleanIds.length) return [];
+        if (!cleanIds && !userId) return [];
+
         const dbClient = client || this.client();
-        if (!dbClient || typeof dbClient.from !== "function") return [];
+        let query = dbClient.from("trash").select("workflow_id");
 
-        let cleanIds = null;
-        if (Array.isArray(workflowIds)) {
-            cleanIds = [...new Set(workflowIds.filter(Boolean))];
-            if (!cleanIds.length) return [];
-        }
-
-        const table = dbClient.from("trash");
-        if (!table || typeof table.select !== "function") return [];
-
-        let query = table.select("workflow_id");
-        if (!query) return [];
-
-        if (cleanIds && typeof query.in === "function") {
+        if (cleanIds) {
             query = query.in("workflow_id", cleanIds);
         }
 
-        if (userId && typeof query.eq === "function") {
+        if (userId) {
             query = query.eq("user_id", userId);
         }
 
-        const res = await query;
-        if (res?.error) throw res.error;
-
-        const rows = Array.isArray(res?.data) ? res.data : [];
-        const cleanSet = cleanIds ? new Set(cleanIds) : null;
-        return rows
-            .map((row) => row?.workflow_id)
-            .filter((id) => Boolean(id) && (!cleanSet || cleanSet.has(id)));
+        const { data, error } = await query;
+        if (error) throw error;
+        return (data || []).map((row) => row.workflow_id).filter(Boolean);
     }
 
     /**

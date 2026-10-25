@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import express from "express";
 import http from "node:http";
 import apiRouter from "../../src/api/routes.js";
-import { db, projectReadService } from "../../src/container.js";
+import { db } from "../../src/container.js";
 import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
 import { supabase } from "../../lib/supabase.js";
 
@@ -209,7 +209,7 @@ describe("Trash List and Restore Routes Boundary Tests (T4)", () => {
         db.characters.findByCharacterId = async (id) =>
             mockCharacters.find((c) => c.id === id || c.workflow_id === id) || null;
         db.characters.findById = async (id) => mockCharacters.find((c) => c.id === id) || null;
-        db.characters.findByProjectOrWorkflowIds = async (projectId, workflowIds = []) => {
+        db.characters.findByProjectOrWorkflowIds = async ({ projectId, workflowIds = [] } = {}) => {
             const trashedIds = new Set(mockTrash.map((t) => t.workflow_id));
             return mockCharacters.filter(
                 (c) =>
@@ -351,23 +351,35 @@ describe("Trash List and Restore Routes Boundary Tests (T4)", () => {
         const delBody = await delRes.json();
         assert.equal(delBody.trashed, true);
 
+        // Also delete character via DELETE /api/characters/wf-char-A -> moves wf-char-A to Trash
+        const delCharRes = await fetch(`${baseUrl}/api/characters/wf-char-A`, {
+            method: "DELETE",
+            headers: { Authorization: "Bearer token-user-A" },
+        });
+        assert.equal(delCharRes.status, 200);
+
         // 2. Appears in GET /api/trash and is hidden from active readers
         const listRes1 = await fetch(`${baseUrl}/api/trash`, {
             headers: { Authorization: "Bearer token-user-A" },
         });
         assert.equal(listRes1.status, 200);
         const listBody1 = await listRes1.json();
-        assert.equal(listBody1.items.length, 1);
-        assert.equal(listBody1.items[0].workflow_id, "wf-elem-A");
-        assert.equal(listBody1.items[0].display_name, "Element WF A");
-        assert.equal(listBody1.items[0].workflow_type, "ELEMENT_SHEET");
+        assert.equal(listBody1.items.length, 2);
+        assert.equal(listBody1.items.some((i) => i.workflow_id === "wf-elem-A"), true);
+        assert.equal(listBody1.items.some((i) => i.workflow_id === "wf-char-A"), true);
 
         const activeWfsWhileTrashed = await db.workflows.findByProject("proj-A");
         assert.equal(activeWfsWhileTrashed.some((w) => w.id === "wf-elem-A"), false);
+        assert.equal(activeWfsWhileTrashed.some((w) => w.id === "wf-char-A"), false);
         const activeElemsWhileTrashed = await db.elements.list({ projectId: "proj-A" });
         assert.equal(activeElemsWhileTrashed.some((e) => e.id === "elem-A"), false);
+        const activeCharsWhileTrashed = await db.characters.findByProjectOrWorkflowIds({
+            projectId: "proj-A",
+            workflowIds: ["wf-char-A"],
+        });
+        assert.equal(activeCharsWhileTrashed.some((c) => c.id === "wf-char-A"), false);
 
-        // 3. Restore via POST /api/trash/wf-elem-A/restore
+        // 3. Restore both via POST /api/trash/:workflowId/restore
         const restoreRes = await fetch(`${baseUrl}/api/trash/wf-elem-A/restore`, {
             method: "POST",
             headers: { Authorization: "Bearer token-user-A" },
@@ -379,6 +391,12 @@ describe("Trash List and Restore Routes Boundary Tests (T4)", () => {
             workflow_id: "wf-elem-A",
             restored: true,
         });
+
+        const restoreCharRes = await fetch(`${baseUrl}/api/trash/wf-char-A/restore`, {
+            method: "POST",
+            headers: { Authorization: "Bearer token-user-A" },
+        });
+        assert.equal(restoreCharRes.status, 200);
 
         // 4. Verify public.workflow row was never deleted or recreated (exact same object reference)
         assert.equal(workflowDeleteCount, 0, "restore must never delete public.workflow");
@@ -394,8 +412,14 @@ describe("Trash List and Restore Routes Boundary Tests (T4)", () => {
 
         const activeWfsAfterRestore = await db.workflows.findByProject("proj-A");
         assert.equal(activeWfsAfterRestore.some((w) => w.id === "wf-elem-A"), true);
+        assert.equal(activeWfsAfterRestore.some((w) => w.id === "wf-char-A"), true);
         const activeElemsAfterRestore = await db.elements.list({ projectId: "proj-A" });
         assert.equal(activeElemsAfterRestore.some((e) => e.id === "elem-A"), true);
+        const activeCharsAfterRestore = await db.characters.findByProjectOrWorkflowIds({
+            projectId: "proj-A",
+            workflowIds: ["wf-char-A"],
+        });
+        assert.equal(activeCharsAfterRestore.some((c) => c.id === "wf-char-A"), true);
     });
 
     it("4. POST /api/trash/:workflowId/restore returns 404 when workflow is not in Trash, when called a second time after restore, or for a non-existent workflowId", async () => {

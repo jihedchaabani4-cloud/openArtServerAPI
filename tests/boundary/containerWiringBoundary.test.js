@@ -9,6 +9,8 @@ import { ElementService } from "../../src/domain/element/ElementService.js";
 import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
 import { CharacterService } from "../../src/domain/character/CharacterService.js";
 import { CharacterMediaService } from "../../src/domain/character/CharacterMediaService.js";
+import { TrashRepository } from "../../src/db/TrashRepository.js";
+import { TrashService } from "../../src/domain/trash/TrashService.js";
 
 describe("Container Service Graph & Dependency Wiring Boundary", () => {
     it("asserts that every WorkflowMediaService reachable from the container holds the exact same mediaUploadService instance", () => {
@@ -272,5 +274,29 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
             (err) => err.message.includes("CharacterMediaService requires storageService"),
             "CharacterMediaService constructor must throw if required dependencies are missing"
         );
+    });
+
+    it("TrashService & TrashRepository wiring: container exposes db.trash and trashService with shared domain services and zero circular references", () => {
+        assert.ok(container.db.trash instanceof TrashRepository, "container.db.trash must be instance of TrashRepository");
+        assert.ok(container.trashService instanceof TrashService, "container.trashService must be instance of TrashService");
+        assert.equal(container.trashService.db, container.db, "trashService.db must hold container.db");
+        assert.equal(
+            container.trashService.workflowService,
+            container.workflowService,
+            "trashService.workflowService must hold container.workflowService"
+        );
+        assert.equal(
+            container.trashService.elementService,
+            container.elementService,
+            "trashService.elementService must hold container.elementService"
+        );
+        assert.equal(
+            container.trashService.characterService,
+            container.characterService,
+            "trashService.characterService must hold container.characterService"
+        );
+        assert.equal(container.workflowService.trashService, undefined, "workflowService must not depend on trashService");
+        assert.equal(container.elementService.trashService, undefined, "elementService must not depend on trashService");
+        assert.equal(container.characterService.trashService, undefined, "characterService must not depend on trashService");
     });
 });

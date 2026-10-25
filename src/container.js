@@ -19,6 +19,7 @@ import { GenerationConfigRepository } from "#db/GenerationConfigRepository.js";
 import { CharacterRepository }        from "#db/CharacterRepository.js";
 import { ElementRepository }          from "#db/ElementRepository.js";
 import { FolderRepository }           from "#db/FolderRepository.js";
+import { TrashRepository }            from "#db/TrashRepository.js";
 
 // ─── Infrastructure ───────────────────────────────────────────────────────────
 import { WorkflowEventRecorder } from "./infrastructure/events/workflowEventRecorder.js";
@@ -41,6 +42,7 @@ import { GenerationRequestService } from "#domain/generation/GenerationRequestSe
 import { FolderService } from "./domain/folder/FolderService.js";
 import { WorkflowStorageGateway } from "./infrastructure/storage/workflowStorageGateway.js";
 import { AssetUploadService } from "./domain/asset/AssetUploadService.js";
+import { TrashService } from "./domain/trash/TrashService.js";
 
 import { UsageEventRepository } from "#platform/billing/UsageEventRepository.js";
 
@@ -182,6 +184,7 @@ export const db = {
     characters: new CharacterRepository(), // Dedicated Character Domain Repository
     elements:   new ElementRepository(),   // Dedicated Element Domain Repository
     folders:    new FolderRepository(),    // Dedicated Folders Domain Repository
+    trash:      new TrashRepository(),     // Dedicated Workflow Trash Repository
 };
 
 // ─── Workflow Architecture (feature 008) ─────────────────────────────────────
@@ -294,6 +297,13 @@ export const elementService = new ElementService({
 workflowService.setEntitySyncHandlers({
     syncCharacter: (targetWorkflowId, updates, userId) => characterService.updateCharacter({ characterId: targetWorkflowId, updates, userId }),
     syncElement: (targetWorkflowId, name) => elementService.updateElement(targetWorkflowId, { name }),
+});
+
+export const trashService = new TrashService({
+    db,
+    workflowService,
+    elementService,
+    characterService,
 });
 
 export const projectReadService = new ProjectReadService({ db });

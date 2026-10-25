@@ -19,6 +19,7 @@ Methods and dependencies are parsed from the code (best effort). "Owns" comes fr
 | `GenerationService` | `src/domain/generation` | - | `getAssets`, `getUserLibrary`, `getWorkflowDetail`, `deleteGeneration`, `updateGeneration`, `listProjectAssets` | `db` | `src/container.js` | 6 |
 | `ProjectReadService` | `src/domain/project` | - | `getProjectData`, `getWorkflowByMedia` | `db` | `src/container.js` | 3 |
 | `ProjectService` | `src/domain/project` | - | `listUserProjects`, `createProject`, `updateProject`, `deleteProject` | `projectRepo` | `src/container.js` | 1 |
+| `TrashService` | `src/domain/trash` | Workflow trash lifecycle (move to trash, permanent delete dispatch, list, and restore) | `requestDelete`, `requestDeleteMany`, `list`, `restore` | `db`, `workflowService`, `elementService`, `characterService` | `src/container.js` | 1 |
 | `LLMService` | `src/platform/ai` | - | `generate`, `generateText`, `generateJSON`, `analyzeVision`, `parseJSON` | `defaultModel` | - | 4 |
 | `PromptService` | `src/platform/ai` | - | `complete`, `completeJSON`, `checkPrompt`, `optimizePrompt`, `generateDnaFromPrompt`, `expandMinimalDna`, `processEditIntent`, `generateProfessionalPromptFromDna`, `generateNegativePrompt`, `generateSceneVariations` | `modelFamily` | `src/container.js` | 1 |
 | `FailedOpsService` | `src/platform/billing` | - | `record`, `getPendingOps`, `markCompleted`, `markRetryScheduled`, `markAbandoned` | `supabase` | `src/container.js`, `src/workers/walletWorker.js` | 2 |
@@ -42,4 +43,4 @@ Methods and dependencies are parsed from the code (best effort). "Owns" comes fr
 | `InMemoryWalletService` | `src/services` | - | `setBalance`, `getBalance`, `reserve`, `extendHold`, `commit`, `release`, `rollback`, `reapExpiredHolds` | `balances`, `reservations`, `HOLD_TTL_MS` | - | 0 |
 | `NodeSafetyService` | `src/v2/nodes/safety` | - | - | - | - | 4 |
 
-Services: 35. Without @owns: 35.
+Services: 36. Without @owns: 35.

@@ -33,7 +33,7 @@ function buildEmptyDeleteResult(workflowId, extra = {}) {
 }
 
 export class TrashService {
-    constructor({ db, workflowService, elementService, characterService } = {}) {
+    constructor({ db, workflowService, elementService, characterService, authService = null } = {}) {
         if (!db?.trash) {
             throw new Error("TrashService requires db.trash (TrashRepository)");
         }
@@ -51,6 +51,7 @@ export class TrashService {
         this.workflowService = workflowService;
         this.elementService = elementService;
         this.characterService = characterService;
+        this.authService = authService || workflowService.authService;
     }
 
     async _resolveOwnedWorkflowTarget({ kind, id, userId, req, traceId }) {
@@ -64,7 +65,7 @@ export class TrashService {
                     operation: "requestDelete",
                 });
             }
-            const isOwned = await this.workflowService.authService.verifyWorkflowOwnership(cleanId, userId, req);
+            const isOwned = await this.authService.verifyWorkflowOwnership(cleanId, userId, req);
             if (!isOwned) {
                 throw new CrudServiceError("Workflow not found", {
                     statusCode: 404,
@@ -85,9 +86,7 @@ export class TrashService {
                     operation: "requestDelete",
                 });
             }
-            if (userId) {
-                await assertOwns("element", id, userId);
-            }
+            await assertOwns("element", id, userId);
             const elementRecord = await this.db.elements.resolveRecord(id);
             if (elementRecord && !elementRecord.workflow_id) {
                 return { workflowId: null, orphanKind: "element", orphanId: elementRecord.id };
@@ -108,9 +107,7 @@ export class TrashService {
                     operation: "requestDelete",
                 });
             }
-            if (userId) {
-                await assertOwns("character", id, userId);
-            }
+            await assertOwns("character", id, userId);
             const charRecord = await this.db.characters.findByCharacterId(id);
             if (charRecord && !charRecord.workflow_id) {
                 return { workflowId: null, orphanKind: "character", orphanId: charRecord.id };
@@ -220,7 +217,7 @@ export class TrashService {
                 });
             }
 
-            const ownedIds = await this.workflowService.authService.verifyWorkflowOwnershipBulk(cleanIds, userId, req);
+            const ownedIds = await this.authService.verifyWorkflowOwnershipBulk(cleanIds, userId, req);
             if (!ownedIds) {
                 throw new CrudServiceError("Workflow not found", {
                     statusCode: 404,

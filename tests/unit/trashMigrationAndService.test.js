@@ -329,6 +329,16 @@ describe("T1: public.trash Migration, TrashRepository, and TrashService", () => 
 
         setDb(fakeDb);
         try {
+            // 0. Unauthenticated element or character delete -> 401 before any trash insert
+            await assert.rejects(
+                () => trashService.requestDelete({ kind: "element", id: "elem-1", userId: null }),
+                (err) => err.statusCode === 401
+            );
+            await assert.rejects(
+                () => trashService.requestDelete({ kind: "character", id: "wf-char-1", userId: null }),
+                (err) => err.statusCode === 401
+            );
+
             // 1. Cross-tenant workflow, element, and character -> 404 before any trash insert
         await assert.rejects(
             () => trashService.requestDelete({ kind: "workflow", id: "wf-gen-1", userId: "attacker" }),

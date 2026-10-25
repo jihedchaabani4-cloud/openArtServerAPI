@@ -17,6 +17,7 @@ import v2WorkflowsRouter from '../../routes/v2/workflows.js';
 import elementRoutes     from '../../routes/elementRoutes.js';
 import mediaIngestRouter from '../../routes/mediaIngestRoutes.js';
 import foldersRouter     from '../../routes/folders.js';
+import trashRouter       from '../../routes/trash.js';
 
 const router = express.Router();
 
@@ -39,6 +40,7 @@ router.use('/wallet',       walletRouter);
 router.use('/admin',        adminRouter);
 router.use('/v2/workflows', v2WorkflowsRouter);
 router.use('/v2/elements',  elementRoutes);
+router.use('/trash',        trashRouter);
 
 export default router;
 

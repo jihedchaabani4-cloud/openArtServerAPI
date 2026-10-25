@@ -93,6 +93,7 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
   let origDbCollectionItemsFindById;
   let origDbFoldersFindOwned;
   let origDbFoldersListByProject;
+  let origDbTrashDeleteByWorkflowAndUser;
 
   let origSupabaseFrom;
 
@@ -222,6 +223,11 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
       db.folders.findOwned = async () => null;
       db.folders.listByProject = async () => [];
     }
+
+    if (db?.trash) {
+      origDbTrashDeleteByWorkflowAndUser = db.trash.deleteByWorkflowAndUser;
+      db.trash.deleteByWorkflowAndUser = async () => null;
+    }
   });
 
   afterEach(() => {
@@ -253,6 +259,9 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     if (db?.folders) {
       if (origDbFoldersFindOwned) db.folders.findOwned = origDbFoldersFindOwned;
       if (origDbFoldersListByProject) db.folders.listByProject = origDbFoldersListByProject;
+    }
+    if (db?.trash && origDbTrashDeleteByWorkflowAndUser) {
+      db.trash.deleteByWorkflowAndUser = origDbTrashDeleteByWorkflowAndUser;
     }
     if (origRunRepoGetRun) {
       RunRepository.prototype.getRun = origRunRepoGetRun;
@@ -636,6 +645,15 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
   });
 
+  it("TEST R4-48: POST /api/trash/:workflowId/restore for foreign workflow returns 404", async () => {
+    const res = await reqAlice(`/api/trash/${FOREIGN_WF_ID}/restore`, {
+      method: "POST",
+    });
+    const body = await res.json();
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+    assert.equal(body.ok, false);
+  });
+
   // ── PART 2: Generic Automated Test — Walks Dumped Route Table & Asserts 100% Foreign Refusal Coverage ──
 
   it("TEST R4-GENERIC: Every authenticated route touching a resource ID has an explicit foreign-refusal test asserting 404/403", () => {
@@ -659,6 +677,7 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
       "POST /api/projects/:projectId/folders",
       "DELETE /api/projects/:id",
       "PATCH /api/projects/:id",
+      "POST /api/trash/:workflowId/restore",
       "DELETE /api/v2/elements/:id",
       "GET /api/v2/elements/:id",
       "PATCH /api/v2/elements/:id",

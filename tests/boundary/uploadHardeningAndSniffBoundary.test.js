@@ -392,39 +392,64 @@ describe("RC1.4-D2.3 — Upload Hardening and Sniff Boundary Tests", () => {
       });
     });
 
-    it("TEST D2.3-b4: 3rd concurrent upload of the same user returns 429", async () => {
+    it("TEST D2.3-b4: with env unset, 3 concurrent uploads of one user pass, the 4th gets 429 TOO_MANY_CONCURRENT_UPLOADS, another user is unaffected", async () => {
+      const origEnv = process.env.MAX_CONCURRENT_UPLOADS_PER_USER;
+      delete process.env.MAX_CONCURRENT_UPLOADS_PER_USER;
+
       const storage = createSizeLimitedMemoryStorage({
         imageLimit: 20 * 1024 * 1024,
         videoLimit: 100 * 1024 * 1024,
       });
 
-      const user = "concurrent-test-user";
+      const userA = "concurrent-user-a";
+      const userB = "concurrent-user-b";
       const jpegHeader = createSampleBytes("jpeg");
 
-      // Create three hanging streams that stay open (concurrency limit = 3)
-      const stream1 = new Readable({ read() { this.push(jpegHeader); } });
-      const stream2 = new Readable({ read() { this.push(jpegHeader); } });
-      const stream3 = new Readable({ read() { this.push(jpegHeader); } });
-      const stream4 = new Readable({ read() { this.push(jpegHeader); } });
+      // 3 hanging streams for user A (concurrency limit = 3)
+      const streamA1 = new Readable({ read() { this.push(jpegHeader); } });
+      const streamA2 = new Readable({ read() { this.push(jpegHeader); } });
+      const streamA3 = new Readable({ read() { this.push(jpegHeader); } });
+      const streamA4 = new Readable({ read() { this.push(jpegHeader); } });
+      const streamB1 = new Readable({ read() { this.push(jpegHeader); } });
 
-      storage._handleFile({ user: { id: user } }, { mimetype: "image/jpeg", stream: stream1 }, () => {});
-      storage._handleFile({ user: { id: user } }, { mimetype: "image/jpeg", stream: stream2 }, () => {});
-      storage._handleFile({ user: { id: user } }, { mimetype: "image/jpeg", stream: stream3 }, () => {});
+      let errA1 = null;
+      let errA2 = null;
+      let errA3 = null;
+      let errB1 = null;
 
-      // 4th upload should immediately return 429
-      await new Promise((resolve) => {
-        storage._handleFile({ user: { id: user } }, { mimetype: "image/jpeg", stream: stream4 }, (err) => {
-          assert.ok(err, "4th concurrent upload must fail");
-          assert.equal(err.statusCode, 429);
-          assert.equal(err.code, "TOO_MANY_CONCURRENT_UPLOADS");
-          resolve();
+      try {
+        storage._handleFile({ user: { id: userA } }, { mimetype: "image/jpeg", stream: streamA1 }, (err) => { errA1 = err; });
+        storage._handleFile({ user: { id: userA } }, { mimetype: "image/jpeg", stream: streamA2 }, (err) => { errA2 = err; });
+        storage._handleFile({ user: { id: userA } }, { mimetype: "image/jpeg", stream: streamA3 }, (err) => { errA3 = err; });
+
+        assert.equal(errA1, null, "1st upload for user A must pass");
+        assert.equal(errA2, null, "2nd upload for user A must pass");
+        assert.equal(errA3, null, "3rd upload for user A must pass");
+
+        // 4th upload for user A gets 429 TOO_MANY_CONCURRENT_UPLOADS
+        await new Promise((resolve) => {
+          storage._handleFile({ user: { id: userA } }, { mimetype: "image/jpeg", stream: streamA4 }, (err) => {
+            assert.ok(err, "4th concurrent upload for user A must fail");
+            assert.equal(err.statusCode, 429);
+            assert.equal(err.code, "TOO_MANY_CONCURRENT_UPLOADS");
+            resolve();
+          });
         });
-      });
 
-      // Close stream1, stream2, and stream3 to release concurrency
-      stream1.push(null);
-      stream2.push(null);
-      stream3.push(null);
+        // Concurrently, user B upload passes without interference
+        storage._handleFile({ user: { id: userB } }, { mimetype: "image/jpeg", stream: streamB1 }, (err) => { errB1 = err; });
+        assert.equal(errB1, null, "1st upload for user B must be unaffected and pass");
+      } finally {
+        if (origEnv !== undefined) {
+          process.env.MAX_CONCURRENT_UPLOADS_PER_USER = origEnv;
+        } else {
+          delete process.env.MAX_CONCURRENT_UPLOADS_PER_USER;
+        }
+        streamA1.push(null);
+        streamA2.push(null);
+        streamA3.push(null);
+        streamB1.push(null);
+      }
     });
   });
 

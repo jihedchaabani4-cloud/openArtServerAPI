@@ -115,6 +115,45 @@ describe("workflow_media write helper (B1) — workflow_media ONLY, no media.wor
     assert.equal(insertedPayload.step_id, "CAE");
   });
 
+  it("MediaRepository.createMedia strips non-column properties (user_id, format) from insert payload", async () => {
+    let insertedPayload = null;
+    const repo = new MediaRepository();
+    repo.client = () => ({
+      from: (table) => {
+        assert.equal(table, "media");
+        return {
+          insert: (payload) => {
+            insertedPayload = payload;
+            return {
+              select: () => ({
+                single: async () => ({ data: { id: "m-1", ...payload }, error: null }),
+              }),
+            };
+          },
+        };
+      },
+    });
+
+    await repo.createMedia({
+      workflow_id: "should-be-stripped",
+      user_id: "should-be-stripped",
+      format: "PNG",
+      project_id: "proj-1",
+      generation_config_id: "cfg-1",
+      step_id: "CAE",
+      url: "https://cdn.example.com/cae.png",
+      width: 1024,
+      height: 1024,
+      status: "success",
+    });
+
+    assert.ok(insertedPayload, "insert must be called");
+    assert.equal("workflow_id" in insertedPayload, false, "workflow_id must NOT be present in media insert payload");
+    assert.equal("user_id" in insertedPayload, false, "user_id must NOT be present in media insert payload");
+    assert.equal("format" in insertedPayload, false, "format must NOT be present in media insert payload");
+    assert.equal(insertedPayload.project_id, "proj-1");
+  });
+
   it("Path 1 (Uploads / MediaService) & Path 5 (CAE): creates media without workflow_id and links via workflow_media", async () => {
     const createMediaPayloads = [];
     const linkCalls = [];

@@ -82,7 +82,7 @@ function createMockHarness() {
                 const id = fields.id || randomUUID();
                 const record = { id, ...fields };
                 media.set(id, record);
-                callLog.push({ op: "media.createMedia", id, url: fields.url });
+                callLog.push({ op: "media.createMedia", id, url: fields.url, fields });
                 return record;
             },
             deleteById: async (id) => {
@@ -940,6 +940,38 @@ describe("Ticket 03 — WorkflowMediaService Single Attach Seam & Explicit Rollb
             assert.equal(handle.entries[1].mediaCreatedInCall, false);
             assert.equal(handle.entries[1].linkCreatedInCall, true);
             assert.equal(handle.entries[1].storageKey, null);
+        });
+
+        it("passes only valid media schema fields to db.media.createMedia (omitting user_id and format)", async () => {
+            const h = createMockHarness();
+            const wfId = "00000000-0000-0000-0000-000000000001";
+            h.workflows.set(wfId, { id: wfId, user_id: "user-1", project_id: "proj-1" });
+
+            await h.service.attachMediaItems({
+                workflowId: wfId,
+                userId: "user-1",
+                projectId: "proj-1",
+                role: "detail",
+                maxAllowed: 6,
+                items: [
+                    {
+                        kind: "uploaded",
+                        uploadedFile: {
+                            storageKey: "user-1/uploads/upload1.png",
+                            url: "https://storage.test/upload1.png",
+                            width: 200,
+                            height: 200,
+                            format: "PNG",
+                        },
+                    },
+                ],
+            });
+
+            const createCall = h.callLog.find((c) => c.op === "media.createMedia");
+            assert.ok(createCall, "createMedia must be called");
+            assert.equal("user_id" in createCall.fields, false, "user_id must NOT be passed to createMedia");
+            assert.equal("format" in createCall.fields, false, "format must NOT be passed to createMedia");
+            assert.equal(createCall.fields.project_id, "proj-1");
         });
 
         it("idempotent re-attachment marks is_existing: true and does not create duplicate links", async () => {

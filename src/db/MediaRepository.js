@@ -14,14 +14,23 @@ export class MediaRepository extends BaseRepository {
      *
      * @param {string} step_id - "CAE" for init/upload | "CAM", "CAU"... for edits
      */
-    async createMedia({ workflow_id: _ignoredWorkflowId, project_id, generation_config_id, step_id, url, width, height, ...extra }) {
+    async createMedia({
+        workflow_id: _ignoredWorkflowId,
+        user_id: _ignoredUserId,
+        format: _ignoredFormat,
+        project_id,
+        step_id,
+        url,
+        width,
+        height,
+        ...extra
+    }) {
         const resolvedWidth = width ? Number(width) : 1024;
         const resolvedHeight = height ? Number(height) : 1024;
         const { data, error } = await this.client()
             .from(this.tableName)
             .insert({
                 project_id,
-                generation_config_id,
                 step_id,
                 url,
                 width: resolvedWidth,
@@ -74,12 +83,7 @@ export class MediaRepository extends BaseRepository {
                 workflow:workflow_id (
                     workflow_type
                 ),
-                media:media_id (
-                    *,
-                    config:generation_config (
-                       dna_data:dna(name, type, description, traits)
-                    )
-                )
+                media:media_id (*)
             `)
             .eq("workflow_id", workflow_id)
             .order("created_at", { ascending: false });
@@ -107,12 +111,7 @@ export class MediaRepository extends BaseRepository {
         if (!id || typeof id !== "string") return null;
         const { data: byId, error: byIdErr } = await this.client()
             .from(this.tableName)
-            .select(`
-                *,
-                config:generation_config (
-                   dna_data:dna(name, type, description, traits)
-                )
-            `)
+            .select("*")
             .eq("id", id)
             .not("url", "is", null)
             .limit(1)
@@ -144,19 +143,23 @@ export class MediaRepository extends BaseRepository {
         return data;
     }
 
+    async findByProjectAll(project_id) {
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("id, step_id, url, width, height, create_time, status, error_message, generation_config")
+            .eq("project_id", project_id)
+            .order("create_time", { ascending: false });
+        if (error) throw error;
+        return data || [];
+    }
+
     /**
      * Finds media with its generation_config and workflow context via workflow_media.
      */
     async findWithContext(id) {
         const { data, error } = await this.client()
             .from(this.tableName)
-            .select(`
-                *,
-                config:generation_config (
-                    id, prompt, model, aspect_ratio, generation_type, seed,
-                    dna_data:dna(name, type, description, traits)
-                )
-            `)
+            .select("*")
             .eq("id", id)
             .single();
         if (error) throw error;
@@ -167,7 +170,7 @@ export class MediaRepository extends BaseRepository {
                 workflow_id,
                 role,
                 workflow:workflow_id (
-                    id, display_name, session_id, variation_index, workflow_type
+                    id, display_name, workflow_type
                 )
             `)
             .eq("media_id", id)
@@ -248,10 +251,25 @@ export class MediaRepository extends BaseRepository {
         if (!ids || ids.length === 0) return [];
         const { data, error } = await this.client()
             .from(this.tableName)
-            .select("id, generation_config_id, step_id, url, width, height, status, error_message, create_time")
+            .select("id, step_id, url, width, height, status, error_message, create_time")
             .in("id", ids);
         if (error) throw error;
         return data || [];
+    }
+
+    /**
+     * Resolves the user_id that owns the project containing this media.
+     * Used for media ownership authorization checks without leaking Supabase into domain services.
+     */
+    async findOwnerByMediaId(mediaId) {
+        if (!mediaId) return null;
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("id, project:project!project_id(user_id)")
+            .eq("id", mediaId)
+            .maybeSingle();
+        if (error || !data) return null;
+        return data.project?.user_id || null;
     }
 
     /**
@@ -266,7 +284,7 @@ export class MediaRepository extends BaseRepository {
     async findByProjectPaginated(projectId, { sessionId, limit = 30, offset = 0 } = {}) {
         let query = this.client()
             .from(this.tableName)
-            .select("id, url, width, height, step_id, create_time")
+            .select("id, url, width, height, step_id, create_time, generation_config")
             .eq("project_id", projectId)
             .order("create_time", { ascending: false })
             .range(Number(offset), Number(offset) + Number(limit) - 1);

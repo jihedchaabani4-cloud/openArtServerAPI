@@ -374,12 +374,10 @@ export class WorkflowMediaService {
                     const uf = item.uploadedFile;
                     const mediaRecord = await this.db.media.createMedia({
                         project_id: projectId,
-                        user_id: userId,
                         url: uf.url,
                         step_id: item.stepId || "upload",
                         width: uf.width,
                         height: uf.height,
-                        format: uf.format,
                         status: "success",
                     });
                     entry.mediaId = mediaRecord.id;

@@ -136,7 +136,7 @@ describe("RC1.1-R2 — Collection Items Ownership & Generic Delete Helpers Bound
   });
 
   // ── TEST 4: Owner toggling like on collection item succeeds ──
-  it("TEST 4: Owner calling PATCH /api/workflows/items/:id/like succeeds with 200", async () => {
+  it("TEST 4: Owner calling PATCH /api/workflows/items/:id/like returns 501 NOT_SUPPORTED", async () => {
     activeUserId = "user-alice"; // Alice toggles like on her own item
 
     const res = await fetch(`${baseUrl}/api/workflows/items/item-alice-1/like`, {
@@ -147,7 +147,8 @@ describe("RC1.1-R2 — Collection Items Ownership & Generic Delete Helpers Bound
     });
 
     const body = await res.json();
-    assert.equal(res.status, 200, `Expected 200, got ${res.status}: ${JSON.stringify(body)}`);
-    assert.equal(body.ok, true);
+    assert.equal(res.status, 501, `Expected 501, got ${res.status}: ${JSON.stringify(body)}`);
+    assert.equal(body.ok, false);
+    assert.equal(body.errorCode, "NOT_SUPPORTED");
   });
 });

@@ -116,7 +116,14 @@ describe("T1: public.trash Migration, TrashRepository, and TrashService", () => 
                                 calls.push({ op: "order", col, opts });
                                 return { data: simulatedListRows, error: null };
                             },
-                            then: (resolve) => resolve({ data: [{ workflow_id: "wf-1" }], error: null }),
+                            then: (resolve) => resolve({
+                                data: simulatedListRows.map((r) => ({
+                                    workflow_id: r.workflow_id,
+                                    deleted_at: r.deleted_at,
+                                    deleted_by: "user-1",
+                                })),
+                                error: null,
+                            }),
                         };
                         return chain;
                     },
@@ -151,16 +158,14 @@ describe("T1: public.trash Migration, TrashRepository, and TrashService", () => 
         const conflict = await repo.insertIfAbsent({ workflowId: "wf-1", userId: "user-1" });
         assert.equal(conflict, null);
 
-        // listByUser maps joined workflow fields
-        const items = await repo.listByUser("user-1");
-        assert.deepEqual(items, [
-            {
-                workflow_id: "wf-1",
-                display_name: "Sunset",
-                workflow_type: "GENERATION",
-                deleted_at: "2026-10-25T18:00:00.000Z",
-            },
-        ]);
+        // getTrashedDetailsMap returns candidate workflow details
+        const detailsMap = await repo.getTrashedDetailsMap({ workflowIds: ["wf-1", "wf-2"] });
+        assert.equal(detailsMap.size, 1);
+        assert.deepEqual(detailsMap.get("wf-1"), {
+            workflow_id: "wf-1",
+            deleted_at: "2026-10-25T18:00:00.000Z",
+            deleted_by: "user-1",
+        });
 
         // deleteByWorkflowAndUser returns true when row deleted, false when 0 rows deleted
         const delOk = await repo.deleteByWorkflowAndUser({ workflowId: "wf-1", userId: "user-1" });
@@ -549,18 +554,6 @@ describe("T1: public.trash Migration, TrashRepository, and TrashService", () => 
             characterService: {},
         });
 
-        await assert.rejects(
-            () => trashService.list({ userId: null }),
-            (err) => err.statusCode === 401
-        );
-
-        const u1List = await trashService.list({ userId: "user-1" });
-        assert.equal(u1List.length, 1);
-        assert.equal(u1List[0].workflow_id, "wf-u1-1");
-
-        const u2List = await trashService.list({ userId: "user-2" });
-        assert.deepEqual(u2List, []);
-
         // Cross-tenant restore -> 404 and leaves user-1's trash row untouched
         await assert.rejects(
             () => trashService.restore({ workflowId: "wf-u1-1", userId: "user-2" }),
@@ -579,5 +572,241 @@ describe("T1: public.trash Migration, TrashRepository, and TrashService", () => 
             () => trashService.restore({ workflowId: "wf-u1-1", userId: "user-1" }),
             (err) => err.statusCode === 404 && err.errorCode === "NOT_FOUND"
         );
+    });
+
+    it("TrashService.restoreAll restores all trashed workflows scoped by user and project", async () => {
+        const trashRows = new Map([
+            ["wf-1", { workflow_id: "wf-1", user_id: "user-1" }],
+            ["wf-2", { workflow_id: "wf-2", user_id: "user-1" }],
+            ["wf-foreign", { workflow_id: "wf-foreign", user_id: "user-2" }],
+        ]);
+
+        const trashService = new TrashService({
+            db: {
+                trash: {
+                    deleteManyByUser: async ({ userId, workflowIds }) => {
+                        const restored = [];
+                        for (const [id, row] of trashRows.entries()) {
+                            if (row.user_id === userId) {
+                                if (!workflowIds || workflowIds.includes(id)) {
+                                    restored.push(id);
+                                    trashRows.delete(id);
+                                }
+                            }
+                        }
+                        return restored;
+                    },
+                },
+                workflows: {
+                    findByProject: async (projectId, { partitioned } = {}) => {
+                        if (projectId === "proj-1") {
+                            return {
+                                active: [],
+                                trashed: [{ id: "wf-1" }, { id: "wf-2" }],
+                            };
+                        }
+                        return { active: [], trashed: [] };
+                    },
+                },
+            },
+            workflowService: {
+                authService: {},
+            },
+            elementService: {},
+            characterService: {},
+        });
+
+        // 1. Unauthenticated -> 401
+        await assert.rejects(
+            () => trashService.restoreAll({}),
+            (err) => err.statusCode === 401 && err.errorCode === "UNAUTHORIZED"
+        );
+
+        // 2. Restore all workflows for user-1
+        const result = await trashService.restoreAll({ userId: "user-1" });
+        assert.equal(result.restored, true);
+        assert.equal(result.count, 2);
+        assert.deepEqual(result.workflow_ids.sort(), ["wf-1", "wf-2"]);
+
+        // user-2 foreign trash row remains untouched
+        assert.equal(trashRows.has("wf-foreign"), true);
+        assert.equal(trashRows.has("wf-1"), false);
+        assert.equal(trashRows.has("wf-2"), false);
+
+        // 3. Called when trash is empty -> returns count 0
+        const emptyResult = await trashService.restoreAll({ userId: "user-1" });
+        assert.equal(emptyResult.restored, true);
+        assert.equal(emptyResult.count, 0);
+        assert.deepEqual(emptyResult.workflow_ids, []);
+    });
+
+    it("TrashService.requestDelete and requestDeleteMany default trash=true on 1st delete, permanently delete directly on 1st delete when trash=false, keep data in trash when trash is unknown, and return 404 on cross-tenant trash=false", async () => {
+        const trashRows = new Map();
+        const insertTrashCalls = [];
+        const permanentCalls = [];
+
+        const mockWorkflows = new Map([
+            ["wf-default", { id: "wf-default", project_id: "proj-u1", user_id: "user-1", workflow_type: "GENERATION" }],
+            ["wf-unknown-param", { id: "wf-unknown-param", project_id: "proj-u1", user_id: "user-1", workflow_type: "GENERATION" }],
+            ["wf-direct-del", { id: "wf-direct-del", project_id: "proj-u1", user_id: "user-1", workflow_type: "GENERATION" }],
+            ["wf-elem-direct", { id: "wf-elem-direct", project_id: "proj-u1", user_id: "user-1", workflow_type: "ELEMENT_SHEET" }],
+            ["wf-char-direct", { id: "wf-char-direct", project_id: "proj-u1", user_id: "user-1", workflow_type: "CHARACTER" }],
+            ["wf-batch-1", { id: "wf-batch-1", project_id: "proj-u1", user_id: "user-1", workflow_type: "GENERATION" }],
+            ["wf-batch-2", { id: "wf-batch-2", project_id: "proj-u1", user_id: "user-1", workflow_type: "GENERATION" }],
+        ]);
+        const mockElements = new Map([
+            ["elem-direct", { id: "elem-direct", workflow_id: "wf-elem-direct", name: "Direct Relic" }],
+        ]);
+        const mockCharacters = new Map([
+            ["wf-char-direct", { id: "wf-char-direct", workflow_id: "wf-char-direct", user_id: "user-1", project_id: "proj-u1", name: "Direct Hero" }],
+        ]);
+
+        const fakeDb = {
+            trash: {
+                insertIfAbsent: async ({ workflowId, userId, deletedBy = userId }) => {
+                    insertTrashCalls.push(workflowId);
+                    if (trashRows.has(workflowId)) return null;
+                    const row = {
+                        id: `trash-${workflowId}`,
+                        workflow_id: workflowId,
+                        user_id: userId,
+                        deleted_at: new Date().toISOString(),
+                        deleted_by: deletedBy,
+                    };
+                    trashRows.set(workflowId, row);
+                    return row;
+                },
+            },
+            workflows: {
+                findById: async (id) => mockWorkflows.get(id) || null,
+                getWorkflow: async (id) => mockWorkflows.get(id) || null,
+            },
+            elements: {
+                resolveRecord: async (id) =>
+                    mockElements.get(id) ||
+                    [...mockElements.values()].find((e) => e.workflow_id === id) ||
+                    null,
+                findById: async (id) => mockElements.get(id) || null,
+                findByWorkflowId: async (wfId) =>
+                    [...mockElements.values()].find((e) => e.workflow_id === wfId) || null,
+            },
+            characters: {
+                findByCharacterId: async (id) =>
+                    mockCharacters.get(id) ||
+                    [...mockCharacters.values()].find((c) => c.workflow_id === id) ||
+                    null,
+                findById: async (id) => mockCharacters.get(id) || null,
+            },
+            projects: {
+                findByUser: async (uid, pid) => (uid === "user-1" && pid === "proj-u1" ? [{ id: "proj-u1", user_id: "user-1" }] : []),
+            },
+        };
+
+        const trashService = new TrashService({
+            db: fakeDb,
+            workflowService: {
+                authService: {
+                    verifyWorkflowOwnership: async (wfId, uid) => mockWorkflows.get(wfId)?.user_id === uid,
+                    verifyWorkflowOwnershipBulk: async (wfIds, uid) => {
+                        const owned = wfIds.filter((id) => mockWorkflows.get(id)?.user_id === uid);
+                        return owned.length === wfIds.length ? owned : null;
+                    },
+                },
+                deleteWorkflow: async ({ workflowId, userId }) => {
+                    permanentCalls.push({ service: "workflow", workflowId, userId });
+                    trashRows.delete(workflowId);
+                    return {
+                        workflowId,
+                        unlinkedMediaCount: 1,
+                        deletedOrphanCount: 1,
+                        deletedMediaCount: 1,
+                        storageFailures: [],
+                    };
+                },
+            },
+            elementService: {
+                deleteElement: async (id, userId) => {
+                    const elem = mockElements.get(id);
+                    permanentCalls.push({ service: "element", id, userId });
+                    if (elem?.workflow_id) trashRows.delete(elem.workflow_id);
+                    return {
+                        workflowId: elem?.workflow_id || id,
+                        unlinkedMediaCount: 2,
+                        deletedOrphanCount: 2,
+                        deletedMediaCount: 2,
+                        storageFailures: [],
+                    };
+                },
+            },
+            characterService: {
+                deleteCharacter: async ({ characterId, userId }) => {
+                    const char = mockCharacters.get(characterId);
+                    permanentCalls.push({ service: "character", characterId, userId });
+                    if (char?.workflow_id) trashRows.delete(char.workflow_id);
+                    return {
+                        workflowId: char?.workflow_id || characterId,
+                        unlinkedMediaCount: 3,
+                        deletedOrphanCount: 3,
+                        deletedMediaCount: 3,
+                        storageFailures: [],
+                    };
+                },
+            },
+        });
+
+        setDb(fakeDb);
+        try {
+            // 1. Cross-tenant with trash: false -> 404 before any delete or trash write
+            await assert.rejects(
+                () => trashService.requestDelete({ kind: "workflow", id: "wf-direct-del", userId: "attacker", trash: false }),
+                (err) => err.statusCode === 404
+            );
+            assert.equal(permanentCalls.length, 0);
+            assert.equal(insertTrashCalls.length, 0);
+
+            // 2. Omitted trash (default true) and unknown trash value -> move to trash (keep data)
+            const defaultRes = await trashService.requestDelete({ kind: "workflow", id: "wf-default", userId: "user-1" });
+            assert.equal(defaultRes.trashed, true);
+            assert.equal(trashRows.has("wf-default"), true);
+
+            const unknownRes = await trashService.requestDelete({ kind: "workflow", id: "wf-unknown-param", userId: "user-1", trash: "unexpected" });
+            assert.equal(unknownRes.trashed, true);
+            assert.equal(trashRows.has("wf-unknown-param"), true);
+            assert.equal(permanentCalls.length, 0);
+
+            // 3. Explicit trash: false on 1st delete -> skips insertIfAbsent and permanently deletes directly
+            insertTrashCalls.length = 0;
+            const directWfRes = await trashService.requestDelete({ kind: "workflow", id: "wf-direct-del", userId: "user-1", trash: false });
+            assert.equal("trashed" in directWfRes, false);
+            assert.equal(directWfRes.deletedMediaCount, 1);
+            assert.equal(insertTrashCalls.length, 0, "trash=false must skip insertIfAbsent");
+            assert.deepEqual(permanentCalls[0], { service: "workflow", workflowId: "wf-direct-del", userId: "user-1" });
+
+            // 4. Explicit trash: "false" (query string form) on 1st delete for element and character -> direct permanent delete
+            const directElemRes = await trashService.requestDelete({ kind: "element", id: "elem-direct", userId: "user-1", trash: "false" });
+            assert.equal("trashed" in directElemRes, false);
+            assert.equal(directElemRes.deletedMediaCount, 2);
+            assert.equal(insertTrashCalls.length, 0);
+            assert.deepEqual(permanentCalls[1], { service: "element", id: "elem-direct", userId: "user-1" });
+
+            const directCharRes = await trashService.requestDelete({ kind: "character", id: "wf-char-direct", userId: "user-1", trash: false });
+            assert.equal("trashed" in directCharRes, false);
+            assert.equal(directCharRes.deletedMediaCount, 3);
+            assert.equal(insertTrashCalls.length, 0);
+            assert.deepEqual(permanentCalls[2], { service: "character", characterId: "wf-char-direct", userId: "user-1" });
+
+            // 5. requestDeleteMany with trash: false -> permanently deletes batch on 1st delete without inserting into trash
+            const batchDirectRes = await trashService.requestDeleteMany({
+                ids: ["wf-batch-1", "wf-batch-2"],
+                userId: "user-1",
+                trash: false,
+            });
+            assert.deepEqual(batchDirectRes.workflow_ids, ["wf-batch-1", "wf-batch-2"]);
+            assert.equal("trashed" in batchDirectRes, false);
+            assert.equal(insertTrashCalls.length, 0);
+            assert.equal(permanentCalls.length, 5);
+        } finally {
+            setDb(null);
+        }
     });
 });

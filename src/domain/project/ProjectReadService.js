@@ -49,13 +49,26 @@ export class ProjectReadService {
             };
         }
 
-        const { data: projectData, error: projectError } = await supabase
-            .from("project")
-            .select("project_name, user_id")
-            .eq("id", projectId)
-            .single();
+        let projectData = null;
+        try {
+            if (this.db?.projects?.findById) {
+                projectData = await this.db.projects.findById(projectId, "project_name, user_id");
+            } else {
+                const query = supabase
+                    .from("project")
+                    .select("project_name, user_id")
+                    .eq("id", projectId);
+                const res = typeof query.maybeSingle === "function"
+                    ? await query.maybeSingle()
+                    : await query.single().catch(() => ({ data: null }));
+                projectData = res?.data || null;
+            }
+        } catch (err) {
+            projectLogger.error({ event: "project_read.project_query_error", err: err?.message || String(err) }, "Project query error");
+            throw new CrudServiceError("Project not found", { statusCode: 404, errorCode: "PROJECT_NOT_FOUND" });
+        }
 
-        if (projectError || !projectData) {
+        if (!projectData) {
             throw new CrudServiceError("Project not found", { statusCode: 404, errorCode: "PROJECT_NOT_FOUND" });
         }
 
@@ -82,94 +95,153 @@ export class ProjectReadService {
 
         // Fetch workflows and media concurrently to minimize latency
         const [workflowsResult, mediaResult] = await Promise.all([
-            this.db.workflows
-                .findByProject(projectId, {
-                    select: "id, display_name, variation_index, primary_media_id, create_time, session_id, favorited, workflow_type, folder_id",
-                    order: { column: "create_time", ascending: false },
-                })
-                .catch((err) => {
-                    projectLogger.error({ event: "project_read.workflow_query_error", err: err?.message || String(err) }, "Workflow query error");
-                    return [];
-                }),
-            supabase
-                .from("media")
-                .select(`
-                    id, step_id, url, width, height, create_time, status, error_message,
-                    generation_config_id,
-                    generation_config (
-                        id, prompt, model, aspect_ratio, generation_type, seed, visibility
-                    )
-                `)
-                .eq("project_id", projectId)
-                .order("create_time", { ascending: false }),
+            this.db?.workflows?.findByProject
+                ? this.db.workflows
+                      .findByProject(projectId, {
+                          select: "id, display_name, create_time, favorited, workflow_type, folder_id",
+                          order: { column: "create_time", ascending: false },
+                          partitioned: true,
+                      })
+                      .catch((err) => {
+                          projectLogger.error({ event: "project_read.workflow_query_error", err: err?.message || String(err) }, "Workflow query error");
+                          return { active: [], trashed: [] };
+                      })
+                : { active: [], trashed: [] },
+            this.db?.media?.findByProjectAll
+                ? this.db.media
+                      .findByProjectAll(projectId)
+                      .catch((err) => {
+                          projectLogger.error({ event: "project_read.media_query_error", err: err?.message || String(err) }, "Media query error");
+                          return [];
+                      })
+                : supabase
+                      .from("media")
+                      .select("id, step_id, url, width, height, create_time, status, error_message, generation_config")
+                      .eq("project_id", projectId)
+                      .order("create_time", { ascending: false })
+                      .then((r) => r.data || [])
+                      .catch(() => []),
         ]);
 
-        const workflows = workflowsResult || [];
-        let mediaItems = mediaResult.data || [];
-        if (mediaResult.error) {
-            projectLogger.error({ event: "project_read.media_query_error", err: mediaResult.error.message }, "Media query error");
-            // Resilience fallback: query media directly without relation joins
-            const fallbackResult = await supabase
-                .from("media")
-                .select("id, step_id, url, width, height, create_time, status, error_message, generation_config_id")
-                .eq("project_id", projectId)
-                .order("create_time", { ascending: false });
-            if (fallbackResult.data) {
-                mediaItems = fallbackResult.data;
-            }
-        }
+        const workflows = Array.isArray(workflowsResult)
+            ? workflowsResult
+            : (workflowsResult?.active || []);
+        const rawTrashedWorkflows = Array.isArray(workflowsResult)
+            ? []
+            : (workflowsResult?.trashed || []);
 
-        const formattedSessions = [];
+        const mediaItems = mediaResult || [];
 
         const workflowIds = (workflows || []).map((w) => w.id);
+        const trashedWorkflowIds = (rawTrashedWorkflows || []).map((w) => w.id);
+        const trashedWorkflowIdSet = new Set(trashedWorkflowIds);
+        const allWorkflowIds = [...workflowIds, ...trashedWorkflowIds];
+
         let elementMap = {};
         let characterMap = {};
         let elementsList = [];
         let charactersList = [];
+        const primaryMediaByWorkflowId = new Map();
+        const workflowMediaRelationByMediaId = new Map();
+        const relationsByMediaId = new Map();
 
-        if (workflowIds.length > 0) {
-            const [elemResult, charResult] = await Promise.all([
-                supabase
-                    .from("element")
-                    .select("*")
-                    .in("workflow_id", workflowIds),
-                supabaseAdmin
-                    .from("characters")
-                    .select("*")
-                    .or(`project_id.eq.${projectId},workflow_id.in.(${workflowIds.join(",")})`),
+        if (allWorkflowIds.length > 0) {
+            const [elemResult, charResult, relationResult] = await Promise.all([
+                workflowIds.length > 0 && this.db.elements?.findByWorkflowIds
+                    ? this.db.elements.findByWorkflowIds(workflowIds).catch((err) => {
+                          projectLogger.warn({ event: "project_read.element_query_warn", err: err?.message || String(err) }, "Element query warning");
+                          return [];
+                      })
+                    : workflowIds.length > 0
+                        ? supabase
+                              .from("element")
+                              .select("*")
+                              .in("workflow_id", workflowIds)
+                              .then((r) => r.data || [])
+                              .catch(() => [])
+                        : Promise.resolve([]),
+                workflowIds.length > 0 && this.db.characters?.findByProjectOrWorkflowIds
+                    ? this.db.characters.findByProjectOrWorkflowIds({ projectId, workflowIds }).catch((err) => {
+                          projectLogger.warn({ event: "project_read.character_query_warn", err: err?.message || String(err) }, "Characters query warning");
+                          return [];
+                      })
+                    : workflowIds.length > 0
+                        ? (supabaseAdmin || supabase)
+                              .from("characters")
+                              .select("*")
+                              .or(`project_id.eq.${projectId},workflow_id.in.(${workflowIds.join(",")})`)
+                              .then((r) => r.data || [])
+                              .catch(() => [])
+                        : Promise.resolve([]),
+                this.db.workflowMedia?.findRelationsByWorkflowIds
+                    ? this.db.workflowMedia.findRelationsByWorkflowIds(allWorkflowIds).catch((err) => {
+                          projectLogger.warn(
+                              { event: "project_read.workflow_media_query_warn", err: err?.message || String(err) },
+                              "Workflow media relation query warning"
+                          );
+                          return [];
+                      })
+                    : supabase
+                          .from("workflow_media")
+                          .select("workflow_id, media_id, role, is_primary, metadata, created_at")
+                          .in("workflow_id", allWorkflowIds)
+                          .then((r) => r.data || [])
+                          .catch(() => []),
             ]);
 
-            if (elemResult.error) {
-                projectLogger.warn({ event: "project_read.element_query_warn", err: elemResult.error.message }, "Element query warning");
-            } else if (elemResult.data) {
-                elementsList = elemResult.data;
-                elementsList.forEach((elem) => {
-                    elementMap[elem.workflow_id] = elem;
-                });
-            }
+            elementsList = elemResult || [];
+            elementsList.forEach((elem) => {
+                elementMap[elem.workflow_id] = elem;
+            });
 
-            if (charResult.error) {
-                projectLogger.warn({ event: "project_read.character_query_warn", err: charResult.error.message }, "Characters query warning");
-            } else if (charResult.data) {
-                charactersList = charResult.data;
-                charactersList.forEach((c) => {
-                    if (c.workflow_id) characterMap[c.workflow_id] = c;
-                    if (c.id) characterMap[c.id] = c;
-                });
+            charactersList = charResult || [];
+            charactersList.forEach((c) => {
+                if (c.workflow_id) characterMap[c.workflow_id] = c;
+                if (c.id) characterMap[c.id] = c;
+            });
+
+            for (const row of relationResult || []) {
+                if (row?.media_id) {
+                    workflowMediaRelationByMediaId.set(row.media_id, row);
+                    if (!relationsByMediaId.has(row.media_id)) {
+                        relationsByMediaId.set(row.media_id, []);
+                    }
+                    relationsByMediaId.get(row.media_id).push(row);
+                }
+                if (row?.is_primary && row?.workflow_id && row?.media_id) {
+                    primaryMediaByWorkflowId.set(row.workflow_id, row.media_id);
+                }
             }
         } else {
             // Also fetch characters directly by project_id when no workflows exist yet
-            const { data: chars, error: charErr } = await supabaseAdmin
-                .from("characters")
-                .select("*")
-                .eq("project_id", projectId);
-
-            if (!charErr && chars) {
-                charactersList = chars;
+            if (this.db.characters?.findByProjectOrWorkflowIds) {
+                try {
+                    const chars = await this.db.characters.findByProjectOrWorkflowIds({ projectId });
+                    charactersList = chars || [];
+                    charactersList.forEach((c) => {
+                        if (c.workflow_id) characterMap[c.workflow_id] = c;
+                        if (c.id) characterMap[c.id] = c;
+                    });
+                } catch (charErr) {
+                    projectLogger.warn({ event: "project_read.character_query_warn", err: charErr?.message || String(charErr) }, "Characters query warning");
+                }
+            } else if (supabaseAdmin || supabase) {
+                const { data: chars } = await (supabaseAdmin || supabase)
+                    .from("characters")
+                    .select("*")
+                    .eq("project_id", projectId);
+                charactersList = chars || [];
                 charactersList.forEach((c) => {
                     if (c.workflow_id) characterMap[c.workflow_id] = c;
                     if (c.id) characterMap[c.id] = c;
                 });
+            }
+        }
+
+        // Backward compatibility fallback for legacy wf.primary_media_id pins
+        for (const wf of [...(workflows || []), ...(rawTrashedWorkflows || [])]) {
+            if (wf?.primary_media_id && !primaryMediaByWorkflowId.has(wf.id)) {
+                primaryMediaByWorkflowId.set(wf.id, wf.primary_media_id);
             }
         }
 
@@ -177,6 +249,7 @@ export class ProjectReadService {
             const elem = elementMap[wf.id] || {};
             const char = characterMap[wf.id] || {};
             const displayName = char.name || char.title || elem.name || wf.display_name || "Untitled Workflow";
+            const primaryMediaId = primaryMediaByWorkflowId.get(wf.id) || wf.primary_media_id || "";
 
             return {
                 id: wf.id,
@@ -186,13 +259,12 @@ export class ProjectReadService {
                 workflow_type: wf.workflow_type,
                 folder_id: wf.folder_id || null,
                 folderId: wf.folder_id || null,
-                primary_media_id: wf.primary_media_id || "",
-                primaryMediaId: wf.primary_media_id || "",
+                primary_media_id: primaryMediaId,
+                primaryMediaId: primaryMediaId,
                 metadata: {
                     displayName,
                     createTime: wf.create_time,
-                    primaryMediaId: wf.primary_media_id || "",
-                    sessionId: wf.session_id,
+                    primaryMediaId: primaryMediaId,
                     favorited: !!wf.favorited,
                     folder_id: wf.folder_id || null,
                     folderId: wf.folder_id || null,
@@ -201,42 +273,22 @@ export class ProjectReadService {
         });
 
         const workflowMap = new Map((workflows || []).map((w) => [w.id, w]));
+        const trashedWorkflowMap = new Map((rawTrashedWorkflows || []).map((w) => [w.id, w]));
         const workflowsByPrimaryMediaId = new Map(
             (workflows || [])
-                .filter((w) => w?.primary_media_id)
-                .map((w) => [w.primary_media_id, w])
+                .filter((w) => primaryMediaByWorkflowId.has(w.id) || w?.primary_media_id)
+                .map((w) => [primaryMediaByWorkflowId.get(w.id) || w.primary_media_id, w])
         );
-        const workflowMediaRelationByMediaId = new Map();
-
-        const relationsByMediaId = new Map();
-
-        if (workflowIds.length > 0) {
-            const { data: relationRows, error: relationErr } = await supabase
-                .from("workflow_media")
-                .select("workflow_id, media_id, role, created_at")
-                .in("workflow_id", workflowIds);
-
-            if (relationErr) {
-                projectLogger.warn(
-                    { event: "project_read.workflow_media_query_warn", err: relationErr.message },
-                    "Workflow media relation query warning"
-                );
-            } else {
-                for (const row of relationRows || []) {
-                    if (row?.media_id) {
-                        workflowMediaRelationByMediaId.set(row.media_id, row);
-                        if (!relationsByMediaId.has(row.media_id)) {
-                            relationsByMediaId.set(row.media_id, []);
-                        }
-                        relationsByMediaId.get(row.media_id).push(row);
-                    }
-                }
-            }
-        }
+        const trashedByPrimaryMediaId = new Map(
+            (rawTrashedWorkflows || [])
+                .filter((w) => primaryMediaByWorkflowId.has(w.id) || w?.primary_media_id)
+                .map((w) => [primaryMediaByWorkflowId.get(w.id) || w.primary_media_id, w])
+        );
+        const trashedMediaByWorkflowId = new Map();
 
         const formattedMedia = [];
         for (const m of mediaItems || []) {
-            const config = m.generation_config;
+            const config = Array.isArray(m.generation_config) ? m.generation_config[0] : (m.generation_config || null);
             const refs = (config?.references || []).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
             const isVideo = m.url && /\.(mp4|webm|mov)$/i.test(m.url);
             const mRelations = relationsByMediaId.get(m.id) || [];
@@ -245,16 +297,16 @@ export class ProjectReadService {
             let mediaRole = primaryRelation?.role || null;
 
             if (!mediaWorkflowId) {
-                const owningWf = workflowsByPrimaryMediaId.get(m.id);
+                const owningWf = workflowsByPrimaryMediaId.get(m.id) || trashedByPrimaryMediaId.get(m.id);
                 if (owningWf) {
                     mediaWorkflowId = owningWf.id;
                     mediaRole = owningWf.workflow_type === "UPLOAD" ? "original" : "output";
                 }
             }
 
-            const wf = workflowMap.get(mediaWorkflowId);
-            const isUpload = !m.generation_config_id ||
-                             wf?.workflow_type === "UPLOAD" ||
+            const isTrashedMedia = trashedWorkflowIdSet.has(mediaWorkflowId);
+            const wf = isTrashedMedia ? trashedWorkflowMap.get(mediaWorkflowId) : workflowMap.get(mediaWorkflowId);
+            const isUpload = wf?.workflow_type === "UPLOAD" ||
                              mediaRole === "original" ||
                              config?.generation_type === "UPLOAD" ||
                              m.step_id === "CAE" ||
@@ -296,6 +348,9 @@ export class ProjectReadService {
                 folderId: wf?.folder_id || null,
                 role: mediaRole,
                 mediaRole,
+                is_primary: Boolean(primaryRelation?.is_primary || (primaryMediaByWorkflowId.get(mediaWorkflowId) === m.id)),
+                isPrimary: Boolean(primaryRelation?.is_primary || (primaryMediaByWorkflowId.get(mediaWorkflowId) === m.id)),
+                metadata: primaryRelation?.metadata || m.metadata || {},
                 step_id: m.step_id,
                 workflowStepId: m.step_id || (isUpload ? "upload" : "GEN"),
                 create_time: m.create_time,
@@ -307,6 +362,7 @@ export class ProjectReadService {
                           aspectRatio: config.aspect_ratio || "",
                           generationType: config.generation_type || "",
                           seed: config.seed ?? null,
+                          parameters: config.parameters ?? {},
                           references: refs.map((ref) => ({
                               url: ref.ref_media?.url || "",
                               asset_id: ref.ref_media_id,
@@ -377,16 +433,29 @@ export class ProjectReadService {
                 width: resolvedWidth,
                 height: resolvedHeight,
             };
-            formattedMedia.push(mediaObject);
+
+            if (isTrashedMedia) {
+                if (!trashedMediaByWorkflowId.has(mediaWorkflowId)) {
+                    trashedMediaByWorkflowId.set(mediaWorkflowId, []);
+                }
+                trashedMediaByWorkflowId.get(mediaWorkflowId).push(mediaObject);
+            } else {
+                formattedMedia.push(mediaObject);
+            }
 
             for (const otherRel of mRelations.slice(1)) {
                 if (otherRel.workflow_id && otherRel.workflow_id !== mediaWorkflowId) {
-                    const linkedWf = workflowMap.get(otherRel.workflow_id);
-                    const linkedStepId = otherRel.role === "detail"
-                        ? "character_detail"
-                        : (otherRel.role === "sheet" ? "character_sheet" : m.step_id);
+                    const otherIsTrashed = trashedWorkflowIdSet.has(otherRel.workflow_id);
+                    const linkedWf = otherIsTrashed
+                        ? trashedWorkflowMap.get(otherRel.workflow_id)
+                        : workflowMap.get(otherRel.workflow_id);
+                    const authenticStepId = m.step_id;
+                    const isOtherUpload = linkedWf?.workflow_type === "UPLOAD" ||
+                                         otherRel.role === "original" ||
+                                         m.step_id === "CAE" ||
+                                         m.step_id === "upload";
 
-                    formattedMedia.push({
+                    const otherMediaObj = {
                         ...mediaObject,
                         workflowId: otherRel.workflow_id,
                         workflow_id: otherRel.workflow_id,
@@ -394,9 +463,21 @@ export class ProjectReadService {
                         folderId: linkedWf?.folder_id || null,
                         role: otherRel.role,
                         mediaRole: otherRel.role,
-                        step_id: linkedStepId,
-                        workflowStepId: linkedStepId,
-                    });
+                        is_primary: Boolean(otherRel.is_primary),
+                        isPrimary: Boolean(otherRel.is_primary),
+                        metadata: otherRel.metadata || {},
+                        step_id: authenticStepId,
+                        workflowStepId: authenticStepId || (isOtherUpload ? "upload" : "GEN"),
+                    };
+
+                    if (otherIsTrashed) {
+                        if (!trashedMediaByWorkflowId.has(otherRel.workflow_id)) {
+                            trashedMediaByWorkflowId.set(otherRel.workflow_id, []);
+                        }
+                        trashedMediaByWorkflowId.get(otherRel.workflow_id).push(otherMediaObj);
+                    } else {
+                        formattedMedia.push(otherMediaObj);
+                    }
                 }
             }
         }
@@ -419,6 +500,38 @@ export class ProjectReadService {
             };
         });
 
+        const formattedTrashedWorkflows = (rawTrashedWorkflows || []).map((wf) => {
+            const displayName = wf.display_name || "Untitled Workflow";
+            const primaryMediaId = primaryMediaByWorkflowId.get(wf.id) || wf.primary_media_id || "";
+            const items = trashedMediaByWorkflowId.get(wf.id) || [];
+
+            return {
+                id: wf.id,
+                name: wf.id,
+                display_name: displayName,
+                projectId,
+                workflow_type: wf.workflow_type,
+                folder_id: wf.folder_id || null,
+                folderId: wf.folder_id || null,
+                primary_media_id: primaryMediaId,
+                primaryMediaId: primaryMediaId,
+                deleted_at: wf.deleted_at || null,
+                deletedAt: wf.deleted_at || null,
+                media: items,
+                items,
+                metadata: {
+                    displayName,
+                    createTime: wf.create_time,
+                    primaryMediaId: primaryMediaId,
+                    favorited: !!wf.favorited,
+                    folder_id: wf.folder_id || null,
+                    folderId: wf.folder_id || null,
+                    deleted_at: wf.deleted_at || null,
+                    deletedAt: wf.deleted_at || null,
+                },
+            };
+        });
+
         crudOperationLog({
             operation,
             status: "ok",
@@ -431,11 +544,12 @@ export class ProjectReadService {
         return {
             projectName,
             projectId,
-            sessions: formattedSessions,
             workflows: workflowsWithItems,
+            trashedWorkflows: formattedTrashedWorkflows,
             media: formattedMedia,
             elements: elementsList,
             characters: charactersList,
+            appConfig: APP_CONFIG,
         };
     }
 
@@ -457,28 +571,12 @@ export class ProjectReadService {
 
         if (this.db?.media?.findById) {
             await this.db.media.findById(mediaId, "id, project_id, status, url, create_time, error_message");
-        } else if (!this.db?.workflowMedia?.findByMedia) {
-            const { error: mediaErr } = await supabase
-                .from("media")
-                .select("id, project_id, status, url, create_time, error_message")
-                .eq("id", mediaId)
-                .single();
-            if (mediaErr) throw mediaErr;
         }
 
         let workflowId = null;
         if (this.db?.workflowMedia?.findByMedia) {
             const links = await this.db.workflowMedia.findByMedia(mediaId);
             workflowId = links?.[0]?.workflow_id || null;
-        } else {
-            const { data: relRows, error: relErr } = await supabase
-                .from("workflow_media")
-                .select("workflow_id")
-                .eq("media_id", mediaId)
-                .order("created_at", { ascending: true })
-                .limit(1);
-            if (relErr) throw relErr;
-            workflowId = relRows?.[0]?.workflow_id || null;
         }
 
         const workflow = workflowId ? await this.db.workflows.getWorkflow(workflowId) : null;
@@ -492,6 +590,12 @@ export class ProjectReadService {
     async _verifyMediaOwnership(mediaId, userId, req = null) {
         const isDev = (process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) && process.env.NODE_ENV !== "production";
         if (isDev) return true;
+
+        if (this.db?.media?.findOwnerByMediaId) {
+            const ownerId = await this.db.media.findOwnerByMediaId(mediaId);
+            if (!ownerId || ownerId !== userId) return false;
+            return true;
+        }
 
         const { data: media, error } = await supabase
             .from("media")

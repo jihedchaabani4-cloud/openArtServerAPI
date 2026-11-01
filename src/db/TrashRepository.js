@@ -38,28 +38,28 @@ export class TrashRepository {
     }
 
     /**
-     * Lists a user's trashed workflows ordered by deleted_at DESC.
+     * Returns a Map of workflow_id -> { workflow_id, deleted_at, deleted_by } for candidate workflow IDs.
      */
-    async listByUser(userId) {
-        if (!userId) return [];
+    async getTrashedDetailsMap({ workflowIds = null, client = null } = {}) {
+        const cleanIds = Array.isArray(workflowIds)
+            ? [...new Set(workflowIds.filter(Boolean))]
+            : null;
+        if (!cleanIds || !cleanIds.length) return new Map();
 
-        const { data, error } = await this.client()
+        const dbClient = client || this.client();
+        const { data, error } = await dbClient
             .from("trash")
-            .select("workflow_id, deleted_at, workflow:workflow!workflow_id(display_name, workflow_type)")
-            .eq("user_id", userId)
-            .order("deleted_at", { ascending: false });
+            .select("workflow_id, deleted_at, deleted_by")
+            .in("workflow_id", cleanIds);
 
         if (error) throw error;
-
-        return (data || []).map((row) => {
-            const wf = Array.isArray(row.workflow) ? row.workflow[0] : row.workflow;
-            return {
-                workflow_id: row.workflow_id,
-                display_name: wf?.display_name ?? null,
-                workflow_type: wf?.workflow_type ?? null,
-                deleted_at: row.deleted_at,
-            };
-        });
+        const map = new Map();
+        for (const row of data || []) {
+            if (row?.workflow_id) {
+                map.set(row.workflow_id, row);
+            }
+        }
+        return map;
     }
 
     /**
@@ -78,6 +78,34 @@ export class TrashRepository {
 
         if (error) throw error;
         return Array.isArray(data) && data.length > 0;
+    }
+
+    /**
+     * Deletes trash rows scoped to user_id, optionally filtered by workflowIds.
+     * @returns {Promise<Array<string>>} Array of restored workflow_ids.
+     */
+    async deleteManyByUser({ userId, workflowIds = null, client = null }) {
+        if (!userId) return [];
+
+        const cleanIds = Array.isArray(workflowIds)
+            ? [...new Set(workflowIds.map((id) => String(id || "").replace(/^workflows\//, "").trim()).filter(Boolean))]
+            : null;
+
+        if (cleanIds && cleanIds.length === 0) return [];
+
+        const dbClient = client || this.client();
+        let query = dbClient
+            .from("trash")
+            .delete()
+            .eq("user_id", userId);
+
+        if (cleanIds && cleanIds.length > 0) {
+            query = query.in("workflow_id", cleanIds);
+        }
+
+        const { data, error } = await query.select("workflow_id");
+        if (error) throw error;
+        return (data || []).map((row) => row.workflow_id).filter(Boolean);
     }
 
     /**

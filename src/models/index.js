@@ -282,4 +282,6 @@ export {
   NoEligibleBindingError,
 } from "./errors/index.js";
 
+export { getModelConfig } from "./catalogPresentation.js";
+
 

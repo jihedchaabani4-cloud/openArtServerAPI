@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { WalletError } from "#platform/billing/WalletService.js";
+import { createLogger } from "../src/infrastructure/logging/index.js";
+
+const adminLogger = createLogger("admin_controller");
 
 /**
  * Admin Controller
@@ -43,12 +46,11 @@ function walletErrorToHttp(err) {
   return codeMap[err.code] || 500;
 }
 
-// ── Handlers ─────────────────────────────────────────────────────────────────
+// ── Controllers ──────────────────────────────────────────────────────────────
 
 /**
  * POST /api/admin/wallet/credit
- * Manually credit or debit any user's wallet.
- * The admin's userId is stored in transaction metadata for auditing.
+ * Manually credit or debit a user's wallet. Used for refunds, goodwill, and manual adjustments.
  */
 export async function adminCredit(req, res) {
   const start = Date.now();
@@ -63,41 +65,36 @@ export async function adminCredit(req, res) {
   }
 
   const { userId, amount, type, reason } = parsed.data;
-  const referenceId = `admin_${adminUserId}_${Date.now()}`;
 
   try {
-    let transaction;
+    const referenceId = `admin_${type.toLowerCase()}_${Date.now()}_${userId.slice(0, 8)}`;
+    const metadata = {
+      adminUserId,
+      reason,
+      adjustedAt: new Date().toISOString(),
+      type,
+    };
 
+    let transaction;
     if (type === "CREDIT") {
       transaction = await req.walletService.credit({
         userId,
         amount,
         referenceId,
-        metadata: {
-          adminUserId,
-          reason,
-          source: "admin_manual",
-        },
+        metadata,
       });
     } else {
-      // DEBIT: hold then immediately commit (no TTL-based expiry needed for admin ops)
-      await req.walletService.hold({
+      transaction = await req.walletService.debit({
         userId,
         amount,
         referenceId,
-        metadata: {
-          adminUserId,
-          reason,
-          source: "admin_manual",
-        },
+        metadata,
       });
-      transaction = await req.walletService.commitHoldIdempotent(referenceId);
     }
 
     const wallet = await req.walletService.getWalletOrThrow(userId);
 
-    console.log(JSON.stringify({
-      timestamp: new Date().toISOString(),
+    adminLogger.info({
       operation: "admin-credit",
       status: "success",
       adminUserId,
@@ -105,12 +102,11 @@ export async function adminCredit(req, res) {
       type,
       amount,
       durationMs: Date.now() - start,
-    }));
+    }, "Admin credit operation succeeded");
 
     return res.json({ transaction, newBalance: wallet.balance });
   } catch (err) {
-    console.error(JSON.stringify({
-      timestamp: new Date().toISOString(),
+    adminLogger.error({
       operation: "admin-credit",
       status: "error",
       adminUserId,
@@ -118,7 +114,7 @@ export async function adminCredit(req, res) {
       error: err.message,
       code: err.code,
       durationMs: Date.now() - start,
-    }));
+    }, "Admin credit operation failed");
 
     if (err instanceof WalletError) {
       return res.status(walletErrorToHttp(err)).json({ error: err.code, message: err.message });
@@ -144,26 +140,24 @@ export async function getAdminWallet(req, res) {
     const wallet = await req.walletService.getWalletOrThrow(userId);
     const { transactions: recentTransactions } = await req.walletService.getTransactions(userId, 10, null, null);
 
-    console.log(JSON.stringify({
-      timestamp: new Date().toISOString(),
+    adminLogger.info({
       operation: "admin-get-wallet",
       status: "success",
       adminUserId,
       targetUserId: userId,
       durationMs: Date.now() - start,
-    }));
+    }, "Admin fetched wallet");
 
     return res.json({ wallet, recentTransactions });
   } catch (err) {
-    console.error(JSON.stringify({
-      timestamp: new Date().toISOString(),
+    adminLogger.error({
       operation: "admin-get-wallet",
       status: "error",
       adminUserId,
       targetUserId: userId,
       error: err.message,
       durationMs: Date.now() - start,
-    }));
+    }, "Admin failed to fetch wallet");
 
     if (err instanceof WalletError) {
       return res.status(walletErrorToHttp(err)).json({ error: err.code, message: err.message });
@@ -174,19 +168,21 @@ export async function getAdminWallet(req, res) {
 
 /**
  * GET /api/admin/reconciliation/latest
- * Returns the result of the most recent nightly reconciliation run.
- * Data is written to Redis key 'reconcile:latest' by walletWorker.
+ * Returns the latest daily reconciliation result from Redis cache.
+ * Falls back to DB scan if Redis key is missing.
  */
 export async function getLatestReconciliation(req, res) {
   const start = Date.now();
 
   try {
-    const raw = await req.redisConnection.get("reconcile:latest");
+    const redis = req.redisConnection;
+    const raw = await redis.get("reconciliation:latest");
 
     if (!raw) {
       return res.json({
-        status: "NOT_RUN",
-        message: "Reconciliation job has not run yet. It runs daily at 03:00 UTC.",
+        cached: false,
+        status: "NO_RUN_RECORDED",
+        message: "No reconciliation run recorded in cache.",
         runAt: null,
         mismatchCount: 0,
         mismatches: [],
@@ -195,22 +191,20 @@ export async function getLatestReconciliation(req, res) {
 
     const result = JSON.parse(raw);
 
-    console.log(JSON.stringify({
-      timestamp: new Date().toISOString(),
+    adminLogger.info({
       operation: "admin-get-reconciliation",
       status: "success",
       durationMs: Date.now() - start,
-    }));
+    }, "Admin fetched reconciliation result");
 
     return res.json(result);
   } catch (err) {
-    console.error(JSON.stringify({
-      timestamp: new Date().toISOString(),
+    adminLogger.error({
       operation: "admin-get-reconciliation",
       status: "error",
       error: err.message,
       durationMs: Date.now() - start,
-    }));
+    }, "Admin failed to fetch reconciliation result");
     return res.status(500).json({ error: "INTERNAL_ERROR", message: "Failed to fetch reconciliation result." });
   }
 }
@@ -247,8 +241,7 @@ export async function updatePricingRule(req, res) {
   try {
     const { rule, cacheInvalidated } = await req.pricingService.updateRule(id, parsed.data);
 
-    console.log(JSON.stringify({
-      timestamp: new Date().toISOString(),
+    adminLogger.info({
       operation: "admin-update-pricing",
       status: "success",
       adminUserId,
@@ -256,19 +249,18 @@ export async function updatePricingRule(req, res) {
       updates: parsed.data,
       cacheInvalidated,
       durationMs: Date.now() - start,
-    }));
+    }, "Admin updated pricing rule");
 
     return res.json({ rule, cacheInvalidated });
   } catch (err) {
-    console.error(JSON.stringify({
-      timestamp: new Date().toISOString(),
+    adminLogger.error({
       operation: "admin-update-pricing",
       status: "error",
       adminUserId,
       ruleId: id,
       error: err.message,
       durationMs: Date.now() - start,
-    }));
+    }, "Admin failed to update pricing rule");
     return res.status(500).json({ error: "INTERNAL_ERROR", message: "Failed to update pricing rule." });
   }
 }
@@ -288,14 +280,13 @@ export async function reloadModels(req, res) {
     reloadRegistry();
     const stats = getRegistryStats();
 
-    console.log(JSON.stringify({
-      timestamp: new Date().toISOString(),
+    adminLogger.info({
       operation: "admin-reload-models",
       status: "success",
       adminUserId,
       stats,
       durationMs: Date.now() - start,
-    }));
+    }, "Admin reloaded models registry");
 
     return res.status(200).json({
       status: "success",
@@ -303,15 +294,14 @@ export async function reloadModels(req, res) {
       stats,
     });
   } catch (err) {
-    console.error(JSON.stringify({
-      timestamp: new Date().toISOString(),
+    adminLogger.error({
       operation: "admin-reload-models",
       status: "error",
       adminUserId,
       error: err.message,
       code: err.code || "REGISTRY_RELOAD_FAILED",
       durationMs: Date.now() - start,
-    }));
+    }, "Admin failed to reload models registry");
 
     return res.status(400).json({
       status: "error",
@@ -320,4 +310,3 @@ export async function reloadModels(req, res) {
     });
   }
 }
-

@@ -53,7 +53,7 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
         throw new Error(`Persistence target "media" requires server-verified targetMediaIds on run record`);
       }
 
-      const targetStepId = step_id || "character_sheet";
+      const targetStepId = step_id || "image_generation";
       nodeLogger.info({ workflowId, stepId: targetStepId }, `Updating media for workflow ${workflowId} (step_id: ${targetStepId}) to completed`);
 
       // Find existing placeholders created by controller for this workflow
@@ -168,11 +168,56 @@ export async function executeNodePersistence({ nodeConfig, output, run, resolved
           ...(typeof asset === "object" ? asset : {}),
         });
 
+        // ── Per-Media Generation Config Persistence ────────────────────────────
+        // The placeholder may already carry a generation_config written by
+        // GenerationRequestService (validated pre-execution config). We merge
+        // runtime-discovered values (provider, effective prompt) onto it while
+        // preserving the initial created_at and original user prompt.
+        const existingConfig = (placeholder.generation_config && typeof placeholder.generation_config === "object")
+          ? placeholder.generation_config
+          : null;
+
+        const originalPrompt = existingConfig?.prompt
+          || (typeof run?.input?.prompt === "string" ? run.input.prompt.trim() : "")
+          || (typeof resolvedInputs?.prompt === "string" ? resolvedInputs.prompt.trim() : "");
+        const effectivePrompt = typeof resolvedInputs?.prompt === "string" ? resolvedInputs.prompt.trim() : "";
+        const promptOptimized = (effectivePrompt && effectivePrompt !== originalPrompt) ? effectivePrompt : undefined;
+
+        const model = output?.metadata?.model || resolvedInputs?.model || run?.input?.model || null;
+        const provider = output?.metadata?.provider || output?._internal?.provider || null;
+
+        const rawParams = (resolvedInputs?.parameters && typeof resolvedInputs.parameters === "object")
+          ? resolvedInputs.parameters
+          : ((run?.input?.parameters && typeof run.input.parameters === "object") ? run.input.parameters : {});
+
+        const cleanParams = {};
+        for (const [k, v] of Object.entries(rawParams)) {
+          if (k && !k.match(/secret|token|password|auth|bearer|api[_-]?key/i)) {
+            cleanParams[k] = v;
+          }
+        }
+
+        const generationConfig = {
+          // Preserve fields from the pre-execution config where available,
+          // then layer in runtime-resolved values (provider, effective prompt).
+          ...(existingConfig || {}),
+          prompt: originalPrompt,
+          ...(promptOptimized !== undefined ? { prompt_optimized: promptOptimized } : {}),
+          model,
+          provider,
+          aspect_ratio: cleanParams.aspect_ratio || existingConfig?.aspect_ratio || run?.input?.aspect_ratio || mediaMeta.aspect_ratio || null,
+          parameters: cleanParams,
+          // Preserve original created_at from the pre-execution config;
+          // fall back to now only if no initial config was written.
+          created_at: existingConfig?.created_at || new Date().toISOString(),
+        };
+
         await activeDb.media.updateMedia(placeholder.id, {
           url: assetUrl,
           status: status || "completed",
           width: mediaMeta.width || placeholder?.width || 1024,
           height: mediaMeta.height || placeholder?.height || 1024,
+          generation_config: generationConfig,
         });
       }
     }

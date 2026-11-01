@@ -155,7 +155,12 @@ export class UseCaseService {
       await this.billingRuntime.rollbackUseCase(reserve.billingHoldId, {
         failedMessage: dispatchErr.message,
         errorCategory: "QUEUE_DISPATCH_FAILED",
-      }).catch(() => {}); // best-effort — never block the error propagation
+      }).catch((rollbackErr) => {
+        useCaseLogger.error(
+          { event: "BILLING_ROLLBACK_FAILED", useCaseId, billingHoldId: reserve.billingHoldId, err: rollbackErr.message },
+          `[UseCaseService] Immediate billing rollback failed for hold ${reserve.billingHoldId} after dispatch failure — reaper will reconcile.`
+        );
+      }); // best-effort — never block the error propagation
 
       // Re-throw as a clean service-level error (Controller will return HTTP 503)
       const err = new Error("Generation service temporarily unavailable. Please try again.");

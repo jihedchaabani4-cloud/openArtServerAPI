@@ -41,7 +41,6 @@ export class MediaService {
     async createMedia({
         workflowId,
         projectId = null,
-        generationConfigId = null,
         stepId = "upload",
         url,
         width = 1024,
@@ -65,10 +64,19 @@ export class MediaService {
                 });
             }
 
-            const { workflow_id: _ignoredWfId, role, workflowType, workflow_type, ...restExtra } = extra;
+            const {
+                workflow_id: _ignoredWfId,
+                role,
+                workflowType,
+                workflow_type,
+                generationConfigId: _ignoredGenId,
+                generation_config_id: _ignoredGenCol,
+                is_primary,
+                isPrimary,
+                ...restExtra
+            } = extra;
             const mediaRecord = await this.db.media.createMedia({
                 project_id: projectId,
-                generation_config_id: generationConfigId,
                 step_id: stepId,
                 url,
                 width: Number(width) || 1024,
@@ -78,11 +86,14 @@ export class MediaService {
                 ...restExtra,
             });
 
+            const resolvedIsPrimary = (is_primary !== undefined) ? is_primary : (isPrimary !== undefined ? isPrimary : undefined);
+
             await createMediaInWorkflow(this.db, {
                 workflowId,
                 mediaId: mediaRecord?.id,
                 stepId,
                 ...(role ? { role } : {}),
+                ...(resolvedIsPrimary !== undefined ? { is_primary: resolvedIsPrimary } : {}),
                 ...(workflowType || workflow_type ? { workflowType: workflowType || workflow_type } : {}),
                 operation: "createMedia:linkWorkflowMedia",
             });

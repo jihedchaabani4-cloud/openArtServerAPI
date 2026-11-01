@@ -100,4 +100,17 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency & Boot Asser
       "walletWorker.js must import container.js to execute fail-fast boot assertions"
     );
   });
+
+  it("TEST 3: useCaseWorker registers exactly one 'failed' event listener (no duplicate registration)", async () => {
+    const fs = await import("node:fs");
+    const content = fs.readFileSync(new URL("../../src/workers/useCaseWorker.js", import.meta.url), "utf8");
+    
+    // Count occurrences of .on("failed", ...) in useCaseWorker.js
+    const failedListenerMatches = content.match(/\.on\(\s*["']failed["']\s*,\s*handleUseCaseWorkerFailure\s*\)/g) || [];
+    assert.equal(
+      failedListenerMatches.length,
+      1,
+      `useCaseWorker.js must register handleUseCaseWorkerFailure exactly once, found ${failedListenerMatches.length}`
+    );
+  });
 });

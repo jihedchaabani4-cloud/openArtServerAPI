@@ -25,14 +25,16 @@ async function startReaper() {
     workerLogger.error({ err: err.message }, "[Reaper] Boot sweep failed");
   }
 
-  // Then run every 5 minutes
-  setInterval(async () => {
-    try {
-      await runReservationReaper();
-    } catch (err) {
-      workerLogger.error({ err: err.message }, "[Reaper] Scheduled sweep failed");
-    }
-  }, REAPER_INTERVAL_MS);
+  // Then run every 5 minutes (can be disabled via DISABLE_IN_PROCESS_REAPER=true when walletWorker or multiple replicas run)
+  if (process.env.DISABLE_IN_PROCESS_REAPER !== "true" && process.env.NODE_ENV !== "test") {
+    setInterval(async () => {
+      try {
+        await runReservationReaper();
+      } catch (err) {
+        workerLogger.error({ err: err.message }, "[Reaper] Scheduled sweep failed");
+      }
+    }, REAPER_INTERVAL_MS);
+  }
 }
 
 startReaper();

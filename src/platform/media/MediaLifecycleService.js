@@ -58,11 +58,14 @@ export async function failWorkflowPendingMedia(db, workflowId, error) {
 }
 
 function inferStepId(nodeType, input = {}, stepIdOverride = null) {
-  if (stepIdOverride) return stepIdOverride;
-  if (input?.step_id) return input.step_id;
-  if (input?.stepId) return input.stepId;
-  if (input?.characterId || (Array.isArray(input?.characters) && input.characters.length > 0)) {
-    return "character_sheet";
+  if (stepIdOverride && !["character_sheet", "character_detail", "element_sheet", "element_reference"].includes(stepIdOverride)) {
+    return stepIdOverride;
+  }
+  if (input?.step_id && !["character_sheet", "character_detail", "element_sheet", "element_reference"].includes(input.step_id)) {
+    return input.step_id;
+  }
+  if (input?.stepId && !["character_sheet", "character_detail", "element_sheet", "element_reference"].includes(input.stepId)) {
+    return input.stepId;
   }
   return "GEN";
 }
@@ -131,7 +134,7 @@ export class MediaWorkflowLifecycleService {
   /**
    * Domain-specific creation: Character Placeholder
    */
-  async createCharacterPlaceholder({ userId, input = {}, runId = null, displayName = null, stepId = "character_sheet" }) {
+  async createCharacterPlaceholder({ userId, input = {}, runId = null, displayName = null, stepId = "GEN" }) {
     return this.startPlaceholder({
       userId,
       nodeType: "image-generation",

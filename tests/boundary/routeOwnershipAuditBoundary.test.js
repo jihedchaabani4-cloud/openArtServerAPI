@@ -645,6 +645,14 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
   });
 
+  it("TEST R4-47: PATCH /api/v2/elements/:id/cover for foreign element returns 404", async () => {
+    const res = await reqAlice("/api/v2/elements/elem-foreign/cover", {
+      method: "PATCH",
+      body: JSON.stringify({ mediaId: "media-1" }),
+    });
+    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+  });
+
   it("TEST R4-48: POST /api/trash/:workflowId/restore for foreign workflow returns 404", async () => {
     const res = await reqAlice(`/api/trash/${FOREIGN_WF_ID}/restore`, {
       method: "POST",

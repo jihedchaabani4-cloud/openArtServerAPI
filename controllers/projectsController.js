@@ -1,74 +1,41 @@
-import { supabase } from "../lib/supabase.js";
-import { generationService } from "../src/container.js";
+import { projectService, generationService } from "../src/container.js";
 import { AppError } from "../src/utils/AppError.js";
+import { createLogger } from "../src/infrastructure/logging/index.js";
+
+const logger = createLogger("projects_controller");
+
+function handleError(res, error, operation) {
+    if (error instanceof AppError) {
+        return res.status(error.statusCode).json({
+            ok: false,
+            errorCode: error.errorCode || "APP_ERROR",
+            message: error.message,
+        });
+    }
+    logger.error({ event: `projects_controller.${operation}_error`, err: error?.message || String(error) }, `${operation} error`);
+    return res.status(500).json({ ok: false, message: error?.message || "Internal server error" });
+}
 
 /** GET all projects for the authenticated user */
 export const getAll = async (req, res) => {
     try {
-        const userId = req.user.id;
-
-        const { data, error } = await supabase
-            .from("project")
-            .select(`
-                *,
-                media:media(url, create_time)
-            `)
-            .eq("user_id", userId)
-            .order("create_time", { ascending: false })
-            .order("create_time", { foreignTable: "media", ascending: false })
-            .limit(1, { foreignTable: "media" });
-
-        if (error) throw error;
-
-        // Map latest media to thumbnail_url and ensure 'name' exists for UI
-        const projectsWithThumbnails = (data || []).map(project => ({
-            ...project,
-            name: project.project_name, // Map for UI consistency
-            thumbnail_url: project.media?.[0]?.url || null
-        }));
-
-        res.json({ ok: true, data: projectsWithThumbnails });
+        const userId = req.user?.id;
+        const projectsWithThumbnails = await projectService.listUserProjects(userId);
+        return res.json({ ok: true, data: projectsWithThumbnails });
     } catch (error) {
-        console.error("fetchProjects error:", error);
-        res.status(500).json({ ok: false, message: error.message });
+        return handleError(res, error, "fetchProjects");
     }
 };
 
 /** POST — create project */
 export const create = async (req, res) => {
     try {
-        const userId = req.user.id;
-        
-        // 📅 Generate automatic name like: 18 avr., 12:25
-        const now = new Date();
-        const autoProjectName = now.toLocaleString('fr-FR', {
-            day: 'numeric',
-            month: 'short',
-            hour: '2-digit',
-            minute: '2-digit',
-        });
-
-        const { data, error } = await supabase
-            .from("project")
-            .insert([{ 
-                project_name: autoProjectName,
-                user_id: userId 
-            }])
-            .select()
-            .single();
-
-        if (error) throw error;
-
-        res.json({ 
-            ok: true, 
-            data: { 
-                ...data, 
-                name: data.project_name 
-            } 
-        });
+        const userId = req.user?.id;
+        const name = req.body?.name || req.body?.project_name;
+        const data = await projectService.createProject({ userId, name });
+        return res.json({ ok: true, data });
     } catch (error) {
-        console.error("createProject error:", error);
-        res.status(500).json({ ok: false, message: error.message });
+        return handleError(res, error, "createProject");
     }
 };
 
@@ -76,43 +43,12 @@ export const create = async (req, res) => {
 export const update = async (req, res) => {
     try {
         const { id } = req.params;
-        const userId = req.user.id;
-        const { name, project_name } = req.body;
-        const projectName = name || project_name;
-
-        // Verify project ownership
-        const { data: project, error: checkError } = await supabase
-            .from("project")
-            .select("id, user_id")
-            .eq("id", id)
-            .single();
-
-        if (checkError || !project || project.user_id !== userId) {
-            console.warn(`[ProjectsController] Foreign-ownership access denied for user ${userId} on project ${id}`, { userId, resourceId: id, resourceType: "project" });
-            return res.status(404).json({ ok: false, message: "Project not found" });
-        }
-
-        const { data, error } = await supabase
-            .from("project")
-            .update({ 
-                project_name: projectName 
-            })
-            .eq("id", id)
-            .eq("user_id", userId) // Ensure ownership
-            .select()
-            .single();
-
-        if (error) throw error;
-        res.json({ 
-            ok: true, 
-            data: { 
-                ...data, 
-                name: data.project_name 
-            } 
-        });
+        const userId = req.user?.id;
+        const name = req.body?.name || req.body?.project_name;
+        const data = await projectService.updateProject({ id, userId, name });
+        return res.json({ ok: true, data });
     } catch (error) {
-        console.error("updateProject error:", error);
-        res.status(500).json({ ok: false, message: error.message });
+        return handleError(res, error, "updateProject");
     }
 };
 
@@ -120,31 +56,11 @@ export const update = async (req, res) => {
 export const remove = async (req, res) => {
     try {
         const { id } = req.params;
-        const userId = req.user.id;
-
-        // Verify project ownership
-        const { data: project, error: checkError } = await supabase
-            .from("project")
-            .select("id, user_id")
-            .eq("id", id)
-            .single();
-
-        if (checkError || !project || project.user_id !== userId) {
-            console.warn(`[ProjectsController] Foreign-ownership access denied for user ${userId} on project ${id}`, { userId, resourceId: id, resourceType: "project" });
-            return res.status(404).json({ ok: false, message: "Project not found" });
-        }
-
-        const { error } = await supabase
-            .from("project")
-            .delete()
-            .eq("id", id)
-            .eq("user_id", userId); // Ensure ownership
-
-        if (error) throw error;
-        res.json({ ok: true });
+        const userId = req.user?.id;
+        await projectService.deleteProject({ id, userId });
+        return res.json({ ok: true });
     } catch (error) {
-        console.error("deleteProject error:", error);
-        res.status(500).json({ ok: false, message: error.message });
+        return handleError(res, error, "deleteProject");
     }
 };
 
@@ -156,7 +72,7 @@ export const remove = async (req, res) => {
 export const listAssets = async (req, res, next) => {
     try {
         const { projectId } = req.params;
-        const userId = req.user.id;
+        const userId = req.user?.id;
         const { folderId, includeDescendants, limit, cursor } = req.query;
 
         const result = await generationService.listProjectAssets({

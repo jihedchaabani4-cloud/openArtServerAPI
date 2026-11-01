@@ -1,49 +1,8 @@
 import { projectReadService } from "../src/container.js";
-import { calculateCost, getCatalog } from "../src/models/index.js";
+import { getModelConfig } from "../src/models/index.js";
+import { createLogger } from "../src/infrastructure/logging/index.js";
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function safeCalculateCost(modelKey, input) {
-    try {
-        return calculateCost(modelKey, input);
-    } catch {
-        return null; // Model not in V2 registry yet — degrade gracefully
-    }
-}
-
-// ── Model config (Cached in memory to prevent repeated recalculations) ─────────
-
-let cachedModelConfig = null;
-
-function getModelConfig() {
-    if (cachedModelConfig) return cachedModelConfig;
-
-    const catalog = getCatalog();
-    const models = catalog.map((m) => {
-        const defaultCost = safeCalculateCost(
-            m.modelFamily || m.id,
-            m.domain === "video" ? { duration: 5, resolution: "720p" } : { quality: "standard" }
-        );
-
-        return {
-            key:            m.modelFamily || m.id,
-            displayName:    m.displayName,
-            description:    m.description || "",
-            category:       m.domain,
-            tier:           m.badge || "standard",
-            pricing:        { ...(m.retailPricing || {}), defaultCost },
-            tags:           m.badge ? [m.badge.toLowerCase()] : [],
-            supportedModes: m.domain ? [m.domain] : [],
-            icon:           m.iconUrl || "",
-            badge:          m.badge || null,
-            parameters:     m.parameters || {},
-        };
-    });
-
-    cachedModelConfig = { models };
-    return cachedModelConfig;
-}
-
+const logger = createLogger("project_controller");
 
 // ── GET /workflows/project-data/:project_id ───────────────────────────────────
 // Thin HTTP adapter — delegates all aggregation to ProjectReadService
@@ -56,7 +15,7 @@ export const getProjectData = async (req, res) => {
         if (!project_id || project_id === "null" || project_id === "undefined") {
             return res.json({
                 result: { data: { json: {
-                    projectContents: { sessions: [], workflows: [], media: [] },
+                    projectContents: { sessions: [], workflows: [], trashedWorkflows: [], media: [] },
                     modelConfig,
                     appConfig: {
                         changeLogId: "2026-03-19-v1-3f4e036c-6a67-467f-a0e6-25cff0a0a8ab",
@@ -81,6 +40,7 @@ export const getProjectData = async (req, res) => {
                         projectContents: {
                             sessions:   data.sessions,
                             workflows:  data.workflows,
+                            trashedWorkflows: data.trashedWorkflows || [],
                             media:      data.media,
                             elements:   data.elements,
                             characters: data.characters,
@@ -91,8 +51,8 @@ export const getProjectData = async (req, res) => {
         });
 
     } catch (err) {
-        console.error("Error fetching project data:", err);
         const statusCode = err.statusCode || 500;
+        logger.error({ event: "project_controller.getProjectData_error", err: err?.message || String(err), statusCode }, "Error fetching project data");
         res.status(statusCode).json({ ok: false, message: err.message });
     }
 };

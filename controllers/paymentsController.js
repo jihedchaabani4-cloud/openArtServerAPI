@@ -1,11 +1,14 @@
 import { walletService } from "../src/container.js";
 import { supabase } from "../lib/supabase.js";
+import { createLogger } from "../src/infrastructure/logging/index.js";
 import {
     buildModelsComparison,
     fetchPackagesFromDB,
     toPublicPackage,
     verifyWebhookSignature,
 } from "./payments/paymentsUtils.js";
+
+const paymentsLogger = createLogger("payments_controller");
 
 // ─── Controllers ──────────────────────────────────────────────────────────────
 
@@ -27,7 +30,7 @@ export async function getCreditPackages(req, res) {
 
         return res.status(200).json({ ok: true, packages: safe, modelsComparison });
     } catch (err) {
-        console.error("[Payments] getCreditPackages error:", err);
+        paymentsLogger.error({ event: "payments.getCreditPackages_error", err: err?.message || String(err) }, "getCreditPackages error");
         return res.status(500).json({ ok: false, message: "Internal server error" });
     }
 }
@@ -41,8 +44,8 @@ export async function getCreditPackages(req, res) {
  */
 export async function getCheckoutUrl(req, res) {
     try {
-        const { packageId } = req.body;
         const userId = req.user?.id;
+        const { packageId } = req.body;
 
         if (!packageId) {
             return res.status(400).json({ ok: false, message: "packageId is required" });
@@ -57,7 +60,7 @@ export async function getCheckoutUrl(req, res) {
             .maybeSingle();
 
         if (error) {
-            console.error("[Payments] DB error fetching package:", error.message);
+            paymentsLogger.error({ event: "payments.fetch_package_error", packageId, err: error.message }, "DB error fetching package");
             return res.status(500).json({ ok: false, message: "Database error" });
         }
 
@@ -85,7 +88,7 @@ export async function getCheckoutUrl(req, res) {
         url.searchParams.set("checkout[custom][user_id]", userId);
         url.searchParams.set("checkout[custom][package_id]", pkg.id);
 
-        console.log(`[Payments] Checkout URL generated for user ${userId}, package ${pkg.id}`);
+        paymentsLogger.info({ event: "payments.checkout_url_generated", userId, packageId: pkg.id }, "Checkout URL generated");
 
         return res.status(200).json({
             ok: true,
@@ -98,7 +101,7 @@ export async function getCheckoutUrl(req, res) {
             },
         });
     } catch (err) {
-        console.error("[Payments] getCheckoutUrl error:", err);
+        paymentsLogger.error({ event: "payments.getCheckoutUrl_error", err: err?.message || String(err) }, "getCheckoutUrl error");
         return res.status(500).json({ ok: false, message: "Internal server error" });
     }
 }
@@ -112,7 +115,7 @@ export async function getCheckoutUrl(req, res) {
  */
 export async function handleWebhook(req, res) {
     if (!Buffer.isBuffer(req.body)) {
-        console.warn("[Payments] Webhook rejected: body is not a raw Buffer");
+        paymentsLogger.warn({ event: "payments.webhook_rejected", reason: "not_raw_buffer" }, "Webhook rejected: body is not a raw Buffer");
         return res.status(400).json({ ok: false, message: "Raw body buffer required" });
     }
     const signature = req.headers["x-signature"];
@@ -120,7 +123,7 @@ export async function handleWebhook(req, res) {
     // ① Verify signature strictly over raw Buffer
     const isValid = verifyWebhookSignature(req.body, signature);
     if (!isValid) {
-        console.warn("[Payments] Webhook rejected: invalid signature");
+        paymentsLogger.warn({ event: "payments.webhook_rejected", reason: "invalid_signature" }, "Webhook rejected: invalid signature");
         return res.status(401).json({ ok: false, message: "Invalid signature" });
     }
 
@@ -132,7 +135,7 @@ export async function handleWebhook(req, res) {
     }
 
     const eventName = event?.meta?.event_name;
-    console.log(`[Payments] Webhook received: ${eventName}`);
+    paymentsLogger.info({ event: "payments.webhook_received", eventName }, "Webhook received");
 
     // ② Only handle order_created
     if (eventName !== "order_created") {
@@ -149,12 +152,12 @@ export async function handleWebhook(req, res) {
 
         // ③ Only process paid orders
         if (orderStatus !== "paid") {
-            console.log(`[Payments] Order ${orderId} is not paid (status: ${orderStatus}), skipping`);
+            paymentsLogger.info({ event: "payments.order_skipped", orderId, orderStatus }, "Order not paid, skipping");
             return res.status(200).json({ ok: true, message: "Order not paid, skipped" });
         }
 
         if (!userId) {
-            console.error("[Payments] Webhook missing user_id in custom_data");
+            paymentsLogger.error({ event: "payments.webhook_missing_user_id", orderId }, "Webhook missing user_id in custom_data");
             return res.status(400).json({ ok: false, message: "Missing user_id" });
         }
 
@@ -184,7 +187,7 @@ export async function handleWebhook(req, res) {
         }
 
         if (!creditsToAdd) {
-            console.error(`[Payments] Unknown variantId: ${variantId}, packageId: ${packageId}`);
+            paymentsLogger.error({ event: "payments.unknown_variant", variantId, packageId }, "Unknown product variant");
             return res.status(400).json({ ok: false, message: "Unknown product variant" });
         }
 
@@ -203,16 +206,16 @@ export async function handleWebhook(req, res) {
             },
         });
 
-        console.log(`[Payments] ✅ Credited ${creditsToAdd} credits to user ${userId} (order: ${orderId})`);
+        paymentsLogger.info({ event: "payments.credits_credited", userId, creditsToAdd, orderId }, "Credits added to wallet");
 
         return res.status(200).json({ ok: true, message: "Credits added successfully" });
     } catch (err) {
         if (err?.code === "DUPLICATE_TRANSACTION") {
-            console.log(`[Payments] Webhook replayed, already processed: ${err.message}`);
+            paymentsLogger.info({ event: "payments.webhook_duplicate", err: err.message }, "Webhook replayed, already processed");
             return res.status(200).json({ ok: true, message: "Already processed" });
         }
 
-        console.error("[Payments] Webhook processing error:", err);
+        paymentsLogger.error({ event: "payments.webhook_error", err: err?.message || String(err) }, "Webhook processing error");
         return res.status(500).json({ ok: false, message: "Failed to process payment" });
     }
 }
@@ -240,7 +243,7 @@ export async function getPurchaseHistory(req, res) {
 
         return res.status(200).json({ ok: true, purchases });
     } catch (err) {
-        console.error("[Payments] getPurchaseHistory error:", err);
+        paymentsLogger.error({ event: "payments.getPurchaseHistory_error", err: err?.message || String(err) }, "getPurchaseHistory error");
         return res.status(500).json({ ok: false, message: "Internal server error" });
     }
 }

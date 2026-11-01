@@ -72,14 +72,12 @@ export class V1StorageBridge {
 
     const workflowData = {
       project_id: projectId,
-      session_id: sessionId,
       display_name: displayName,
       workflow_type: validWfType,
       folder_id: effectiveFolderId,
       user_id: userId,
     };
 
-    let generationConfigId = null;
     let resolvedDimensions = { width: 1024, height: 1024, aspect_ratio: "SQUARE" };
     if (config) {
       const meta = resolveMediaMetadata({ ...config, parameters: config.parameters || config });
@@ -88,20 +86,11 @@ export class V1StorageBridge {
         height: meta.height || 1024,
         aspect_ratio: meta.aspect_ratio || config.aspect_ratio || "SQUARE",
       };
-      const configRecord = await this.db.configs.createConfig({
-        prompt: config.prompt || "",
-        model: config.model || "unknown",
-        aspect_ratio: resolvedDimensions.aspect_ratio,
-        generation_type: config.generation_type || "TEXT_ONLY",
-        seed: config.seed || null,
-      });
-      generationConfigId = configRecord.id;
     }
 
     // Create media with null url and status='processing'
     const mediaData = {
       project_id: projectId,
-      generation_config_id: generationConfigId,
       step_id: stepId,
       url: null,
       width: resolvedDimensions.width,
@@ -160,7 +149,6 @@ export class V1StorageBridge {
       config = null,
     } = params;
 
-    let generationConfigId = null;
     let resolvedDimensions = { width: 1024, height: 1024, aspect_ratio: "SQUARE" };
     if (config) {
       const meta = resolveMediaMetadata({ ...config, parameters: config.parameters || config });
@@ -169,18 +157,10 @@ export class V1StorageBridge {
         height: meta.height || 1024,
         aspect_ratio: meta.aspect_ratio || config.aspect_ratio || "SQUARE",
       };
-      const configRecord = await this.db.configs.createConfig({
-        prompt: config.prompt || "",
-        model: config.model || "unknown",
-        aspect_ratio: resolvedDimensions.aspect_ratio,
-        generation_type: config.generation_type || "IMAGE_TO_IMAGE",
-      });
-      generationConfigId = configRecord.id;
     }
 
     const mediaData = {
       project_id: projectId,
-      generation_config_id: generationConfigId,
       step_id: stepId,
       url: null,
       width: resolvedDimensions.width,
@@ -292,7 +272,6 @@ export class V1StorageBridge {
       workflow_type: workflowType,
     };
 
-    let generationConfigId = null;
     let resolvedDimensions = { width: 1024, height: 1024, aspect_ratio: "SQUARE" };
     if (config) {
       const meta = resolveMediaMetadata({ ...config, parameters: config.parameters || config });
@@ -301,19 +280,10 @@ export class V1StorageBridge {
         height: meta.height || 1024,
         aspect_ratio: meta.aspect_ratio || config.aspect_ratio || "SQUARE",
       };
-      const configRecord = await this.db.configs.createConfig({
-        prompt: config.prompt || "",
-        model: config.model || "unknown",
-        aspect_ratio: resolvedDimensions.aspect_ratio,
-        generation_type: config.generation_type || "TEXT_ONLY",
-        seed: config.seed || null,
-      });
-      generationConfigId = configRecord.id;
     }
 
     const mediaData = {
       project_id: projectId,
-      generation_config_id: generationConfigId,
       step_id: stepId,
       url: asset.url,
       width: asset.width || resolvedDimensions.width,
@@ -363,20 +333,8 @@ export class V1StorageBridge {
       setAsPrimary = true,
     } = params;
 
-    let generationConfigId = null;
-    if (config) {
-      const configRecord = await this.db.configs.createConfig({
-        prompt: config.prompt || "",
-        model: config.model || "unknown",
-        aspect_ratio: config.aspect_ratio || "SQUARE",
-        generation_type: config.generation_type || "TEXT_ONLY",
-      });
-      generationConfigId = configRecord.id;
-    }
-
     const mediaData = {
       project_id: projectId,
-      generation_config_id: generationConfigId,
       step_id: stepId,
       url: asset.url,
       width: asset.width || 1024,

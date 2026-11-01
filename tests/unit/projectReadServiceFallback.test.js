@@ -1,9 +1,80 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ProjectReadService } from "../../src/domain/project/ProjectReadService.js";
+import { MediaRepository } from "../../src/db/MediaRepository.js";
 import { supabase } from "../../lib/supabase.js";
 
 describe("ProjectReadService - Primary Media Fallback & Items Attachment", () => {
+    it("returns saved generation parameters in project data", async () => {
+        const projectId = "11111111-1111-4111-8111-111111111111";
+        const userId = "22222222-2222-4222-8222-222222222222";
+        const workflowId = "33333333-3333-4333-8333-333333333333";
+        const mediaId = "44444444-4444-4444-8444-444444444444";
+        const parameters = { quality: "medium", resolution: "1k", aspect_ratio: "16:9" };
+        const service = new ProjectReadService({
+            db: {
+                projects: { findById: async () => ({ id: projectId, user_id: userId }) },
+                workflows: {
+                    findByProject: async () => [{
+                        id: workflowId,
+                        project_id: projectId,
+                        workflow_type: "GENERATION",
+                        primary_media_id: mediaId,
+                    }],
+                },
+                media: {
+                    findByProjectAll: async () => [{
+                        id: mediaId,
+                        project_id: projectId,
+                        status: "failed",
+                        url: null,
+                        width: 1344,
+                        height: 768,
+                        step_id: "image_generation",
+                        generation_config: {
+                            model: "gpt_image_2",
+                            prompt: "Saved failed prompt",
+                            aspect_ratio: "16:9",
+                            parameters,
+                        },
+                    }],
+                },
+                workflowMedia: {
+                    findRelationsByWorkflowIds: async () => [{
+                        workflow_id: workflowId,
+                        media_id: mediaId,
+                        role: "output",
+                        is_primary: true,
+                    }],
+                },
+                characters: { findByProjectOrWorkflowIds: async () => [] },
+                elements: { findByWorkflowIds: async () => [] },
+            },
+        });
+
+        const projectData = await service.getProjectData({ projectId, userId });
+
+        assert.deepEqual(projectData.media[0].generationConfig.parameters, parameters);
+    });
+
+    it("selects generation_config when loading all project media", async () => {
+        const originalFrom = supabase.from;
+        let selectedColumns = "";
+        supabase.from = () => ({
+            select(columns) {
+                selectedColumns = columns;
+                return { eq: () => ({ order: async () => ({ data: [], error: null }) }) };
+            },
+        });
+
+        try {
+            await new MediaRepository().findByProjectAll("project-id");
+            assert.match(selectedColumns, /generation_config/);
+        } finally {
+            supabase.from = originalFrom;
+        }
+    });
+
     it("defensively attributes media to workflow when workflow_media row is missing but primary_media_id is set", async () => {
         const projectId = "11111111-1111-4111-8111-111111111111";
         const userId = "22222222-2222-4222-8222-222222222222";

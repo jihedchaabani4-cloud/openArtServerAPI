@@ -165,9 +165,9 @@ export async function resolveAsElement(workflowId, userId = null) {
       }
     }
 
-    // Resolve source_images array (URLs or media IDs) in parallel
+    // Resolve references array (URLs or media IDs) in parallel
     const mediaIdLookups = [];
-    for (const arr of ["source_images", "references"]) {
+    for (const arr of ["references"]) {
       if (Array.isArray(elem[arr])) {
         for (const r of elem[arr]) {
           if (typeof r === "string" && r.startsWith("http")) {

@@ -164,8 +164,13 @@ describe("Trash List and Restore Routes Boundary Tests (T4)", () => {
             if (idx !== -1) mockWorkflows.splice(idx, 1);
             return true;
         };
-        db.workflows.findByProject = async (projectId) => {
+        db.workflows.findByProject = async (projectId, options = {}) => {
             const trashedIds = new Set(mockTrash.map((t) => t.workflow_id));
+            if (options?.partitioned) {
+                const active = mockWorkflows.filter((w) => w.project_id === projectId && !trashedIds.has(w.id));
+                const trashed = mockWorkflows.filter((w) => w.project_id === projectId && trashedIds.has(w.id));
+                return { active, trashed };
+            }
             return mockWorkflows.filter((w) => w.project_id === projectId && !trashedIds.has(w.id));
         };
         db.workflows.client = () => ({
@@ -253,6 +258,20 @@ describe("Trash List and Restore Routes Boundary Tests (T4)", () => {
             const [removed] = mockTrash.splice(idx, 1);
             return removed;
         };
+
+        db.trash.deleteManyByUser = async ({ userId, workflowIds = null }) => {
+            const removedIds = [];
+            for (let i = mockTrash.length - 1; i >= 0; i--) {
+                const item = mockTrash[i];
+                if (item.user_id === userId) {
+                    if (!workflowIds || workflowIds.includes(item.workflow_id)) {
+                        removedIds.push(item.workflow_id);
+                        mockTrash.splice(i, 1);
+                    }
+                }
+            }
+            return removedIds;
+        };
     });
 
     afterEach(() => {
@@ -263,83 +282,14 @@ describe("Trash List and Restore Routes Boundary Tests (T4)", () => {
         Object.assign(db.trash, originalDbTrash);
     });
 
-    it("1. Authentication guard: unauthenticated GET /api/trash and POST /api/trash/:workflowId/restore return 401", async () => {
-        const listRes = await fetch(`${baseUrl}/api/trash`);
-        assert.equal(listRes.status, 401);
-
+    it("1. Authentication guard: unauthenticated POST /api/trash/:workflowId/restore returns 401", async () => {
         const restoreRes = await fetch(`${baseUrl}/api/trash/wf-A-1/restore`, {
             method: "POST",
         });
         assert.equal(restoreRes.status, 401);
     });
 
-    it("2. GET /api/trash returns only the authenticated user's trashed workflows ordered by deleted_at DESC", async () => {
-        mockTrash.push(
-            {
-                id: "trash-1",
-                workflow_id: "wf-A-1",
-                user_id: "user-A",
-                deleted_at: "2026-10-25T15:00:00.000Z",
-                deleted_by: "user-A",
-            },
-            {
-                id: "trash-2",
-                workflow_id: "wf-B-1",
-                user_id: "user-B",
-                deleted_at: "2026-10-25T16:00:00.000Z",
-                deleted_by: "user-B",
-            },
-            {
-                id: "trash-3",
-                workflow_id: "wf-A-2",
-                user_id: "user-A",
-                deleted_at: "2026-10-25T17:00:00.000Z",
-                deleted_by: "user-A",
-            }
-        );
-
-        const resA = await fetch(`${baseUrl}/api/trash`, {
-            headers: { Authorization: "Bearer token-user-A" },
-        });
-        assert.equal(resA.status, 200);
-        const bodyA = await resA.json();
-        assert.deepEqual(bodyA, {
-            ok: true,
-            items: [
-                {
-                    workflow_id: "wf-A-2",
-                    display_name: "Second WF A",
-                    workflow_type: "VIDEO",
-                    deleted_at: "2026-10-25T17:00:00.000Z",
-                },
-                {
-                    workflow_id: "wf-A-1",
-                    display_name: "First WF A",
-                    workflow_type: "IMAGE",
-                    deleted_at: "2026-10-25T15:00:00.000Z",
-                },
-            ],
-        });
-
-        const resB = await fetch(`${baseUrl}/api/trash`, {
-            headers: { Authorization: "Bearer token-user-B" },
-        });
-        assert.equal(resB.status, 200);
-        const bodyB = await resB.json();
-        assert.deepEqual(bodyB, {
-            ok: true,
-            items: [
-                {
-                    workflow_id: "wf-B-1",
-                    display_name: "Foreign WF B",
-                    workflow_type: "IMAGE",
-                    deleted_at: "2026-10-25T16:00:00.000Z",
-                },
-            ],
-        });
-    });
-
-    it("3. End-to-end Trash -> List -> Restore -> Reader visibility lifecycle without deleting or recreating public.workflow", async () => {
+    it("2. End-to-end Trash -> Restore -> Reader visibility lifecycle without deleting or recreating public.workflow", async () => {
         const originalWfRef = mockWorkflows.find((w) => w.id === "wf-elem-A");
 
         // 1. Delete element via DELETE /api/v2/elements/elem-A -> moves wf-elem-A to Trash
@@ -358,16 +308,7 @@ describe("Trash List and Restore Routes Boundary Tests (T4)", () => {
         });
         assert.equal(delCharRes.status, 200);
 
-        // 2. Appears in GET /api/trash and is hidden from active readers
-        const listRes1 = await fetch(`${baseUrl}/api/trash`, {
-            headers: { Authorization: "Bearer token-user-A" },
-        });
-        assert.equal(listRes1.status, 200);
-        const listBody1 = await listRes1.json();
-        assert.equal(listBody1.items.length, 2);
-        assert.equal(listBody1.items.some((i) => i.workflow_id === "wf-elem-A"), true);
-        assert.equal(listBody1.items.some((i) => i.workflow_id === "wf-char-A"), true);
-
+        // 2. Workflows are hidden from active readers
         const activeWfsWhileTrashed = await db.workflows.findByProject("proj-A");
         assert.equal(activeWfsWhileTrashed.some((w) => w.id === "wf-elem-A"), false);
         assert.equal(activeWfsWhileTrashed.some((w) => w.id === "wf-char-A"), false);
@@ -403,13 +344,7 @@ describe("Trash List and Restore Routes Boundary Tests (T4)", () => {
         assert.equal(workflowCreateCount, 0, "restore must never recreate public.workflow");
         assert.equal(mockWorkflows.find((w) => w.id === "wf-elem-A"), originalWfRef);
 
-        // 5. Disappears from GET /api/trash and reappears in active readers
-        const listRes2 = await fetch(`${baseUrl}/api/trash`, {
-            headers: { Authorization: "Bearer token-user-A" },
-        });
-        const listBody2 = await listRes2.json();
-        assert.deepEqual(listBody2, { ok: true, items: [] });
-
+        // 5. Reappears in active readers
         const activeWfsAfterRestore = await db.workflows.findByProject("proj-A");
         assert.equal(activeWfsAfterRestore.some((w) => w.id === "wf-elem-A"), true);
         assert.equal(activeWfsAfterRestore.some((w) => w.id === "wf-char-A"), true);
@@ -422,7 +357,7 @@ describe("Trash List and Restore Routes Boundary Tests (T4)", () => {
         assert.equal(activeCharsAfterRestore.some((c) => c.id === "wf-char-A"), true);
     });
 
-    it("4. POST /api/trash/:workflowId/restore returns 404 when workflow is not in Trash, when called a second time after restore, or for a non-existent workflowId", async () => {
+    it("3. POST /api/trash/:workflowId/restore returns 404 when workflow is not in Trash, when called a second time after restore, or for a non-existent workflowId", async () => {
         // Active workflow not in Trash -> 404
         const resNotTrashed = await fetch(`${baseUrl}/api/trash/wf-A-1/restore`, {
             method: "POST",
@@ -476,5 +411,37 @@ describe("Trash List and Restore Routes Boundary Tests (T4)", () => {
         assert.equal(mockTrash.length, 1, "User A's trash row must remain untouched after cross-tenant restore attempt");
         assert.equal(mockTrash[0].workflow_id, "wf-A-1");
         assert.equal(mockTrash[0].user_id, "user-A");
+    });
+
+    it("6. POST /api/trash/restore-all restores all trashed workflows for authenticated user and returns count", async () => {
+        // Setup: add 2 items for user-A and 1 item for user-B to trash
+        await db.trash.insertIfAbsent({ workflowId: "wf-A-1", userId: "user-A" });
+        await db.trash.insertIfAbsent({ workflowId: "wf-elem-A", userId: "user-A" });
+        await db.trash.insertIfAbsent({ workflowId: "wf-B-1", userId: "user-B" });
+
+        // Unauthenticated -> 401
+        const unauthRes = await fetch(`${baseUrl}/api/trash/restore-all`, {
+            method: "POST",
+        });
+        assert.equal(unauthRes.status, 401);
+
+        // User A restores all
+        const restoreAllRes = await fetch(`${baseUrl}/api/trash/restore-all`, {
+            method: "POST",
+            headers: {
+                Authorization: "Bearer token-user-A",
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ projectId: "proj-A" }),
+        });
+        assert.equal(restoreAllRes.status, 200);
+        const restoreAllBody = await restoreAllRes.json();
+        assert.equal(restoreAllBody.ok, true);
+        assert.equal(restoreAllBody.restored, true);
+        assert.equal(restoreAllBody.count >= 1, true);
+
+        // User B's trash row must remain in trash
+        assert.equal(mockTrash.some((t) => t.workflow_id === "wf-B-1" && t.user_id === "user-B"), true);
+        assert.equal(mockTrash.some((t) => t.user_id === "user-A"), false);
     });
 });

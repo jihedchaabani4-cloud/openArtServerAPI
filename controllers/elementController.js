@@ -9,12 +9,14 @@
 import { randomUUID } from "node:crypto";
 import { elementService, elementMediaService, trashService } from "../src/container.js";
 import { assertOwns } from "../src/platform/security/ownership.js";
+import { createLogger } from "../src/infrastructure/logging/index.js";
+
+const elementLogger = createLogger("element_controller");
 
 // ─── Logging helpers ──────────────────────────────────────────────────────────
 
 function structuredLog({ traceId, operation, durationMs, status, errorCode, message } = {}) {
     const entry = {
-        timestamp:  new Date().toISOString(),
         traceId:    traceId || randomUUID(),
         operation,
         durationMs: durationMs ?? null,
@@ -26,25 +28,25 @@ function structuredLog({ traceId, operation, durationMs, status, errorCode, mess
 }
 
 function logOk(traceId, operation, start) {
-    console.log(JSON.stringify(structuredLog({ traceId, operation, durationMs: Date.now() - start, status: "success" })));
+    elementLogger.info(structuredLog({ traceId, operation, durationMs: Date.now() - start, status: "success" }), `${operation} ok`);
 }
 
 function logErr(traceId, operation, start, err) {
     const statusCode = err.statusCode || 500;
-    console.error(JSON.stringify(structuredLog({ traceId, operation, durationMs: Date.now() - start, status: "error", errorCode: statusCode, message: err.message })));
+    elementLogger.error(structuredLog({ traceId, operation, durationMs: Date.now() - start, status: "error", errorCode: statusCode, message: err.message }), `${operation} error`);
     return statusCode;
 }
 
 // ─── POST /api/v2/elements ────────────────────────────────────────────────────
 
-/** Create a new Element. Body: { name, sourceImages[1-6], description?, projectId, tags?, userId? } */
+/** Create a new Element. Body: { name, description?, projectId, tags?, userId? } */
 export async function createElement(req, res) {
     const traceId = randomUUID();
     const start   = Date.now();
     const op      = "POST /api/v2/elements";
 
     try {
-        const { name, sourceImages, description, tags, element_type, type } = req.body;
+        const { name, description, tags, element_type, type, images, imageUrls, sourceImages } = req.body;
         const projectId = req.body.projectId || req.body.project_id;
         const userId = req.user?.id || req.body.userId;
 
@@ -52,7 +54,18 @@ export async function createElement(req, res) {
             await assertOwns("project", projectId, userId);
         }
 
-        const result = await elementService.createElement({ name, sourceImages, description, projectId, tags, userId, element_type, type });
+        const result = await elementService.createElement({
+            name,
+            description,
+            projectId,
+            tags,
+            userId,
+            element_type,
+            type,
+            images,
+            imageUrls,
+            sourceImages,
+        });
 
         logOk(traceId, op, start);
         return res.status(201).json({ status: "created", ...result });
@@ -112,7 +125,7 @@ export async function getElementById(req, res) {
         const element = await elementService.getElementById(req.params.id);
 
         if (!element) {
-            console.warn(JSON.stringify(structuredLog({ traceId, operation: op, durationMs: Date.now() - start, status: "not_found", errorCode: 404 })));
+            elementLogger.warn(structuredLog({ traceId, operation: op, durationMs: Date.now() - start, status: "not_found", errorCode: 404 }), "Element not found");
             return res.status(404).json({ error: true, message: `Element not found: ${req.params.id}` });
         }
 
@@ -137,7 +150,7 @@ export async function updateElement(req, res) {
             await assertOwns("element", req.params.id, userId);
         }
 
-        const updated = await elementService.updateElement(req.params.id, req.body || {});
+        const updated = await elementService.updateElement(req.params.id, req.body || {}, userId);
 
         logOk(traceId, op, start);
         return res.json({ status: "success", element: updated });
@@ -153,12 +166,14 @@ export async function deleteElement(req, res) {
     const traceId = randomUUID();
     const start   = Date.now();
     const op      = "DELETE /api/v2/elements/:id";
+    const trash   = req.query?.trash ?? req.body?.trash;
 
     try {
         const result = await trashService.requestDelete({
             kind: "element",
             id: req.params.id,
             userId: req.user?.id,
+            trash,
             req,
         });
 
@@ -231,6 +246,7 @@ export async function removeImageFromElement(req, res) {
         return res.status(logErr(traceId, op, start, err)).json({ error: true, message: err.message });
     }
 }
+
 
 // ─── POST /api/v2/elements/analyze ───────────────────────────────────────────
 

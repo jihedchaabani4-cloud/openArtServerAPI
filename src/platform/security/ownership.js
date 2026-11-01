@@ -122,11 +122,32 @@ export async function assertOwns(resourceType, id, userId) {
       }
 
       if (elemRecord) {
-        // Elements belong to a workflow, which belongs to a project
+        // Direct user_id check on element if present
+        if (elemRecord.user_id && elemRecord.user_id === userId) {
+          resource = elemRecord;
+          break;
+        }
+
+        // Elements belong to a workflow, which belongs to a project.
+        // Try both getWorkflow and findById so code paths where only one
+        // is available still succeed.
         const wfId = elemRecord.workflow_id || id;
+        let wf = null;
         if (wfId && db.workflows?.getWorkflow) {
-          const wf = await db.workflows.getWorkflow(wfId).catch(() => null);
-          if (wf?.project_id && db.projects?.findByUser) {
+          wf = await db.workflows.getWorkflow(wfId).catch(() => null);
+        }
+        if (!wf && wfId && db.workflows?.findById) {
+          wf = await db.workflows.findById(wfId).catch(() => null);
+        }
+
+        if (wf) {
+          // Direct user_id match on the workflow
+          if (wf.user_id && wf.user_id === userId) {
+            resource = elemRecord;
+            break;
+          }
+          // Project membership check
+          if (wf.project_id && db.projects?.findByUser) {
             const matches = await db.projects.findByUser(userId, wf.project_id).catch(() => []);
             if (matches?.length) {
               resource = elemRecord;

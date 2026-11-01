@@ -70,7 +70,11 @@ export async function createWorkflowWithMedia(
         }
 
         if (setAsPrimary && media?.id) {
-            await db.workflows.updatePrimaryMedia(workflow.id, media.id);
+            if (db.workflowMedia?.setPrimaryMedia) {
+                await db.workflowMedia.setPrimaryMedia({ workflowId: workflow.id, mediaId: media.id });
+            } else if (db.workflows?.updatePrimaryMedia) {
+                await db.workflows.updatePrimaryMedia(workflow.id, media.id);
+            }
         }
 
         return { workflow, media };
@@ -170,7 +174,11 @@ export async function appendMediaToWorkflow(
     });
 
     if (setAsPrimary) {
-        await db.workflows.updatePrimaryMedia(workflow_id, media.id);
+        if (db.workflowMedia?.setPrimaryMedia) {
+            await db.workflowMedia.setPrimaryMedia({ workflowId: workflow_id, mediaId: media.id });
+        } else if (db.workflows?.updatePrimaryMedia) {
+            await db.workflows.updatePrimaryMedia(workflow_id, media.id);
+        }
     }
 
     return media;

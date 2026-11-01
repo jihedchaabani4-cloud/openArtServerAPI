@@ -1,6 +1,9 @@
 import crypto from "crypto";
 import { supabase } from "../../lib/supabase.js";
 import { getCatalog, calculateCost } from "../../src/models/index.js";
+import { createLogger } from "../../src/infrastructure/logging/index.js";
+
+const logger = createLogger("payments_utils");
 
 const SENSITIVE_PACKAGE_FIELDS = new Set(["variant_id", "checkout_url"]);
 
@@ -8,7 +11,7 @@ export function verifyWebhookSignature(rawBody, signature) {
     const secret = process.env.LEMON_WEBHOOK_SECRET;
 
     if (!secret) {
-        console.error("[Payments] LEMON_WEBHOOK_SECRET is not set!");
+        logger.error({ event: "payments.missing_webhook_secret" }, "LEMON_WEBHOOK_SECRET is not set");
         return false;
     }
 
@@ -40,7 +43,7 @@ export async function fetchPackagesFromDB() {
         .order("credits", { ascending: true });
 
     if (error) {
-        console.error("[Payments] Failed to fetch packages from DB:", error.message);
+        logger.error({ event: "payments.fetch_packages_error", err: error.message }, "Failed to fetch packages from DB");
         return null;
     }
 

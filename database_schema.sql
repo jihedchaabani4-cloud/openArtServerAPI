@@ -156,6 +156,7 @@ CREATE TABLE public.media (
   height integer NOT NULL CHECK (height > 0),
   create_time timestamp with time zone NOT NULL DEFAULT now(),
   status media_status DEFAULT 'processing'::media_status,
+  generation_config jsonb,  -- Per-media config snapshot: { prompt, prompt_optimized, model, provider, aspect_ratio, parameters }
   error_message text,
   
   -- ═══ CHAMPS V2 PROPOSÉS POUR VERSIONING ═══

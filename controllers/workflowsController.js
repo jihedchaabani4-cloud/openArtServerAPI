@@ -38,9 +38,10 @@ export const patchWorkflow = async (req, res) => {
 export const deleteWorkflow = async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
+    const trash = req.query?.trash ?? req.body?.trash;
 
     try {
-        const result = await trashService.requestDelete({ kind: "workflow", id, userId, req });
+        const result = await trashService.requestDelete({ kind: "workflow", id, userId, trash, req });
 
         return res.json({
             ok: true,
@@ -58,11 +59,13 @@ export const deleteWorkflow = async (req, res) => {
 export const bulkDeleteWorkflows = async (req, res) => {
     const userId = req.user.id;
     const workflow_ids = req.body?.workflow_ids;
+    const trash = req.query?.trash ?? req.body?.trash;
 
     try {
         const result = await trashService.requestDeleteMany({
             ids: workflow_ids,
             userId,
+            trash,
             req,
         });
 
@@ -123,17 +126,24 @@ export const bulkToggleLike = async (req, res) => {
 export const setPrimaryMedia = async (req, res) => {
     try {
         const { id } = req.params;
-        const { media_id } = req.body;
+        const targetMediaId = req.body?.primaryMediaId !== undefined
+            ? req.body.primaryMediaId
+            : (req.body?.media_id ?? req.body?.mediaId);
         const userId = req.user.id;
 
         const result = await workflowService.setPrimaryMedia({
             workflowId: id,
-            mediaId:    media_id,
+            mediaId:    targetMediaId,
             userId,
             req,
         });
 
-        return res.json({ ok: true, primary_media_id: result.primary_media_id });
+        const resolvedId = result?.primaryMediaId ?? result?.primary_media_id ?? targetMediaId;
+        return res.json({
+            ok: true,
+            primaryMediaId: resolvedId,
+            primary_media_id: resolvedId,
+        });
     } catch (err) {
         controllerLogger.error({ workflowId: req.params.id, err }, `Error setting primary media for workflow ${req.params.id}: ${err.message}`);
         return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
@@ -179,9 +189,10 @@ export const detachMediaToNewWorkflow = async (req, res) => {
 export const deleteMedia = async (req, res) => {
     try {
         const { media_id } = req.params;
+        const workflowId = req.params?.workflow_id || req.query?.workflow_id || req.query?.workflowId || req.body?.workflow_id || req.body?.workflowId || null;
         const userId = req.user.id;
 
-        const result = await workflowService.deleteMedia({ mediaId: media_id, userId, req });
+        const result = await workflowService.deleteMedia({ mediaId: media_id, workflowId, userId, req });
 
         return res.json({
             ok:                    true,

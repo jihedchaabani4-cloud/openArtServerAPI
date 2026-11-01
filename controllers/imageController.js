@@ -1,13 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { db, useCaseService, folderService } from "../src/container.js";
+import { generationRequestService } from "../src/container.js";
 import { createLogger } from "../src/infrastructure/logging/index.js";
-
-const controllerLogger = createLogger("controller");
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 import { resolveMediaMetadata } from "../src/platform/media/mediaMetadataResolver.js";
 import { assertOwns, assertOwnsAny, toMediaIdList } from "../src/platform/security/ownership.js";
-import { createMediaInWorkflow } from "../src/db/workflowMediaLinker.js";
+
+const controllerLogger = createLogger("controller");
 
 const MEDIA_PARAM_KEYS = [
   "input_image",
@@ -19,7 +16,6 @@ const MEDIA_PARAM_KEYS = [
   "reference_images",
   "reference_videos",
 ];
-const ARRAY_MEDIA_PARAM_KEYS = ["images", "reference_images", "reference_videos"];
 
 /**
  * POST /api/images/generated
@@ -28,29 +24,10 @@ const ARRAY_MEDIA_PARAM_KEYS = ["images", "reference_images", "reference_videos"
  *
  * Architecture:
  *   - Accepts model-specific params as an opaque `parameters` object.
- *   - Does NOT know or map individual model params (quality, resolution, etc.).
- *   - Model Management is the source of truth for parameter validation + mapping.
- *
- * Request shape:
- *   {
- *     prompt:     string (required)
- *     model:      string (required)
- *     references: string[]  (workflow IDs only — no raw URLs)
- *     parameters: object    (model-specific, pass-through)
- *     project_id: string (required)
- *     session_id: string (optional)
- *   }
- *
- * Flow:
- *   1. Validate request shape.
- *   2. Create Workflow + Media placeholder rows in DB.
- *   3. Reserve credits & enqueue UseCase job.
- *   4. Return { workflowId, mediaId, taskId, status: "processing" }.
+ *   - Validates HTTP request shape, permissions, and media-specific constraints.
+ *   - Delegates domain orchestration, placeholder persistence, and job dispatch to GenerationRequestService.
  */
 export async function generateImage(req, res) {
-  let workflowId     = null;
-  let mediaId        = null;
-  let serverMediaIds = [];
   try {
     const { prompt, model, references = [], parameters = {} } = req.body;
     const projectId = req.body.project_id || req.body.projectId || null;
@@ -106,10 +83,6 @@ export async function generateImage(req, res) {
     // ── 0. Enforce Project Ownership ─────────────────────────────────────────
     await assertOwns("project", projectId, userId);
 
-    // ── 0a. Enforce Folder Usability (BEFORE billing and workflow creation) ───
-    const rawFolderId = req.body.folder_id || req.body.folderId || req.body.collection_id || req.body.collectionId || null;
-    const validatedFolderId = await folderService.validateAndAssertUsable(rawFolderId, userId, projectId);
-
     // ── 0b. Enforce Reference Ownership ──────────────────────────────────────
     for (const refId of sanitizedReferences) {
       await assertOwnsAny(["workflow", "character", "element", "media"], refId, userId);
@@ -126,180 +99,49 @@ export async function generateImage(req, res) {
       }
     }
 
-    // ── Server decides output count ──────────────────────────────────────────
-    // Clamped to 1 unless the endpoint explicitly supports more (max from model schema).
-    const requestedCount = Number(req.body.count || parameters?.count || 1);
-    const endpointSupportsMulti = false; // image endpoint does not currently enable multi-output
-    const maxFromSchema = 1; // image models do not declare count in parameters schema
-    const outputCount = endpointSupportsMulti ? Math.min(Math.max(1, requestedCount), maxFromSchema) : 1;
-
-    workflowId   = randomUUID();
-
-    // ── 1. Create Workflow container ─────────────────────────────────────────
-    await db.workflows.createWorkflow({
-      id:            workflowId,
-      project_id:    projectId,
-      session_id:    null,
-      display_name:  prompt.slice(0, 60),
-      workflow_type: "GENERATION",
-      folder_id:     validatedFolderId,
-      user_id:       userId,
-    });
-
-    controllerLogger.info({ workflowId, projectId, outputCount }, `Workflow created: ${workflowId}`);
-
-    // ── 2. Create Media placeholder(s) ───────────────────────────────────────
+    // ── Media-specific metadata resolution ───────────────────────────────────
     const mediaMeta = resolveMediaMetadata({ parameters, ...req.body });
-    serverMediaIds = [];
+    const outputCount = 1;
+    const rawFolderId = req.body.folder_id || req.body.folderId || req.body.collection_id || req.body.collectionId || null;
 
-    for (let i = 0; i < outputCount; i++) {
-      const id = randomUUID();
-      await db.media.createMedia({
-        id,
-        project_id:  projectId,
-        step_id:     "image_generation",
-        url:         null,
-        width:       mediaMeta.width,
-        height:      mediaMeta.height,
-        status:      "processing",
-      });
-      await createMediaInWorkflow(db, {
-        workflowId,
-        mediaId: id,
-        stepId: "image_generation",
-        workflowType: "GENERATION",
-        operation: "generateImage:linkWorkflowMedia",
-      });
-      serverMediaIds.push(id);
-    }
-    mediaId = serverMediaIds[0];
-
-    controllerLogger.info({ mediaId, serverMediaIds, workflowId }, `Media placeholder(s) created`);
-
-    // ── 3. Prepare UseCase runtime input ─────────────────────────────────────
-    // Only workflow-level fields at root. All model-specific params are in `parameters`.
-    const resolvedParams = (parameters && typeof parameters === "object") ? { ...parameters } : {};
-    for (const arrayKey of ARRAY_MEDIA_PARAM_KEYS) {
-      if (resolvedParams[arrayKey] !== undefined && resolvedParams[arrayKey] !== null) {
-        resolvedParams[arrayKey] = toMediaIdList(resolvedParams[arrayKey]);
-      }
-    }
-    if (mediaMeta?.aspect_ratio) {
-      resolvedParams.aspect_ratio = resolvedParams.aspect_ratio || mediaMeta.aspect_ratio;
-    }
-    const runtimeInput = {
-      prompt:           prompt.trim(),
-      model:            chosenModel,
-      aspect_ratio:     mediaMeta.aspect_ratio,
-      width:            mediaMeta.width,
-      height:           mediaMeta.height,
-      references:       sanitizedReferences,
-      parameters:       resolvedParams,
-      project_id:       projectId,
-      workflow_id:      workflowId,
-      media_id:         mediaId,
-      serverWorkflowId: workflowId,
-      serverMediaIds,
-      serverProjectId:  projectId,
-    };
-
-
-    // ── 4. Credit reservation & Redis job dispatch ────────────────────────────
-    let taskId               = null;
-    let hasSufficientCredits = true;
-    let creditErrorMsg       = null;
-    let calculatedCost       = null;
-
-    try {
-      controllerLogger.debug({ workflowId, useCase: "image-generation-v1" }, "Preparing & reserving credits");
-      const prepared = await useCaseService.prepareAndEnqueue({
-        useCaseId:   "image-generation-v1",
-        input:       runtimeInput,
-        userId,
-        executionId: workflowId,
-        traceId:     workflowId,
-        serverContext: {
-          workflowId,
-          v1_workflow_id: workflowId,
-          mediaIds: serverMediaIds,
-          projectId,
-        },
-      });
-      taskId         = prepared.jobId || prepared.executionId || workflowId;
-      calculatedCost = prepared.cost?.totalCredits ?? null;
-      controllerLogger.info({ calculatedCost, taskId }, `Reserved ${calculatedCost} credits & enqueued job "${taskId}"`);
-    } catch (serviceErr) {
-      // ── Distinguish error types — Controller only routes, never retries ──────
-      if (serviceErr.code === "INSUFFICIENT_CREDITS" || serviceErr.code === "BILLING_HOLD_REQUIRED") {
-        // Business error: user doesn't have enough credits
-        hasSufficientCredits = false;
-        creditErrorMsg       = serviceErr.message;
-        controllerLogger.warn({ workflowId, code: serviceErr.code }, `Billing error: ${serviceErr.message}`);
-      } else if (serviceErr.code === "QUEUE_DISPATCH_FAILED") {
-        // Infrastructure error: queue unavailable after all retries + credits already rolled back by UseCaseService
-        controllerLogger.error({ workflowId, code: serviceErr.code }, `Queue dispatch failed: ${serviceErr.message}`);
-        if (serverMediaIds.length > 0 && db?.media) {
-          for (const mId of serverMediaIds) {
-            await db.media.updateMedia(mId, {
-              status: "failed",
-              error_message: serviceErr.message,
-            }).catch(() => {});
-          }
-        }
-        return res.status(503).json({
-          ok:         false,
-          status:     "failed",
-          code:       "QUEUE_DISPATCH_FAILED",
-          message:    serviceErr.message,
-          workflowId,
-          mediaId,
-          mediaIds:   serverMediaIds,
-        });
-      } else {
-        // Unknown service error — propagate to outer catch → HTTP 500
-        throw serviceErr;
-      }
-    }
-
-    if (!hasSufficientCredits && serverMediaIds.length > 0 && db?.media) {
-      for (const mId of serverMediaIds) {
-        await db.media.updateMedia(mId, {
-          status: "saved",
-          error_message: creditErrorMsg || "Insufficient credits",
-        }).catch(() => {});
-      }
-    }
-
-    // ── 5. Return response ────────────────────────────────────────────────────
-    return res.json({
-      ok:           true,
-      status:       hasSufficientCredits ? "processing" : "saved",
-      needsCredits: !hasSufficientCredits,
-      message:      hasSufficientCredits
-        ? "Image generation started."
-        : (creditErrorMsg || "Add credits to generate your image."),
-      cost:         calculatedCost,
-      workflowId,
-      mediaId,
-      mediaIds:     serverMediaIds,
-      taskId,
-      project_id:  projectId,
-      session_id:  null,
-      workflow:    { id: workflowId, primary_media_id: mediaId, media_ids: serverMediaIds, workflow_type: "GENERATION" },
+    // ── Delegate execution to GenerationRequestService ───────────────────────
+    const result = await generationRequestService.requestGeneration({
+      userId,
+      mediaType: "image",
+      stepId: "image_generation",
+      useCaseId: "image-generation-v1",
+      prompt,
+      model: chosenModel,
+      projectId,
+      folderId: rawFolderId,
+      references: sanitizedReferences,
+      parameters,
+      mediaMeta,
+      outputCount,
+      defaultMessages: {
+        started: "Image generation started.",
+        addCredits: "Add credits to generate your image.",
+      },
     });
+
+    return res.json(result);
 
   } catch (err) {
+    if (err.code === "QUEUE_DISPATCH_FAILED") {
+      return res.status(503).json({
+        ok:         false,
+        status:     "failed",
+        code:       "QUEUE_DISPATCH_FAILED",
+        message:    err.message,
+        workflowId: err.workflowId,
+        mediaId:    err.mediaId,
+        mediaIds:   err.mediaIds,
+      });
+    }
+
     const statusCode = err.statusCode || 500;
     controllerLogger.error({ err, statusCode }, `generateImage error: ${err.message}`);
-    if (serverMediaIds?.length > 0 && db?.media) {
-      for (const mId of serverMediaIds) {
-        await db.media.updateMedia(mId, {
-          status: "failed",
-          error_message: err.message || "Failed to prepare generation request",
-        }).catch(() => {});
-      }
-    }
-    const traceId = workflowId || randomUUID();
+    const traceId = err.workflowId || randomUUID();
     return res.status(statusCode).json({
       ok: false,
       code: statusCode >= 500 ? "INTERNAL_ERROR" : (err.code || "REQUEST_FAILED"),
@@ -308,4 +150,3 @@ export async function generateImage(req, res) {
     });
   }
 }
-

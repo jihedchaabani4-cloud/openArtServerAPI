@@ -101,20 +101,63 @@ export class WorkflowRepository extends BaseRepository {
 
 
     async findByProject(project_id, options = {}) {
-        const { select = "*", order = { column: "create_time", ascending: false } } = options;
+        const { select = "*", order = { column: "create_time", ascending: false }, partitioned = false } = options;
         let query = supabase.from(this.tableName).select(select);
         if (order) query = query.order(order.column, { ascending: order.ascending });
         query = query.eq("project_id", project_id);
-        const { data, error } = await query;
+        let { data, error } = await query;
+        if (error && typeof select === "string" && select.includes("primary_media_id")) {
+            // Graceful resilience: if primary_media_id column was dropped (ADR-0007),
+            // retry without primary_media_id rather than failing the entire project read.
+            const fallbackSelect = select
+                .split(",")
+                .map((s) => s.trim())
+                .filter((s) => s !== "primary_media_id")
+                .join(", ");
+            let fallbackQuery = supabase.from(this.tableName).select(fallbackSelect);
+            if (order) fallbackQuery = fallbackQuery.order(order.column, { ascending: order.ascending });
+            fallbackQuery = fallbackQuery.eq("project_id", project_id);
+            const fallbackRes = await fallbackQuery;
+            if (!fallbackRes.error) {
+                data = fallbackRes.data;
+                error = null;
+            }
+        }
         if (error) throw error;
         const rows = data || [];
-        if (!rows.length) return rows;
+        if (!rows.length) {
+            return partitioned ? { active: [], trashed: [] } : rows;
+        }
         const candidateIds = rows.map((row) => row.id).filter(Boolean);
-        const trashedSet = await trashRepository.getTrashedWorkflowIdSet({
-            workflowIds: candidateIds,
-            client: supabase,
-        });
-        return trashedSet.size > 0 ? rows.filter((row) => !trashedSet.has(row.id)) : rows;
+        let trashedDetailsMap = new Map();
+        try {
+            trashedDetailsMap = await trashRepository.getTrashedDetailsMap({
+                workflowIds: candidateIds,
+            });
+        } catch (_err) {
+            // Graceful resilience: if trash table query fails (e.g. migration not applied),
+            // candidate workflows remain active rather than zeroing out the user's project.
+            trashedDetailsMap = new Map();
+        }
+
+        if (partitioned) {
+            const active = [];
+            const trashed = [];
+            for (const row of rows) {
+                const trashInfo = trashedDetailsMap.get(row.id);
+                if (trashInfo) {
+                    trashed.push({
+                        ...row,
+                        deleted_at: trashInfo.deleted_at || null,
+                    });
+                } else {
+                    active.push(row);
+                }
+            }
+            return { active, trashed };
+        }
+
+        return trashedDetailsMap.size > 0 ? rows.filter((row) => !trashedDetailsMap.has(row.id)) : rows;
     }
 
     /**

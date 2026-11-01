@@ -205,6 +205,10 @@ describe("Asset Listing with Folder Filters & Pagination (Task F-T7)", () => {
 
       return list.slice(0, limit + 1);
     };
+
+    // Mock db.workflowMedia
+    db.workflowMedia = db.workflowMedia || {};
+    db.workflowMedia.findByWorkflowIds = async () => [];
   });
 
   describe("GET /api/projects/:projectId/assets", () => {

@@ -131,7 +131,12 @@ export async function handleUseCaseWorkerFailure(job, err) {
       await db.media.updateMedia(mediaId, {
         status: "failed",
         error_message: failMessage,
-      }).catch(() => {});
+      }).catch((dbErr) => {
+        workerLogger.error(
+          { jobId: job?.id, mediaId, err: dbErr.message },
+          `[Worker] Direct media status update failed for media ${mediaId} — manual review required.`
+        );
+      });
     }
   }
 
@@ -144,7 +149,5 @@ export async function handleUseCaseWorkerFailure(job, err) {
     });
   }
 }
-
-useCaseWorker.on("failed", handleUseCaseWorkerFailure);
 
 export default useCaseWorker;

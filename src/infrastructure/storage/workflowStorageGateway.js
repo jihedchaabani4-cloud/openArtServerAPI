@@ -65,16 +65,14 @@ export class WorkflowStorageGateway {
           result._v2Context;
         const asset = this.lifecycle.extractAsset(output, nodeType);
         if (!asset) {
-          console.warn(
+          storageLogger.warn(
+            { runId, workflowId },
             `[WorkflowStorageGateway] No asset in output for run ${runId}`
           );
           return null;
         }
 
-        const stepId =
-          workflowId === "character-sheet-v1" || input?.type === "character"
-            ? "character_sheet"
-            : "GEN";
+        const stepId = "GEN";
         const displayName = `${workflowId} – ${runId.slice(0, 8)}`;
         const projectId = await this.lifecycle.resolveProjectId(userId, input);
         const sessionId = input.session_id || input.sessionId || null;

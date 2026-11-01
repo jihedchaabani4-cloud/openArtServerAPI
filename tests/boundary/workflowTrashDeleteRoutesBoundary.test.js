@@ -543,4 +543,85 @@ describe("Workflow Trash Delete Routes Boundary Tests (T3)", () => {
             "deleteCharacterRow:char-orphan-A",
         ]);
     });
+
+    it("7. Explicit trash=false parameter on first delete bypasses public.trash and permanently deletes workflows, elements, characters, and bulk workflow batches", async () => {
+        callOrder = [];
+
+        // Cross-tenant with ?trash=false -> 404 without mutating state
+        const crossRes = await fetch(`${baseUrl}/api/workflows/workflows/wf-std-A?trash=false`, {
+            method: "DELETE",
+            headers: { Authorization: "Bearer token-user-B" },
+        });
+        assert.equal(crossRes.status, 404);
+        assert.deepEqual(callOrder, []);
+
+        // 1. Single workflow delete on 1st call with ?trash=false -> direct permanent delete
+        const wfRes = await fetch(`${baseUrl}/api/workflows/workflows/wf-std-A?trash=false`, {
+            method: "DELETE",
+            headers: { Authorization: "Bearer token-user-A" },
+        });
+        assert.equal(wfRes.status, 200);
+        const wfBody = await wfRes.json();
+        assert.deepEqual(wfBody, {
+            ok: true,
+            deleted_workflow_id: "wf-std-A",
+            deleted_media_count: 1,
+            storage_failures: 0,
+        });
+        assert.equal("trashed" in wfBody, false);
+        assert.equal(mockTrash.length, 0, "trash=false must not insert into public.trash");
+        assert.equal(mockWorkflows.some((w) => w.id === "wf-std-A"), false);
+
+        // 2. Element delete on 1st call with ?trash=false -> direct permanent delete
+        const elemRes = await fetch(`${baseUrl}/api/v2/elements/elem-user-A?trash=false`, {
+            method: "DELETE",
+            headers: { Authorization: "Bearer token-user-A" },
+        });
+        assert.equal(elemRes.status, 200);
+        const elemBody = await elemRes.json();
+        assert.deepEqual(elemBody, {
+            status: "success",
+            deleted: true,
+            id: "elem-user-A",
+        });
+        assert.equal("trashed" in elemBody, false);
+        assert.equal(mockTrash.length, 0);
+        assert.equal(mockElements.some((e) => e.id === "elem-user-A"), false);
+        assert.equal(mockWorkflows.some((w) => w.id === "wf-elem-A"), false);
+
+        // 3. Character delete on 1st call with body { trash: false } -> direct permanent delete
+        const charRes = await fetch(`${baseUrl}/api/characters/wf-char-A`, {
+            method: "DELETE",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: "Bearer token-user-A",
+            },
+            body: JSON.stringify({ trash: false }),
+        });
+        assert.equal(charRes.status, 200);
+        const charBody = await charRes.json();
+        assert.equal(charBody.ok, true);
+        assert.equal("trashed" in charBody, false);
+        assert.equal(charBody.deletedMediaCount, 1);
+        assert.equal(mockTrash.length, 0);
+        assert.equal(mockCharacters.some((c) => c.id === "wf-char-A"), false);
+        assert.equal(mockWorkflows.some((w) => w.id === "wf-char-A"), false);
+
+        // 4. Bulk workflow delete on 1st call with body { workflow_ids: ["wf-std-A-2"], trash: false } -> direct permanent delete
+        const bulkRes = await fetch(`${baseUrl}/api/workflows/workflows`, {
+            method: "DELETE",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: "Bearer token-user-A",
+            },
+            body: JSON.stringify({ workflow_ids: ["wf-std-A-2"], trash: false }),
+        });
+        assert.equal(bulkRes.status, 200);
+        const bulkBody = await bulkRes.json();
+        assert.equal(bulkBody.ok, true);
+        assert.equal("trashed" in bulkBody, false);
+        assert.equal("trashed" in bulkBody.results[0], false);
+        assert.equal(mockTrash.length, 0);
+        assert.equal(mockWorkflows.some((w) => w.id === "wf-std-A-2"), false);
+    });
 });

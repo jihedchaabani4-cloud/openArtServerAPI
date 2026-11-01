@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { WalletError } from "#platform/billing/WalletService.js";
+import { createLogger } from "../src/infrastructure/logging/index.js";
+
+const walletLogger = createLogger("wallet_controller");
 
 /**
  * Wallet Controller
@@ -45,7 +48,7 @@ function walletErrorToHttp(err) {
   return codeMap[err.code] || 500;
 }
 
-// ── Handlers ─────────────────────────────────────────────────────────────────
+// ── Controllers ──────────────────────────────────────────────────────────────
 
 /**
  * GET /api/wallet/balance
@@ -58,25 +61,23 @@ export async function getBalance(req, res) {
   try {
     const balance = await req.walletService.getBalance(userId);
 
-    console.log(JSON.stringify({
-      timestamp: new Date().toISOString(),
+    walletLogger.info({
       operation: "get-balance",
       status: "success",
       userId,
       durationMs: Date.now() - start,
-    }));
+    }, "Balance fetched");
 
     return res.json({ balance, userId });
   } catch (err) {
-    console.error(JSON.stringify({
-      timestamp: new Date().toISOString(),
+    walletLogger.error({
       operation: "get-balance",
       status: "error",
       userId,
       error: err.message,
       code: err.code,
       durationMs: Date.now() - start,
-    }));
+    }, "Failed to fetch balance");
 
     if (err instanceof WalletError) {
       return res.status(walletErrorToHttp(err)).json({ error: err.code, message: err.message });
@@ -87,16 +88,13 @@ export async function getBalance(req, res) {
 
 /**
  * GET /api/wallet/transactions
- * Returns cursor-paginated transaction history for the authenticated user.
- *
- * Cursor-based pagination (stable on a live append-only table):
- *   ?limit=20&before=<iso-timestamp>&beforeId=<uuid>
+ * Returns paginated transaction history for the authenticated user.
+ * Supports cursor pagination via `before` (ISO 8601 string) and `beforeId` (UUID).
  */
 export async function getTransactions(req, res) {
   const start = Date.now();
   const userId = req.user.id;
 
-  // Validate query params
   const parsed = TransactionsQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     return res.status(400).json({
@@ -110,27 +108,25 @@ export async function getTransactions(req, res) {
   try {
     const result = await req.walletService.getTransactions(userId, limit, before, beforeId);
 
-    console.log(JSON.stringify({
-      timestamp: new Date().toISOString(),
+    walletLogger.info({
       operation: "get-transactions",
       status: "success",
       userId,
       limit,
       count: result.transactions.length,
       durationMs: Date.now() - start,
-    }));
+    }, "Transactions fetched");
 
     return res.json(result);
   } catch (err) {
-    console.error(JSON.stringify({
-      timestamp: new Date().toISOString(),
+    walletLogger.error({
       operation: "get-transactions",
       status: "error",
       userId,
       error: err.message,
       code: err.code,
       durationMs: Date.now() - start,
-    }));
+    }, "Failed to fetch transactions");
 
     if (err instanceof WalletError) {
       return res.status(walletErrorToHttp(err)).json({ error: err.code, message: err.message });
@@ -161,8 +157,7 @@ export async function getPrice(req, res) {
   try {
     const result = await req.pricingService.getPrice(modelKey, operationType, qualityTier);
 
-    console.log(JSON.stringify({
-      timestamp: new Date().toISOString(),
+    walletLogger.info({
       operation: "get-price",
       status: "success",
       userId,
@@ -171,12 +166,11 @@ export async function getPrice(req, res) {
       qualityTier,
       cached: result.cached,
       durationMs: Date.now() - start,
-    }));
+    }, "Price calculated");
 
     return res.json(result);
   } catch (err) {
-    console.error(JSON.stringify({
-      timestamp: new Date().toISOString(),
+    walletLogger.error({
       operation: "get-price",
       status: "error",
       userId,
@@ -184,7 +178,7 @@ export async function getPrice(req, res) {
       error: err.message,
       code: err.code,
       durationMs: Date.now() - start,
-    }));
+    }, "Failed to calculate price");
 
     if (err.code === "PRICING_NOT_FOUND") {
       return res.status(404).json({ error: "PRICING_NOT_FOUND", message: err.message });

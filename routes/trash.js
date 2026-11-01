@@ -6,7 +6,7 @@ const router = express.Router();
 
 router.use(requireAuth);
 
-router.get("/", trashController.listTrash);
+router.post("/restore-all", trashController.restoreAllWorkflows);
 router.post("/:workflowId/restore", trashController.restoreWorkflow);
 
 export default router;

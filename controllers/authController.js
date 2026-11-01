@@ -1,5 +1,8 @@
 import { supabase, createRequestBoundClient } from "#lib/supabase.js";
 import { walletService } from "#container.js";
+import { createLogger } from "../src/infrastructure/logging/index.js";
+
+const authLogger = createLogger("auth_controller");
 
 const FRONTEND_URL = process.env.FRONTEND_URL;
 const BASE_URL = process.env.BASE_URL;
@@ -12,10 +15,6 @@ const COOKIE_OPTS = {
   sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
   path: "/",
 };
-
-const INITIAL_ACCOUNT_CREDITS = Number(
-0
-);
 
 function isValidEmail(email) {
   return typeof email === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
@@ -88,7 +87,7 @@ async function createProfile(userId, extra = {}) {
   // Use upsert to avoid race conditions on concurrent creation attempts
   const { data, error } = await supabase
     .from("profiles")
-    .upsert({ id: userId, credits: INITIAL_ACCOUNT_CREDITS, ...extra }, { onConflict: ["id"] });
+    .upsert({ id: userId, ...extra }, { onConflict: ["id"] });
 
   if (error) throw error;
   return data?.[0] ?? null;
@@ -126,7 +125,7 @@ export async function signup(req, res) {
     setAuthCookies(res, data.session);
     return res.status(201).json({ user: { id: data.user.id } });
   } catch (err) {
-    console.error("[Auth] Signup error:", err);
+    authLogger.error({ event: "auth.signup_error", err: err?.message || String(err) }, "Signup error");
     return res.status(500).json({ error: "Internal server error." });
   }
 }
@@ -151,7 +150,7 @@ export async function login(req, res) {
     setAuthCookies(res, data.session);
     return res.status(200).json({ user: { id: data.user.id } });
   } catch (err) {
-    console.error("[Auth] Login error:", err);
+    authLogger.error({ event: "auth.login_error", err: err?.message || String(err) }, "Login error");
     return res.status(500).json({ error: "Internal server error." });
   }
 }
@@ -170,7 +169,7 @@ export async function googleRedirect(req, res) {
 
     return res.redirect(data.url);
   } catch (err) {
-    console.error("[Auth] Google redirect error:", err);
+    authLogger.error({ event: "auth.google_redirect_error", err: err?.message || String(err) }, "Google redirect error");
     return res.status(500).json({ error: "Internal server error." });
   }
 }
@@ -190,7 +189,7 @@ export async function microsoftRedirect(req, res) {
 
     return res.redirect(data.url);
   } catch (err) {
-    console.error("[Auth] Microsoft redirect error:", err);
+    authLogger.error({ event: "auth.microsoft_redirect_error", err: err?.message || String(err) }, "Microsoft redirect error");
     return res.status(500).json({ error: "Internal server error." });
   }
 }
@@ -213,7 +212,7 @@ export async function googleCallback(req, res) {
 
     return res.redirect(`${FRONTEND_URL}/`);
   } catch (err) {
-    console.error("[Auth] Google callback error:", err);
+    authLogger.error({ event: "auth.google_callback_error", err: err?.message || String(err) }, "Google callback error");
     return res.status(500).json({ error: "Internal server error." });
   }
 }
@@ -237,7 +236,7 @@ export async function getMe(req, res) {
       user: mapSessionUser(user),
     });
   } catch (err) {
-    console.error("[Auth] getMe error:", err);
+    authLogger.error({ event: "auth.getMe_error", err: err?.message || String(err) }, "getMe error");
     return res.status(500).json({ error: "Internal server error." });
   }
 }
@@ -259,7 +258,7 @@ export async function getWalletBalance(req, res) {
 
     return res.status(200).json({ balance });
   } catch (err) {
-    console.error("[Auth] getWalletBalance error:", err);
+    authLogger.error({ event: "auth.getWalletBalance_error", err: err?.message || String(err) }, "getWalletBalance error");
     return res.status(500).json({ error: "Internal server error." });
   }
 }

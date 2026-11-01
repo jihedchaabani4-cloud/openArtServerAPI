@@ -244,7 +244,7 @@ describe("Reference and Media Ownership Security & Boundary Tests (Task T2c)", (
       },
       body: JSON.stringify({
         prompt: "A photo of Alice",
-        model: "seedream_v5",
+        model: "nanobana_pro",
         project_id: "proj-user-B",
         references: ["char-user-A"],
       }),
@@ -267,7 +267,7 @@ describe("Reference and Media Ownership Security & Boundary Tests (Task T2c)", (
       },
       body: JSON.stringify({
         prompt: "Edit this photo",
-        model: "seedream_v5",
+        model: "nanobana_pro",
         project_id: "proj-user-B",
         parameters: {
           input_image: "media-user-A",
@@ -361,7 +361,7 @@ describe("Reference and Media Ownership Security & Boundary Tests (Task T2c)", (
       },
       body: JSON.stringify({
         prompt: "A photo of Alice",
-        model: "seedream_v5",
+        model: "nanobana_pro",
         project_id: "proj-user-A",
         references: ["char-user-A"],
         parameters: {

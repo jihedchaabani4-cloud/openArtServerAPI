@@ -1,12 +1,12 @@
 /**
  * TrashService
- * @owns Workflow trash lifecycle (move to trash, permanent delete dispatch, list, and restore)
+ * @owns Workflow trash lifecycle (move to trash, permanent delete dispatch, and restore)
  *
  * Public methods:
  *   - requestDelete({ kind, id, userId, req })
  *   - requestDeleteMany({ ids, userId, req })
- *   - list({ userId })
  *   - restore({ workflowId, userId })
+ *   - restoreAll({ userId, projectId, workflowIds })
  */
 
 import { randomUUID } from "node:crypto";
@@ -141,9 +141,10 @@ export class TrashService {
         return this.workflowService.deleteWorkflow({ workflowId, userId, req });
     }
 
-    async requestDelete({ kind = "workflow", id, userId, req = null } = {}) {
+    async requestDelete({ kind = "workflow", id, userId, trash = true, req = null } = {}) {
         const traceId = randomUUID();
         const start = Date.now();
+        const shouldMoveToTrash = !(trash === false || String(trash).toLowerCase() === "false");
 
         try {
             const { workflowId, orphanKind, orphanId } = await this._resolveOwnedWorkflowTarget({
@@ -161,22 +162,24 @@ export class TrashService {
                 return await this.characterService.deleteCharacter({ characterId: orphanId, userId, req });
             }
 
-            const inserted = await this.db.trash.insertIfAbsent({
-                workflowId,
-                userId,
-                deletedBy: userId,
-            });
-
-            if (inserted) {
-                crudOperationLog({
-                    traceId,
-                    operation: "requestDelete:trashed",
-                    status: "ok",
-                    durationMs: Date.now() - start,
+            if (shouldMoveToTrash === true) {
+                const inserted = await this.db.trash.insertIfAbsent({
                     workflowId,
-                    kind,
+                    userId,
+                    deletedBy: userId,
                 });
-                return buildEmptyDeleteResult(workflowId, { trashed: true });
+
+                if (inserted) {
+                    crudOperationLog({
+                        traceId,
+                        operation: "requestDelete:trashed",
+                        status: "ok",
+                        durationMs: Date.now() - start,
+                        workflowId,
+                        kind,
+                    });
+                    return buildEmptyDeleteResult(workflowId, { trashed: true });
+                }
             }
 
             const result = await this._permanentlyDeleteByWorkflowOwner({ workflowId, userId, req });
@@ -202,7 +205,7 @@ export class TrashService {
         }
     }
 
-    async requestDeleteMany({ ids = [], userId, req = null } = {}) {
+    async requestDeleteMany({ ids = [], userId, trash = true, req = null } = {}) {
         const traceId = randomUUID();
         const start = Date.now();
         const cleanIds = normalizeWorkflowIds(ids);
@@ -228,7 +231,7 @@ export class TrashService {
             }
 
             const settled = await Promise.allSettled(
-                ownedIds.map((id) => this.requestDelete({ kind: "workflow", id, userId, req }))
+                ownedIds.map((id) => this.requestDelete({ kind: "workflow", id, userId, trash, req }))
             );
 
             const successfulIds = settled
@@ -273,17 +276,6 @@ export class TrashService {
         }
     }
 
-    async list({ userId } = {}) {
-        if (!userId) {
-            throw new CrudServiceError("Authentication required", {
-                statusCode: 401,
-                errorCode: "UNAUTHORIZED",
-                operation: "trash.list",
-            });
-        }
-        return this.db.trash.listByUser(userId);
-    }
-
     async restore({ workflowId, userId } = {}) {
         const cleanId = cleanWorkflowId(workflowId);
         if (!cleanId) {
@@ -317,6 +309,73 @@ export class TrashService {
         return {
             workflow_id: cleanId,
             restored: true,
+        };
+    }
+
+    async restoreAll({ userId, projectId = null, workflowIds = null } = {}) {
+        const start = Date.now();
+        const traceId = randomUUID();
+
+        if (!userId) {
+            throw new CrudServiceError("Authentication required", {
+                statusCode: 401,
+                errorCode: "UNAUTHORIZED",
+                traceId,
+                operation: "trash.restoreAll",
+            });
+        }
+
+        let targetIds = null;
+
+        if (projectId) {
+            await assertOwns("project", projectId, userId);
+            const workflowsResult = await this.db.workflows.findByProject(projectId, {
+                partitioned: true,
+            });
+            const trashedWfs = workflowsResult?.trashed || [];
+            targetIds = trashedWfs.map((w) => w.id).filter(Boolean);
+
+            if (Array.isArray(workflowIds) && workflowIds.length > 0) {
+                const passedIds = normalizeWorkflowIds(workflowIds);
+                targetIds = targetIds.filter((id) => passedIds.includes(id));
+            }
+
+            if (targetIds.length === 0) {
+                return {
+                    restored: true,
+                    count: 0,
+                    workflow_ids: [],
+                };
+            }
+        } else if (Array.isArray(workflowIds)) {
+            targetIds = normalizeWorkflowIds(workflowIds);
+            if (targetIds.length === 0) {
+                return {
+                    restored: true,
+                    count: 0,
+                    workflow_ids: [],
+                };
+            }
+        }
+
+        const restoredIds = await this.db.trash.deleteManyByUser({
+            userId,
+            workflowIds: targetIds,
+        });
+
+        crudOperationLog({
+            traceId,
+            operation: "trash.restoreAll",
+            status: "ok",
+            durationMs: Date.now() - start,
+            count: restoredIds.length,
+            projectId: projectId || undefined,
+        });
+
+        return {
+            restored: true,
+            count: restoredIds.length,
+            workflow_ids: restoredIds,
         };
     }
 }

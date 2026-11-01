@@ -628,7 +628,12 @@ export async function executeOrchestration(runId) {
           status: "failed",
           error: { code: "NODE_FAILED", message: err.message },
           completed_at: new Date().toISOString()
-        }).catch(() => {});
+        }).catch((updateErr) => {
+          workflowLogger.error(
+            { nodeId: node.id, runId, err: updateErr, event: LogEvents.WORKFLOW_NODE_FAILED },
+            `Failed to update node run status to failed for node ${node.id}: ${updateErr.message}`
+          );
+        });
         return await executeOrchestration(runId);
       }
     }

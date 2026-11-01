@@ -93,6 +93,9 @@ export async function createMediaInWorkflow(firstArg, secondArg, thirdArg, fourt
             ...(role ? { role } : {}),
             ...(resolvedStepId ? { stepId: resolvedStepId } : {}),
             ...(workflowType || workflow_type ? { workflowType: workflowType || workflow_type } : {}),
+            ...(opts.is_primary !== undefined ? { is_primary: opts.is_primary } : {}),
+            ...(opts.isPrimary !== undefined ? { isPrimary: opts.isPrimary } : {}),
+            ...(opts.metadata !== undefined ? { metadata: opts.metadata } : {}),
         });
         return res || null;
     } catch (err) {
@@ -110,4 +113,3 @@ export async function createMediaInWorkflow(firstArg, secondArg, thirdArg, fourt
 export async function linkWorkflowMediaForCreatedRow(db, options = {}) {
     return createMediaInWorkflow(db, options);
 }
-

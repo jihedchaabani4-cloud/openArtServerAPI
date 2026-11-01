@@ -173,29 +173,29 @@ export class ElementAnalysisService {
       let elementType = "object";
 
       if (workflowId) {
-        const { data: wf } = await supabase
-          .from("workflow")
-          .select("id, name, metadata, element_type")
-          .or(`id.eq.${workflowId},name.eq.${workflowId}`)
-          .single();
+        let wf = null;
+        try {
+          const { data } = await supabase
+            .from("workflow")
+            .select("id, display_name, metadata, element_type")
+            .eq("id", workflowId)
+            .maybeSingle();
+          wf = data;
+        } catch (_) {}
 
         if (wf) {
           elementType = wf.element_type || wf.metadata?.elementType || "object";
         }
 
-        const { data: media } = await supabase
-          .from("media")
-          .select("id, url, file_url, generation_config, workflow_id")
-          .or(`workflow_id.eq.${workflowId},workflow_id.eq.${wf?.name || workflowId}`);
+        const { data: links } = await supabase
+          .from("workflow_media")
+          .select("media:media_id(id, url, file_url)")
+          .eq("workflow_id", workflowId);
 
-        if (media && media.length > 0) {
-          for (const m of media) {
-            const refs = m?.generation_config?.references || [];
-            for (const ref of refs) {
-              const u = ref?.url || ref?.file_url || ref?.src;
-              if (u) urls.push(u);
-            }
-            const directUrl = m.url || m.file_url;
+        if (links && links.length > 0) {
+          for (const link of links) {
+            const m = Array.isArray(link.media) ? link.media[0] : link.media;
+            const directUrl = m?.url || m?.file_url;
             if (directUrl) urls.push(directUrl);
           }
         }

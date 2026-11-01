@@ -90,7 +90,27 @@ export class CharacterMediaService {
                 });
             }
 
-            const wf = await this.db.workflows.getWorkflow(characterId).catch(() => null);
+            let wf = await this.db.workflows.getWorkflow(characterId).catch(() => null);
+            if (!wf) {
+                const charRecord = await this.db.characters?.findByCharacterId?.(characterId).catch(() => null)
+                    || await this.db.characters?.findById?.(characterId).catch(() => null);
+                if (charRecord) {
+                    const targetWfId = charRecord.workflow_id || charRecord.id;
+                    wf = await this.db.workflows.getWorkflow(targetWfId).catch(() => null);
+                    if (!wf && this.db.workflows?.createWorkflow) {
+                        wf = await this.db.workflows.createWorkflow({
+                            id: targetWfId,
+                            project_id: charRecord.project_id || projectId,
+                            user_id: charRecord.user_id || userId,
+                            workflow_type: "CHARACTER_SHEET",
+                            display_name: charRecord.name || charRecord.title || "Character",
+                        }).catch(() => null);
+                        if (wf && !charRecord.workflow_id && this.db.characters?.updateCharacterFields) {
+                            await this.db.characters.updateCharacterFields(charRecord.id, { workflow_id: wf.id }).catch(() => null);
+                        }
+                    }
+                }
+            }
             if (!wf) {
                 throw new CrudServiceError("Character workflow not found", {
                     statusCode: 404,
@@ -243,7 +263,27 @@ export class CharacterMediaService {
                 });
             }
 
-            const wf = await this.db.workflows.getWorkflow(characterId).catch(() => null);
+            let wf = await this.db.workflows.getWorkflow(characterId).catch(() => null);
+            if (!wf) {
+                const charRecord = await this.db.characters?.findByCharacterId?.(characterId).catch(() => null)
+                    || await this.db.characters?.findById?.(characterId).catch(() => null);
+                if (charRecord) {
+                    const targetWfId = charRecord.workflow_id || charRecord.id;
+                    wf = await this.db.workflows.getWorkflow(targetWfId).catch(() => null);
+                    if (!wf && this.db.workflows?.createWorkflow) {
+                        wf = await this.db.workflows.createWorkflow({
+                            id: targetWfId,
+                            project_id: charRecord.project_id || projectId,
+                            user_id: charRecord.user_id || userId,
+                            workflow_type: "CHARACTER_SHEET",
+                            display_name: charRecord.name || charRecord.title || "Character",
+                        }).catch(() => null);
+                        if (wf && !charRecord.workflow_id && this.db.characters?.updateCharacterFields) {
+                            await this.db.characters.updateCharacterFields(charRecord.id, { workflow_id: wf.id }).catch(() => null);
+                        }
+                    }
+                }
+            }
             if (!wf) {
                 throw new CrudServiceError("Character workflow not found", {
                     statusCode: 404,

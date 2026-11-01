@@ -132,7 +132,8 @@ export async function deleteCharacter(req, res) {
     try {
         const { characterId } = req.params;
         const userId = req.user.id;
-        const result = await trashService.requestDelete({ kind: "character", id: characterId, userId, req });
+        const trash = req.query?.trash ?? req.body?.trash;
+        const result = await trashService.requestDelete({ kind: "character", id: characterId, userId, trash, req });
         return res.json({ ok: true, ...result });
     } catch (err) {
         controllerLogger.error({ characterId: req.params?.characterId, err }, `deleteCharacter error: ${err.message}`);

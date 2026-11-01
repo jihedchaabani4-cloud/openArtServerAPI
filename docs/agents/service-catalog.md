@@ -33,8 +33,7 @@ Methods and dependencies are parsed from the code (best effort). "Owns" comes fr
 | `AuditService` | `src/platform/security` | - | `log` | - | - | 0 |
 | `AuthorizationService` | `src/platform/security` | - | `can`, `assertCan` | - | - | 0 |
 | `TenantAccessService` | `src/platform/security` | - | `assertProjectOwnership` | `db` | - | 0 |
-| `mediaStorageService` | `src/platform/storage` | - | - | - | - | 0 |
-| `StorageService` | `src/platform/storage` | - | `upload`, `uploadBuffer`, `uploadStream`, `uploadFromUrl`, `delete`, `deleteFiles`, `extractStoragePath`, `deleteByUrl`, `deleteByUrls`, `remove` | `bucketName`, `provider`, `paths` | `src/container.js` | 11 |
+| `StorageService` | `src/platform/storage` | Physical object storage operations, storage key construction and validation, and storage provider delegation. | `buildKey`, `validateFolder`, `extractKey`, `extractStoragePath`, `upload`, `getPublicUrl`, `delete`, `deleteFiles`, `deleteByUrl` | `bucketName`, `provider`, `paths` | `src/container.js` | 11 |
 | `WorkflowAuthorizationService` | `src/platform/workflow` | - | `verifyWorkflowOwnership`, `verifyWorkflowOwnershipBulk`, `verifyMediaOwnership` | `db` | `src/platform/workflow/WorkflowServiceBase.js` | 4 |
 | `WorkflowMediaService` | `src/platform/workflow` | - | `createMediaInWorkflow`, `assignMediaToWorkflow`, `resolveOwnedSourceMedia`, `attachMediaItems`, `rollbackAttachedMedia`, `clearPrimaryMedia`, `setPrimaryMedia`, `detachMedia`, `releaseWorkflowMedia`, `scanOrphanMediaDryRun`, `deleteMedia` | `db`, `storageService`, `authService`, `mediaUploadService` | `src/platform/workflow/WorkflowServiceBase.js` | 5 |
 | `WorkflowLifecycleService` | `src/platform/workflow` | - | - | - | `src/container.js` | 3 |
@@ -43,4 +42,4 @@ Methods and dependencies are parsed from the code (best effort). "Owns" comes fr
 | `InMemoryWalletService` | `src/services` | - | `setBalance`, `getBalance`, `reserve`, `extendHold`, `commit`, `release`, `rollback`, `reapExpiredHolds` | `balances`, `reservations`, `HOLD_TTL_MS` | - | 0 |
 | `NodeSafetyService` | `src/v2/nodes/safety` | - | - | - | - | 4 |
 
-Services: 36. Without @owns: 35.
+Services: 35. Without @owns: 33.

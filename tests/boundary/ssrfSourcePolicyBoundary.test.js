@@ -2,9 +2,18 @@ import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import dns from "node:dns/promises";
 import { StorageService } from "../../src/platform/storage/StorageService.js";
+import { MediaUploadService } from "../../src/platform/media-ingestion/MediaUploadService.js";
+import { SourceReader } from "../../src/platform/media-ingestion/SourceReader.js";
+import { CHARACTER_DETAIL_UPLOAD_POLICY } from "../../src/platform/media-ingestion/UploadPolicy.js";
+
+const VALID_1PX_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+  "base64"
+);
 
 describe("SSRF Mitigation & SourcePolicy Boundary Tests (Task T4)", () => {
   let storageService;
+  let mediaUploadService;
   let mockProvider;
   let originalFetch;
   let originalDnsLookup;
@@ -16,10 +25,11 @@ describe("SSRF Mitigation & SourcePolicy Boundary Tests (Task T4)", () => {
       },
       delete: async () => {},
       deleteFiles: async () => ({ deletedCount: 1, failures: [] }),
-      getUrl: (path) => `https://storage.example.com/${path}`,
+      getPublicUrl: async (path) => `https://storage.example.com/${path}`,
     };
 
     storageService = new StorageService("test-bucket", mockProvider);
+    mediaUploadService = new MediaUploadService({ storageService });
   });
 
   beforeEach(() => {
@@ -44,7 +54,7 @@ describe("SSRF Mitigation & SourcePolicy Boundary Tests (Task T4)", () => {
     for (const url of targets) {
       await assert.rejects(
         async () => {
-          await storageService.uploadFromUrl("test/path.png", url);
+          await mediaUploadService.upload({ files: [url], userId: "user-1" });
         },
         /(SSRF|forbidden|restricted|prohibited|invalid)/i,
         `Expected ${url} to be blocked by SSRF defense`
@@ -63,7 +73,7 @@ describe("SSRF Mitigation & SourcePolicy Boundary Tests (Task T4)", () => {
     for (const url of targets) {
       await assert.rejects(
         async () => {
-          await storageService.uploadFromUrl("test/path.png", url);
+          await mediaUploadService.upload({ files: [url], userId: "user-1" });
         },
         /(SSRF|forbidden|restricted|local)/i,
         `Expected ${url} to be blocked by SSRF defense`
@@ -82,7 +92,10 @@ describe("SSRF Mitigation & SourcePolicy Boundary Tests (Task T4)", () => {
 
     await assert.rejects(
       async () => {
-        await storageService.uploadFromUrl("test/path.png", "http://evil.example.com/exploit.png");
+        await mediaUploadService.upload({
+          files: ["http://evil.example.com/exploit.png"],
+          userId: "user-1",
+        });
       },
       /(SSRF|restricted IP|SSRF protection)/i,
       "Expected evil.example.com resolving to 127.0.0.1 to be blocked"
@@ -108,7 +121,10 @@ describe("SSRF Mitigation & SourcePolicy Boundary Tests (Task T4)", () => {
 
     await assert.rejects(
       async () => {
-        await storageService.uploadFromUrl("test/path.png", "http://public.example.com/redirect");
+        await mediaUploadService.upload({
+          files: ["http://public.example.com/redirect"],
+          userId: "user-1",
+        });
       },
       /(SSRF|forbidden|restricted|private)/i,
       "Expected redirect to 127.0.0.1 to be blocked"
@@ -126,10 +142,17 @@ describe("SSRF Mitigation & SourcePolicy Boundary Tests (Task T4)", () => {
     for (const url of prohibited) {
       await assert.rejects(
         async () => {
-          await storageService.uploadFromUrl("test/path.png", url);
+          await mediaUploadService.upload({ files: [url], userId: "user-1" });
+        },
+        /(protocol|Only HTTP|Unsupported source format|invalid)/i,
+        `Expected protocol in ${url} to be rejected by MediaUploadService`
+      );
+      await assert.rejects(
+        async () => {
+          await SourceReader.read({ kind: "url", value: url });
         },
         /(protocol|Only HTTP|invalid)/i,
-        `Expected protocol in ${url} to be rejected`
+        `Expected protocol in ${url} to be rejected by SourceReader / SourcePolicy`
       );
     }
   });
@@ -151,7 +174,10 @@ describe("SSRF Mitigation & SourcePolicy Boundary Tests (Task T4)", () => {
 
     await assert.rejects(
       async () => {
-        await storageService.uploadFromUrl("test/path.png", "https://public.example.com/huge.png");
+        await mediaUploadService.upload({
+          files: ["https://public.example.com/huge.png"],
+          userId: "user-1",
+        });
       },
       /(too large|exceeds maximum|limit)/i,
       "Expected oversize file to be rejected"
@@ -173,11 +199,13 @@ describe("SSRF Mitigation & SourcePolicy Boundary Tests (Task T4)", () => {
 
     await assert.rejects(
       async () => {
-        await storageService.uploadFromUrl("test/path.png", "https://public.example.com/file.html", {
-          purpose: "character_reference", // only images allowed
+        await mediaUploadService.upload({
+          files: ["https://public.example.com/file.html"],
+          userId: "user-1",
+          policy: CHARACTER_DETAIL_UPLOAD_POLICY, // only images allowed
         });
       },
-      /(format|MIME|not allowed)/i,
+      /(format|MIME|not allowed|HTML \/ Script)/i,
       "Expected non-image MIME type to be rejected for character_reference"
     );
   });
@@ -186,19 +214,21 @@ describe("SSRF Mitigation & SourcePolicy Boundary Tests (Task T4)", () => {
   it("TEST 8: Legitimate public image URL succeeds and uploads to storage", async () => {
     dns.lookup = async () => [{ address: "93.184.216.34", family: 4 }];
 
-    const samplePng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-
     globalThis.fetch = async () => {
-      return new Response(samplePng, {
+      return new Response(VALID_1PX_PNG, {
         status: 200,
         headers: {
           "content-type": "image/png",
-          "content-length": String(samplePng.length),
+          "content-length": String(VALID_1PX_PNG.length),
         },
       });
     };
 
-    const result = await storageService.uploadFromUrl("test/valid.png", "https://public.example.com/image.png");
-    assert.strictEqual(result, "https://storage.example.com/test/valid.png");
+    const { uploaded } = await mediaUploadService.upload({
+      files: ["https://public.example.com/image.png"],
+      userId: "user-1",
+    });
+    assert.strictEqual(uploaded.length, 1);
+    assert.match(uploaded[0].url, /^https:\/\/storage\.example\.com\/user-1\/uploads\/.+\.png$/);
   });
 });

@@ -2,6 +2,10 @@
  * StoragePathResolver
  * Canonical generator for storage paths across all platform domains.
  * Eliminates ad-hoc string concatenation and ensures consistent hierarchy in storage buckets.
+ *
+ * NOTE (Transitional): Direct external usage of `StoragePathResolver` or `storageService.paths.projectAsset(...)`
+ * is preserved for backward compatibility. Callers outside `src/platform/storage/` should progressively
+ * migrate to `storageService.buildKey(...)`, `storageService.validateFolder(...)`, and `storageService.extractKey(...)`.
  */
 import { CrudServiceError } from "../../utils/crudOperationLog.js";
 
@@ -10,33 +14,8 @@ export class StoragePathResolver {
         this.defaultBucket = defaultBucket;
     }
 
-    _cleanExt(ext = "jpg") {
-        return String(ext || "jpg").replace(/^\.+/, "").toLowerCase();
-    }
-
     _cleanId(id) {
         return String(id || "anonymous").replace(/[^a-zA-Z0-9_-]/g, "");
-    }
-
-    /**
-     * Turnaround 3-view character body sheet path
-     */
-    characterSheet(userId, characterId, mediaId, ext = "jpg") {
-        return `character-sheets/${this._cleanId(userId)}/${characterId}/${mediaId}.${this._cleanExt(ext)}`;
-    }
-
-    /**
-     * Character detail reference image path
-     */
-    characterDetail(userId, characterId, mediaId, ext = "jpg") {
-        return `character-details/${this._cleanId(userId)}/${characterId}/${mediaId}.${this._cleanExt(ext)}`;
-    }
-
-    /**
-     * Element reference image or turnaround sheet path
-     */
-    element(userId, projectId, filename) {
-        return `elements/${this._cleanId(userId)}/${projectId}/${filename}`;
     }
 
     static ALLOWED_STORAGE_FOLDERS = new Set([
@@ -83,13 +62,6 @@ export class StoragePathResolver {
     projectAsset(userId, folder = "uploads", filename) {
         const segment = StoragePathResolver.validateFolderSegment(folder);
         return `${this._cleanId(userId)}/${segment}/${filename}`;
-    }
-
-    /**
-     * AI Generated media variation path
-     */
-    generation(userId, projectId, workflowId, mediaId, ext = "jpg") {
-        return `generations/${this._cleanId(userId)}/${projectId}/${workflowId}/${mediaId}.${this._cleanExt(ext)}`;
     }
 
     /**

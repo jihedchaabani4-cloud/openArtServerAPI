@@ -7,6 +7,7 @@ import { Readable } from "node:stream";
 import app from "../../index.js";
 import { supabase } from "../../lib/supabase.js";
 import { StorageService } from "../../src/platform/storage/StorageService.js";
+import { MediaUploadService } from "../../src/platform/media-ingestion/MediaUploadService.js";
 import {
   createSizeLimitedMemoryStorage,
   resetActiveUploadsForTest,
@@ -171,20 +172,22 @@ describe("RC1.4-D2.5 — Upload Hardening & Security Follow-up Boundary Tests", 
 
   // ── (d) Provider-output path security: SSRF & Dangerous SVG rejection ─────────
   describe("(d) Provider-output path security invariants", () => {
-    it("uploadFromUrl rejects private IP (SSRF) even when isProviderOutput is true", async () => {
+    it("MediaUploadService rejects private IP (SSRF) on remote URL ingestion", async () => {
       class MockStorageProvider {
         async upload() { return "https://cdn.example.com/file"; }
       }
       const storage = new StorageService("test-bucket", new MockStorageProvider());
+      const mediaUploadService = new MediaUploadService({ storageService: storage });
 
       await assert.rejects(
         async () => {
-          await storage.uploadFromUrl("runs/ssrf-test.png", "http://127.0.0.1/private-file.png", {
-            isProviderOutput: true,
+          await mediaUploadService.upload({
+            files: ["http://127.0.0.1/private-file.png"],
+            userId: "user-1",
           });
         },
         /private|restricted|ssrf/i,
-        "Private IP must be rejected by SSRF defense even for provider outputs"
+        "Private IP must be rejected by SSRF defense"
       );
     });
 
@@ -199,7 +202,7 @@ describe("RC1.4-D2.5 — Upload Hardening & Security Follow-up Boundary Tests", 
 
       await assert.rejects(
         async () => {
-          await storage.uploadBuffer("runs/svg-test.svg", svgPayload, {
+          await storage.upload("runs/svg-test.svg", svgPayload, {
             isProviderOutput: true,
             contentType: "image/svg+xml",
           });

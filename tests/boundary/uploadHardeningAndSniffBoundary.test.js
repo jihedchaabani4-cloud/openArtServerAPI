@@ -171,7 +171,7 @@ describe("RC1.4-D2.3 — Upload Hardening and Sniff Boundary Tests", () => {
       const storage = new StorageService("test-bucket", provider);
 
       const pngBytes = createSampleBytes("png");
-      const url = await storage.uploadBuffer("uploads/image.png", pngBytes, {
+      const url = await storage.upload("uploads/image.png", pngBytes, {
         contentType: "image/png",
         isProviderOutput: false,
       });
@@ -187,7 +187,7 @@ describe("RC1.4-D2.3 — Upload Hardening and Sniff Boundary Tests", () => {
 
       const pngBytes = createSampleBytes("png");
       await assert.rejects(
-        () => storage.uploadBuffer("uploads/image.png", pngBytes, {
+        () => storage.upload("uploads/image.png", pngBytes, {
           contentType: "image/jpeg", // wrong declared MIME
           isProviderOutput: false,
         }),
@@ -209,7 +209,7 @@ describe("RC1.4-D2.3 — Upload Hardening and Sniff Boundary Tests", () => {
 
       for (const payload of dangerousPayloads) {
         await assert.rejects(
-          () => storage.uploadBuffer("uploads/exploit.bin", payload, { contentType: "image/png" }),
+          () => storage.upload("uploads/exploit.bin", payload, { contentType: "image/png" }),
           /detected/i
         );
       }
@@ -222,7 +222,7 @@ describe("RC1.4-D2.3 — Upload Hardening and Sniff Boundary Tests", () => {
 
       // 1. Provider returns WebP but CDN header declared image/jpeg
       const webpBytes = createSampleBytes("webp");
-      await storage.uploadBuffer("generated/art.jpg", webpBytes, {
+      await storage.upload("generated/art.jpg", webpBytes, {
         contentType: "image/jpeg",
         isProviderOutput: true,
       });
@@ -230,7 +230,7 @@ describe("RC1.4-D2.3 — Upload Hardening and Sniff Boundary Tests", () => {
 
       // 2. Provider returns MP4 but CDN header declared application/octet-stream
       const mp4Bytes = createSampleBytes("mp4_isom");
-      await storage.uploadBuffer("generated/clip.mp4", mp4Bytes, {
+      await storage.upload("generated/clip.mp4", mp4Bytes, {
         contentType: "application/octet-stream",
         isProviderOutput: true,
       });
@@ -238,7 +238,7 @@ describe("RC1.4-D2.3 — Upload Hardening and Sniff Boundary Tests", () => {
 
       // 3. Provider returns QuickTime MOV but CDN header declared video/mp4
       const movBytes = createSampleBytes("mov_qt");
-      await storage.uploadBuffer("generated/movie.mov", movBytes, {
+      await storage.upload("generated/movie.mov", movBytes, {
         contentType: "video/mp4",
         isProviderOutput: true,
       });
@@ -251,7 +251,7 @@ describe("RC1.4-D2.3 — Upload Hardening and Sniff Boundary Tests", () => {
 
       const htmlPayload = Buffer.from("<!doctype html><html><body>error page</body></html>");
       await assert.rejects(
-        () => storage.uploadBuffer("generated/out.jpg", htmlPayload, {
+        () => storage.upload("generated/out.jpg", htmlPayload, {
           contentType: "image/jpeg",
           isProviderOutput: true,
         }),

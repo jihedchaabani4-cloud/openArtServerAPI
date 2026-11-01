@@ -1,24 +1,120 @@
-import { SupabaseStorageProvider } from "./storage/providers/SupabaseStorageProvider.js";
-import { StoragePathResolver, storagePathResolver } from "./StoragePathResolver.js";
-import { SourceReader } from "../media-ingestion/SourceReader.js";
-import { SourcePolicy } from "../media-ingestion/SourcePolicy.js";
-import { MediaInspector } from "../media-ingestion/MediaInspector.js";
-import { createLogger } from "../../infrastructure/logging/index.js";
-
-const storageLogger = createLogger("storage");
-
 /**
  * StorageService
+ * @owns Physical object storage operations, storage key construction and validation, and storage provider delegation.
+ *
  * Unified Platform Storage Service.
  * Serves as the central facade for all storage operations, file uploads,
  * path resolutions, and batch deletions.
  */
+import { SupabaseStorageProvider } from "./providers/SupabaseStorageProvider.js";
+import { StoragePathResolver, storagePathResolver } from "./StoragePathResolver.js";
+import { createLogger } from "../../infrastructure/logging/index.js";
+
+const storageLogger = createLogger("storage");
+
 function isStream(val) {
     return (
         val !== null &&
         typeof val === "object" &&
         (typeof val.pipe === "function" || typeof val[Symbol.asyncIterator] === "function" || typeof val.getReader === "function")
     );
+}
+
+/**
+ * Storage-layer defense-in-depth magic-bytes inspection.
+ * Rejects dangerous executable/script/archive signatures and detects common raster/video formats.
+ *
+ * @param {Buffer} buffer
+ * @returns {string | null}
+ */
+function sniffStorageMagicBytes(buffer) {
+    if (!buffer || buffer.length < 4) return null;
+
+    if (buffer[0] === 0x4d && buffer[1] === 0x5a) {
+        throw new Error("[StorageService] Executable binary payload (MZ) detected. Ingestion rejected.");
+    }
+    if (buffer[0] === 0x7f && buffer[1] === 0x45 && buffer[2] === 0x4c && buffer[3] === 0x46) {
+        throw new Error("[StorageService] Executable ELF binary detected. Ingestion rejected.");
+    }
+    const headerText = buffer.slice(0, 256).toString("utf8").toLowerCase();
+    if (
+        headerText.includes("<!doctype") ||
+        headerText.includes("<html") ||
+        headerText.includes("<script") ||
+        headerText.includes("<?php")
+    ) {
+        throw new Error("[StorageService] HTML / Script markup payload detected. Ingestion rejected.");
+    }
+    if (
+        headerText.includes("<svg") ||
+        headerText.includes("<?xml") ||
+        headerText.includes("<xml") ||
+        headerText.includes('xmlns="http://www.w3.org/2000/svg"')
+    ) {
+        throw new Error(
+            "[StorageService] SVG / XML markup payload detected. Vector graphics and scriptable XML are not permitted in raster image ingestion."
+        );
+    }
+    if (buffer[0] === 0x50 && buffer[1] === 0x4b) {
+        throw new Error("[StorageService] ZIP archive payload (PK) detected. Ingestion rejected.");
+    }
+
+    if (
+        buffer[0] === 0x89 &&
+        buffer[1] === 0x50 &&
+        buffer[2] === 0x4e &&
+        buffer[3] === 0x47 &&
+        buffer[4] === 0x0d &&
+        buffer[5] === 0x0a &&
+        buffer[6] === 0x1a &&
+        buffer[7] === 0x0a
+    ) {
+        return "image/png";
+    }
+    if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+        return "image/jpeg";
+    }
+    if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
+        return "image/gif";
+    }
+    if (
+        buffer.length >= 12 &&
+        buffer.slice(0, 4).toString("ascii") === "RIFF" &&
+        buffer.slice(8, 12).toString("ascii") === "WEBP"
+    ) {
+        return "image/webp";
+    }
+    if (buffer.length >= 8) {
+        const box = buffer.slice(4, 8).toString("ascii").toLowerCase();
+        if (box === "moov" || box === "wide") {
+            return "video/quicktime";
+        }
+    }
+    if (buffer.length >= 12 && buffer.slice(4, 8).toString("ascii") === "ftyp") {
+        const brand = buffer.slice(8, 12).toString("ascii").toLowerCase();
+        if (brand.includes("avif") || brand.includes("avis")) {
+            return "image/avif";
+        }
+        if (
+            brand.includes("heic") ||
+            brand.includes("heix") ||
+            brand.includes("heim") ||
+            brand.includes("heis") ||
+            brand.includes("mif1") ||
+            brand.includes("msf1")
+        ) {
+            return "image/heic";
+        }
+        if (brand.includes("qt")) {
+            return "video/quicktime";
+        }
+        return "video/mp4";
+    }
+    if (buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3) {
+        return "video/webm";
+    }
+
+    return null;
 }
 
 const SAFE_MEDIA_MIME_TYPES = new Set([
@@ -66,7 +162,37 @@ export class StorageService {
     constructor(bucketName = "generated_images", provider = null) {
         this.bucketName = bucketName;
         this.provider = provider || new SupabaseStorageProvider({ bucketName });
+        // Transitional backward-compatible exposure for legacy callers (`storageService.paths.projectAsset(...)`).
+        // Consumers should progressively migrate to `storageService.buildKey(...)` and `storageService.validateFolder(...)`.
         this.paths = storagePathResolver;
+    }
+
+    /**
+     * Builds a validated user-scoped storage key: `<cleanUserId>/<validatedFolder>/<filename>`.
+     */
+    buildKey({ userId, folder = "uploads", filename } = {}) {
+        return this.paths.projectAsset(userId, folder, filename);
+    }
+
+    /**
+     * Validates a storage folder segment against the canonical folder allowlist.
+     */
+    validateFolder(folder) {
+        return StoragePathResolver.validateFolderSegment(folder);
+    }
+
+    /**
+     * Extracts relative bucket storage key from a full public CDN URL or relative path.
+     */
+    extractKey(url) {
+        return this.paths.extractStoragePath(url, this.bucketName);
+    }
+
+    /**
+     * Extract storage path from a full public CDN URL (compatibility alias for extractKey).
+     */
+    extractStoragePath(url) {
+        return this.extractKey(url);
     }
 
     /**
@@ -94,7 +220,7 @@ export class StorageService {
         // Validate magic bytes to prevent writing dangerous files into storage
         let detectedMime = null;
         if (Buffer.isBuffer(body) && body.length >= 4) {
-            detectedMime = MediaInspector.sniffMagicBytes(body);
+            detectedMime = sniffStorageMagicBytes(body);
         }
 
         const isProviderOrInternal = Boolean(
@@ -183,71 +309,10 @@ export class StorageService {
     }
 
     /**
-     * Upload a buffer directly to storage path with MIME integrity verification.
+     * Resolve the public URL for a storage path.
      */
-    async uploadBuffer(path, buffer, options = {}) {
-        return this.upload(path, buffer, options);
-    }
-
-    /**
-     * Upload a readable stream directly to storage path with zero full-file RAM buffering.
-     */
-    async uploadStream(path, stream, options = {}) {
-        return this.upload(path, stream, options);
-    }
-
-    /**
-     * Download from external URL and upload to internal storage bucket.
-     * Enforces SSRF defense, redirect re-validation, size limits, and MIME policy via SourceReader & SourcePolicy.
-     *
-     * @param {string} path - Destination storage path
-     * @param {string} url - Source remote URL
-     * @param {Object} [options]
-     * @returns {Promise<string>} Public URL
-     */
-    async uploadFromUrl(path, url, options = {}) {
-        if (!url) throw new Error("URL is required for uploadFromUrl");
-        try {
-            const profile = options.profile || SourcePolicy.getProfile(options.purpose || "default");
-            const { buffer, mimeHint } = await SourceReader.read(
-                { kind: "url", value: url },
-                profile
-            );
-
-            // Sniff magic bytes to detect disguised scripts / executable payloads
-            let sniffedMime = null;
-            try {
-                sniffedMime = MediaInspector.sniffMagicBytes(buffer);
-            } catch (err) {
-                // If dangerous payload (HTML/script/executable) detected, reject immediately
-                throw new Error(`[SourcePolicy] File format validation failed: ${err.message}`);
-            }
-
-            const isProviderOrInternal = Boolean(
-                options.isProviderOutput ||
-                options.isInternal ||
-                options.origin === "provider" ||
-                options.origin === "internal" ||
-                (options.isProviderOutput !== false && !options.isEndUserUpload)
-            );
-
-            // Enforce MIME restrictions using detected MIME (or mimeHint fallback)
-            const effectiveMime = sniffedMime || mimeHint;
-            if (!isProviderOrInternal && profile.allowedMimeTypes && effectiveMime && !profile.allowedMimeTypes.includes(effectiveMime)) {
-                throw new Error(
-                    `[SourcePolicy] File format "${effectiveMime}" is not allowed for this operation. Allowed: ${profile.allowedMimeTypes.join(", ")}`
-                );
-            }
-
-            return await this.upload(path, buffer, {
-                isProviderOutput: isProviderOrInternal,
-                ...options,
-                contentType: sniffedMime || options.contentType || mimeHint || undefined,
-            });
-        } catch (e) {
-            storageLogger.error({ event: "storage.upload_from_url_error", err: e.message || String(e) }, "Storage uploadFromUrl error");
-            throw e;
-        }
+    async getPublicUrl(path) {
+        return await this.provider.getPublicUrl(path);
     }
 
     /**
@@ -284,33 +349,12 @@ export class StorageService {
     }
 
     /**
-     * Extract storage path from a full public CDN URL
-     */
-    extractStoragePath(url) {
-        return this.paths.extractStoragePath(url, this.bucketName);
-    }
-
-    /**
      * Delete a file directly by its public URL
      */
     async deleteByUrl(url) {
-        const path = this.extractStoragePath(url);
+        const path = this.extractKey(url);
         if (!path) return;
         return await this.delete(path);
-    }
-
-    /**
-     * Batch delete files by their public URLs
-     */
-    async deleteByUrls(urls = []) {
-        const paths = (urls || [])
-            .map((u) => this.extractStoragePath(u))
-            .filter(Boolean);
-        return await this.deleteFiles(paths);
-    }
-
-    remove(path) {
-        return this.delete(path);
     }
 }
 

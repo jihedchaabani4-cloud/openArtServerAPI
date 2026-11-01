@@ -162,7 +162,7 @@ describe("RC1.4-D2.4 — Upload Hardening Follow-up Boundary Tests", () => {
       try {
         // 1. HEIC with declared MIME in safe allowlist
         const heicBytes = createD24SampleBytes("heic");
-        const heicUrl = await storage.uploadBuffer("runs/gen-1.heic", heicBytes, {
+        const heicUrl = await storage.upload("runs/gen-1.heic", heicBytes, {
           isProviderOutput: true,
           contentType: "image/heic",
           runId: "run-heic-1",
@@ -174,7 +174,7 @@ describe("RC1.4-D2.4 — Upload Hardening Follow-up Boundary Tests", () => {
 
         // 2. Audio MP3 with declared audio MIME
         const mp3Bytes = createD24SampleBytes("audio_mp3");
-        const mp3Url = await storage.uploadBuffer("runs/audio-1.mp3", mp3Bytes, {
+        const mp3Url = await storage.upload("runs/audio-1.mp3", mp3Bytes, {
           isProviderOutput: true,
           contentType: "audio/mpeg",
           runId: "run-audio-1",
@@ -186,7 +186,7 @@ describe("RC1.4-D2.4 — Upload Hardening Follow-up Boundary Tests", () => {
 
         // 3. Unknown magic bytes without declared MIME -> falls back to application/octet-stream
         const unknownBytes = createD24SampleBytes("unknown_binary");
-        const unkUrl = await storage.uploadBuffer("runs/unknown-1.bin", unknownBytes, {
+        const unkUrl = await storage.upload("runs/unknown-1.bin", unknownBytes, {
           isProviderOutput: true,
           runId: "run-unk-1",
           model: "custom-model",
@@ -222,7 +222,7 @@ describe("RC1.4-D2.4 — Upload Hardening Follow-up Boundary Tests", () => {
         const bytes = createD24SampleBytes(payloadType);
         await assert.rejects(
           async () => {
-            await storage.uploadBuffer(`runs/bad-${payloadType}`, bytes, {
+            await storage.upload(`runs/bad-${payloadType}`, bytes, {
               isProviderOutput: true,
               runId: "run-evil",
               model: "evil-model",

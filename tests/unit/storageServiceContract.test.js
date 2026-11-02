@@ -7,11 +7,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
     StorageService,
-    StoragePathResolver,
-    IStorageProvider,
-    SupabaseStorageProvider,
     InMemoryStorageProvider,
 } from "../../src/platform/storage/index.js";
+import { StoragePathResolver } from "../../src/platform/storage/StoragePathResolver.js";
+import { IStorageProvider } from "../../src/platform/storage/IStorageProvider.js";
+import { SupabaseStorageProvider } from "../../src/platform/storage/providers/SupabaseStorageProvider.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");

@@ -1,16 +1,12 @@
+/** @owns Manages user credit balance, two-phase holds, settlements, and refunds. */
 import { createClient } from "@supabase/supabase-js";
 import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";
 
 const walletLogger = createLogger("wallet");
 const billingLogger = createLogger("billing");
 
-export class WalletError extends Error {
-  constructor(message, code) {
-    super(message);
-    this.name = "WalletError";
-    this.code = code;
-  }
-}
+import { WalletError } from "./BillingErrors.js";
+export { WalletError };
 
 export class WalletService {
   HOLD_TTL_SECONDS = 10 * 60; // 10 minutes TTL per specification clarification

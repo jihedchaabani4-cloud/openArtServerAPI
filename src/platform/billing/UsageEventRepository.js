@@ -1,3 +1,4 @@
+/** @owns Lightweight repository for the usage_events audit table. */
 import { createClient } from "@supabase/supabase-js";
 import { createLogger } from "../../infrastructure/logging/index.js";
 

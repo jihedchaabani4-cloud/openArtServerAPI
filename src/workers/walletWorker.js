@@ -4,8 +4,7 @@ import { Worker } from "bullmq";
 import { createClient } from "@supabase/supabase-js";
 import { workerRedisConnection, redisConnection } from "../queue/redis.js";
 import { walletMaintenanceQueue, WALLET_QUEUE_NAME, scheduleWalletJobs } from "../queue/walletQueue.js";
-import { WalletService } from "#platform/billing/WalletService.js";
-import { FailedOpsService } from "#platform/billing/FailedOpsService.js";
+import { WalletService, FailedOpsService } from "#platform/billing";
 import { runReservationReaper } from "./reservationReaperWorker.js";
 import { createLogger, LogEvents } from "../infrastructure/logging/index.js";
 

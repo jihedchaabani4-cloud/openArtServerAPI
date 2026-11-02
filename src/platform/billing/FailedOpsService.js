@@ -1,3 +1,4 @@
+/** @owns Manages retry scheduling and persistence for failed wallet operations. */
 import { createClient } from "@supabase/supabase-js";
 import { createLogger } from "../../infrastructure/logging/index.js";
 

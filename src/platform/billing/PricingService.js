@@ -1,4 +1,6 @@
 /**
+ * @owns Provides credit cost lookups and Redis caching for model pricing rules.
+ *
  * PricingService
  * ─────────────────────────────────────────────────────────────────────────────
  * Provides credit cost lookups for model / operation / quality combinations

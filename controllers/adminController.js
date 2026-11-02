@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { WalletError } from "#platform/billing/WalletService.js";
+import { WalletError } from "#platform/billing";
 import { createLogger } from "../src/infrastructure/logging/index.js";
 
 const adminLogger = createLogger("admin_controller");

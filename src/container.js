@@ -2,9 +2,13 @@ import "dotenv/config";
 import { PromptService } from "#platform/ai/PromptService.js";
 import { createStorageService } from "#platform/storage";
 import { supabaseAdmin } from "#lib/supabase.js";
-import { WalletService } from "#platform/billing/WalletService.js";
-import { PricingService } from "#platform/billing/PricingService.js";
-import { FailedOpsService } from "#platform/billing/FailedOpsService.js";
+import {
+    WalletService,
+    PricingService,
+    FailedOpsService,
+    UsageEventRepository,
+    configureBilling,
+} from "#platform/billing";
 import { createClient } from "@supabase/supabase-js";
 import { redisConnection } from "#queue/redis.js";
 import { createLogger } from "./infrastructure/logging/index.js";
@@ -42,7 +46,7 @@ import { WorkflowStorageGateway } from "./infrastructure/storage/workflowStorage
 import { AssetUploadService } from "./domain/asset/AssetUploadService.js";
 import { TrashService } from "./domain/trash/TrashService.js";
 
-import { UsageEventRepository } from "#platform/billing/UsageEventRepository.js";
+
 
 // ─── Services ────────────────────────────────────────────────────────────────
 export const promptService  = new PromptService();
@@ -142,6 +146,7 @@ export const walletService  = process.env.SUPABASE_URL && walletServiceKey
     : null;
 
 if (walletService) {
+    configureBilling({ walletService });
     systemLogger.debug("WalletService initialized");
 } else {
     systemLogger.warn("WalletService disabled: missing SUPABASE_URL or service key");

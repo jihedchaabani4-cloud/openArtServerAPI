@@ -29,6 +29,11 @@ export { WalletService } from "./WalletService.js";
 export { PricingService } from "./PricingService.js";
 export { FailedOpsService } from "./FailedOpsService.js";
 export { UsageEventRepository } from "./UsageEventRepository.js";
+export {
+    createBillingRepositories,
+    createWalletService,
+    createFailedOpsService,
+} from "./billingFactory.js";
 
 let _defaultWalletService = null;
 let _defaultPackageFetcher = null;

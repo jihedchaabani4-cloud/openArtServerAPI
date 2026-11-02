@@ -1,6 +1,7 @@
 /** @owns Manages retry scheduling and persistence for failed wallet operations. */
 import { createClient } from "@supabase/supabase-js";
 import { createLogger } from "../../infrastructure/logging/index.js";
+import { FailedOpsRepository } from "./repositories/FailedOpsRepository.js";
 
 const billingLogger = createLogger("billing");
 
@@ -23,10 +24,16 @@ const billingLogger = createLogger("billing");
  *   - walletWorker 'retry-failed-ops' job — to fetch and process pending ops
  * ─────────────────────────────────────────────────────────────────────────────
  */
-
 export class FailedOpsService {
-  constructor(supabaseUrl, supabaseServiceKey) {
-    this.supabase = createClient(supabaseUrl, supabaseServiceKey);
+  constructor(supabaseUrlOrDeps, supabaseServiceKey = null) {
+    if (supabaseUrlOrDeps && typeof supabaseUrlOrDeps === "object" && (supabaseUrlOrDeps.failedOpsRepo || supabaseUrlOrDeps.repo)) {
+      this.repo = supabaseUrlOrDeps.failedOpsRepo || supabaseUrlOrDeps.repo;
+    } else if (typeof supabaseUrlOrDeps === "string") {
+      const client = createClient(supabaseUrlOrDeps, supabaseServiceKey);
+      this.repo = new FailedOpsRepository(client);
+    } else {
+      this.repo = null;
+    }
   }
 
   /**
@@ -35,17 +42,11 @@ export class FailedOpsService {
    * already exists (avoids duplicate entries on BullMQ job replays).
    */
   async record({ operationType, referenceId, walletId, userId, amount, payload = {}, failureReason }) {
-    const timestamp = new Date().toISOString();
+    if (!this.repo) return;
 
     try {
       // Check for existing record (idempotent)
-      const { data: existing } = await this.supabase
-        .from("failed_wallet_operations")
-        .select("id")
-        .eq("reference_id", referenceId)
-        .eq("operation_type", operationType)
-        .maybeSingle();
-
+      const existing = await this.repo.findExisting(referenceId, operationType);
       if (existing) {
         billingLogger.debug({
           operation: "record-failed-op",
@@ -56,18 +57,16 @@ export class FailedOpsService {
         return;
       }
 
-      const { error } = await this.supabase
-        .from("failed_wallet_operations")
-        .insert({
-          operation_type: operationType,
-          reference_id: referenceId,
-          wallet_id: walletId || null,
-          user_id: userId,
-          amount: amount || null,
-          payload,
-          failure_reason: failureReason || null,
-          status: "PENDING",
-        });
+      const { error } = await this.repo.insertFailedOp({
+        operation_type: operationType,
+        reference_id: referenceId,
+        wallet_id: walletId || null,
+        user_id: userId,
+        amount: amount || null,
+        payload,
+        failure_reason: failureReason || null,
+        status: "PENDING",
+      });
 
       if (error) {
         // Log but do not throw — recording a failed op must never crash the caller
@@ -105,28 +104,14 @@ export class FailedOpsService {
    * Limits to 50 per run to bound job execution time.
    */
   async getPendingOps() {
-    const now = new Date().toISOString();
-
-    const { data, error } = await this.supabase
-      .from("failed_wallet_operations")
-      .select("*")
-      .eq("status", "PENDING")
-      .or(`next_retry_at.is.null,next_retry_at.lte.${now}`)
-      .order("created_at", { ascending: true })
-      .limit(50);
-
-    if (error) throw new Error(`[FailedOpsService] getPendingOps failed: ${error.message}`);
-    return data || [];
+    if (!this.repo) return [];
+    return this.repo.getPendingOps();
   }
 
   /** Mark an operation as successfully completed. */
   async markCompleted(id) {
-    const { error } = await this.supabase
-      .from("failed_wallet_operations")
-      .update({ status: "COMPLETED" })
-      .eq("id", id);
-
-    if (error) throw new Error(`[FailedOpsService] markCompleted(${id}) failed: ${error.message}`);
+    if (!this.repo) return;
+    return this.repo.markCompleted(id);
   }
 
   /**
@@ -134,18 +119,10 @@ export class FailedOpsService {
    * next_retry_at = now + (1 minute × 2^retryCount)
    */
   async markRetryScheduled(id, retryCount) {
+    if (!this.repo) return;
     const delayMs = 60_000 * Math.pow(2, retryCount);
     const nextRetryAt = new Date(Date.now() + delayMs).toISOString();
-
-    const { error } = await this.supabase
-      .from("failed_wallet_operations")
-      .update({
-        retry_count: retryCount,
-        next_retry_at: nextRetryAt,
-      })
-      .eq("id", id);
-
-    if (error) throw new Error(`[FailedOpsService] markRetryScheduled(${id}) failed: ${error.message}`);
+    return this.repo.markRetryScheduled(id, retryCount, nextRetryAt);
   }
 
   /**
@@ -153,11 +130,8 @@ export class FailedOpsService {
    * Emits a structured ERROR log for admin alerting.
    */
   async markAbandoned(id, reason) {
-    const { error } = await this.supabase
-      .from("failed_wallet_operations")
-      .update({ status: "ABANDONED", failure_reason: reason })
-      .eq("id", id);
-
+    if (!this.repo) return;
+    await this.repo.markAbandoned(id, reason);
     billingLogger.error({
       event: "wallet.op_abandoned",
       operation: "wallet-op-abandoned",

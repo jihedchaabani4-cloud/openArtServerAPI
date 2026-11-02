@@ -8,6 +8,8 @@ import {
     FailedOpsService,
     UsageEventRepository,
     configureBilling,
+    createWalletService,
+    createFailedOpsService,
 } from "#platform/billing";
 import { createClient } from "@supabase/supabase-js";
 import { redisConnection } from "#queue/redis.js";
@@ -134,15 +136,15 @@ assertWalletConfiguredForEnvironment();
 assertSecurityConfiguredForEnvironment();
 assertRateLimitConfiguredForEnvironment();
 
-const _supabaseForUsageEvents = process.env.SUPABASE_URL && walletServiceKey
+const _supabaseForBilling = process.env.SUPABASE_URL && walletServiceKey
     ? createClient(process.env.SUPABASE_URL, walletServiceKey)
     : null;
-export const usageEventRepo = _supabaseForUsageEvents
-    ? new UsageEventRepository(_supabaseForUsageEvents)
+export const usageEventRepo = _supabaseForBilling
+    ? new UsageEventRepository(_supabaseForBilling)
     : null;
 
-export const walletService  = process.env.SUPABASE_URL && walletServiceKey
-    ? new WalletService(process.env.SUPABASE_URL, walletServiceKey, { usageEventRepo })
+export const walletService  = _supabaseForBilling
+    ? createWalletService({ client: _supabaseForBilling, usageEventRepo })
     : null;
 
 if (walletService) {
@@ -167,8 +169,8 @@ if (pricingService) {
 }
 
 // ─── Failed Operations Service ────────────────────────────────────────────────
-export const failedOpsService = process.env.SUPABASE_URL && walletServiceKey
-    ? new FailedOpsService(process.env.SUPABASE_URL, walletServiceKey)
+export const failedOpsService = _supabaseForBilling
+    ? createFailedOpsService({ client: _supabaseForBilling })
     : null;
 
 if (failedOpsService) {

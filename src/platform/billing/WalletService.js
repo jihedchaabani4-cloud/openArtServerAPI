@@ -6,6 +6,8 @@ const walletLogger = createLogger("wallet");
 const billingLogger = createLogger("billing");
 
 import { WalletError } from "./BillingErrors.js";
+import { WalletRepository } from "./repositories/WalletRepository.js";
+import { TransactionRepository } from "./repositories/TransactionRepository.js";
 export { WalletError };
 
 export class WalletService {
@@ -21,15 +23,43 @@ export class WalletService {
   // See bottom of this file for full CREATE OR REPLACE FUNCTION scripts.
   // ═══════════════════════════════════════════════════════════════════════
 
-  constructor(supabaseUrl, supabaseServiceKey, { usageEventRepo = null } = {}) {
-    this.supabase = createClient(supabaseUrl, supabaseServiceKey);
-    this.defaultInitialBalance = Number(
-      process.env.INITIAL_WALLET_BALANCE ||
-      process.env.DEFAULT_WALLET_BALANCE ||
-      0
-    );
-    // Optional usage_events repository (audit trail for free-tier usage)
-    this.usageEventRepo = usageEventRepo || null;
+  constructor(supabaseUrlOrDeps, supabaseServiceKey = null, { usageEventRepo = null, walletRepo = null, txRepo = null, defaultInitialBalance = null } = {}) {
+    this._supabase = null;
+    if (typeof supabaseUrlOrDeps === "object" && supabaseUrlOrDeps !== null) {
+      const deps = supabaseUrlOrDeps;
+      this.walletRepo = deps.walletRepo || null;
+      this.txRepo = deps.txRepo || deps.transactionRepo || null;
+      this.usageEventRepo = deps.usageEventRepo || usageEventRepo || null;
+      this.defaultInitialBalance = deps.defaultInitialBalance !== undefined
+        ? deps.defaultInitialBalance
+        : Number(process.env.INITIAL_WALLET_BALANCE || process.env.DEFAULT_WALLET_BALANCE || 0);
+      this.supabase = deps.supabase || null;
+    } else if (typeof supabaseUrlOrDeps === "string") {
+      const client = createClient(supabaseUrlOrDeps, supabaseServiceKey);
+      this.walletRepo = walletRepo || new WalletRepository(client);
+      this.txRepo = txRepo || new TransactionRepository(client);
+      this.usageEventRepo = usageEventRepo || null;
+      this.defaultInitialBalance = defaultInitialBalance !== undefined
+        ? defaultInitialBalance
+        : Number(process.env.INITIAL_WALLET_BALANCE || process.env.DEFAULT_WALLET_BALANCE || 0);
+      this.supabase = client;
+    } else {
+      this.walletRepo = null;
+      this.txRepo = null;
+      this.usageEventRepo = null;
+      this.defaultInitialBalance = 0;
+      this.supabase = null;
+    }
+  }
+
+  get supabase() {
+    return this._supabase;
+  }
+
+  set supabase(client) {
+    this._supabase = client;
+    if (this.walletRepo) this.walletRepo.supabase = client;
+    if (this.txRepo) this.txRepo.supabase = client;
   }
 
   // ─────────────────────────────────────────────
@@ -40,28 +70,8 @@ export class WalletService {
    * FIX: استعمل upsert بدل check+insert لتفادي race condition
    */
   async createWallet(userId, initialBalance = this.defaultInitialBalance) {
-    const { data, error } = await this.supabase
-      .from("wallets")
-      .insert({ user_id: userId, balance: initialBalance })
-      .select("*")
-      .maybeSingle();
-
-    if (error) {
-      if (error.code === "23505" || error.code === "23503") {
-        // Race condition: wallet was created between check and insert
-        const { data: existing, error: selectErr } = await this.supabase
-          .from("wallets")
-          .select("*")
-          .eq("user_id", userId)
-          .single();
-        if (selectErr) throw new WalletError(selectErr.message, "DB_ERROR");
-        return existing;
-      }
-      throw new WalletError(error.message, "DB_ERROR");
-    }
-
-    walletLogger.info({ userId }, `Wallet ensured for user ${userId}`);
-    return data;
+    if (!this.walletRepo) throw new WalletError("WalletRepository is not configured", "DB_ERROR");
+    return this.walletRepo.createOrEnsureWallet(userId, initialBalance);
   }
 
   async ensureWallet(userId, initialBalance = this.defaultInitialBalance) {
@@ -212,12 +222,12 @@ export class WalletService {
 
     const expiresAt = new Date(Date.now() + this.HOLD_TTL_SECONDS * 1000).toISOString();
 
-    const { data: tx, error } = await this.supabase.rpc("hold_credits", {
-      p_wallet_id: wallet.id,
-      p_amount: amount,
-      p_reference_id: referenceId,
-      p_metadata: metadata,
-      p_expires_at: expiresAt,
+    const { tx, error } = await this.txRepo.holdCreditsRpc({
+      walletId: wallet.id,
+      amount,
+      referenceId,
+      metadata,
+      expiresAt,
     });
 
     if (error) {
@@ -260,12 +270,12 @@ export class WalletService {
       Date.now() + this.HOLD_TTL_SECONDS * 1000
     ).toISOString();
 
-    const { data: tx, error } = await this.supabase.rpc("hold_credits", {
-      p_wallet_id: wallet.id,
-      p_amount: amount,
-      p_reference_id: referenceId,
-      p_metadata: metadata,
-      p_expires_at: expiresAt,
+    const { tx, error } = await this.txRepo.holdCreditsRpc({
+      walletId: wallet.id,
+      amount,
+      referenceId,
+      metadata,
+      expiresAt,
     });
 
     if (error) {
@@ -353,9 +363,9 @@ export class WalletService {
     if (!referenceId || typeof referenceId !== "string" || !referenceId.trim()) return null;
     const seconds = Number(additionalSeconds) || 300;
 
-    const { data: tx, error } = await this.supabase.rpc("extend_hold", {
-      p_reference_id: referenceId,
-      p_additional_seconds: seconds,
+    const { tx, error } = await this.txRepo.extendHoldRpc({
+      referenceId,
+      additionalSeconds: seconds,
     });
 
     if (error) {
@@ -408,11 +418,11 @@ export class WalletService {
 
     const wallet = await this.getWalletOrThrow(userId);
 
-    const { data: tx, error } = await this.supabase.rpc("credit_wallet", {
-      p_wallet_id: wallet.id,
-      p_amount: amount,
-      p_reference_id: referenceId,
-      p_metadata: metadata,
+    const { tx, error } = await this.walletRepo.creditWalletRpc({
+      walletId: wallet.id,
+      amount,
+      referenceId,
+      metadata,
     });
 
     if (error) {
@@ -470,29 +480,9 @@ export class WalletService {
    */
   async getTransactions(userId, limit = 20, before = null, beforeId = null) {
     const wallet = await this.getWalletOrThrow(userId);
-
-    let query = this.supabase
-      .from("transactions")
-      .select("*")
-      .eq("wallet_id", wallet.id)
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: false })
-      .limit(limit + 1); // Fetch one extra to determine if there's a next page
-
-    // Apply cursor filter when both cursor components are provided
-    if (before && beforeId) {
-      // Return rows where created_at < before, OR created_at = before AND id < beforeId
-      query = query.or(
-        `created_at.lt.${before},and(created_at.eq.${before},id.lt.${beforeId})`
-      );
-    }
-
-    const { data, error } = await query;
-    if (error) throw new WalletError(error.message, "DB_ERROR");
-
-    const rows = data ?? [];
+    const rows = await this.txRepo.getTransactionsByWalletId(wallet.id, { limit, before, beforeId });
     const hasNextPage = rows.length > limit;
-    if (hasNextPage) rows.pop(); // Remove the extra sentinel row
+    if (hasNextPage) rows.pop();
 
     const nextCursor = hasNextPage && rows.length > 0
       ? {
@@ -509,7 +499,7 @@ export class WalletService {
   // ─────────────────────────────────────────────
 
   async expireStaleHolds() {
-    const { data, error } = await this.supabase.rpc("expire_stale_holds");
+    const { data, error } = await this.txRepo.expireStaleHoldsRpc();
 
     if (error) {
       if (this.isMissingRpcError(error)) {
@@ -531,7 +521,7 @@ export class WalletService {
    * @returns {Promise<Array<{ holdId: string, referenceId: string, workflowId: string|null, mediaId: string|null, amount: number }>>}
    */
   async reapExpiredHolds() {
-    const { data, error } = await this.supabase.rpc("expire_stale_holds");
+    const { data, error } = await this.txRepo.expireStaleHoldsRpc();
     let expiredTxs = [];
 
     if (!error && data) {
@@ -565,46 +555,28 @@ export class WalletService {
    * FIX: استعمل maybeSingle() بدل single() لتفريق "مش موجود" عن "DB error"
    */
   async getWalletOrThrow(userId) {
-    const { data, error } = await this.supabase
-      .from("wallets")
-      .select("*")
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    if (error) throw new WalletError(error.message, "DB_ERROR");
+    if (!this.walletRepo) throw new WalletError("WalletRepository is not configured", "DB_ERROR");
+    const data = await this.walletRepo.findByUserId(userId);
     if (!data) throw new WalletError(`Wallet not found for user ${userId}`, "WALLET_NOT_FOUND");
-
     return data;
   }
 
   async getWalletByIdOrThrow(walletId) {
-    const { data, error } = await this.supabase
-      .from("wallets")
-      .select("*")
-      .eq("id", walletId)
-      .maybeSingle();
-
-    if (error) throw new WalletError(error.message, "DB_ERROR");
+    if (!this.walletRepo) throw new WalletError("WalletRepository is not configured", "DB_ERROR");
+    const data = await this.walletRepo.findById(walletId);
     if (!data) throw new WalletError(`Wallet not found for id ${walletId}`, "WALLET_NOT_FOUND");
-
     return data;
   }
 
   async getTransactionByReferenceOrThrow(referenceId) {
-    const { data, error } = await this.supabase
-      .from("transactions")
-      .select("*")
-      .eq("reference_id", referenceId)
-      .maybeSingle();
-
-    if (error) throw new WalletError(error.message, "DB_ERROR");
+    if (!this.txRepo) throw new WalletError("TransactionRepository is not configured", "DB_ERROR");
+    const data = await this.txRepo.findByReference(referenceId);
     if (!data) {
       throw new WalletError(
         `Transaction not found for reference ${referenceId}`,
         "TRANSACTION_NOT_FOUND"
       );
     }
-
     return data;
   }
 
@@ -612,9 +584,7 @@ export class WalletService {
     const fnName =
       newStatus === "COMPLETED" ? "commit_transaction" : "rollback_transaction";
 
-    const { data: tx, error } = await this.supabase.rpc(fnName, {
-      p_reference_id: referenceId,
-    });
+    const { tx, error } = await this.txRepo.resolveTransactionRpc(fnName, referenceId);
 
     if (error) {
       if (this.isMissingRpcError(error)) {
@@ -639,17 +609,7 @@ export class WalletService {
   }
 
   async _mergeTransactionMetadata(referenceId, extraMetadata) {
-    const { data: current } = await this.supabase
-      .from("transactions")
-      .select("metadata")
-      .eq("reference_id", referenceId)
-      .maybeSingle();
-
-    const merged = { ...(current?.metadata || {}), ...extraMetadata };
-    await this.supabase
-      .from("transactions")
-      .update({ metadata: merged })
-      .eq("reference_id", referenceId);
+    await this.txRepo.mergeMetadata(referenceId, extraMetadata);
   }
 
   isMissingRpcError(error) {
@@ -684,7 +644,6 @@ export class WalletService {
    * - Optimistic lock على الـ balance لتفادي race condition
    */
   async holdFallback({ wallet, amount, referenceId, metadata, expiresAt }) {
-    // ① re-read الـ wallet بأحدث قيمة (optimistic lock snapshot)
     const fresh = await this.getWalletByIdOrThrow(wallet.id);
 
     const newBalance = Number(fresh.balance) - Number(amount);
@@ -695,20 +654,15 @@ export class WalletService {
       );
     }
 
-    // ② insert transaction أولاً — لو duplicate يرمي error بلا ما يلمس الرصيد
-    const { data: tx, error: txError } = await this.supabase
-      .from("transactions")
-      .insert({
-        wallet_id: fresh.id,
-        amount,
-        type: "DEBIT",
-        status: "PENDING",
-        reference_id: referenceId,
-        metadata,
-        expires_at: expiresAt,
-      })
-      .select("*")
-      .single();
+    const { tx, txError } = await this.txRepo.insertTransaction({
+      wallet_id: fresh.id,
+      amount,
+      type: "DEBIT",
+      status: "PENDING",
+      reference_id: referenceId,
+      metadata,
+      expires_at: expiresAt,
+    });
 
     if (txError) {
       if (txError.code === "23505") {
@@ -720,20 +674,14 @@ export class WalletService {
       throw new WalletError(txError.message, "DB_ERROR");
     }
 
-    // ③ update balance مع optimistic lock: .eq("balance", fresh.balance)
-    const { error: walletError, count } = await this.supabase
-      .from("wallets")
-      .update({ balance: newBalance })
-      .eq("id", fresh.id)
-      .eq("balance", fresh.balance); // FIX: optimistic lock
+    const { ok: debited, error: walletError } = await this.walletRepo.decrementBalanceOptimistic(
+      fresh.id,
+      amount,
+      fresh.balance
+    );
 
-    if (walletError || count === 0) {
-      // rollback: احذف الـ transaction اللي حطيناه
-      await this.supabase
-        .from("transactions")
-        .delete()
-        .eq("reference_id", referenceId);
-
+    if (!debited) {
+      await this.txRepo.deleteByReference(referenceId).catch(() => {});
       throw new WalletError(
         "Balance changed concurrently, please retry",
         "CONFLICT"
@@ -752,20 +700,15 @@ export class WalletService {
     const fresh = await this.getWalletByIdOrThrow(wallet.id);
     const newBalance = Number(fresh.balance) + Number(amount);
 
-    // ① insert transaction أولاً
-    const { data: tx, error: txError } = await this.supabase
-      .from("transactions")
-      .insert({
-        wallet_id: fresh.id,
-        amount,
-        type: "CREDIT",
-        status: "COMPLETED",
-        reference_id: referenceId,
-        metadata,
-        expires_at: null,
-      })
-      .select("*")
-      .single();
+    const { tx, txError } = await this.txRepo.insertTransaction({
+      wallet_id: fresh.id,
+      amount,
+      type: "CREDIT",
+      status: "COMPLETED",
+      reference_id: referenceId,
+      metadata,
+      expires_at: null,
+    });
 
     if (txError) {
       if (txError.code === "23505") {
@@ -777,19 +720,14 @@ export class WalletService {
       throw new WalletError(txError.message, "DB_ERROR");
     }
 
-    // ② update balance مع optimistic lock
-    const { error: walletError, count } = await this.supabase
-      .from("wallets")
-      .update({ balance: newBalance })
-      .eq("id", fresh.id)
-      .eq("balance", fresh.balance); // FIX: optimistic lock
+    const { ok: credited, error: walletError } = await this.walletRepo.incrementBalanceOptimistic(
+      fresh.id,
+      amount,
+      fresh.balance
+    );
 
-    if (walletError || count === 0) {
-      await this.supabase
-        .from("transactions")
-        .delete()
-        .eq("reference_id", referenceId);
-
+    if (!credited) {
+      await this.txRepo.deleteByReference(referenceId).catch(() => {});
       throw new WalletError(
         "Balance changed concurrently, please retry",
         "CONFLICT"
@@ -802,7 +740,7 @@ export class WalletService {
   async commitFallback(referenceId) {
     const tx = await this.getTransactionByReferenceOrThrow(referenceId);
 
-    if (tx.status === "COMPLETED") return tx; // FIX: idempotent
+    if (tx.status === "COMPLETED") return tx;
     if (tx.status !== "PENDING") {
       throw new WalletError(
         `Transaction ${referenceId} is not pending (status: ${tx.status})`,
@@ -810,14 +748,11 @@ export class WalletService {
       );
     }
 
-    // FIX: optimistic lock — يتأكد الـ status ما تغيّرش
-    const { data, error } = await this.supabase
-      .from("transactions")
-      .update({ status: "COMPLETED" })
-      .eq("id", tx.id)
-      .eq("status", "PENDING")
-      .select("*")
-      .single();
+    const { data, error } = await this.txRepo.updateStatusWithOptimisticLock({
+      id: tx.id,
+      fromStatus: "PENDING",
+      toStatus: "COMPLETED",
+    });
 
     if (error || !data) {
       throw new WalletError(
@@ -838,7 +773,7 @@ export class WalletService {
   async rollbackFallback(referenceId) {
     const tx = await this.getTransactionByReferenceOrThrow(referenceId);
 
-    if (tx.status === "FAILED") return tx; // FIX: idempotent
+    if (tx.status === "FAILED") return tx;
     if (tx.status !== "PENDING") {
       throw new WalletError(
         `Cannot rollback: status is ${tx.status}`,
@@ -846,14 +781,11 @@ export class WalletService {
       );
     }
 
-    // ① lock الـ status أولاً بـ optimistic lock
-    const { data: updated, error: txError } = await this.supabase
-      .from("transactions")
-      .update({ status: "FAILED" })
-      .eq("id", tx.id)
-      .eq("status", "PENDING") // FIX: لو غيّره أحد قبلنا → يفشل
-      .select("*")
-      .single();
+    const { data: updated, error: txError } = await this.txRepo.updateStatusWithOptimisticLock({
+      id: tx.id,
+      fromStatus: "PENDING",
+      toStatus: "FAILED",
+    });
 
     if (txError || !updated) {
       throw new WalletError(
@@ -862,16 +794,8 @@ export class WalletService {
       );
     }
 
-    // ② بعد ما أمّنّا الـ status، نرجع الرصيد
     const wallet = await this.getWalletByIdOrThrow(tx.wallet_id);
-    const { error: walletError } = await this.supabase
-      .from("wallets")
-      .update({ balance: Number(wallet.balance) + Number(tx.amount) })
-      .eq("id", wallet.id);
-
-    if (walletError) {
-      throw new WalletError(walletError.message, "DB_ERROR");
-    }
+    await this.walletRepo.restoreBalance(wallet.id, tx.amount, wallet.balance);
 
     return updated;
   }
@@ -885,23 +809,12 @@ export class WalletService {
     const returnRows = options?.returnRows === true;
     const now = new Date().toISOString();
 
-    // ① atomic claim: غيّر الـ status مباشرة بشرط PENDING
-    const { data: expired, error } = await this.supabase
-      .from("transactions")
-      .update({ status: "FAILED" })
-      .eq("status", "PENDING")
-      .lt("expires_at", now)
-      .select("*");
-
+    const { expired, error } = await this.txRepo.expireStaleHoldsDirect(now);
     if (error) throw new WalletError(error.message, "DB_ERROR");
 
-    // ② ارجع الرصيد لكل transaction فشلت
     for (const tx of expired || []) {
       const wallet = await this.getWalletByIdOrThrow(tx.wallet_id);
-      await this.supabase
-        .from("wallets")
-        .update({ balance: Number(wallet.balance) + Number(tx.amount) })
-        .eq("id", wallet.id);
+      await this.walletRepo.restoreBalance(wallet.id, tx.amount, wallet.balance);
     }
 
     return returnRows ? (expired || []) : (expired?.length ?? 0);

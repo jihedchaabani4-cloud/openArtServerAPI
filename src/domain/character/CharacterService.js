@@ -22,15 +22,13 @@ export class CharacterService {
     /**
      * @param {Object} deps
      * @param {Object} deps.db                   - Repository map (db.characters, db.workflows, db.media, db.projects)
-     * @param {Object} deps.storageService       - StorageService instance
      * @param {Object} deps.workflowService      - WorkflowLifecycleService instance
      * @param {Object} [deps.useCaseService]     - UseCaseService instance
      * @param {Object} [deps.mediaService]       - Optional pre-configured CharacterMediaService
      * @param {Object} [deps.generationService]  - Optional pre-configured CharacterGenerationService
      */
-    constructor({ db, storageService, workflowService, useCaseService, mediaIngestionService, mediaService, generationService } = {}) {
+    constructor({ db, workflowService, useCaseService, mediaIngestionService, mediaService, generationService } = {}) {
         this.db = db;
-        this.storageService = storageService;
         this.workflowService = workflowService;
         this.mediaIngestionService = mediaIngestionService;
 

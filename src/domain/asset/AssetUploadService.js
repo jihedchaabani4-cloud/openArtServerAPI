@@ -35,7 +35,6 @@ export class AssetUploadService {
      * @param {Object} [deps.workflowAuthService]       - WorkflowAuthorizationService instance
      * @param {Object} [deps.mediaService]              - Canonical MediaService instance
      * @param {Object} [deps.folderService]             - FolderService instance
-     * @param {Object} [deps.storageService]            - StorageService for fallback orphan cleanup
      */
     constructor({
         db,
@@ -46,7 +45,6 @@ export class AssetUploadService {
         mediaIngestionService = null,
         mediaService = null,
         folderService = null,
-        storageService = null,
     } = {}) {
         if (!mediaUploadService || typeof mediaUploadService.upload !== "function") {
             throw new Error("AssetUploadService requires mediaUploadService with an upload method.");
@@ -60,7 +58,6 @@ export class AssetUploadService {
         this.db = db;
         this.mediaUploadService = mediaUploadService;
         this.workflowMediaService = workflowMediaService;
-        this.storageService = storageService;
         this.authService = authService;
         this.mediaService = mediaService || new MediaService({ db });
         this.folderService = folderService;

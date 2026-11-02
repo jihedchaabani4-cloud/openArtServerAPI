@@ -8,8 +8,7 @@ const storageLogger = createLogger("storage");
  * All workflow + media lifecycle logic lives in the service.
  */
 export class WorkflowStorageGateway {
-  constructor({ storageService = null, v1Db = null, lifecycleService = null } = {}) {
-    this.storageService = storageService;
+  constructor({ v1Db = null, lifecycleService = null } = {}) {
     this.lifecycle =
       lifecycleService ?? new MediaWorkflowLifecycleService({ db: v1Db });
   }

@@ -195,7 +195,6 @@ export const workflowBillingGateway = new WorkflowBillingGateway({ walletService
 const _lifecycleService = new MediaWorkflowLifecycleService({ db });
 export const mediaWorkflowLifecycleService = _lifecycleService;
 export const workflowStorageGateway = new WorkflowStorageGateway({
-    storageService,
     v1Db: db,
     lifecycleService: _lifecycleService,
 });
@@ -228,7 +227,6 @@ export const assetUploadService = new AssetUploadService({
     authService: workflowService.authService,
     mediaService,
     folderService,
-    storageService,
 });
 
 export const mediaIngestionService = new MediaIngestionService({
@@ -272,7 +270,6 @@ export const characterMediaService = new CharacterMediaService({
 
 export const characterService = new CharacterService({
     db,
-    storageService,
     workflowService,
     useCaseService,
     mediaIngestionService,
@@ -289,7 +286,6 @@ export const elementMediaService = new ElementMediaService({
 
 export const elementService = new ElementService({
     db,
-    storageService,
     workflowService,
     mediaService: elementMediaService,
     analysisService: new ElementAnalysisService(),

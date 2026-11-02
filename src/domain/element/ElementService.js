@@ -54,14 +54,12 @@ export class ElementService {
     /**
      * @param {Object} deps
      * @param {Object} deps.db                       - { elements, workflows, media, workflowMedia }
-     * @param {Object} [deps.storageService]
      * @param {Object} [deps.workflowService]
      * @param {Object} [deps.mediaService]           - ElementMediaService instance
      * @param {Object} [deps.analysisService]        - ElementAnalysisService instance
      */
     constructor({
         db,
-        storageService        = null,
         workflowService       = null,
         mediaService          = null,
         elementMediaService   = null,
@@ -73,7 +71,6 @@ export class ElementService {
             media:         db?.media         || defaultMediaRepo,
             workflowMedia: db?.workflowMedia || defaultWorkflowMediaRepo,
         };
-        this.storageService        = storageService;
         this.workflowService       = workflowService;
         const resolvedMediaService = mediaService || elementMediaService;
         if (!resolvedMediaService) {

@@ -8,27 +8,20 @@
  */
 import { StoragePathResolver, storagePathResolver } from "./StoragePathResolver.js";
 import { StorageError, StorageValidationError } from "./StorageErrors.js";
+import { isStream } from "./streamUtils.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
 
 const storageLogger = createLogger("storage");
 
-function isStream(val) {
-    return (
-        val !== null &&
-        typeof val === "object" &&
-        (typeof val.pipe === "function" || typeof val[Symbol.asyncIterator] === "function" || typeof val.getReader === "function")
-    );
-}
-
 /**
- * Storage-layer defense-in-depth magic-bytes inspection.
- * Rejects dangerous executable/script/archive signatures and detects common raster/video formats.
+ * Storage-layer defense-in-depth safety assertion.
+ * Rejects executable binaries, shell scripts, scriptable XML, and archive payloads.
  *
- * @param {Buffer} buffer
- * @returns {string | null}
+ * @param {Buffer} buffer - Raw file bytes (at least 4 bytes)
+ * @throws {StorageValidationError} If payload signature is forbidden
  */
-function sniffStorageMagicBytes(buffer) {
-    if (!buffer || buffer.length < 4) return null;
+function assertSafeStoragePayload(buffer) {
+    if (!buffer || buffer.length < 4) return;
 
     if (buffer[0] === 0x4d && buffer[1] === 0x5a) {
         throw new StorageValidationError("[StorageService] Executable binary payload (MZ) detected. Ingestion rejected.");
@@ -58,6 +51,16 @@ function sniffStorageMagicBytes(buffer) {
     if (buffer[0] === 0x50 && buffer[1] === 0x4b) {
         throw new StorageValidationError("[StorageService] ZIP archive payload (PK) detected. Ingestion rejected.");
     }
+}
+
+/**
+ * Detects common raster image and video container MIME types from raw magic bytes.
+ *
+ * @param {Buffer} buffer - Raw file bytes
+ * @returns {string | null} Detected MIME type or null if unrecognized
+ */
+function detectRasterOrVideoMime(buffer) {
+    if (!buffer || buffer.length < 4) return null;
 
     if (
         buffer[0] === 0x89 &&
@@ -158,6 +161,85 @@ const DANGEROUS_MIME_TYPES = new Set([
     "application/x-executable",
 ]);
 
+/**
+ * Resolves the appropriate Content-Type for an upload path and payload,
+ * enforcing origin-specific policies (provider output vs end-user upload).
+ *
+ * @param {string} path - Destination storage path
+ * @param {string | null} detectedMime - Sniffed MIME type from buffer bytes
+ * @param {Object} options - Upload options
+ * @returns {string} Resolved Content-Type header
+ */
+function resolveUploadContentType(path, detectedMime, options = {}) {
+    const isProviderOrInternal = Boolean(
+        options.isProviderOutput ||
+        options.isInternal ||
+        options.origin === "provider" ||
+        options.origin === "internal"
+    );
+
+    let declaredMime = options.contentType || options.declaredMime || options.mimetype;
+
+    let contentType = declaredMime || null;
+    if (!declaredMime) {
+        const lowerPath = path.toLowerCase();
+        if (lowerPath.endsWith(".png")) contentType = "image/png";
+        else if (lowerPath.endsWith(".webp")) contentType = "image/webp";
+        else if (lowerPath.endsWith(".gif")) contentType = "image/gif";
+        else if (lowerPath.endsWith(".avif")) contentType = "image/avif";
+        else if (lowerPath.endsWith(".svg")) contentType = "image/svg+xml";
+        else if (lowerPath.endsWith(".mp4")) contentType = "video/mp4";
+        else if (lowerPath.endsWith(".webm")) contentType = "video/webm";
+        else if (lowerPath.endsWith(".mov")) contentType = "video/quicktime";
+        else if (lowerPath.endsWith(".mkv")) contentType = "video/x-matroska";
+        else if (lowerPath.endsWith(".heic")) contentType = "image/heic";
+        else if (lowerPath.endsWith(".mp3")) contentType = "audio/mpeg";
+        else if (lowerPath.endsWith(".wav")) contentType = "audio/wav";
+        else if (lowerPath.endsWith(".jpg") || lowerPath.endsWith(".jpeg")) contentType = "image/jpeg";
+        else contentType = isProviderOrInternal ? "application/octet-stream" : "image/jpeg";
+        declaredMime = contentType;
+    }
+
+    if (isProviderOrInternal) {
+        if (declaredMime && DANGEROUS_MIME_TYPES.has(declaredMime.toLowerCase())) {
+            throw new StorageValidationError(`[StorageService] Dangerous MIME type "${declaredMime}" rejected for provider output.`);
+        }
+
+        if (detectedMime) {
+            return detectedMime;
+        }
+
+        if (declaredMime && SAFE_MEDIA_MIME_TYPES.has(declaredMime.toLowerCase())) {
+            contentType = declaredMime.toLowerCase();
+        } else {
+            contentType = "application/octet-stream";
+        }
+        const runId = options.runId || "none";
+        const model = options.model || "none";
+        const provider = options.provider || options.providerId || "none";
+        storageLogger.warn(
+            { event: "storage.fallback_type", runId, model, provider, contentType },
+            "Unrecognized format for provider asset; falling back to safe type"
+        );
+        return contentType;
+    }
+
+    if (
+        declaredMime &&
+        detectedMime &&
+        !declaredMime.startsWith("application/octet-stream") &&
+        !declaredMime.startsWith("multipart/")
+    ) {
+        if (declaredMime !== detectedMime) {
+            throw new StorageValidationError(
+                `[StorageService] Content inspection failed: declared MIME "${declaredMime}" does not match file bytes ("${detectedMime}").`
+            );
+        }
+    }
+
+    return detectedMime || contentType;
+}
+
 export class StorageService {
     /**
      * @param {Object|string} [optionsOrBucket="generated_images"] - Options object or legacy bucket name string
@@ -227,99 +309,28 @@ export class StorageService {
      * @returns {Promise<string>} Public URL
      */
     async upload(path, payload, options = {}) {
-        let body;
+        let normalizedPayload;
         if (isStream(payload)) {
-            body = payload;
+            normalizedPayload = payload;
         } else if (typeof payload === "string") {
             const pureBase64 = payload.includes(",")
                 ? payload.split(",")[1]
                 : payload;
-            body = Buffer.from(pureBase64, "base64");
+            normalizedPayload = Buffer.from(pureBase64, "base64");
         } else {
-            body = payload;
+            normalizedPayload = payload;
         }
 
-        // Validate magic bytes to prevent writing dangerous files into storage
         let detectedMime = null;
-        if (Buffer.isBuffer(body) && body.length >= 4) {
-            detectedMime = sniffStorageMagicBytes(body);
+        if (Buffer.isBuffer(normalizedPayload) && normalizedPayload.length >= 4) {
+            assertSafeStoragePayload(normalizedPayload);
+            detectedMime = detectRasterOrVideoMime(normalizedPayload);
         }
 
-        const isProviderOrInternal = Boolean(
-            options.isProviderOutput ||
-            options.isInternal ||
-            options.origin === "provider" ||
-            options.origin === "internal"
-        );
-
-        let declaredMime = options.contentType || options.declaredMime || options.mimetype;
-
-        // Determine content type based on path extension if not explicitly specified
-        let contentType = declaredMime || null;
-        if (!declaredMime) {
-            const lowerPath = path.toLowerCase();
-            if (lowerPath.endsWith(".png")) contentType = "image/png";
-            else if (lowerPath.endsWith(".webp")) contentType = "image/webp";
-            else if (lowerPath.endsWith(".gif")) contentType = "image/gif";
-            else if (lowerPath.endsWith(".avif")) contentType = "image/avif";
-            else if (lowerPath.endsWith(".svg")) contentType = "image/svg+xml";
-            else if (lowerPath.endsWith(".mp4")) contentType = "video/mp4";
-            else if (lowerPath.endsWith(".webm")) contentType = "video/webm";
-            else if (lowerPath.endsWith(".mov")) contentType = "video/quicktime";
-            else if (lowerPath.endsWith(".mkv")) contentType = "video/x-matroska";
-            else if (lowerPath.endsWith(".heic")) contentType = "image/heic";
-            else if (lowerPath.endsWith(".mp3")) contentType = "audio/mpeg";
-            else if (lowerPath.endsWith(".wav")) contentType = "audio/wav";
-            else if (lowerPath.endsWith(".jpg") || lowerPath.endsWith(".jpeg")) contentType = "image/jpeg";
-            else contentType = isProviderOrInternal ? "application/octet-stream" : "image/jpeg";
-            declaredMime = contentType;
-        }
-
-        if (isProviderOrInternal) {
-            // Reject dangerous declared MIME types even if bytes were unrecognized
-            if (declaredMime && DANGEROUS_MIME_TYPES.has(declaredMime.toLowerCase())) {
-                throw new StorageValidationError(`[StorageService] Dangerous MIME type "${declaredMime}" rejected for provider output.`);
-            }
-
-            if (detectedMime) {
-                // Provider outputs / internal copies: use DETECTED type and ignore wrong/generic declared MIME
-                contentType = detectedMime;
-            } else {
-                // Unrecognized but non-dangerous format: safe allow-list or fallback to application/octet-stream
-                if (declaredMime && SAFE_MEDIA_MIME_TYPES.has(declaredMime.toLowerCase())) {
-                    contentType = declaredMime.toLowerCase();
-                } else {
-                    contentType = "application/octet-stream";
-                }
-                const runId = options.runId || "none";
-                const model = options.model || "none";
-                const provider = options.provider || options.providerId || "none";
-                storageLogger.warn(
-                    { event: "storage.fallback_type", runId, model, provider, contentType },
-                    "Unrecognized format for provider asset; falling back to safe type"
-                );
-            }
-        } else {
-            // End-user uploads: enforce strict declared == real format
-            if (
-                declaredMime &&
-                detectedMime &&
-                !declaredMime.startsWith("application/octet-stream") &&
-                !declaredMime.startsWith("multipart/")
-            ) {
-                if (declaredMime !== detectedMime) {
-                    throw new StorageValidationError(
-                        `[StorageService] Content inspection failed: declared MIME "${declaredMime}" does not match file bytes ("${detectedMime}").`
-                    );
-                }
-            }
-            if (detectedMime) {
-                contentType = detectedMime;
-            }
-        }
+        const contentType = resolveUploadContentType(path, detectedMime, options);
 
         try {
-            return await this.provider.upload(path, body, {
+            return await this.provider.upload(path, normalizedPayload, {
                 ...options,
                 contentType,
                 upsert: true,

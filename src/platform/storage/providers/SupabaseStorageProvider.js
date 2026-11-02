@@ -1,17 +1,8 @@
 import { IStorageProvider } from "../IStorageProvider.js";
+import { isStream } from "../streamUtils.js";
 import { createLogger } from "../../../infrastructure/logging/index.js";
 
 const storageLogger = createLogger("storage");
-
-function isStream(val) {
-    return (
-        val !== null &&
-        typeof val === "object" &&
-        (typeof val.pipe === "function" ||
-            typeof val[Symbol.asyncIterator] === "function" ||
-            typeof val.getReader === "function")
-    );
-}
 
 export class SupabaseStorageProvider extends IStorageProvider {
     /**

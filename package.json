@@ -8,7 +8,7 @@
         "#lib/*.js": "./lib/*.js",
         "#utils/*.js": "./src/utils/*.js",
         "#db/*.js": "./src/db/*.js",
-        "#platform/storage/*.js": "./src/platform/storage/*.js",
+        "#platform/storage": "./src/platform/storage/index.js",
         "#platform/workflow/*.js": "./src/platform/workflow/*.js",
         "#platform/media/*.js": "./src/platform/media/*.js",
         "#platform/media-ingestion/*.js": "./src/platform/media-ingestion/*.js",

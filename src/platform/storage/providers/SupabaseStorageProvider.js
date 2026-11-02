@@ -1,4 +1,3 @@
-import { supabaseAdmin } from "../../../../lib/supabase.js";
 import { IStorageProvider } from "../IStorageProvider.js";
 import { createLogger } from "../../../infrastructure/logging/index.js";
 
@@ -16,14 +15,11 @@ function isStream(val) {
 
 export class SupabaseStorageProvider extends IStorageProvider {
     /**
-     * @param {Object} [options]
+     * @param {Object} options
      * @param {string} [options.bucketName="generated_images"]
-     * @param {Object} [options.client=supabaseAdmin] - Injected Supabase client with `.storage`.
-     *   NOTE (Transitional): The `supabaseAdmin` default fallback is kept for backward compatibility
-     *   with existing container/default instantiation and should be removed (making `client` required via DI)
-     *   when extracting Storage into a standalone reusable package.
+     * @param {Object} options.client - Injected Supabase client with `.storage`.
      */
-    constructor({ bucketName = "generated_images", client = supabaseAdmin } = {}) {
+    constructor({ bucketName = "generated_images", client = null } = {}) {
         super();
         if (!client || !client.storage) {
             throw new Error("SupabaseStorageProvider requires a storage-capable client.");

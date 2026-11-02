@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { PromptService } from "#platform/ai/PromptService.js";
-import { StorageService } from "#platform/storage";
+import { createStorageService } from "#platform/storage";
+import { supabaseAdmin } from "#lib/supabase.js";
 import { WalletService } from "#platform/billing/WalletService.js";
 import { PricingService } from "#platform/billing/PricingService.js";
 import { FailedOpsService } from "#platform/billing/FailedOpsService.js";
@@ -48,7 +49,7 @@ import { UsageEventRepository } from "#platform/billing/UsageEventRepository.js"
 
 // ─── Services ────────────────────────────────────────────────────────────────
 export const promptService  = new PromptService();
-export const storageService = new StorageService();
+export const storageService = createStorageService({ client: supabaseAdmin });
 const walletServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || null;
 
 /**

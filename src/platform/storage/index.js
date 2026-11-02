@@ -8,6 +8,7 @@
  */
 
 export { StorageService } from "./StorageService.js";
+export { createStorageService } from "./storageFactory.js";
 export { StorageError, StorageValidationError } from "./StorageErrors.js";
 
 // InMemoryStorageProvider: In-memory provider (Test-Only, OD-STOR-4)

@@ -6,9 +6,8 @@
  * Serves as the central facade for all storage operations, file uploads,
  * path resolutions, and batch deletions.
  */
-import { SupabaseStorageProvider } from "./providers/SupabaseStorageProvider.js";
 import { StoragePathResolver, storagePathResolver } from "./StoragePathResolver.js";
-import { StorageValidationError } from "./StorageErrors.js";
+import { StorageError, StorageValidationError } from "./StorageErrors.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
 
 const storageLogger = createLogger("storage");
@@ -160,9 +159,31 @@ const DANGEROUS_MIME_TYPES = new Set([
 ]);
 
 export class StorageService {
-    constructor(bucketName = "generated_images", provider = null) {
+    /**
+     * @param {Object|string} [optionsOrBucket="generated_images"] - Options object or legacy bucket name string
+     * @param {Object} [legacyProvider=null] - Legacy positional provider parameter
+     */
+    constructor(optionsOrBucket = "generated_images", legacyProvider = null) {
+        let bucketName, provider;
+        if (typeof optionsOrBucket === "string") {
+            bucketName = optionsOrBucket;
+            provider = legacyProvider;
+        } else if (optionsOrBucket && typeof optionsOrBucket === "object") {
+            ({ bucketName = "generated_images", provider = null } = optionsOrBucket);
+        } else {
+            bucketName = "generated_images";
+            provider = null;
+        }
+
+        if (!provider) {
+            throw new StorageError(
+                "STORAGE_CONFIG_ERROR",
+                "StorageService requires an explicit storage provider."
+            );
+        }
+
         this.bucketName = bucketName;
-        this.provider = provider || new SupabaseStorageProvider({ bucketName });
+        this.provider = provider;
         // Transitional backward-compatible exposure for legacy callers (`storageService.paths.projectAsset(...)`).
         // Consumers should progressively migrate to `storageService.buildKey(...)` and `storageService.validateFolder(...)`.
         this.paths = storagePathResolver;

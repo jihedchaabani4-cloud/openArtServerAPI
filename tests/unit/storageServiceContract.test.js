@@ -273,4 +273,37 @@ describe("StorageService — Architecture, Dependency Isolation & Public Contrac
             }
         );
     });
+
+    it("StorageService fails closed without a provider, and createStorageService factory constructs with client", async () => {
+        const { createStorageService } = await import("../../src/platform/storage/index.js");
+        const { StorageError } = await import("../../src/platform/storage/StorageErrors.js");
+
+        // Fails closed without provider
+        assert.throws(
+            () => new StorageService(),
+            (err) => err instanceof StorageError && err.code === "STORAGE_CONFIG_ERROR"
+        );
+        assert.throws(
+            () => new StorageService({ bucketName: "test_bucket" }),
+            (err) => err instanceof StorageError && err.code === "STORAGE_CONFIG_ERROR"
+        );
+
+        // Factory fails closed without client
+        assert.throws(
+            () => createStorageService({}),
+            (err) => err instanceof StorageError && err.code === "STORAGE_CONFIG_ERROR"
+        );
+
+        // Factory succeeds with valid client
+        const fakeClient = {
+            storage: {
+                from() {
+                    return {};
+                },
+            },
+        };
+        const createdService = createStorageService({ client: fakeClient, bucketName: "factory_bucket" });
+        assert.ok(createdService instanceof StorageService);
+        assert.equal(createdService.bucketName, "factory_bucket");
+    });
 });

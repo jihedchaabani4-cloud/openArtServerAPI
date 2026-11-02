@@ -350,7 +350,14 @@ export class StorageService {
     }
 
     /**
-     * Delete a file directly by its public URL
+     * Delete a file directly by its public URL.
+     *
+     * @deprecated Transitional method preserved for backward compatibility (OD-STOR-3).
+     * Prefer calling `storageService.delete(key)` or `storageService.deleteFiles([key])`
+     * with validated storage keys.
+     *
+     * @param {string} url - Public CDN URL
+     * @returns {Promise<void>}
      */
     async deleteByUrl(url) {
         const path = this.extractKey(url);
@@ -358,6 +365,3 @@ export class StorageService {
         return await this.delete(path);
     }
 }
-
-export const storageService = new StorageService();
-export default storageService;

@@ -37,7 +37,7 @@ Methods and dependencies are parsed from the code (best effort). "Owns" comes fr
 | `WorkflowLifecycleService` | `src/platform/workflow` | - | - | - | `src/container.js` | 3 |
 | `QueueDispatchError` | `src/services` | - | - | `name`, `code`, `statusCode`, `cause`, `attempts` | - | 1 |
 | `UseCaseService` | `src/services` | - | `prepareAndEnqueue`, `assertPaidJobHasHold`, `getHoldTTLForUseCase`, `startHoldHeartbeat`, `extendHoldHeartbeat`, `settlePreparedBilling`, `rollbackPreparedBilling`, `executeQueuedUseCase`, `runUseCase`, `getUseCase`, `listUseCases` | `walletService`, `pricingService`, `jobQueueService`, `billingRuntime` | `src/container.js` | 4 |
-| `InMemoryWalletService` | `src/services` | - | `setBalance`, `getBalance`, `reserve`, `extendHold`, `commit`, `release`, `rollback`, `reapExpiredHolds` | `balances`, `reservations`, `HOLD_TTL_MS` | - | 0 |
+| `InMemoryWalletService` | `src/services` | In-memory test double for unit testing Two-Phase Wallet reservation lifecycle. | `setBalance`, `getBalance`, `reserve`, `extendHold`, `commit`, `release`, `rollback`, `reapExpiredHolds` | `balances`, `reservations`, `HOLD_TTL_MS` | - | 0 |
 | `NodeSafetyService` | `src/v2/nodes/safety` | - | - | - | - | 4 |
 
-Services: 33. Without @owns: 25.
+Services: 33. Without @owns: 24.

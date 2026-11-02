@@ -1,3 +1,6 @@
+/**
+ * @owns In-memory test double for unit testing Two-Phase Wallet reservation lifecycle.
+ */
 import { v4 as uuidv4 } from "uuid";
 import { InsufficientCreditsError, ReservationExpiredError } from "../errors/AppError.js";
 

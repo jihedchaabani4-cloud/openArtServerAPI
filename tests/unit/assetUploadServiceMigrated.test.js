@@ -593,8 +593,11 @@ describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaS
         const { StoragePathResolver } = await import("../../src/platform/storage/StoragePathResolver.js");
 
         let savedStorageKey = null;
+        const resolver = new StoragePathResolver();
         const mockStorageService = {
-            paths: new StoragePathResolver(),
+            paths: resolver,
+            buildKey: ({ userId, folder, filename }) => resolver.projectAsset(userId, folder, filename),
+            validateFolder: (folder) => StoragePathResolver.validateFolderSegment(folder),
             upload: async (key, buffer) => {
                 savedStorageKey = key;
                 return `https://mock-storage.local/${key}`;

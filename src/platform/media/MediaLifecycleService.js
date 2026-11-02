@@ -1,5 +1,14 @@
+/**
+ * MediaWorkflowLifecycleService
+ *
+ * @owns Media generation placeholder lifecycle and stale-placeholder recovery transitions.
+ */
+
 import { V1StorageBridge } from "../../v2/services/v1StorageBridge.js";
 import { resolveMediaMetadata } from "./mediaMetadataResolver.js";
+import { createLogger } from "../../infrastructure/logging/index.js";
+
+const lifecycleLogger = createLogger("media_lifecycle");
 
 /** Canonical media statuses written to the V1 `media` table. */
 export const MEDIA_WORKFLOW_STATUS = {
@@ -116,8 +125,8 @@ export function normalizeNodeMediaOutputs(nodeConfig, output, { runId, nodeId } 
  *   Phase 2 — complete (status=success) or fail (status=failed)
  */
 export class MediaWorkflowLifecycleService {
-  constructor({ db = null } = {}) {
-    this.bridge = db ? new V1StorageBridge({ db }) : null;
+  constructor({ db = null, bridge = null } = {}) {
+    this.bridge = bridge || (db ? new V1StorageBridge({ db }) : null);
   }
 
   isProviderBackedNodeType(nodeType) {
@@ -211,13 +220,17 @@ export class MediaWorkflowLifecycleService {
             config: buildGenerationConfig(nodeType, input),
           });
           if (media) {
-            console.log(
-              `[MediaWorkflowLifecycle] Appended placeholder to existing parent workflow=${targetWfId} media=${media.id}`
+            lifecycleLogger.info(
+              { event: "media_lifecycle.placeholder_appended", workflowId: targetWfId.trim(), mediaId: media.id },
+              "Appended placeholder to existing parent workflow"
             );
             return { workflowId: targetWfId.trim(), mediaId: media.id };
           }
         } catch (appendErr) {
-          console.warn(`[MediaWorkflowLifecycle] Notice appending to parent workflow ${targetWfId}:`, appendErr.message);
+          lifecycleLogger.warn(
+            { event: "media_lifecycle.placeholder_append_notice", workflowId: targetWfId.trim(), err: appendErr?.message },
+            "Notice appending placeholder to parent workflow"
+          );
         }
       }
 
@@ -233,13 +246,17 @@ export class MediaWorkflowLifecycleService {
         config: buildGenerationConfig(nodeType, input),
       });
 
-      console.log(
-        `[MediaWorkflowLifecycle] Started placeholder run=${runId || "n/a"} workflow=${workflow.id} media=${media.id}`
+      lifecycleLogger.info(
+        { event: "media_lifecycle.placeholder_started", runId: runId || null, workflowId: workflow.id, mediaId: media.id },
+        "Started media placeholder"
       );
 
       return { workflowId: workflow.id, mediaId: media.id };
     } catch (err) {
-      console.error("[MediaWorkflowLifecycle] startPlaceholder failed:", err);
+      lifecycleLogger.error(
+        { event: "media_lifecycle.start_placeholder_failed", runId: runId || null, err: err?.message },
+        "startPlaceholder failed"
+      );
       return null;
     }
   }
@@ -334,7 +351,10 @@ export class MediaWorkflowLifecycleService {
       );
       return true;
     } catch (err) {
-      console.error("[MediaWorkflowLifecycle] completePlaceholder failed:", err);
+      lifecycleLogger.error(
+        { event: "media_lifecycle.complete_placeholder_failed", mediaId, err: err?.message },
+        "completePlaceholder failed"
+      );
       return false;
     }
   }
@@ -349,7 +369,10 @@ export class MediaWorkflowLifecycleService {
       await this.bridge.failV1Media(mediaId, normalizeError(error));
       return true;
     } catch (err) {
-      console.error("[MediaWorkflowLifecycle] failPlaceholder failed:", err);
+      lifecycleLogger.error(
+        { event: "media_lifecycle.fail_placeholder_failed", mediaId, err: err?.message },
+        "failPlaceholder failed"
+      );
       return false;
     }
   }
@@ -449,7 +472,10 @@ export class MediaWorkflowLifecycleService {
 
       return false;
     } catch (err) {
-      console.error(`[MediaWorkflowLifecycle] failForExpiredHold failed for hold=${holdId}:`, err);
+      lifecycleLogger.error(
+        { event: "media_lifecycle.fail_expired_hold_failed", holdId, workflowId: workflowId || null, mediaId, err: err?.message },
+        "failForExpiredHold failed"
+      );
       return false;
     }
   }

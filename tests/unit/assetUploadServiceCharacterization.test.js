@@ -196,7 +196,6 @@ function makeCharacterizeHarness() {
         db,
         mediaUploadService,
         workflowMediaService,
-        binaryIngestionService: ingest,
         mediaService: new MediaService({ db }),
         authService: authService,
     });

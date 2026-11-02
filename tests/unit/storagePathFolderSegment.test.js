@@ -3,7 +3,8 @@ process.env.NODE_ENV = "test";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { StoragePathResolver, storagePathResolver } from "../../src/platform/storage/StoragePathResolver.js";
-import { BinaryIngestionService } from "../../src/platform/media-ingestion/BinaryIngestionService.js";
+import { StorageService, InMemoryStorageProvider } from "../../src/platform/storage/index.js";
+import { MediaUploadService } from "../../src/platform/media-ingestion/index.js";
 
 const resolver = storagePathResolver || new StoragePathResolver();
 
@@ -68,23 +69,25 @@ describe("StoragePathResolver.projectAsset — folder segment contract", () => {
     });
 });
 
-describe("BinaryIngestionService — fail-fast folder rejection", () => {
+describe("MediaUploadService — fail-fast folder rejection", () => {
     it("rejects an unsafe folder with 400 before reading or uploading the file", async () => {
+        const provider = new InMemoryStorageProvider({ bucketName: "test-bucket" });
+        const realStorage = new StorageService("test-bucket", provider);
         const storageService = {
-            paths: {
-                projectAsset: () => {
-                    throw new Error("projectAsset must not be reached");
-                },
+            validateFolder: (folder) => realStorage.validateFolder(folder),
+            buildKey: () => {
+                throw new Error("buildKey must not be reached");
             },
             upload: async () => {
                 throw new Error("storage upload must not be reached");
             },
+            deleteFiles: async () => ({ deletedCount: 0, failures: [] }),
         };
-        const service = new BinaryIngestionService({ storageService });
+        const service = new MediaUploadService({ storageService });
         const source = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
         await assert.rejects(
-            async () => service.ingestBinary({ source, userId: "user-1", folder: "../evil" }),
+            async () => service.upload({ files: [source], userId: "user-1", folder: "../evil" }),
             (err) => err.statusCode === 400 && err.errorCode === "VALIDATION_ERROR"
         );
     });

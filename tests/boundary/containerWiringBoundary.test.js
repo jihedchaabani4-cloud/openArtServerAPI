@@ -2,7 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import * as container from "../../src/container.js";
 import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
-import { MediaUploadService } from "../../src/platform/media-ingestion/MediaUploadService.js";
+import { MediaUploadService } from "../../src/platform/media-ingestion/index.js";
+import { MediaService, MediaWorkflowLifecycleService } from "../../src/platform/media/index.js";
 import { WorkflowLifecycleService } from "../../src/platform/workflow/WorkflowService.js";
 import { WorkflowService as WorkflowServiceBase } from "../../src/platform/workflow/WorkflowServiceBase.js";
 import { ElementService } from "../../src/domain/element/ElementService.js";
@@ -298,5 +299,27 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
         assert.equal(container.workflowService.trashService, undefined, "workflowService must not depend on trashService");
         assert.equal(container.elementService.trashService, undefined, "elementService must not depend on trashService");
         assert.equal(container.characterService.trashService, undefined, "characterService must not depend on trashService");
+    });
+
+    it("Media platform wiring: container exposes MediaService & MediaWorkflowLifecycleService and drops legacy ingestion shims", () => {
+        assert.ok(container.mediaService instanceof MediaService, "container.mediaService must be instance of MediaService");
+        assert.equal(container.mediaService.mediaRepo, container.db.media, "mediaService.mediaRepo must hold container.db.media");
+        assert.ok(
+            container.mediaWorkflowLifecycleService instanceof MediaWorkflowLifecycleService,
+            "container.mediaWorkflowLifecycleService must be instance of MediaWorkflowLifecycleService"
+        );
+        assert.equal("binaryIngestionService" in container, false, "container.binaryIngestionService must be removed");
+        assert.equal("mediaIngestionService" in container, false, "container.mediaIngestionService must be removed");
+        assert.equal("legacyMediaIngestAdapter" in container, false, "container.legacyMediaIngestAdapter must be removed");
+        assert.strictEqual(
+            container.characterService.mediaIngestionService,
+            undefined,
+            "container.characterService.mediaIngestionService must be removed"
+        );
+        assert.strictEqual(
+            container.assetUploadService.binaryIngestionService,
+            undefined,
+            "container.assetUploadService.binaryIngestionService must be removed"
+        );
     });
 });

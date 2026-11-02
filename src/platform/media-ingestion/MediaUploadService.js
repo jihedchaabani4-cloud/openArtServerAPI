@@ -2,6 +2,8 @@
  * MediaUploadService
  * Stateless platform Media Upload service (ADR-0012).
  *
+ * @owns Stateless binary media validation, 4K WebP optimization, storage upload, and compensating discard.
+ *
  * Owns:
  * - Request-level file count validation (policy.maxFilesPerRequest and optional maxFiles hint)
  * - Safe source reading, magic-byte inspection, and policy metadata validation (Phase 1)
@@ -24,7 +26,6 @@ import { SourcePolicy } from "./SourcePolicy.js";
 import { MediaInspector } from "./MediaInspector.js";
 import { DEFAULT_UPLOAD_POLICY } from "./UploadPolicy.js";
 import { ValidationError, UploadError } from "./MediaUploadErrors.js";
-import { StoragePathResolver } from "../storage/StoragePathResolver.js";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
 import { calculateAspectRatio } from "../../utils/ratioUtils.js";
 
@@ -49,7 +50,18 @@ function resolveTargetFolder(policy, mediaType, folderOverride) {
 }
 
 export class MediaUploadService {
-    constructor({ storageService }) {
+    constructor({ storageService } = {}) {
+        if (
+            !storageService ||
+            typeof storageService.upload !== "function" ||
+            typeof storageService.deleteFiles !== "function" ||
+            typeof storageService.buildKey !== "function" ||
+            typeof storageService.validateFolder !== "function"
+        ) {
+            throw new Error(
+                "MediaUploadService requires storageService implementing upload, deleteFiles, buildKey, and validateFolder."
+            );
+        }
         this.storageService = storageService;
     }
 
@@ -160,7 +172,7 @@ export class MediaUploadService {
 
     _validateFolderOverride(folder) {
         try {
-            StoragePathResolver.validateFolderSegment(folder);
+            this.storageService.validateFolder(folder);
         } catch (folderErr) {
             throw new ValidationError(folderErr.message, {
                 statusCode: 400,
@@ -244,7 +256,7 @@ export class MediaUploadService {
         const ext = MIME_TO_EXT[optimized.mimeType] || "bin";
         const targetFolder = resolveTargetFolder(policy, optimized.type, folder);
         const filename = `${Date.now()}_${randomUUID().substring(0, 8)}.${ext}`;
-        const storageKey = this.storageService.paths.projectAsset(userId, targetFolder, filename);
+        const storageKey = this.storageService.buildKey({ userId, folder: targetFolder, filename });
 
         let url;
         try {

@@ -78,13 +78,10 @@ export class WorkflowAuthorizationService {
         if (!mediaId) return false;
         if (this._isBypassed(req)) return true;
 
-        const { data: media, error: mediaError } = await this.db.media.client()
-            .from("media")
-            .select("id, project:project!project_id(user_id)")
-            .eq("id", mediaId)
-            .maybeSingle();
-
-        if (mediaError) {
+        let media;
+        try {
+            media = await this.db.media.findMediaOwnershipRecord(mediaId);
+        } catch (mediaError) {
             authLogger.error({ event: "workflow_auth.media_lookup_error", err: mediaError.message, userId, mediaId }, "verifyMediaOwnership media lookup error");
             throw mediaError;
         }

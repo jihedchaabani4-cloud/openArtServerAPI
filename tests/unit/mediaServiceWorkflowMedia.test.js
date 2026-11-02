@@ -1,22 +1,26 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { MediaService } from "../../src/platform/media/MediaService.js";
+import { MediaService } from "../../src/platform/media/index.js";
 
-describe("MediaService workflow_media dual-write", () => {
-  it("links created media to workflow_media using inferred role", async () => {
-    const linkCalls = [];
+describe("MediaService — strict public.media ownership boundary", () => {
+  it("persists canonical media rows to public.media and never writes to workflow_media", async () => {
+    const mediaInserts = [];
+    let workflowMediaTouched = false;
     const service = new MediaService({
       db: {
         media: {
-          createMedia: async (payload) => ({
-            id: "media-1",
-            ...payload,
-          }),
+          createMedia: async (payload) => {
+            mediaInserts.push(payload);
+            return {
+              id: "media-1",
+              ...payload,
+            };
+          },
         },
         workflowMedia: {
-          linkMedia: async (payload) => {
-            linkCalls.push(payload);
-            return { workflow_id: payload.workflowId, media_id: payload.mediaId, role: "output" };
+          linkMedia: async () => {
+            workflowMediaTouched = true;
+            throw new Error("MediaService must not write to workflow_media");
           },
         },
       },
@@ -32,12 +36,9 @@ describe("MediaService workflow_media dual-write", () => {
     });
 
     assert.equal(media.id, "media-1");
-    assert.deepEqual(linkCalls, [
-      {
-        workflowId: "workflow-1",
-        mediaId: "media-1",
-        stepId: "image_generation",
-      },
-    ]);
+    assert.equal(workflowMediaTouched, false);
+    assert.equal(mediaInserts.length, 1);
+    assert.equal("workflow_id" in mediaInserts[0], false);
+    assert.equal("workflowId" in mediaInserts[0], false);
   });
 });

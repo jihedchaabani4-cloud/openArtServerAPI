@@ -27,10 +27,9 @@ export class CharacterService {
      * @param {Object} [deps.mediaService]       - Optional pre-configured CharacterMediaService
      * @param {Object} [deps.generationService]  - Optional pre-configured CharacterGenerationService
      */
-    constructor({ db, workflowService, useCaseService, mediaIngestionService, mediaService, generationService } = {}) {
+    constructor({ db, workflowService, useCaseService, mediaService, generationService } = {}) {
         this.db = db;
         this.workflowService = workflowService;
-        this.mediaIngestionService = mediaIngestionService;
 
         if (!mediaService) {
             throw new Error("CharacterService requires mediaService (CharacterMediaService)");

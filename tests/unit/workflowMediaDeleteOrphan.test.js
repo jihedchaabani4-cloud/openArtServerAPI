@@ -699,21 +699,20 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
 
     const db = {
       media: {
-        findById: async (id) => ({ id, url: `https://cdn.example.com/${id}.png`, step_id: "txt2img" }),
+        findById: async (id) => ({
+          id,
+          url: `https://cdn.example.com/${id}.png`,
+          status: "ready",
+          project_id: "proj-1",
+          user_id: "user-1",
+          step_id: "txt2img",
+        }),
         deleteById: async (id) => ({ id }),
         updateFields: async (id, fields) => ({ id, ...fields }),
         findByWorkflow: async () => remainingVariations,
         client: () => ({
           from: () => ({
             delete: () => ({ eq: async () => ({ error: null }) }),
-            select: () => ({
-              eq: () => ({
-                single: async () => ({
-                  data: { id: "m-pinned-1", status: "ready", project_id: "proj-1", user_id: "user-1", step_id: "txt2img" },
-                  error: null,
-                }),
-              }),
-            }),
           }),
         }),
       },

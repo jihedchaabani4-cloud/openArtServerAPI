@@ -62,6 +62,15 @@ function createFakeStorage({ failOnUploadIndex = null, failOnDelete = false } = 
     return {
         uploaded,
         deletedBatches,
+        buildKey({ userId, folder = "uploads", filename } = {}) {
+            return `${userId}/${folder}/${filename}`;
+        },
+        validateFolder(folder) {
+            if (!folder || /\.\.|[\/\\]|\s/.test(folder)) {
+                throw new Error(`Unsafe folder segment: ${folder}`);
+            }
+            return folder;
+        },
         paths: {
             projectAsset(userId, folder, filename) {
                 return `${userId}/${folder}/${filename}`;
@@ -558,6 +567,7 @@ describe("MediaUploadService Seam 1 Contract", () => {
     it("discard ignores structured NoSuchKey code idempotently but throws and logs genuine storage errors including 404 bucket errors", async () => {
         let deleteFilesCalledWith = null;
         const fakeStorage = {
+            ...createFakeStorage(),
             async deleteFiles(keys) {
                 deleteFilesCalledWith = keys;
                 return {

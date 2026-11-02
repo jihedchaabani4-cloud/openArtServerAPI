@@ -344,6 +344,64 @@ export class MediaRepository extends BaseRepository {
         if (error) throw error;
         return data || [];
     }
+
+    /**
+     * Fetches the media record joined with its project owner for fail-closed ownership verification.
+     * Propagates database errors to the caller so infrastructure faults never masquerade as missing rows.
+     *
+     * @param {string} mediaId
+     * @returns {Promise<{ id: string, project: { user_id: string|null }|null }|null>}
+     */
+    async findMediaOwnershipRecord(mediaId) {
+        if (!mediaId) return null;
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("id, project:project!project_id(user_id)")
+            .eq("id", mediaId)
+            .maybeSingle();
+        if (error) throw error;
+        return data || null;
+    }
+
+    /**
+     * Lists lightweight media rows (`id, url, project_id`) for orphan scanning and diagnostics.
+     *
+     * @param {Object} [options]
+     * @param {string|null} [options.projectId=null]
+     * @param {number} [options.limit=500]
+     * @returns {Promise<Array<{ id: string, url: string|null, project_id: string|null }>>}
+     */
+    async listAll({ projectId = null, limit = 500 } = {}) {
+        let query = this.client()
+            .from(this.tableName)
+            .select("id, url, project_id");
+        if (projectId) {
+            query = query.eq("project_id", projectId);
+        }
+        if (limit) {
+            query = query.limit(limit);
+        }
+        const { data, error } = await query;
+        if (error) throw error;
+        return data || [];
+    }
+
+    /**
+     * Finds media placeholders stuck in 'processing' or 'pending' before cutoffIso.
+     *
+     * @param {string} cutoffIso - ISO 8601 timestamp string
+     * @returns {Promise<Array<{ id: string, status: string, create_time: string, project_id: string|null }>>}
+     */
+    async findStalePlaceholders(cutoffIso) {
+        if (!cutoffIso) return [];
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("id, status, create_time, project_id")
+            .in("status", ["processing", "pending"])
+            .lt("create_time", cutoffIso);
+        if (error) throw error;
+        return data || [];
+    }
 }
 
 

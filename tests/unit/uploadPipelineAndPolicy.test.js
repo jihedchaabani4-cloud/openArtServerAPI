@@ -1,11 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { SourcePolicy } from "../../src/platform/media-ingestion/SourcePolicy.js";
+import { SourcePolicy, MediaUploadService } from "../../src/platform/media-ingestion/index.js";
 import { createUploadMiddleware } from "../../src/middleware/uploadMiddleware.js";
-import { BinaryIngestionService } from "../../src/platform/media-ingestion/BinaryIngestionService.js";
-import { MediaIngestionService } from "../../src/platform/media-ingestion/MediaIngestionService.js";
+import { StorageService, InMemoryStorageProvider } from "../../src/platform/storage/index.js";
 import { AssetUploadService } from "../../src/domain/asset/AssetUploadService.js";
-import { MediaService } from "../../src/platform/media/MediaService.js";
+import { MediaService } from "../../src/platform/media/index.js";
 import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
 import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
 
@@ -48,129 +47,38 @@ describe("Authoritative SourcePolicy & Upload Middleware Contract", () => {
     });
 });
 
-describe("BinaryIngestionService & MediaIngestionService Decoupled Contracts", () => {
-    it("BinaryIngestionService performs pure binary ingestion without DB or workflow dependencies", async () => {
-        let storageUploadCalled = false;
-        const mockStorage = {
-            paths: {
-                projectAsset: () => "mock/path/binary.webp",
-            },
-            upload: async () => {
-                storageUploadCalled = true;
-                return "https://cdn.example.com/mock/path/binary.webp";
-            },
-        };
+describe("MediaUploadService Stateless Platform Contract", () => {
+    it("MediaUploadService performs pure binary upload without DB or workflow dependencies", async () => {
+        const provider = new InMemoryStorageProvider({ bucketName: "test-bucket" });
+        const storageService = new StorageService("test-bucket", provider);
+        const uploadService = new MediaUploadService({ storageService });
 
-        const binaryService = new BinaryIngestionService({ storageService: mockStorage });
-
-        const result = await binaryService.ingestBinary({
-            source: {
+        const { uploaded } = await uploadService.upload({
+            files: [{
                 buffer: VALID_PNG_BUFFER,
                 originalname: "pixel.png",
                 mimetype: "image/png",
-            },
+            }],
             userId: "user-pure-binary",
-            purpose: "default",
         });
 
-        assert.ok(storageUploadCalled, "Storage upload should have been called");
-        assert.equal(result.url, "https://cdn.example.com/mock/path/binary.webp");
-        assert.equal(result.type, "image");
-        assert.equal(result.buffer, undefined, "Large binary buffer must NOT be returned in result");
-        assert.equal(result.media, undefined, "No media record in binary result");
-        assert.equal(result.workflowId, undefined, "No workflow in binary result");
+        assert.equal(uploaded.length, 1);
+        assert.match(uploaded[0].storageKey, /^user-pure-binary\/uploads\/\d+_[a-f0-9]+\.png$/);
+        assert.equal(provider.has(uploaded[0].storageKey), true);
+        assert.equal(uploaded[0].type, "image");
+        assert.equal(uploaded[0].buffer, undefined, "Large binary buffer must NOT be returned in result");
+        assert.equal(uploaded[0].media, undefined, "No media record in stateless upload result");
+        assert.equal(uploaded[0].workflowId, undefined, "No workflow in stateless upload result");
     });
 
-    it("Platform MediaIngestionService operates purely without domain dependencies", async () => {
-        const mockBinary = {
-            ingestBinary: async () => ({
-                url: "https://cdn.example.com/sheet.webp",
-                type: "image",
-                width: 1024,
-                height: 1024,
-                ratio: "1:1",
-                format: "WEBP",
-                sizeBytes: 4096,
-                inspection: { type: "image" },
-            }),
-        };
-
-        const mediaIngestion = new MediaIngestionService({
-            binaryIngestionService: mockBinary,
-        });
-
-        const result = await mediaIngestion.ingest({
-            source: { buffer: VALID_PNG_BUFFER, mimetype: "image/png" },
-            userId: "user-123",
-        });
-
-        assert.equal(result.isNew, true);
-        assert.equal(result.media, null, "Platform ingest produces no media record without domain orchestrator");
-        assert.equal(result.url, "https://cdn.example.com/sheet.webp");
-    });
-
-    it("Platform MediaIngestionService instance in container is untouched and independent of domain orchestration", async () => {
-        const { mediaIngestionService } = await import("../../src/container.js");
-        const propDesc = Object.getOwnPropertyDescriptor(mediaIngestionService, "ingest");
-        assert.equal(propDesc, undefined, "mediaIngestionService must NOT have own getter/setter for ingest");
-        assert.equal(typeof mediaIngestionService.ingest, "function", "mediaIngestionService.ingest must be the prototype platform method");
-        assert.equal(typeof mediaIngestionService.ingestBinary, "function", "mediaIngestionService.ingestBinary must be platform method");
-    });
-
-    it("legacyMediaIngestAdapter preserves both contracts (binary-only skipMediaCreate and assetUploadService delegation)", async () => {
-        const { legacyMediaIngestAdapter, assetUploadService, binaryIngestionService } = await import("../../src/container.js");
-        const origUploadAsset = assetUploadService.uploadAsset;
-        const origIngestBinary = binaryIngestionService.ingestBinary;
-
-        let uploadAssetCalled = false;
-        let ingestBinaryCalled = false;
-
-        assetUploadService.uploadAsset = async (opts) => {
-            uploadAssetCalled = true;
-            return {
-                media: { id: "media-bridged-1" },
-                mediaId: "media-bridged-1",
-                workflowId: "wf-bridged-1",
-                url: "https://cdn.example.com/bridged.webp",
-                isNew: true,
-            };
-        };
-
-        binaryIngestionService.ingestBinary = async (opts) => {
-            ingestBinaryCalled = true;
-            return {
-                url: "https://cdn.example.com/binary-only.webp",
-                type: "image",
-                width: 100,
-                height: 100,
-            };
-        };
-
-        try {
-            // Contract 1: ordinary legacy ingest(options) delegates to assetUploadService.uploadAsset
-            const resDefault = await legacyMediaIngestAdapter.ingest({
-                source: { buffer: VALID_PNG_BUFFER, mimetype: "image/png" },
-                userId: "user-bridge",
-                purpose: "default",
-            });
-            assert.ok(uploadAssetCalled, "Ordinary legacy ingest must delegate to assetUploadService.uploadAsset");
-            assert.equal(resDefault.mediaId, "media-bridged-1");
-
-            // Contract 2: skipMediaCreate: true delegates to binaryIngestionService.ingestBinary
-            const resSkip = await legacyMediaIngestAdapter.ingest({
-                source: { buffer: VALID_PNG_BUFFER, mimetype: "image/png" },
-                skipMediaCreate: true,
-                workflowId: "wf-skip-1",
-            });
-            assert.ok(ingestBinaryCalled, "skipMediaCreate: true must delegate to binaryIngestionService.ingestBinary");
-            assert.equal(resSkip.media, null);
-            assert.equal(resSkip.mediaId, null);
-            assert.equal(resSkip.workflowId, "wf-skip-1");
-            assert.equal(resSkip.url, "https://cdn.example.com/binary-only.webp");
-        } finally {
-            assetUploadService.uploadAsset = origUploadAsset;
-            binaryIngestionService.ingestBinary = origIngestBinary;
-        }
+    it("Container exposes MediaUploadService and removes legacy duplicate ingestion services", async () => {
+        const container = await import("../../src/container.js");
+        assert.ok(container.mediaUploadService instanceof MediaUploadService);
+        assert.equal(typeof container.mediaUploadService.upload, "function");
+        assert.equal(typeof container.mediaUploadService.discard, "function");
+        assert.equal("binaryIngestionService" in container, false);
+        assert.equal("mediaIngestionService" in container, false);
+        assert.equal("legacyMediaIngestAdapter" in container, false);
     });
 });
 
@@ -211,19 +119,6 @@ describe("Canonical Primary-Media Persistence & WorkflowMedia Contract", () => {
         };
 
         const mediaService = new MediaService({ db: mockDb });
-
-        const mockBinaryIngest = {
-            ingestBinary: async () => ({
-                url: "https://mock-storage.local/canonical.webp",
-                type: "image",
-                width: 1920,
-                height: 1080,
-                ratio: "16:9",
-                format: "WEBP",
-                sizeBytes: 8888,
-                inspection: { type: "image" },
-            }),
-        };
 
         const mockUploadService = {
             upload: async () => ({
@@ -294,30 +189,12 @@ describe("Canonical Primary-Media Persistence & WorkflowMedia Contract", () => {
         assert.equal(redundantSecondaryCalled, false, "Redundant secondary updatePrimaryMedia must not be called");
     });
 
-    it("ElementMediaService calls ingestBinary and owns media record & role: detail linking", async () => {
-        let ingestBinaryCalled = false;
-        let mediaCreated = false;
+    it("ElementMediaService calls mediaUploadService.upload and links role: detail via workflowMediaService", async () => {
         const linkCalls = [];
-
-        const mockIngestionService = {
-            ingestBinary: async () => {
-                ingestBinaryCalled = true;
-                return {
-                    url: "https://cdn.example.com/elem.webp",
-                    type: "image",
-                    width: 800,
-                    height: 600,
-                    sizeBytes: 5000,
-                };
-            },
-        };
 
         const mockDb = {
             media: {
-                createMedia: async (data) => {
-                    mediaCreated = true;
-                    return { id: "media-elem-1", ...data };
-                },
+                createMedia: async (data) => ({ id: "media-elem-1", ...data }),
             },
             workflowMedia: {
                 linkMedia: async (payload) => {

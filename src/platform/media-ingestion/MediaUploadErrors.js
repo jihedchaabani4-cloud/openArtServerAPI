@@ -34,13 +34,21 @@ export class QuotaError extends MediaUploadBaseError {
     }
 }
 
+/**
+ * @deprecated Transitional — relocate to Workflow domain in the Workflow Service phase.
+ * Retained here only for direct internal imports in WorkflowMediaRepository, WorkflowMediaService,
+ * and scripts/run-disposable-shared-media-test.js; excluded from platform/media-ingestion barrel.
+ */
 export const WORKFLOW_REFERENCE_QUOTA_PREFIX = "Maximum ";
+/** @deprecated Transitional — relocate to Workflow domain in the Workflow Service phase. */
 export const WORKFLOW_REFERENCE_QUOTA_PATTERN = /Maximum\s+\d+\s+reference\s+images\s+allowed/i;
 
+/** @deprecated Transitional — relocate to Workflow domain in the Workflow Service phase. */
 export function formatWorkflowReferenceQuotaMessage(maxAllowed, currentCount) {
     return `Maximum ${maxAllowed} reference images allowed per element. Current: ${currentCount}`;
 }
 
+/** @deprecated Transitional — relocate to Workflow domain in the Workflow Service phase. */
 export function isWorkflowReferenceQuotaError(err) {
     if (!err) return false;
     if (err.errorCode === "LIMIT_EXCEEDED" || err.code === "LIMIT_EXCEEDED") return true;

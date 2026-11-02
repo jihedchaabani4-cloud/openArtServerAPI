@@ -116,7 +116,6 @@ function makeService(mockDb, ingest, { storageService = null } = {}) {
         db: mockDb.db,
         mediaUploadService,
         workflowMediaService,
-        binaryIngestionService: ingest.stub,
         mediaService: new MediaService({ db: mockDb.db }),
         storageService,
         authService: {

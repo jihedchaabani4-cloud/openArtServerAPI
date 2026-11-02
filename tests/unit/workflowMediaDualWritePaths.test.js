@@ -154,9 +154,9 @@ describe("workflow_media write helper (B1) — workflow_media ONLY, no media.wor
     assert.equal(insertedPayload.project_id, "proj-1");
   });
 
-  it("Path 1 (Uploads / MediaService) & Path 5 (CAE): creates media without workflow_id and links via workflow_media", async () => {
+  it("Path 1 & Path 5 (MediaService): creates media strictly in public.media without workflow_id or workflow_media side effects", async () => {
     const createMediaPayloads = [];
-    const linkCalls = [];
+    let workflowMediaTouched = false;
     const service = new MediaService({
       db: {
         media: {
@@ -166,9 +166,8 @@ describe("workflow_media write helper (B1) — workflow_media ONLY, no media.wor
           },
         },
         workflowMedia: {
-          linkMedia: async (payload) => {
-            linkCalls.push(payload);
-            return payload;
+          linkMedia: async () => {
+            workflowMediaTouched = true;
           },
         },
       },
@@ -191,10 +190,7 @@ describe("workflow_media write helper (B1) — workflow_media ONLY, no media.wor
     assert.equal(createMediaPayloads.length, 2);
     assert.equal("workflow_id" in createMediaPayloads[0], false, "Upload createMedia must not pass workflow_id");
     assert.equal("workflow_id" in createMediaPayloads[1], false, "CAE createMedia must not pass workflow_id");
-    assert.deepEqual(linkCalls, [
-      { workflowId: "wf-upload-1", mediaId: "upload-media", stepId: "upload" },
-      { workflowId: "wf-cae-1", mediaId: "CAE-media", stepId: "CAE" },
-    ]);
+    assert.equal(workflowMediaTouched, false, "MediaService must not touch workflow_media directly");
   });
 
   it("Path 2 (Image and video generation): links placeholders to workflow_media without writing workflow_id to media", async () => {
@@ -501,21 +497,10 @@ describe("workflow_media write helper (B1) — workflow_media ONLY, no media.wor
     const service = new WorkflowMediaService({
       db: {
         media: {
-          client: () => ({
-            from: () => ({
-              select: (cols) => {
-                assert.equal(cols.includes("workflow_id"), false, "detachMedia must not select workflow!workflow_id join");
-                return {
-                  eq: () => ({
-                    single: async () => ({
-                      data: { id: "m-detach-1", status: "success", project_id: "proj-1", step_id: "image_generation" },
-                      error: null,
-                    }),
-                  }),
-                };
-              },
-            }),
-          }),
+          findById: async (_id, cols = "*") => {
+            assert.equal(cols.includes("workflow_id"), false, "detachMedia must not select workflow!workflow_id join");
+            return { id: "m-detach-1", status: "success", project_id: "proj-1", step_id: "image_generation" };
+          },
           updateFields: async (id, fields) => {
             mediaUpdateCalls.push({ id, fields });
             return { id, ...fields };

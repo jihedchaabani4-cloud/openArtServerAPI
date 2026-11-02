@@ -21,7 +21,12 @@ function fakeDb({ workflowRows, workflowError, mediaRow, mediaError, wfAsMediaRo
         return builder;
     };
     return {
-        media: { client: () => ({ from: () => build() }) },
+        media: {
+            findMediaOwnershipRecord: async () => {
+                if (mediaError) throw mediaError;
+                return mediaRow ?? null;
+            },
+        },
         workflows: { client: () => ({ from: () => build() }) },
     };
 }

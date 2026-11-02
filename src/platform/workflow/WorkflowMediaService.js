@@ -937,12 +937,15 @@ export class WorkflowMediaService {
                 });
             }
 
-            const { data: media, error: mediaErr } = await this.db.media.client()
-                .from("media")
-                .select("*")
-                .eq("id", mediaId)
-                .single();
-            if (mediaErr) throw mediaErr;
+            const media = await this.db.media.findById(mediaId);
+            if (!media) {
+                throw new CrudServiceError("Media not found", {
+                    statusCode: 404,
+                    errorCode: "NOT_FOUND",
+                    traceId,
+                    operation: "detachMedia",
+                });
+            }
 
             const status = (media.status || "").toString().toLowerCase();
             if (["processing", "pending", "uploading"].includes(status)) {
@@ -1151,18 +1154,6 @@ export class WorkflowMediaService {
         } else if (projectId && typeof this.db.media?.findByProject === "function") {
             const res = await this.db.media.findByProject(projectId, { limit }).catch(() => []);
             candidates = Array.isArray(res) ? res : (res?.data || []);
-        } else if (typeof this.db.media?.client === "function") {
-            let query = this.db.media.client()
-                .from("media")
-                .select("id, url, project_id");
-            if (projectId) {
-                query = query.eq("project_id", projectId);
-            }
-            if (limit) {
-                query = query.limit(limit);
-            }
-            const { data } = await query;
-            candidates = data || [];
         }
 
         const orphanMediaIds = [];

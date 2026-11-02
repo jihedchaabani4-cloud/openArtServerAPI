@@ -185,24 +185,13 @@ describe("Workflow user_id Persistence, updateFolderId Hardening, and UUID Valid
       const origAuth = workflowMediaService.authService.verifyMediaOwnership;
       workflowMediaService.authService.verifyMediaOwnership = async () => true;
 
-      const origMediaClient = db.media.client;
-      db.media.client = () => ({
-        from: () => ({
-          select: () => ({
-            eq: () => ({
-              single: async () => ({
-                data: {
-                  id: "media-1",
-                  workflow_id: "old-wf",
-                  status: "completed",
-                  user_id: "00000000-0000-0000-0000-000000000001",
-                  project_id: "11111111-1111-1111-1111-111111111111",
-                },
-                error: null,
-              }),
-            }),
-          }),
-        }),
+      const origMediaFindById = db.media.findById;
+      db.media.findById = async () => ({
+        id: "media-1",
+        workflow_id: "old-wf",
+        status: "completed",
+        user_id: "00000000-0000-0000-0000-000000000001",
+        project_id: "11111111-1111-1111-1111-111111111111",
       });
 
       const origMediaUpdate = db.media.updateFields;
@@ -224,7 +213,7 @@ describe("Workflow user_id Persistence, updateFolderId Hardening, and UUID Valid
       } finally {
         db.workflows.createWorkflow = origCreate;
         workflowMediaService.authService.verifyMediaOwnership = origAuth;
-        db.media.client = origMediaClient;
+        db.media.findById = origMediaFindById;
         db.media.updateFields = origMediaUpdate;
         db.workflows.updateFields = origWfUpdate;
         db.workflows.findById = origFindById;

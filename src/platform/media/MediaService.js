@@ -1,33 +1,39 @@
 /**
  * MediaService
- * Canonical owner of the Media application entity.
+ * Canonical owner of the Media application entity (`public.media`).
+ *
+ * @owns Canonical CRUD, status transitions, and metadata queries for public.media records.
  *
  * Clean Architecture Boundary:
- *   - Represents the canonical Media entity in the database (`media` table).
+ *   - Represents the canonical Media entity in the database (`public.media` table).
  *   - Encapsulates media record creation, lookup, status updates, and field mutations.
- *   - Works in tandem with WorkflowMediaService (relationships) and StorageService (physical files).
- *
- * Feature: 026-backend-platform-layer-refactor / Canonical Media Architecture
+ *   - Strictly independent of `public.workflow_media` (owned by WorkflowMediaService) and physical object storage (StorageService).
  */
 
 import { randomUUID } from "node:crypto";
-import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
-import { createMediaInWorkflow } from "../../db/workflowMediaLinker.js";
+import { createLogger } from "../../infrastructure/logging/index.js";
+
+const mediaLogger = createLogger("media_service");
 
 export class MediaService {
     /**
      * @param {Object} deps
-     * @param {Object} deps.db                   - Repository map (db.media, db.workflows)
+     * @param {Object} [deps.mediaRepo] - MediaRepository instance
+     * @param {Object} [deps.db]        - Repository map containing db.media
      */
-    constructor({ db }) {
-        this.db = db;
+    constructor({ mediaRepo = null, db = null } = {}) {
+        const resolvedRepo = mediaRepo || db?.media;
+        if (!resolvedRepo || typeof resolvedRepo.createMedia !== "function") {
+            throw new Error("MediaService requires mediaRepo (or db.media) implementing createMedia.");
+        }
+        this.mediaRepo = resolvedRepo;
     }
 
     /**
-     * Create a canonical media record in the database.
+     * Create a canonical media record in `public.media`.
+     * Does NOT write to `public.workflow_media` (workflow linking belongs to WorkflowMediaService).
      *
      * @param {Object} params
-     * @param {string} params.workflowId
      * @param {string} [params.projectId]
      * @param {string} [params.generationConfigId]
      * @param {string} [params.stepId="upload"]
@@ -39,7 +45,6 @@ export class MediaService {
      * @returns {Promise<Object>} Created media record
      */
     async createMedia({
-        workflowId,
         projectId = null,
         stepId = "upload",
         url,
@@ -47,35 +52,28 @@ export class MediaService {
         height = 1024,
         status = "success",
         errorMessage = null,
+        generationConfigId = undefined,
         ...extra
-    }) {
+    } = {}) {
         const traceId = randomUUID();
         const start = Date.now();
 
-        crudOperationLog({ traceId, operation: "createMedia:start", workflowId, stepId });
+        const {
+            workflowId: _ignoredWorkflowIdProp,
+            workflow_id: _ignoredWfId,
+            role: _ignoredRole,
+            workflowType: _ignoredWfTypeProp,
+            workflow_type: _ignoredWfType,
+            is_primary: _ignoredIsPrimaryCol,
+            isPrimary: _ignoredIsPrimaryProp,
+            generation_config_id: extraGenConfigId,
+            ...restExtra
+        } = extra;
+
+        const resolvedGenerationConfigId = generationConfigId ?? extraGenConfigId;
 
         try {
-            if (!workflowId) {
-                throw new CrudServiceError("workflowId is required to create a media record.", {
-                    statusCode: 400,
-                    errorCode: "VALIDATION_ERROR",
-                    traceId,
-                    operation: "createMedia",
-                });
-            }
-
-            const {
-                workflow_id: _ignoredWfId,
-                role,
-                workflowType,
-                workflow_type,
-                generationConfigId: _ignoredGenId,
-                generation_config_id: _ignoredGenCol,
-                is_primary,
-                isPrimary,
-                ...restExtra
-            } = extra;
-            const mediaRecord = await this.db.media.createMedia({
+            const mediaRecord = await this.mediaRepo.createMedia({
                 project_id: projectId,
                 step_id: stepId,
                 url,
@@ -83,40 +81,35 @@ export class MediaService {
                 height: Number(height) || 1024,
                 status,
                 error_message: errorMessage,
+                ...(resolvedGenerationConfigId !== undefined ? { generation_config_id: resolvedGenerationConfigId } : {}),
                 ...restExtra,
             });
 
-            const resolvedIsPrimary = (is_primary !== undefined) ? is_primary : (isPrimary !== undefined ? isPrimary : undefined);
-
-            await createMediaInWorkflow(this.db, {
-                workflowId,
-                mediaId: mediaRecord?.id,
-                stepId,
-                ...(role ? { role } : {}),
-                ...(resolvedIsPrimary !== undefined ? { is_primary: resolvedIsPrimary } : {}),
-                ...(workflowType || workflow_type ? { workflowType: workflowType || workflow_type } : {}),
-                operation: "createMedia:linkWorkflowMedia",
-            });
-
-            crudOperationLog({
-                traceId,
-                operation: "createMedia:success",
-                status: "ok",
-                durationMs: Date.now() - start,
-                mediaId: mediaRecord.id,
-                workflowId,
-            });
+            mediaLogger.info(
+                {
+                    event: "media.created",
+                    traceId,
+                    mediaId: mediaRecord?.id,
+                    projectId,
+                    stepId,
+                    durationMs: Date.now() - start,
+                },
+                "Created media record"
+            );
 
             return mediaRecord;
         } catch (err) {
-            crudOperationLog({
-                traceId,
-                operation: "createMedia:error",
-                status: "error",
-                durationMs: Date.now() - start,
-                errorCode: err.statusCode || 500,
-                message: err.message,
-            });
+            mediaLogger.error(
+                {
+                    event: "media.create_failed",
+                    traceId,
+                    projectId,
+                    stepId,
+                    durationMs: Date.now() - start,
+                    err: err?.message,
+                },
+                "Failed to create media record"
+            );
             throw err;
         }
     }
@@ -130,17 +123,7 @@ export class MediaService {
      */
     async findById(mediaId, columns = "*") {
         if (!mediaId) return null;
-        try {
-            return await this.db.media.findById(mediaId, columns);
-        } catch (err) {
-            crudOperationLog({
-                operation: "findById",
-                status: "warning",
-                mediaId,
-                message: err.message,
-            });
-            return null;
-        }
+        return this.mediaRepo.findById(mediaId, columns);
     }
 
     /**
@@ -151,38 +134,55 @@ export class MediaService {
      */
     async findByIds(mediaIds) {
         if (!Array.isArray(mediaIds) || mediaIds.length === 0) return [];
-        try {
-            return await this.db.media.findByIds(mediaIds);
-        } catch (err) {
-            crudOperationLog({
-                operation: "findByIds",
-                status: "warning",
-                count: mediaIds.length,
-                message: err.message,
-            });
-            return [];
-        }
+        return this.mediaRepo.findByIds(mediaIds);
     }
 
     /**
-     * Retrieve all media records attached to a specific workflow container.
+     * Retrieve a canonical media record by its public URL.
      *
-     * @param {string} workflowId
+     * @param {string} url
+     * @returns {Promise<Object|null>}
+     */
+    async findByUrl(url) {
+        if (!url) return null;
+        return this.mediaRepo.findByUrl(url);
+    }
+
+    /**
+     * Retrieve paginated media records belonging to a project.
+     *
+     * @param {string} projectId
+     * @param {Object} [options]
+     * @param {number} [options.limit=30]
+     * @param {number} [options.offset=0]
      * @returns {Promise<Object[]>}
      */
-    async findByWorkflow(workflowId) {
-        if (!workflowId) return [];
-        try {
-            return await this.db.media.findByWorkflow(workflowId);
-        } catch (err) {
-            crudOperationLog({
-                operation: "findByWorkflow",
-                status: "warning",
-                workflowId,
-                message: err.message,
-            });
-            return [];
-        }
+    async findByProject(projectId, { limit = 30, offset = 0 } = {}) {
+        if (!projectId) return [];
+        return this.mediaRepo.findByProject(projectId, limit, offset);
+    }
+
+    /**
+     * Retrieve the media record joined with its project owner (`id, project(user_id)`).
+     *
+     * @param {string} mediaId
+     * @returns {Promise<{ id: string, project: { user_id: string|null }|null }|null>}
+     */
+    async findOwnershipRecord(mediaId) {
+        if (!mediaId) return null;
+        return this.mediaRepo.findMediaOwnershipRecord(mediaId);
+    }
+
+    /**
+     * List lightweight media rows (`id, url, project_id`) for diagnostics and orphan scans.
+     *
+     * @param {Object} [options]
+     * @param {string|null} [options.projectId=null]
+     * @param {number} [options.limit=500]
+     * @returns {Promise<Object[]>}
+     */
+    async listAll({ projectId = null, limit = 500 } = {}) {
+        return this.mediaRepo.listAll({ projectId, limit });
     }
 
     /**
@@ -194,7 +194,7 @@ export class MediaService {
      * @returns {Promise<Object>}
      */
     async updateStatus(mediaId, status, errorMessage = null) {
-        return this.db.media.updateFields(mediaId, {
+        return this.mediaRepo.updateFields(mediaId, {
             status,
             error_message: errorMessage,
         });
@@ -208,17 +208,17 @@ export class MediaService {
      * @returns {Promise<Object>}
      */
     async updateFields(mediaId, fields = {}) {
-        return this.db.media.updateFields(mediaId, fields);
+        return this.mediaRepo.updateFields(mediaId, fields);
     }
 
     /**
-     * Delete a media record row from database.
+     * Delete a media record row from `public.media`.
      *
      * @param {string} mediaId
-     * @returns {Promise<boolean>}
+     * @returns {Promise<boolean|void>}
      */
     async deleteById(mediaId) {
-        return this.db.media.deleteById(mediaId);
+        return this.mediaRepo.deleteById(mediaId);
     }
 }
 

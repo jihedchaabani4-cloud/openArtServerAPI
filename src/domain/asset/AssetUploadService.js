@@ -20,7 +20,6 @@ import { DEFAULT_UPLOAD_POLICY } from "../../platform/media-ingestion/UploadPoli
 import { MediaUploadService } from "../../platform/media-ingestion/MediaUploadService.js";
 import { WorkflowMediaService } from "../../platform/workflow/WorkflowMediaService.js";
 import { WorkflowAuthorizationService } from "../../platform/workflow/WorkflowAuthorizationService.js";
-import { MediaService } from "../../platform/media/MediaService.js";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
 import { calculateAspectRatio } from "../../utils/ratioUtils.js";
 
@@ -30,19 +29,15 @@ export class AssetUploadService {
      * @param {Object} deps.db                          - Repositories (db.media, db.workflows, db.projects, db.folders, db.workflowMedia)
      * @param {Object} deps.mediaUploadService         - MediaUploadService instance (Ticket 01)
      * @param {Object} deps.workflowMediaService       - WorkflowMediaService instance (Ticket 03)
-     * @param {Object} [deps.binaryIngestionService]    - Legacy BinaryIngestionService fallback
-     * @param {Object} [deps.mediaIngestionService]     - Legacy fallback
-     * @param {Object} [deps.workflowAuthService]       - WorkflowAuthorizationService instance
-     * @param {Object} [deps.mediaService]              - Canonical MediaService instance
-     * @param {Object} [deps.folderService]             - FolderService instance
+     * @param {Object} [deps.authService]              - WorkflowAuthorizationService instance
+     * @param {Object} [deps.mediaService]             - Canonical MediaService instance
+     * @param {Object} [deps.folderService]            - FolderService instance
      */
     constructor({
         db,
         mediaUploadService,
         workflowMediaService,
         authService,
-        binaryIngestionService = null,
-        mediaIngestionService = null,
         mediaService = null,
         folderService = null,
     } = {}) {
@@ -59,7 +54,7 @@ export class AssetUploadService {
         this.mediaUploadService = mediaUploadService;
         this.workflowMediaService = workflowMediaService;
         this.authService = authService;
-        this.mediaService = mediaService || new MediaService({ db });
+        this.mediaService = mediaService;
         this.folderService = folderService;
     }
 

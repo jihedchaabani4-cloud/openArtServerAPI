@@ -35,6 +35,7 @@ export {
 } from "./billingFactory.js";
 
 let _defaultWalletService = null;
+let _defaultCreditPackageRepo = null;
 let _defaultPackageFetcher = null;
 
 /**
@@ -43,10 +44,12 @@ let _defaultPackageFetcher = null;
  *
  * @param {Object} params
  * @param {any} [params.walletService]
+ * @param {any} [params.creditPackageRepo]
  * @param {Function} [params.packageFetcher]
  */
-export function configureBilling({ walletService = null, packageFetcher = null } = {}) {
+export function configureBilling({ walletService = null, creditPackageRepo = null, packageFetcher = null } = {}) {
     if (walletService) _defaultWalletService = walletService;
+    if (creditPackageRepo) _defaultCreditPackageRepo = creditPackageRepo;
     if (packageFetcher) _defaultPackageFetcher = packageFetcher;
 }
 
@@ -274,6 +277,55 @@ export async function listCreditPackages(options = {}, ctx = {}) {
     if (typeof _defaultPackageFetcher === "function") {
         return _defaultPackageFetcher(options);
     }
-    const { fetchPackagesFromDB } = await import("../../../controllers/payments/paymentsUtils.js");
-    return fetchPackagesFromDB();
+    const repo = ctx?.creditPackageRepo || _defaultCreditPackageRepo;
+    if (repo && typeof repo.listActivePackages === "function") {
+        return repo.listActivePackages();
+    }
+    return [];
+}
+
+/**
+ * Retrieves a specific active credit package by ID.
+ *
+ * @param {string} packageId
+ * @param {{ creditPackageRepo?: any }} [ctx]
+ * @returns {Promise<object|null>}
+ * @throws {BillingValidationError | BillingConfigurationError}
+ */
+export async function getCreditPackage(packageId, ctx = {}) {
+    if (!packageId || typeof packageId !== "string") {
+        throw new BillingValidationError("packageId is required");
+    }
+    const repo = ctx?.creditPackageRepo || _defaultCreditPackageRepo;
+    if (!repo) {
+        throw new BillingConfigurationError("CreditPackageRepository is not configured in Billing system");
+    }
+    return repo.findActiveById(packageId);
+}
+
+/**
+ * Resolves credit quantity granted by a package variant or fallback ID.
+ *
+ * @param {{ variantId?: string|number, packageId?: string }} input
+ * @param {{ creditPackageRepo?: any }} [ctx]
+ * @returns {Promise<number|null>}
+ * @throws {BillingConfigurationError}
+ */
+export async function resolvePackageCredits(input = {}, ctx = {}) {
+    const { variantId, packageId } = input || {};
+    const repo = ctx?.creditPackageRepo || _defaultCreditPackageRepo;
+    if (!repo) {
+        throw new BillingConfigurationError("CreditPackageRepository is not configured in Billing system");
+    }
+
+    if (variantId) {
+        const credits = await repo.findCreditsByVariantId(variantId);
+        if (credits != null) return credits;
+    }
+
+    if (packageId) {
+        return repo.findCreditsById(packageId);
+    }
+
+    return null;
 }

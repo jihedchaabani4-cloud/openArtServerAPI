@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { PromptService } from "#platform/ai/PromptService.js";
 import { createStorageService } from "#platform/storage";
-import { supabaseAdmin } from "#lib/supabase.js";
+import { supabase, supabaseAdmin } from "#lib/supabase.js";
 import {
     WalletService,
     FailedOpsService,
@@ -9,6 +9,7 @@ import {
     configureBilling,
     createWalletService,
     createFailedOpsService,
+    createBillingRepositories,
 } from "#platform/billing";
 import { PricingService } from "./models/pricing/PricingService.js";
 import { createClient } from "@supabase/supabase-js";
@@ -143,12 +144,20 @@ export const usageEventRepo = _supabaseForBilling
     ? new UsageEventRepository(_supabaseForBilling)
     : null;
 
+export const billingRepos = _supabaseForBilling
+    ? createBillingRepositories(_supabaseForBilling)
+    : null;
+export const creditPackageRepo = billingRepos?.creditPackageRepo || null;
+if (creditPackageRepo && supabase) {
+    creditPackageRepo.supabase = supabase;
+}
+
 export const walletService  = _supabaseForBilling
     ? createWalletService({ client: _supabaseForBilling, usageEventRepo })
     : null;
 
 if (walletService) {
-    configureBilling({ walletService });
+    configureBilling({ walletService, creditPackageRepo });
     systemLogger.debug("WalletService initialized");
 } else {
     systemLogger.warn("WalletService disabled: missing SUPABASE_URL or service key");

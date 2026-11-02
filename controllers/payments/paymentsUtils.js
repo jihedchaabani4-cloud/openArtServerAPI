@@ -35,19 +35,14 @@ export function verifyWebhookSignature(rawBody, signature) {
 }
 
 export async function fetchPackagesFromDB() {
-    const { data, error } = await supabase
-        .from("credit_packages")
-        .select("*")
-        .eq("is_active", true)
-        .order("sort_order", { ascending: true })
-        .order("credits", { ascending: true });
-
-    if (error) {
-        logger.error({ event: "payments.fetch_packages_error", err: error.message }, "Failed to fetch packages from DB");
+    try {
+        const { listCreditPackages } = await import("#platform/billing");
+        const packages = await listCreditPackages();
+        return packages ?? [];
+    } catch (err) {
+        logger.error({ event: "payments.fetch_packages_error", err: err?.message }, "Failed to fetch packages from Billing");
         return null;
     }
-
-    return data ?? [];
 }
 
 export function toPublicPackage(pkg = {}) {

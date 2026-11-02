@@ -1,5 +1,6 @@
 import { walletService } from "../src/container.js";
 import { supabase } from "../lib/supabase.js";
+import { getCreditPackage, resolvePackageCredits } from "#platform/billing";
 import { createLogger } from "../src/infrastructure/logging/index.js";
 import {
     buildModelsComparison,
@@ -51,15 +52,11 @@ export async function getCheckoutUrl(req, res) {
             return res.status(400).json({ ok: false, message: "packageId is required" });
         }
 
-        // Fetch the specific package from Supabase
-        const { data: pkg, error } = await supabase
-            .from("credit_packages")
-            .select("*")
-            .eq("id", packageId)
-            .eq("is_active", true)
-            .maybeSingle();
-
-        if (error) {
+        // Fetch the specific package via Billing capability
+        let pkg;
+        try {
+            pkg = await getCreditPackage(packageId);
+        } catch (error) {
             paymentsLogger.error({ event: "payments.fetch_package_error", packageId, err: error.message }, "DB error fetching package");
             return res.status(500).json({ ok: false, message: "Database error" });
         }
@@ -161,30 +158,8 @@ export async function handleWebhook(req, res) {
             return res.status(400).json({ ok: false, message: "Missing user_id" });
         }
 
-        // ④ Look up credits from DB using variantId first, then packageId as fallback
-        let creditsToAdd = null;
-
-        // Try variantId first (most reliable)
-        if (variantId) {
-            const { data: pkgByVariant } = await supabase
-                .from("credit_packages")
-                .select("credits")
-                .eq("variant_id", variantId)
-                .maybeSingle();
-
-            creditsToAdd = pkgByVariant?.credits ?? null;
-        }
-
-        // Fallback: try packageId from custom_data
-        if (!creditsToAdd && packageId) {
-            const { data: pkgById } = await supabase
-                .from("credit_packages")
-                .select("credits")
-                .eq("id", packageId)
-                .maybeSingle();
-
-            creditsToAdd = pkgById?.credits ?? null;
-        }
+        // ④ Look up credits from Billing using variantId first, then packageId as fallback
+        const creditsToAdd = await resolvePackageCredits({ variantId, packageId });
 
         if (!creditsToAdd) {
             paymentsLogger.error({ event: "payments.unknown_variant", variantId, packageId }, "Unknown product variant");

@@ -4,6 +4,7 @@
 import { WalletRepository } from "./repositories/WalletRepository.js";
 import { TransactionRepository } from "./repositories/TransactionRepository.js";
 import { FailedOpsRepository } from "./repositories/FailedOpsRepository.js";
+import { CreditPackageRepository } from "./repositories/CreditPackageRepository.js";
 import { UsageEventRepository } from "./UsageEventRepository.js";
 import { WalletService } from "./WalletService.js";
 import { FailedOpsService } from "./FailedOpsService.js";
@@ -20,6 +21,7 @@ export function createBillingRepositories(supabaseClient) {
         transactionRepo: new TransactionRepository(supabaseClient),
         failedOpsRepo: new FailedOpsRepository(supabaseClient),
         usageEventRepo: new UsageEventRepository(supabaseClient),
+        creditPackageRepo: new CreditPackageRepository(supabaseClient),
     };
 }
 

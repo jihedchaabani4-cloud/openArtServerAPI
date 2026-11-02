@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { WalletRepository } from "../../src/platform/billing/repositories/WalletRepository.js";
 import { TransactionRepository } from "../../src/platform/billing/repositories/TransactionRepository.js";
 import { FailedOpsRepository } from "../../src/platform/billing/repositories/FailedOpsRepository.js";
+import { CreditPackageRepository } from "../../src/platform/billing/repositories/CreditPackageRepository.js";
 import { WalletError } from "../../src/platform/billing/BillingErrors.js";
 
 function makeMockSupabase() {
@@ -13,6 +14,7 @@ function makeMockSupabase() {
         wallets: new Map(),
         transactions: new Map(),
         failed_wallet_operations: new Map(),
+        credit_packages: new Map(),
     };
 
     const client = {
@@ -328,6 +330,72 @@ describe("Billing Business System — Private Repositories (Phase 2.2)", () => {
 
             await repo.markAbandoned(existing.id, "Max retries reached");
             assert.equal(table.get(existing.id).status, "ABANDONED");
+        });
+    });
+
+    describe("CreditPackageRepository", () => {
+        it("returns empty array or package list on active query", async () => {
+            const client = makeMockSupabase();
+            const repo = new CreditPackageRepository(client);
+
+            const empty = await repo.listActivePackages();
+            assert.deepEqual(empty, []);
+
+            const table = client.tables.credit_packages;
+            table.set("pkg-1", {
+                id: "pkg-1",
+                label: "Starter",
+                credits: 100,
+                price: 10,
+                variant_id: "var-100",
+                is_active: true,
+                sort_order: 1,
+            });
+            table.set("pkg-2", {
+                id: "pkg-2",
+                label: "Pro",
+                credits: 500,
+                price: 45,
+                variant_id: "var-500",
+                is_active: false,
+                sort_order: 2,
+            });
+
+            const active = await repo.listActivePackages();
+            assert.equal(active.length, 1);
+            assert.equal(active[0].id, "pkg-1");
+        });
+
+        it("finds active package by id", async () => {
+            const client = makeMockSupabase();
+            const repo = new CreditPackageRepository(client);
+
+            const table = client.tables.credit_packages;
+            table.set("pkg-100", { id: "pkg-100", credits: 100, is_active: true });
+
+            const found = await repo.findActiveById("pkg-100");
+            assert.ok(found);
+            assert.equal(found.credits, 100);
+
+            const missing = await repo.findActiveById("non-existent");
+            assert.equal(missing, null);
+        });
+
+        it("finds credits amount by variant ID and package ID", async () => {
+            const client = makeMockSupabase();
+            const repo = new CreditPackageRepository(client);
+
+            const table = client.tables.credit_packages;
+            table.set("pkg-100", { id: "pkg-100", variant_id: "v-100", credits: 100, is_active: true });
+
+            const creditsByVar = await repo.findCreditsByVariantId("v-100");
+            assert.equal(creditsByVar, 100);
+
+            const creditsById = await repo.findCreditsById("pkg-100");
+            assert.equal(creditsById, 100);
+
+            const missing = await repo.findCreditsByVariantId("v-unknown");
+            assert.equal(missing, null);
         });
     });
 });

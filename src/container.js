@@ -4,13 +4,13 @@ import { createStorageService } from "#platform/storage";
 import { supabaseAdmin } from "#lib/supabase.js";
 import {
     WalletService,
-    PricingService,
     FailedOpsService,
     UsageEventRepository,
     configureBilling,
     createWalletService,
     createFailedOpsService,
 } from "#platform/billing";
+import { PricingService } from "./models/pricing/PricingService.js";
 import { createClient } from "@supabase/supabase-js";
 import { redisConnection } from "#queue/redis.js";
 import { createLogger } from "./infrastructure/logging/index.js";

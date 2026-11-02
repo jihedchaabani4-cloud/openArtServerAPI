@@ -26,7 +26,6 @@ export {
 };
 
 export { WalletService } from "./WalletService.js";
-export { PricingService } from "./PricingService.js";
 export { FailedOpsService } from "./FailedOpsService.js";
 export { UsageEventRepository } from "./UsageEventRepository.js";
 export {

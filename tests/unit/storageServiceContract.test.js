@@ -240,4 +240,38 @@ describe("StorageService — Architecture, Dependency Isolation & Public Contrac
             console.error = origConsoleError;
         }
     });
+
+    it("StorageValidationError conforms to StorageError, AppError, and catches MZ executable sniffing", async () => {
+        const { StorageError, StorageValidationError } = await import(
+            "../../src/platform/storage/StorageErrors.js"
+        );
+        const { AppError } = await import("../../src/errors/AppError.js");
+
+        const err = new StorageValidationError("Test validation error");
+        assert.ok(err instanceof StorageError, "Expected err to be instanceof StorageError");
+        assert.ok(err instanceof AppError, "Expected err to be instanceof AppError");
+        assert.equal(err.code, "STORAGE_VALIDATION_ERROR");
+        assert.equal(err.statusCode, 400);
+        assert.equal(err.errorCode, "VALIDATION_ERROR");
+
+        const provider = new InMemoryStorageProvider({ bucketName: "test_bucket" });
+        const service = new StorageService("test_bucket", provider);
+
+        const exeBuffer = Buffer.from([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00]);
+        await assert.rejects(
+            async () => {
+                await service.upload("u1/uploads/test.exe", exeBuffer);
+            },
+            (thrown) => {
+                assert.ok(thrown instanceof StorageValidationError);
+                assert.ok(thrown instanceof StorageError);
+                assert.ok(thrown instanceof AppError);
+                assert.equal(thrown.statusCode, 400);
+                assert.equal(thrown.code, "STORAGE_VALIDATION_ERROR");
+                assert.equal(thrown.errorCode, "VALIDATION_ERROR");
+                assert.match(thrown.message, /Executable binary/);
+                return true;
+            }
+        );
+    });
 });

@@ -8,6 +8,7 @@
  */
 import { SupabaseStorageProvider } from "./providers/SupabaseStorageProvider.js";
 import { StoragePathResolver, storagePathResolver } from "./StoragePathResolver.js";
+import { StorageValidationError } from "./StorageErrors.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
 
 const storageLogger = createLogger("storage");
@@ -31,10 +32,10 @@ function sniffStorageMagicBytes(buffer) {
     if (!buffer || buffer.length < 4) return null;
 
     if (buffer[0] === 0x4d && buffer[1] === 0x5a) {
-        throw new Error("[StorageService] Executable binary payload (MZ) detected. Ingestion rejected.");
+        throw new StorageValidationError("[StorageService] Executable binary payload (MZ) detected. Ingestion rejected.");
     }
     if (buffer[0] === 0x7f && buffer[1] === 0x45 && buffer[2] === 0x4c && buffer[3] === 0x46) {
-        throw new Error("[StorageService] Executable ELF binary detected. Ingestion rejected.");
+        throw new StorageValidationError("[StorageService] Executable ELF binary detected. Ingestion rejected.");
     }
     const headerText = buffer.slice(0, 256).toString("utf8").toLowerCase();
     if (
@@ -43,7 +44,7 @@ function sniffStorageMagicBytes(buffer) {
         headerText.includes("<script") ||
         headerText.includes("<?php")
     ) {
-        throw new Error("[StorageService] HTML / Script markup payload detected. Ingestion rejected.");
+        throw new StorageValidationError("[StorageService] HTML / Script markup payload detected. Ingestion rejected.");
     }
     if (
         headerText.includes("<svg") ||
@@ -51,12 +52,12 @@ function sniffStorageMagicBytes(buffer) {
         headerText.includes("<xml") ||
         headerText.includes('xmlns="http://www.w3.org/2000/svg"')
     ) {
-        throw new Error(
+        throw new StorageValidationError(
             "[StorageService] SVG / XML markup payload detected. Vector graphics and scriptable XML are not permitted in raster image ingestion."
         );
     }
     if (buffer[0] === 0x50 && buffer[1] === 0x4b) {
-        throw new Error("[StorageService] ZIP archive payload (PK) detected. Ingestion rejected.");
+        throw new StorageValidationError("[StorageService] ZIP archive payload (PK) detected. Ingestion rejected.");
     }
 
     if (
@@ -256,7 +257,7 @@ export class StorageService {
         if (isProviderOrInternal) {
             // Reject dangerous declared MIME types even if bytes were unrecognized
             if (declaredMime && DANGEROUS_MIME_TYPES.has(declaredMime.toLowerCase())) {
-                throw new Error(`[StorageService] Dangerous MIME type "${declaredMime}" rejected for provider output.`);
+                throw new StorageValidationError(`[StorageService] Dangerous MIME type "${declaredMime}" rejected for provider output.`);
             }
 
             if (detectedMime) {
@@ -286,7 +287,7 @@ export class StorageService {
                 !declaredMime.startsWith("multipart/")
             ) {
                 if (declaredMime !== detectedMime) {
-                    throw new Error(
+                    throw new StorageValidationError(
                         `[StorageService] Content inspection failed: declared MIME "${declaredMime}" does not match file bytes ("${detectedMime}").`
                     );
                 }

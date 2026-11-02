@@ -7,7 +7,7 @@
  * is preserved for backward compatibility. Callers outside `src/platform/storage/` should progressively
  * migrate to `storageService.buildKey(...)`, `storageService.validateFolder(...)`, and `storageService.extractKey(...)`.
  */
-import { CrudServiceError } from "../../utils/crudOperationLog.js";
+import { StorageValidationError } from "./StorageErrors.js";
 
 export class StoragePathResolver {
     constructor({ defaultBucket = "generated_images" } = {}) {
@@ -45,12 +45,8 @@ export class StoragePathResolver {
         if (!segment) return "uploads";
         if (!StoragePathResolver.ALLOWED_STORAGE_FOLDERS.has(segment)) {
             const preview = segment.length > 32 ? `${segment.slice(0, 32)}…` : segment;
-            throw new CrudServiceError(
-                `Invalid storage folder "${preview}": must be one of allowed storage folders.`,
-                {
-                    statusCode: 400,
-                    errorCode: "VALIDATION_ERROR",
-                }
+            throw new StorageValidationError(
+                `Invalid storage folder "${preview}": must be one of allowed storage folders.`
             );
         }
         return segment;

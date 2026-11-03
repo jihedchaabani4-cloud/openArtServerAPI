@@ -306,4 +306,90 @@ describe("StorageService — Architecture, Dependency Isolation & Public Contrac
         assert.ok(createdService instanceof StorageService);
         assert.equal(createdService.bucketName, "factory_bucket");
     });
+
+    describe("StorageService SVG/XML sub-condition independent security coverage", () => {
+        it('rejects "<svg" sub-condition independently without script markup', async () => {
+            const { StorageValidationError } = await import(
+                "../../src/platform/storage/StorageErrors.js"
+            );
+            const provider = new InMemoryStorageProvider({ bucketName: "test_bucket" });
+            const service = new StorageService({ bucketName: "test_bucket", provider });
+            const payload = Buffer.from('<svg width="100" height="100"><circle cx="50" cy="50" r="40"/></svg>');
+
+            await assert.rejects(
+                async () => {
+                    await service.upload("u1/uploads/test-svg.png", payload);
+                },
+                (thrown) => {
+                    assert.ok(thrown instanceof StorageValidationError);
+                    assert.equal(thrown.statusCode, 400);
+                    assert.match(thrown.message, /SVG \/ XML markup payload detected/i);
+                    return true;
+                }
+            );
+        });
+
+        it('rejects "<?xml" sub-condition independently without script markup', async () => {
+            const { StorageValidationError } = await import(
+                "../../src/platform/storage/StorageErrors.js"
+            );
+            const provider = new InMemoryStorageProvider({ bucketName: "test_bucket" });
+            const service = new StorageService({ bucketName: "test_bucket", provider });
+            const payload = Buffer.from('<?xml version="1.0" encoding="UTF-8"?><catalog><book id="bk101"/></catalog>');
+
+            await assert.rejects(
+                async () => {
+                    await service.upload("u1/uploads/test-qxml.png", payload);
+                },
+                (thrown) => {
+                    assert.ok(thrown instanceof StorageValidationError);
+                    assert.equal(thrown.statusCode, 400);
+                    assert.match(thrown.message, /SVG \/ XML markup payload detected/i);
+                    return true;
+                }
+            );
+        });
+
+        it('rejects "<xml" sub-condition independently without script markup', async () => {
+            const { StorageValidationError } = await import(
+                "../../src/platform/storage/StorageErrors.js"
+            );
+            const provider = new InMemoryStorageProvider({ bucketName: "test_bucket" });
+            const service = new StorageService({ bucketName: "test_bucket", provider });
+            const payload = Buffer.from('<xml><record id="1"><value>data</value></record></xml>');
+
+            await assert.rejects(
+                async () => {
+                    await service.upload("u1/uploads/test-xml.png", payload);
+                },
+                (thrown) => {
+                    assert.ok(thrown instanceof StorageValidationError);
+                    assert.equal(thrown.statusCode, 400);
+                    assert.match(thrown.message, /SVG \/ XML markup payload detected/i);
+                    return true;
+                }
+            );
+        });
+
+        it('rejects "xmlns svg namespace" sub-condition independently without script markup', async () => {
+            const { StorageValidationError } = await import(
+                "../../src/platform/storage/StorageErrors.js"
+            );
+            const provider = new InMemoryStorageProvider({ bucketName: "test_bucket" });
+            const service = new StorageService({ bucketName: "test_bucket", provider });
+            const payload = Buffer.from('<g xmlns="http://www.w3.org/2000/svg"><path d="M10 10"/></g>');
+
+            await assert.rejects(
+                async () => {
+                    await service.upload("u1/uploads/test-xmlns.png", payload);
+                },
+                (thrown) => {
+                    assert.ok(thrown instanceof StorageValidationError);
+                    assert.equal(thrown.statusCode, 400);
+                    assert.match(thrown.message, /SVG \/ XML markup payload detected/i);
+                    return true;
+                }
+            );
+        });
+    });
 });

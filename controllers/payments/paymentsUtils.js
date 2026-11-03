@@ -5,7 +5,31 @@ import { createLogger } from "../../src/infrastructure/logging/index.js";
 
 const logger = createLogger("payments_utils");
 
-const SENSITIVE_PACKAGE_FIELDS = new Set(["variant_id", "checkout_url"]);
+/**
+ * Explicit allowlist of safe public fields for credit packages.
+ * Any new public columns added to credit_packages in Postgres must be added here explicitly.
+ * Sensitive fields (variant_id, checkout_url) or future internal administrative metadata
+ * are dropped by default to prevent leakage to public/client consumers.
+ */
+export const PUBLIC_PACKAGE_FIELDS = Object.freeze([
+    "id",
+    "label",
+    "credits",
+    "price",
+    "currency",
+    "yearly_price",
+    "popular",
+    "is_trial",
+    "is_active",
+    "sort_order",
+    "description",
+    "features",
+    "plan_type",
+    "created_at",
+    "updated_at",
+]);
+
+const PUBLIC_PACKAGE_FIELD_SET = new Set(PUBLIC_PACKAGE_FIELDS);
 
 export function verifyWebhookSignature(rawBody, signature) {
     const secret = process.env.LEMON_WEBHOOK_SECRET;
@@ -46,9 +70,14 @@ export async function fetchPackagesFromDB() {
 }
 
 export function toPublicPackage(pkg = {}) {
-    return Object.fromEntries(
-        Object.entries(pkg).filter(([key]) => !SENSITIVE_PACKAGE_FIELDS.has(key))
-    );
+    if (!pkg || typeof pkg !== "object") return {};
+    const result = {};
+    for (const field of PUBLIC_PACKAGE_FIELDS) {
+        if (Object.prototype.hasOwnProperty.call(pkg, field)) {
+            result[field] = pkg[field];
+        }
+    }
+    return result;
 }
 
 function floorMediaCount(packageCredits, modelCredits) {

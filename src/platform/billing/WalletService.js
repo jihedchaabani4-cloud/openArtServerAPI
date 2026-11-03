@@ -310,11 +310,25 @@ export class WalletService {
       return await this.commit(referenceId, extraMetadata);
     } catch (err) {
       const isStatusErr = err.message?.includes("COMPLETED") || err.message?.includes("not PENDING");
-      const { data: tx } = await this.supabase
-        .from("transactions")
-        .select("status")
-        .eq("reference_id", referenceId)
-        .maybeSingle();
+      let tx = null;
+      try {
+        if (this.txRepo) {
+          tx = await this.txRepo.findByReference(referenceId);
+        } else if (this.supabase) {
+          const res = await this.supabase
+            .from("transactions")
+            .select("status")
+            .eq("reference_id", referenceId)
+            .maybeSingle();
+          tx = res?.data;
+        }
+      } catch (findErr) {
+        walletLogger.warn(
+          { event: "wallet.idempotent_lookup_failed", referenceId, err: findErr?.message },
+          `Failed to lookup transaction status during commit recovery for reference ${referenceId}: ${findErr?.message}`
+        );
+      }
+
       if (tx?.status === "COMPLETED") {
         if (extraMetadata && typeof extraMetadata === "object") {
           await this._mergeTransactionMetadata(referenceId, extraMetadata).catch(() => {});
@@ -337,11 +351,25 @@ export class WalletService {
     try {
       return await this.rollback(referenceId, extraMetadata);
     } catch (err) {
-      const { data: tx } = await this.supabase
-        .from("transactions")
-        .select("status")
-        .eq("reference_id", referenceId)
-        .maybeSingle();
+      let tx = null;
+      try {
+        if (this.txRepo) {
+          tx = await this.txRepo.findByReference(referenceId);
+        } else if (this.supabase) {
+          const res = await this.supabase
+            .from("transactions")
+            .select("status")
+            .eq("reference_id", referenceId)
+            .maybeSingle();
+          tx = res?.data;
+        }
+      } catch (findErr) {
+        walletLogger.warn(
+          { event: "wallet.idempotent_lookup_failed", referenceId, err: findErr?.message },
+          `Failed to lookup transaction status during rollback recovery for reference ${referenceId}: ${findErr?.message}`
+        );
+      }
+
       if (tx?.status === "FAILED") {
         if (extraMetadata && typeof extraMetadata === "object") {
           await this._mergeTransactionMetadata(referenceId, extraMetadata).catch(() => {});

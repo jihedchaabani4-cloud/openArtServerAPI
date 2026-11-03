@@ -12,6 +12,7 @@ import { failWorkflowPendingMedia } from "../../src/platform/media/MediaLifecycl
 import { supabase } from "../../lib/supabase.js";
 import { setDb } from "../../src/platform/security/ownership.js";
 import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
+import { BillingConfigurationError } from "../../src/platform/billing/BillingErrors.js";
 
 describe("Sheet Generation real service layer tests — workflow_media integrity", () => {
   let originalRpc;
@@ -535,20 +536,20 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
       type: "HOLD",
     });
 
-    // 1. Initial rollback: refunds 10 credits and updates status to FAILED
-    const res1 = await walletService.rollbackFallback(refId);
-    assert.equal(res1.status, "FAILED", "Status must be updated to FAILED");
-    assert.equal(walletsTable.get(walletId).balance, 60, "Balance must increase from 50 to 60");
+    // 1. Initial rollback: fails closed with BillingConfigurationError on PGRST202
+    await assert.rejects(
+      async () => walletService.rollback(refId),
+      (err) => err instanceof BillingConfigurationError || /PGRST202|missing/.test(err?.message)
+    );
 
-    // 2. Second rollback (retry / crash then timeout): must be idempotent no-op
-    const res2 = await walletService.rollbackFallback(refId);
-    assert.equal(res2.status, "FAILED", "Status remains FAILED");
-    assert.equal(walletsTable.get(walletId).balance, 60, "Balance must remain 60 without duplicate credit");
+    // 2. rollbackHoldIdempotent: also fails closed on missing RPC
+    await assert.rejects(
+      async () => walletService.rollbackHoldIdempotent(refId),
+      (err) => err instanceof BillingConfigurationError || /PGRST202|missing/.test(err?.message)
+    );
 
-    // 3. rollbackHoldIdempotent: safe across retries
-    const res3 = await walletService.rollbackHoldIdempotent(refId);
-    assert.equal(res3.status, "FAILED");
-    assert.equal(walletsTable.get(walletId).balance, 60, "Balance remains 60");
+    // 3. Balance must remain untouched (50 credits, not refunded non-atomically)
+    assert.equal(walletsTable.get(walletId).balance, 50, "Balance must remain unchanged when RPC fails closed");
 
     // Part B: Worker crash handler failure recovery marks ALL direct media failed
     const targetMediaId2 = "media-crash-idem-2";

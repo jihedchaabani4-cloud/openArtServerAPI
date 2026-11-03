@@ -293,4 +293,40 @@ describe("RC1.2-S4 — Lemon Squeezy Payments Webhook Boundary Tests", () => {
     assert.equal(responseBody.ok, false);
     assert.match(responseBody.message, /buffer/i);
   });
+
+  it("TEST WEBHOOK-8: Webhook returns HTTP 500 when credit() fails closed with BillingConfigurationError", async () => {
+    const { BillingConfigurationError } = await import("../../src/platform/billing/BillingErrors.js");
+    walletService.credit = async () => {
+      throw new BillingConfigurationError("[WalletService] RPC credit_wallet missing (PGRST202 / schema cache): fail closed");
+    };
+
+    const payload = {
+      meta: {
+        event_name: "order_created",
+        custom_data: { user_id: "user-webhook-err", package_id: "pkg_fail_closed" },
+      },
+      data: {
+        id: "order_99999",
+        attributes: {
+          status: "paid",
+          first_order_item: { variant_id: "variant_100" },
+        },
+      },
+    };
+    const rawBuffer = Buffer.from(JSON.stringify(payload));
+    const sig = signPayload(rawBuffer);
+
+    const res = await fetch(`${baseUrl}/api/payments/webhook`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Signature": sig,
+      },
+      body: rawBuffer,
+    });
+
+    assert.equal(res.status, 500, "Webhook must return HTTP 500 when credit() fails closed so payment provider retries");
+    const body = await res.json();
+    assert.equal(body.ok, false);
+  });
 });

@@ -7,7 +7,7 @@ import { CharacterRepository } from "../../src/db/CharacterRepository.js";
 import { FolderRepository } from "../../src/db/FolderRepository.js";
 import { ProjectReadService } from "../../src/domain/project/ProjectReadService.js";
 import { WorkflowAuthorizationService } from "../../src/platform/workflow/WorkflowAuthorizationService.js";
-import { assertOwns, setDb } from "../../src/platform/security/ownership.js";
+import { assertOwns, setDb } from "#platform/identity";
 
 /**
  * Builds an in-memory Supabase table query simulator supporting:

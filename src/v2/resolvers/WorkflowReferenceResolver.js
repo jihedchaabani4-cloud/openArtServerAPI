@@ -11,7 +11,7 @@
 import { db } from "../../container.js";
 import { elementRepository } from "../../db/ElementRepository.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
-import { assertOwns, assertOwnsAny } from "../../platform/security/ownership.js";
+import { assertOwns, assertOwnsAny } from "#platform/identity";
 import { inferWorkflowMediaRole } from "../../db/workflowMediaRole.js";
 
 const dbLogger = createLogger("database");

@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { assertOwns, assertOwnsAny } from "../../src/platform/security/ownership.js";
+import { assertOwns, assertOwnsAny } from "#platform/identity";
 import { db } from "../../src/container.js";
 import { AppError } from "../../src/utils/AppError.js";
 

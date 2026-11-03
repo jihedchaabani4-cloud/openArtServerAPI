@@ -8,7 +8,7 @@
 
 import { randomUUID } from "node:crypto";
 import { elementService, elementMediaService, trashService } from "../src/container.js";
-import { assertOwns } from "../src/platform/security/ownership.js";
+import { assertOwns } from "#platform/identity";
 import { createLogger } from "../src/infrastructure/logging/index.js";
 
 const elementLogger = createLogger("element_controller");

@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { TrashRepository } from "../../src/db/TrashRepository.js";
 import { TrashService } from "../../src/domain/trash/TrashService.js";
-import { setDb } from "../../src/platform/security/ownership.js";
+import { setDb } from "#platform/identity";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

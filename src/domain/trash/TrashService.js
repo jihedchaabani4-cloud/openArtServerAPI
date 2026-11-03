@@ -11,7 +11,7 @@
 
 import { randomUUID } from "node:crypto";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
-import { assertOwns } from "../../platform/security/ownership.js";
+import { assertOwns } from "#platform/identity";
 
 function cleanWorkflowId(rawId) {
     return String(rawId || "").replace(/^workflows\//, "").trim();

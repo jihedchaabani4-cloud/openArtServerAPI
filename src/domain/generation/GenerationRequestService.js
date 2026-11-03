@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { AppError } from "../../utils/AppError.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
 import { createMediaInWorkflow } from "../../db/workflowMediaLinker.js";
-import { toMediaIdList } from "../../platform/security/ownership.js";
+import { toMediaIdList } from "#platform/identity";
 import { validateInput, getModelSchema } from "../../models/index.js";
 
 const logger = createLogger("generation_request_service");

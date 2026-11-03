@@ -5,7 +5,7 @@
  */
 
 import { generationService, workflowService, db } from "../src/container.js";
-import { assertOwns } from "../src/platform/security/ownership.js";
+import { assertOwns } from "#platform/identity";
 import { safePublicRouteError } from "../src/utils/safePublicRouteError.js";
 
 export const deleteGeneration = async (req, res) => {

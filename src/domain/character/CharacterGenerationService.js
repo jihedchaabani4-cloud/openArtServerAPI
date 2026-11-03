@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { llmService } from "#platform/ai/LLMService.js";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
 import { createMediaInWorkflow } from "../../db/workflowMediaLinker.js";
-import { toMediaIdList } from "../../platform/security/ownership.js";
+import { toMediaIdList } from "#platform/identity";
 
 const CHARACTER_GENERATOR_SYSTEM_PROMPT = `
 You are an elite haute-couture AI Art Director and Master Character Designer for high-budget cinematic films and editorial fashion houses.

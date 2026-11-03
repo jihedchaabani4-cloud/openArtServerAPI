@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import express from "express";
 import http from "node:http";
 import { assertSecurityConfiguredForEnvironment } from "../../src/container.js";
-import { safeCompareSecret } from "../../src/platform/security/secretComparison.js";
+import { safeCompareSecret } from "#platform/identity";
 import workflowsRouter from "../../routes/workflows.js";
 import { projectReadService } from "../../src/container.js";
 import { supabase } from "../../lib/supabase.js";

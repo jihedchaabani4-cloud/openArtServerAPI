@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { generationRequestService } from "../src/container.js";
 import { createLogger } from "../src/infrastructure/logging/index.js";
 import { resolveMediaMetadata } from "../src/platform/media/mediaMetadataResolver.js";
-import { assertOwns, assertOwnsAny, toMediaIdList } from "../src/platform/security/ownership.js";
+import { assertOwns, assertOwnsAny, toMediaIdList } from "#platform/identity";
 
 const controllerLogger = createLogger("video-controller");
 

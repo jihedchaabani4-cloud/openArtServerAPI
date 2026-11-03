@@ -10,7 +10,7 @@ import { ElementMediaService } from "../../src/domain/element/ElementMediaServic
 import { createWorkflowWithMediaAtomic } from "../../src/db/workflowMediaOps.js";
 import { failWorkflowPendingMedia } from "../../src/platform/media/MediaLifecycleService.js";
 import { supabase } from "../../lib/supabase.js";
-import { setDb } from "../../src/platform/security/ownership.js";
+import { setDb } from "#platform/identity";
 import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
 import { BillingConfigurationError } from "../../src/platform/billing/BillingErrors.js";
 

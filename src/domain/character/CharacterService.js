@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";
 import { CharacterMediaService } from "./CharacterMediaService.js";
 import { CharacterGenerationService } from "./CharacterGenerationService.js";
-import { assertOwns, assertOwnsAny, toMediaIdList } from "../../platform/security/ownership.js";
+import { assertOwns, assertOwnsAny, toMediaIdList } from "#platform/identity";
 import { createLogger } from "../../infrastructure/logging/index.js";
 
 const logger = createLogger("character-service");

@@ -8,7 +8,7 @@ import { db, useCaseService } from "../../src/container.js";
 import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
 import { supabase } from "../../lib/supabase.js";
 import { resetLimitersForTest } from "../../src/middleware/rateLimit.js";
-import { toMediaIdList } from "../../src/platform/security/ownership.js";
+import { toMediaIdList } from "#platform/identity";
 import {
   resolveWorkflowReference,
   resolveWorkflowReferences,

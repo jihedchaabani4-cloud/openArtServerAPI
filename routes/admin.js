@@ -1,6 +1,5 @@
 import express from "express";
-import { requireAuth } from "../src/middleware/auth.js";
-import { requireAdmin } from "../src/middleware/requireAdmin.js";
+import { requireAuth, requireAdmin } from "#platform/identity";
 import { walletRateLimit } from "../src/middleware/walletRateLimit.js";
 import { walletService, pricingService } from "../src/container.js";
 import { redisConnection } from "../src/queue/redis.js";

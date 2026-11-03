@@ -20,7 +20,7 @@ import { CharacterMediaService } from "../../src/domain/character/CharacterMedia
 import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
 import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
 import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
-import { assertOwns, setDb } from "../../src/platform/security/ownership.js";
+import { assertOwns, setDb } from "#platform/identity";
 
 describe("Shared-Media Lifecycle Regression & Hardening", () => {
 

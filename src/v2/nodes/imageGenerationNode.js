@@ -1,7 +1,7 @@
 import { run } from "../../models/index.js";
 import { NodeSafetyService } from "./safety/NodeSafetyService.js";
 import { resolvePrimaryMediaUrl } from "../resolvers/WorkflowReferenceResolver.js";
-import { toMediaIdList } from "../../platform/security/ownership.js";
+import { toMediaIdList } from "#platform/identity";
 
 /**
  * Image Generation Node — Pure Pass-Through

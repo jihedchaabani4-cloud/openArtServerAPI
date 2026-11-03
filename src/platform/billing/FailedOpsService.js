@@ -5,6 +5,10 @@ import { FailedOpsRepository } from "./repositories/FailedOpsRepository.js";
 
 const billingLogger = createLogger("billing");
 
+export const FAILED_OPS_BACKOFF_BASE_MS = 60_000;
+export const FAILED_OPS_BACKOFF_MULTIPLIER = 2;
+export const FAILED_OPS_DEFAULT_MAX_RETRIES = 5;
+
 /**
  * FailedOpsService
  * ─────────────────────────────────────────────────────────────────────────────
@@ -120,7 +124,7 @@ export class FailedOpsService {
    */
   async markRetryScheduled(id, retryCount) {
     if (!this.repo) return;
-    const delayMs = 60_000 * Math.pow(2, retryCount);
+    const delayMs = FAILED_OPS_BACKOFF_BASE_MS * Math.pow(FAILED_OPS_BACKOFF_MULTIPLIER, retryCount);
     const nextRetryAt = new Date(Date.now() + delayMs).toISOString();
     return this.repo.markRetryScheduled(id, retryCount, nextRetryAt);
   }

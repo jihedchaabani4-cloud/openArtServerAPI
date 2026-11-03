@@ -87,9 +87,14 @@ export async function handleExpireStaleHolds({
  * next_retry_at is NULL or in the past, then replays each operation.
  * Uses exponential backoff on failure and marks ABANDONED after max_retries.
  */
-export async function handleRetryFailedOps({ failedOpsService: injectedOps = null } = {}) {
+export async function handleRetryFailedOps({
+  failedOpsService: injectedOps = null,
+  walletService: injectedWallet = null,
+  replayFn = null,
+} = {}) {
   const start = Date.now();
   const activeOps = injectedOps || failedOpsService;
+  const activeReplay = replayFn || ((operation) => replayOperation(operation, { walletService: injectedWallet || walletService }));
   const ops = await activeOps.getPendingOps();
 
   if (ops.length === 0) {
@@ -112,7 +117,7 @@ export async function handleRetryFailedOps({ failedOpsService: injectedOps = nul
 
   for (const op of ops) {
     try {
-      await replayOperation(op, { walletService });
+      await activeReplay(op);
       await activeOps.markCompleted(op.id);
       successCount++;
       logger.info(

@@ -34,6 +34,13 @@ export const walletMaintenanceQueue = new Queue(WALLET_QUEUE_NAME, {
   },
 });
 
+walletMaintenanceQueue.on("error", (err) => {
+  queueLogger.error(
+    { event: "wallet_queue.error", err: err?.message || String(err) },
+    `[WalletQueue] Redis queue error: ${err?.message || String(err)}`
+  );
+});
+
 /**
  * Register all recurring wallet maintenance jobs.
  * Uses upsertJobScheduler() — the BullMQ v5 idiomatic API for repeatable jobs.

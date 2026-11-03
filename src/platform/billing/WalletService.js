@@ -5,10 +5,10 @@ import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";
 const walletLogger = createLogger("wallet");
 const billingLogger = createLogger("billing");
 
-import { WalletError } from "./BillingErrors.js";
+import { WalletError, BillingConfigurationError } from "./BillingErrors.js";
 import { WalletRepository } from "./repositories/WalletRepository.js";
 import { TransactionRepository } from "./repositories/TransactionRepository.js";
-export { WalletError };
+export { WalletError, BillingConfigurationError };
 
 export class WalletService {
   HOLD_TTL_SECONDS = 10 * 60; // 10 minutes TTL per specification clarification
@@ -232,8 +232,7 @@ export class WalletService {
 
     if (error) {
       if (this.isMissingRpcError(error)) {
-        walletLogger.warn({ rpc: "hold_credits" }, "RPC hold_credits not found, using table fallback");
-        return this.holdFallback({ wallet, amount, referenceId, metadata, expiresAt });
+        throw new BillingConfigurationError("[WalletService] RPC hold_credits missing (PGRST202 / schema cache): fail closed");
       }
       if (error.code === "23505") {
         throw new WalletError(
@@ -280,8 +279,7 @@ export class WalletService {
 
     if (error) {
       if (this.isMissingRpcError(error)) {
-        walletLogger.warn({ rpc: "hold_credits" }, "RPC hold_credits not found, using table fallback");
-        return this.holdFallback({ wallet, amount, referenceId, metadata, expiresAt });
+        throw new BillingConfigurationError("[WalletService] RPC hold_credits missing (PGRST202 / schema cache): fail closed");
       }
 
       if (error.code === "23505") {
@@ -455,8 +453,7 @@ export class WalletService {
 
     if (error) {
       if (this.isMissingRpcError(error)) {
-        walletLogger.warn({ rpc: "credit_wallet" }, "RPC credit_wallet not found, using table fallback");
-        return this.creditFallback({ wallet, amount, referenceId, metadata });
+        throw new BillingConfigurationError("[WalletService] RPC credit_wallet missing (PGRST202 / schema cache): fail closed");
       }
 
       if (error.code === "23505") {
@@ -616,14 +613,7 @@ export class WalletService {
 
     if (error) {
       if (this.isMissingRpcError(error)) {
-        walletLogger.warn({ rpc: fnName }, `RPC ${fnName} not found, using table fallback`);
-        const fallbackTx = newStatus === "COMPLETED"
-          ? await this.commitFallback(referenceId)
-          : await this.rollbackFallback(referenceId);
-        if (extraMetadata && typeof extraMetadata === "object") {
-          await this._mergeTransactionMetadata(referenceId, extraMetadata).catch(() => {});
-        }
-        return fallbackTx;
+        throw new BillingConfigurationError(`[WalletService] RPC ${fnName} missing (PGRST202 / schema cache): fail closed`);
       }
 
       throw new WalletError(error.message, "TRANSACTION_NOT_FOUND");
@@ -666,167 +656,7 @@ export class WalletService {
   // FALLBACK METHODS (when RPCs not available)
   // ─────────────────────────────────────────────
 
-  /**
-   * FIX:
-   * - Insert transaction أولاً (لو فشل، ما لمسناش الرصيد)
-   * - Optimistic lock على الـ balance لتفادي race condition
-   */
-  async holdFallback({ wallet, amount, referenceId, metadata, expiresAt }) {
-    const fresh = await this.getWalletByIdOrThrow(wallet.id);
 
-    const newBalance = Number(fresh.balance) - Number(amount);
-    if (newBalance < 0) {
-      throw new WalletError(
-        `Insufficient funds: need ${amount}, have ${fresh.balance}`,
-        "INSUFFICIENT_FUNDS"
-      );
-    }
-
-    const { tx, txError } = await this.txRepo.insertTransaction({
-      wallet_id: fresh.id,
-      amount,
-      type: "DEBIT",
-      status: "PENDING",
-      reference_id: referenceId,
-      metadata,
-      expires_at: expiresAt,
-    });
-
-    if (txError) {
-      if (txError.code === "23505") {
-        throw new WalletError(
-          `Transaction ${referenceId} already exists (duplicate)`,
-          "DUPLICATE_TRANSACTION"
-        );
-      }
-      throw new WalletError(txError.message, "DB_ERROR");
-    }
-
-    const { ok: debited, error: walletError } = await this.walletRepo.decrementBalanceOptimistic(
-      fresh.id,
-      amount,
-      fresh.balance
-    );
-
-    if (!debited) {
-      await this.txRepo.deleteByReference(referenceId).catch(() => {});
-      throw new WalletError(
-        "Balance changed concurrently, please retry",
-        "CONFLICT"
-      );
-    }
-
-    return tx;
-  }
-
-  /**
-   * FIX:
-   * - Insert transaction أولاً
-   * - Optimistic lock على الـ balance
-   */
-  async creditFallback({ wallet, amount, referenceId, metadata }) {
-    const fresh = await this.getWalletByIdOrThrow(wallet.id);
-    const newBalance = Number(fresh.balance) + Number(amount);
-
-    const { tx, txError } = await this.txRepo.insertTransaction({
-      wallet_id: fresh.id,
-      amount,
-      type: "CREDIT",
-      status: "COMPLETED",
-      reference_id: referenceId,
-      metadata,
-      expires_at: null,
-    });
-
-    if (txError) {
-      if (txError.code === "23505") {
-        throw new WalletError(
-          `Transaction ${referenceId} already exists (duplicate)`,
-          "DUPLICATE_TRANSACTION"
-        );
-      }
-      throw new WalletError(txError.message, "DB_ERROR");
-    }
-
-    const { ok: credited, error: walletError } = await this.walletRepo.incrementBalanceOptimistic(
-      fresh.id,
-      amount,
-      fresh.balance
-    );
-
-    if (!credited) {
-      await this.txRepo.deleteByReference(referenceId).catch(() => {});
-      throw new WalletError(
-        "Balance changed concurrently, please retry",
-        "CONFLICT"
-      );
-    }
-
-    return tx;
-  }
-
-  async commitFallback(referenceId) {
-    const tx = await this.getTransactionByReferenceOrThrow(referenceId);
-
-    if (tx.status === "COMPLETED") return tx;
-    if (tx.status !== "PENDING") {
-      throw new WalletError(
-        `Transaction ${referenceId} is not pending (status: ${tx.status})`,
-        "INVALID_TRANSITION"
-      );
-    }
-
-    const { data, error } = await this.txRepo.updateStatusWithOptimisticLock({
-      id: tx.id,
-      fromStatus: "PENDING",
-      toStatus: "COMPLETED",
-    });
-
-    if (error || !data) {
-      throw new WalletError(
-        "Transaction was modified concurrently",
-        "CONFLICT"
-      );
-    }
-
-    return data;
-  }
-
-  /**
-   * FIX:
-   * - Idempotent: لو FAILED بالفعل → return مباشرة
-   * - Optimistic lock على الـ status لتفادي double-rollback
-   * - نحدّث الـ status أولاً ثم نرجع الرصيد (عكس النسخة القديمة)
-   */
-  async rollbackFallback(referenceId) {
-    const tx = await this.getTransactionByReferenceOrThrow(referenceId);
-
-    if (tx.status === "FAILED") return tx;
-    if (tx.status !== "PENDING") {
-      throw new WalletError(
-        `Cannot rollback: status is ${tx.status}`,
-        "INVALID_TRANSITION"
-      );
-    }
-
-    const { data: updated, error: txError } = await this.txRepo.updateStatusWithOptimisticLock({
-      id: tx.id,
-      fromStatus: "PENDING",
-      toStatus: "FAILED",
-    });
-
-    if (txError || !updated) {
-      throw new WalletError(
-        "Transaction was modified concurrently",
-        "CONFLICT"
-      );
-    }
-
-    const wallet = await this.getWalletByIdOrThrow(tx.wallet_id);
-    await this.walletRepo.restoreBalance(wallet.id, tx.amount, wallet.balance);
-
-    return updated;
-  }
 
   /**
    * FIX:

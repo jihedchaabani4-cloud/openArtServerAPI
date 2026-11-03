@@ -35,6 +35,13 @@ export async function getUseCaseQueue() {
         removeOnFail: { count: 500 },
       },
     });
+
+    useCaseQueueInstance.on("error", (err) => {
+      queueLogger.error(
+        { event: "usecase_queue.error", err: err?.message || String(err) },
+        `[UseCaseQueue] Redis queue error: ${err?.message || String(err)}`
+      );
+    });
   }
   return useCaseQueueInstance;
 }

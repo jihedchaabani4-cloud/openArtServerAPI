@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { EventEmitter } from "node:events";
 import { Worker } from "bullmq";
 import { workerRedisConnection } from "../queue/redis.js";
 import { USECASE_QUEUE_NAME } from "../services/jobQueueService.js";
@@ -24,7 +25,7 @@ workerLogger.info({
  * 🎯 Dedicated UseCase & Node Execution Worker
  */
 export const useCaseWorker = process.env.NODE_ENV === "test"
-  ? { on: () => {}, close: async () => {} }
+  ? Object.assign(new EventEmitter(), { close: async () => {} })
   : new Worker(
       USECASE_QUEUE_NAME,
       wrapWorkerJob("usecase-worker", async (job) => {
@@ -64,6 +65,13 @@ export const useCaseWorker = process.env.NODE_ENV === "test"
         removeOnFail: { count: 500 }
       }
     );
+
+useCaseWorker.on("error", (err) => {
+  workerLogger.error(
+    { event: "usecase_worker.error", err: err?.message || String(err) },
+    `[UseCaseWorker] Redis worker error: ${err?.message || String(err)}`
+  );
+});
 
 if (process.env.NODE_ENV !== "test") {
   useCaseWorker.on("active", (job) => {

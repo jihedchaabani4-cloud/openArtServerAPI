@@ -6,7 +6,8 @@ import { WalletRepository } from "../../src/platform/billing/repositories/Wallet
 import { TransactionRepository } from "../../src/platform/billing/repositories/TransactionRepository.js";
 import { FailedOpsRepository } from "../../src/platform/billing/repositories/FailedOpsRepository.js";
 import { CreditPackageRepository } from "../../src/platform/billing/repositories/CreditPackageRepository.js";
-import { WalletError } from "../../src/platform/billing/BillingErrors.js";
+import { WalletError, BillingError } from "../../src/platform/billing/BillingErrors.js";
+import { createBillingRepositories } from "../../src/platform/billing/billingFactory.js";
 
 function makeMockSupabase() {
     const rpcCalls = [];
@@ -184,7 +185,7 @@ function makeMockSupabase() {
     return client;
 }
 
-describe("Billing Business System — Private Repositories (Phase 2.2)", () => {
+describe("Billing Business System — Private Repositories (Phase 2.2 & 2.4)", () => {
     describe("WalletRepository", () => {
         it("fails closed on missing supabaseClient", () => {
             assert.throws(() => new WalletRepository(), /supabaseClient is required/);
@@ -396,6 +397,39 @@ describe("Billing Business System — Private Repositories (Phase 2.2)", () => {
 
             const missing = await repo.findCreditsByVariantId("v-unknown");
             assert.equal(missing, null);
+        });
+
+        it("fails closed when instantiated without supabaseClient", () => {
+            assert.throws(
+                () => new CreditPackageRepository(),
+                (err) => err instanceof BillingError && /supabaseClient is required/.test(err.message)
+            );
+        });
+    });
+
+    describe("createBillingRepositories (Factory Wiring)", () => {
+        it("returns null when admin client is missing", () => {
+            assert.equal(createBillingRepositories(null), null);
+        });
+
+        it("throws BillingError fail-closed when catalogClient is missing", () => {
+            const adminClient = makeMockSupabase();
+            assert.throws(
+                () => createBillingRepositories(adminClient),
+                (err) => err instanceof BillingError && /catalogClient is required/.test(err.message)
+            );
+        });
+
+        it("wires catalogClient to CreditPackageRepository and returns both transactionRepo and txRepo alias", () => {
+            const adminClient = makeMockSupabase();
+            const catalogClient = makeMockSupabase();
+
+            const repos = createBillingRepositories(adminClient, { catalogClient });
+            assert.ok(repos.creditPackageRepo instanceof CreditPackageRepository);
+            assert.equal(repos.creditPackageRepo._client, catalogClient, "CreditPackageRepository must be wired with the catalogClient");
+            assert.equal(repos.walletRepo.supabase, adminClient, "WalletRepository must be wired with admin client");
+            assert.ok(repos.transactionRepo instanceof TransactionRepository);
+            assert.equal(repos.txRepo, repos.transactionRepo, "txRepo alias must strictly match transactionRepo");
         });
     });
 });

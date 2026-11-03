@@ -145,12 +145,9 @@ export const usageEventRepo = _supabaseForBilling
     : null;
 
 export const billingRepos = _supabaseForBilling
-    ? createBillingRepositories(_supabaseForBilling)
+    ? createBillingRepositories(_supabaseForBilling, { catalogClient: supabase })
     : null;
 export const creditPackageRepo = billingRepos?.creditPackageRepo || null;
-if (creditPackageRepo && supabase) {
-    creditPackageRepo.supabase = supabase;
-}
 
 export const walletService  = _supabaseForBilling
     ? createWalletService({ client: _supabaseForBilling, usageEventRepo })

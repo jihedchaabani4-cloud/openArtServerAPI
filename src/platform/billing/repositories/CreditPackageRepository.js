@@ -7,43 +7,33 @@
  * Encapsulates read access to the credit_packages table.
  */
 
-import { BillingError } from "../BillingErrors.js";
+import { BillingError, BillingConfigurationError } from "../BillingErrors.js";
 import { createLogger } from "../../../infrastructure/logging/index.js";
-import { supabase as defaultSupabase } from "#lib/supabase.js";
 
 const logger = createLogger("credit-package-repo");
 
 export class CreditPackageRepository {
     /**
-     * @param {import('@supabase/supabase-js').SupabaseClient} [supabaseClient]
+     * @param {import('@supabase/supabase-js').SupabaseClient} supabaseClient
      */
-    constructor(supabaseClient = null) {
-        this._client = supabaseClient || defaultSupabase;
-    }
-
-    get supabase() {
-        return this._client || defaultSupabase;
-    }
-
-    set supabase(client) {
-        this._client = client;
+    constructor(supabaseClient) {
+        if (!supabaseClient) {
+            throw new BillingConfigurationError("[CreditPackageRepository] supabaseClient is required");
+        }
+        this._client = supabaseClient;
     }
 
     /**
-     * List all active credit packages ordered by sort_order ascending.
+     * List all active credit packages ordered by sort_order ascending, then credits ascending.
      * @returns {Promise<Array<object>>}
      */
     async listActivePackages() {
-        const client = this.supabase;
-        if (!client) {
-            throw new BillingError("[CreditPackageRepository] Supabase client is not available", 500);
-        }
-
-        const { data, error } = await client
+        const { data, error } = await this._client
             .from("credit_packages")
             .select("*")
             .eq("is_active", true)
-            .order("sort_order", { ascending: true });
+            .order("sort_order", { ascending: true })
+            .order("credits", { ascending: true });
 
         if (error) {
             logger.error({ event: "credit_packages.list_error", err: error.message }, "Error fetching credit packages");
@@ -61,12 +51,7 @@ export class CreditPackageRepository {
     async findActiveById(packageId) {
         if (!packageId) return null;
 
-        const client = this.supabase;
-        if (!client) {
-            throw new BillingError("[CreditPackageRepository] Supabase client is not available", 500);
-        }
-
-        const { data, error } = await client
+        const { data, error } = await this._client
             .from("credit_packages")
             .select("*")
             .eq("id", packageId)
@@ -89,12 +74,7 @@ export class CreditPackageRepository {
     async findCreditsByVariantId(variantId) {
         if (!variantId) return null;
 
-        const client = this.supabase;
-        if (!client) {
-            throw new BillingError("[CreditPackageRepository] Supabase client is not available", 500);
-        }
-
-        const { data, error } = await client
+        const { data, error } = await this._client
             .from("credit_packages")
             .select("credits")
             .eq("variant_id", String(variantId))
@@ -116,12 +96,7 @@ export class CreditPackageRepository {
     async findCreditsById(packageId) {
         if (!packageId) return null;
 
-        const client = this.supabase;
-        if (!client) {
-            throw new BillingError("[CreditPackageRepository] Supabase client is not available", 500);
-        }
-
-        const { data, error } = await client
+        const { data, error } = await this._client
             .from("credit_packages")
             .select("credits")
             .eq("id", packageId)

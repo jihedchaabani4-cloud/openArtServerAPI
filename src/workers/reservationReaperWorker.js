@@ -5,39 +5,76 @@ import { createLogger, LogEvents } from "../infrastructure/logging/index.js";
 const logger = createLogger("reservation-reaper");
 
 /**
- * Sweeps and releases any orphaned credit holds that have exceeded their 10-minute TTL,
- * then reconciles the associated execution/media state via mediaWorkflowLifecycleService.
+ * Reconciles expired holds by releasing holds and updating associated media/workflow state to failed.
+ * Provides per-row error isolation so a failure on one item never halts the others or crashes callers.
  *
- * @returns {Promise<number>} Number of released reservations
+ * @param {Object} [options]
+ * @param {Object} [options.walletService]
+ * @param {Object} [options.lifecycleService]
+ * @param {Object} [options.logger]
+ * @returns {Promise<Array<Object>>} List of reaped hold records
  */
-export async function runReservationReaper({
+export async function reconcileExpiredHolds({
   walletService: injectedWallet = null,
-  lifecycleService: injectedLifecycle = null,
+  lifecycleService: injectedLifecycle = undefined,
+  logger: customLogger = null,
 } = {}) {
-  const start = Date.now();
+  const activeLogger = customLogger || logger;
   const activeWallet = injectedWallet || containerWallet || inMemoryWallet;
-  const activeLifecycle = injectedLifecycle || mediaWorkflowLifecycleService;
+  const activeLifecycle = injectedLifecycle === undefined ? mediaWorkflowLifecycleService : injectedLifecycle;
 
-  try {
-    const expiredHolds = await activeWallet.reapExpiredHolds();
-    const holdsList = Array.isArray(expiredHolds) ? expiredHolds : [];
-    const reapedCount = Array.isArray(expiredHolds) ? expiredHolds.length : (Number(expiredHolds) || 0);
+  if (!activeWallet) {
+    return [];
+  }
 
-    for (const hold of holdsList) {
-      if (activeLifecycle && (hold.workflowId || hold.mediaId)) {
+  const expiredHolds = typeof activeWallet.reapExpiredHolds === "function"
+    ? await activeWallet.reapExpiredHolds()
+    : (typeof activeWallet.expireStaleHolds === "function" ? await activeWallet.expireStaleHolds() : []);
+
+  const holdsList = Array.isArray(expiredHolds) ? expiredHolds : [];
+
+  for (const hold of holdsList) {
+    if (activeLifecycle && (hold.workflowId || hold.mediaId)) {
+      try {
         await activeLifecycle.failForExpiredHold({
           holdId: hold.holdId || hold.referenceId || hold.id,
           workflowId: hold.workflowId,
           mediaId: hold.mediaId,
           reason: "Generation execution timed out. Your credits have been refunded.",
-        }).catch((err) => {
-          logger.warn(
-            { holdId: hold.holdId, workflowId: hold.workflowId, err: err.message },
-            `Failed to mark media failed for expired hold ${hold.holdId}`
-          );
         });
+      } catch (err) {
+        activeLogger.warn(
+          { holdId: hold.holdId || hold.referenceId || hold.id, workflowId: hold.workflowId, err: err.message },
+          `Failed to mark media failed for expired hold ${hold.holdId || hold.referenceId || hold.id}: ${err.message}`
+        );
       }
     }
+  }
+
+  return holdsList;
+}
+
+/**
+ * Sweeps and releases any orphaned credit holds that have exceeded their 10-minute TTL,
+ * reconciles the associated execution/media state via mediaWorkflowLifecycleService,
+ * and sweeps stale placeholders.
+ *
+ * @returns {Promise<number>} Number of released reservations
+ */
+export async function runReservationReaper({
+  walletService: injectedWallet = null,
+  lifecycleService: injectedLifecycle = undefined,
+} = {}) {
+  const start = Date.now();
+  const activeLifecycle = injectedLifecycle === undefined ? mediaWorkflowLifecycleService : injectedLifecycle;
+
+  try {
+    const holdsList = await reconcileExpiredHolds({
+      walletService: injectedWallet,
+      lifecycleService: activeLifecycle,
+      logger,
+    });
+    const reapedCount = holdsList.length;
 
     if (activeLifecycle && typeof activeLifecycle.sweepStalePlaceholders === "function") {
       await activeLifecycle.sweepStalePlaceholders().catch((err) => {
@@ -66,4 +103,3 @@ export async function runReservationReaper({
     throw err;
   }
 }
-

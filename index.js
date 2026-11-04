@@ -8,7 +8,8 @@ import { createLogger, LogErrorCodes } from "./src/infrastructure/logging/index.
 const systemLogger = createLogger("system");
 
 import apiRouter from "./src/api/routes.js";
-import { walletService } from "./src/container.js";
+import { walletService, mediaWorkflowLifecycleService } from "./src/container.js";
+import { reconcileExpiredHolds } from "./src/workers/reservationReaperWorker.js";
 import { bootstrapV2 } from "./src/v2/bootstrap.js";
 import { requireAuth } from "./src/middleware/auth.js";
 import { rateLimit } from "./src/middleware/rateLimit.js";
@@ -246,10 +247,16 @@ if (process.env.NODE_ENV !== "test") {
 
     // ── Start Cron Jobs ──────────────────────────────────────────
         if (walletService) {
-            setInterval(() => {
-                walletService.expireStaleHolds().catch(err => {
+            setInterval(async () => {
+                try {
+                    await reconcileExpiredHolds({
+                        walletService,
+                        lifecycleService: mediaWorkflowLifecycleService,
+                        logger: systemLogger,
+                    });
+                } catch (err) {
                     systemLogger.error({ err, event: "cron.error" }, `Failed to expire stale holds: ${err.message}`);
-                });
+                }
             }, 10 * 60 * 1000); // Every 10 minutes
             systemLogger.info({ intervalMinutes: 10 }, "Started Stale Holds expiration cron job (runs every 10m)");
         }

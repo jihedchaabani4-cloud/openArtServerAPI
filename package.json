@@ -15,6 +15,7 @@
         "#platform/ai/*.js": "./src/platform/ai/*.js",
         "#platform/billing": "./src/platform/billing/index.js",
         "#platform/identity": "./src/platform/identity/index.js",
+        "#platform/models": "./src/platform/models/index.js",
         "#domain/character/*.js": "./src/domain/character/*.js",
         "#domain/element/*.js": "./src/domain/element/*.js",
         "#domain/generation/*.js": "./src/domain/generation/*.js",

@@ -39,15 +39,3 @@ export {
     requireAdmin,
 } from "../../middleware/requireAdmin.js";
 
-// Platform Authorization & Audit Services
-export {
-    AuthorizationService,
-} from "../security/AuthorizationService.js";
-
-export {
-    TenantAccessService,
-} from "../security/TenantAccessService.js";
-
-export {
-    AuditService,
-} from "../security/AuditService.js";

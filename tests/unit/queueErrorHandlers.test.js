@@ -1,7 +1,6 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import { redisConnection } from "../../src/queue/redis.js";
-import { jobQueue } from "../../src/queue/queue.js";
 import { getUseCaseQueue } from "../../src/services/jobQueueService.js";
 import { useCaseWorker } from "../../src/workers/useCaseWorker.js";
 import { walletMaintenanceQueue } from "../../src/queue/walletQueue.js";
@@ -17,12 +16,6 @@ describe("Queue and Worker Error Event Handlers", () => {
         if (typeof redisConnection?.disconnect === "function") {
             redisConnection.disconnect(false);
         }
-    });
-
-    it("jobQueue handles error events without throwing or crashing", () => {
-        assert.doesNotThrow(() => {
-            jobQueue.emit("error", new Error("Simulated Redis disconnect on jobQueue"));
-        });
     });
 
     it("useCaseQueue handles error events without throwing or crashing", async () => {

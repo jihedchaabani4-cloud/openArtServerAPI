@@ -17,9 +17,6 @@ import {
     isInternalSecretAllowedRequest,
     isInternalSecretAllowedRoute,
     USER_ID_REGEX,
-    AuthorizationService,
-    TenantAccessService,
-    AuditService,
 } from "#platform/identity";
 
 describe("Identity System Public Contract (#platform/identity)", () => {
@@ -100,16 +97,5 @@ describe("Identity System Public Contract (#platform/identity)", () => {
             assert.equal(USER_ID_REGEX.test("not-a-uuid"), false);
         });
     });
-
-    describe("4. Platform Services", () => {
-        it("exports AuthorizationService, TenantAccessService, AuditService classes", () => {
-            assert.equal(typeof AuthorizationService, "function");
-            assert.equal(typeof TenantAccessService, "function");
-            assert.equal(typeof AuditService, "function");
-
-            const authService = new AuthorizationService();
-            assert.equal(typeof authService.can, "function");
-            assert.equal(typeof authService.assertCan, "function");
-        });
-    });
 });
+

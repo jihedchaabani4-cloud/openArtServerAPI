@@ -28,9 +28,6 @@ Methods and dependencies are parsed from the code (best effort). "Owns" comes fr
 | `MediaUploadService` | `src/platform/media-ingestion` | Stateless binary media validation, 4K WebP optimization, storage upload, and compensating discard. | `upload`, `discard` | `storageService` | `src/container.js` | 7 |
 | `MediaWorkflowLifecycleService` | `src/platform/media` | Media generation placeholder lifecycle and stale-placeholder recovery transitions. | `isProviderBackedNodeType`, `resolveProjectId`, `createCharacterPlaceholder`, `createElementPlaceholder`, `createGenerationPlaceholder`, `startPlaceholder`, `startPlaceholders`, `startPlaceholdersForNode`, `completePlaceholder`, `failPlaceholder`, `finalizePlaceholder`, `completePlaceholders`, `failPlaceholders`, `finalizeOutputsForNode`, `failForExpiredHold`, `sweepStalePlaceholders`, `extractAsset`, `getAspectRatio` | `db`, `bridge` | `src/container.js`, `src/infrastructure/storage/workflowStorageGateway.js` | 3 |
 | `MediaService` | `src/platform/media` | Canonical CRUD, status transitions, and metadata queries for public.media records. | `createMedia`, `findById`, `findByIds`, `findByUrl`, `findByProject`, `findOwnershipRecord`, `listAll`, `updateStatus`, `updateFields`, `deleteById` | `mediaRepo`, `db` | `src/container.js` | 3 |
-| `AuditService` | `src/platform/security` | - | `log` | - | - | 1 |
-| `AuthorizationService` | `src/platform/security` | - | `can`, `assertCan` | - | - | 1 |
-| `TenantAccessService` | `src/platform/security` | - | `assertProjectOwnership` | `db` | - | 1 |
 | `StorageService` | `src/platform/storage` | Physical object storage operations, storage key construction and validation, and storage provider delegation. | `buildKey`, `validateFolder`, `extractKey`, `extractStoragePath`, `upload`, `getPublicUrl`, `delete`, `deleteFiles`, `deleteByUrl` | `bucketName`, `provider`, `paths` | `src/platform/storage/storageFactory.js` | 7 |
 | `WorkflowAuthorizationService` | `src/platform/workflow` | - | `verifyWorkflowOwnership`, `verifyWorkflowOwnershipBulk`, `verifyMediaOwnership` | `db` | `src/platform/workflow/WorkflowServiceBase.js` | 4 |
 | `WorkflowMediaService` | `src/platform/workflow` | - | `createMediaInWorkflow`, `assignMediaToWorkflow`, `resolveOwnedSourceMedia`, `attachMediaItems`, `rollbackAttachedMedia`, `clearPrimaryMedia`, `setPrimaryMedia`, `detachMedia`, `releaseWorkflowMedia`, `scanOrphanMediaDryRun`, `deleteMedia` | `db`, `storageService`, `authService`, `mediaUploadService` | `src/platform/workflow/WorkflowServiceBase.js` | 6 |
@@ -40,4 +37,4 @@ Methods and dependencies are parsed from the code (best effort). "Owns" comes fr
 | `InMemoryWalletService` | `src/services` | In-memory test double for unit testing Two-Phase Wallet reservation lifecycle. | `setBalance`, `getBalance`, `reserve`, `extendHold`, `commit`, `release`, `rollback`, `reapExpiredHolds` | `balances`, `reservations`, `HOLD_TTL_MS` | - | 0 |
 | `NodeSafetyService` | `src/v2/nodes/safety` | - | - | - | - | 4 |
 
-Services: 33. Without @owns: 24.
+Services: 30. Without @owns: 21.

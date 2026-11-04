@@ -49,7 +49,7 @@ function loadFiles() {
 
 function specifiers(file) {
   const out = [];
-  const re = /(?:require\(\s*|from\s+|import\(\s*)['"]([^'"]+)['"]/g;
+  const re = /(?:require\(\s*|from\s+|import\(\s*|import\s+)['"]([^'"]+)['"]/g;
   file.lines.forEach((line, i) => {
     if (isComment(line)) return;
     let m;
@@ -57,6 +57,120 @@ function specifiers(file) {
     while ((m = re.exec(line))) out.push({ spec: m[1], line: i + 1, text: line });
   });
   return out;
+}
+
+const CANONICAL_SYSTEMS = new Set([
+  'identity',
+  'billing',
+  'models',
+  'media',
+  'workspace',
+  'character',
+  'element',
+  'workflow-container',
+  'execution',
+]);
+
+function isKnownSystem(name) {
+  if (CANONICAL_SYSTEMS.has(name)) return true;
+  return fs.existsSync(path.join(ROOT, 'src', 'systems', name));
+}
+
+function loadExceptions() {
+  const excPath = path.join(ROOT, 'scripts', 'arch-exceptions.json');
+  if (!fs.existsSync(excPath)) return [];
+  try {
+    const data = JSON.parse(fs.readFileSync(excPath, 'utf8'));
+    return Array.isArray(data.exceptions) ? data.exceptions : [];
+  } catch (err) {
+    console.error(`Warning: failed to parse ${excPath}: ${err.message}`);
+    return [];
+  }
+}
+
+function isExempt(exceptions, ruleId, fRel, spec, targetRel) {
+  if (!exceptions || !exceptions.length) return false;
+  return exceptions.some((exc) => {
+    if (exc.rule && exc.rule !== ruleId) return false;
+    if (exc.from) {
+      if (exc.from.startsWith('/') && exc.from.endsWith('/')) {
+        const re = new RegExp(exc.from.slice(1, -1));
+        if (!re.test(fRel)) return false;
+      } else if (exc.from !== fRel) {
+        return false;
+      }
+    }
+    if (exc.specifierPattern) {
+      const re = new RegExp(exc.specifierPattern);
+      if (!re.test(spec)) return false;
+    }
+    if (exc.targetPattern && targetRel) {
+      const re = new RegExp(exc.targetPattern);
+      if (!re.test(targetRel)) return false;
+    }
+    return true;
+  });
+}
+
+function checkRuleR10(f, exceptions = loadExceptions()) {
+  const fromSysMatch = f.rel.match(/^src\/systems\/([^/]+)\//);
+  const fromSys = fromSysMatch ? fromSysMatch[1] : null;
+
+  const hits = [];
+  const specs = specifiers(f);
+
+  for (const s of specs) {
+    let targetSys = null;
+    let isDeep = false;
+    let targetRel = null;
+
+    const aliasMatch = s.spec.match(/^#([a-zA-Z0-9_-]+)(?:\/(.*))?$/);
+    if (aliasMatch) {
+      const aliasSys = aliasMatch[1];
+      const subpath = aliasMatch[2] || '';
+      if (isKnownSystem(aliasSys)) {
+        targetSys = aliasSys;
+        const isPublic = subpath === '' || subpath === 'index' || subpath === 'index.js';
+        if (!isPublic && fromSys !== targetSys) {
+          isDeep = true;
+        }
+      }
+    } else {
+      let resolved = null;
+      if (s.spec.startsWith('.')) {
+        const abs = path.resolve(ROOT, path.dirname(f.rel), s.spec);
+        resolved = path.relative(ROOT, abs).split(path.sep).join('/');
+      } else if (s.spec.startsWith('src/systems/')) {
+        resolved = s.spec;
+      }
+
+      if (resolved && resolved.startsWith('src/systems/')) {
+        targetRel = resolved;
+        const sysRelMatch = resolved.match(/^src\/systems\/([^/]+)(?:\/(.*))?$/);
+        if (sysRelMatch) {
+          const pathSys = sysRelMatch[1];
+          const subpath = sysRelMatch[2] || '';
+          targetSys = pathSys;
+          const isPublic = subpath === '' ||
+                           subpath === 'index' ||
+                           subpath === 'index.js' ||
+                           subpath === 'index.cjs' ||
+                           subpath === 'index.mjs';
+          if (!isPublic && fromSys !== targetSys) {
+            isDeep = true;
+          }
+        }
+      }
+    }
+
+    if (isDeep && targetSys) {
+      if (!isExempt(exceptions, 'R10', f.rel, s.spec, targetRel)) {
+        hits.push({ line: s.line, text: s.text });
+      }
+    }
+  }
+
+  return hits;
 }
 
 const grep = (file, regex) => {
@@ -122,6 +236,11 @@ const RULES = [
       return /@owns\s+\S/.test(f.text) ? [] : [{ line: 1, text: 'missing @owns header' }];
     },
   },
+  {
+    id: 'R10',
+    desc: 'outside src/systems/<name>/, only index.js or #<name> may be imported',
+    run: (f) => checkRuleR10(f),
+  },
 ];
 
 function migrationViolations() {
@@ -170,7 +289,11 @@ function layerReport(files) {
 }
 
 function summary(violations, baseline, fresh) {
-  const ids = [...RULES.map((r) => r.id), 'R6'].sort();
+  const ids = [...new Set([...RULES.map((r) => r.id), 'R6'])].sort((a, b) => {
+    const numA = parseInt(a.replace(/\D/g, ''), 10);
+    const numB = parseInt(b.replace(/\D/g, ''), 10);
+    return numA - numB;
+  });
   const desc = Object.fromEntries(RULES.map((r) => [r.id, r.desc]));
   desc.R6 = 'migrations with SECURITY DEFINER must REVOKE FROM PUBLIC, anon, authenticated';
   const now = {}; const base = {}; const neu = {};
@@ -226,4 +349,19 @@ function main() {
   return 0;
 }
 
-process.exit(main());
+if (require.main === module) {
+  process.exit(main());
+} else {
+  module.exports = {
+    ROOT,
+    RULES,
+    CANONICAL_SYSTEMS,
+    specifiers,
+    isComment,
+    isKnownSystem,
+    loadExceptions,
+    isExempt,
+    checkRuleR10,
+    collect,
+  };
+}

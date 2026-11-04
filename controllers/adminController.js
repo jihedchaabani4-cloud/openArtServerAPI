@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { WalletError } from "#platform/billing";
 import { createLogger } from "../src/infrastructure/logging/index.js";
+import { RECONCILIATION_CACHE_KEY } from "../src/queue/redis.js";
 
 const adminLogger = createLogger("admin_controller");
 
@@ -176,7 +177,7 @@ export async function getLatestReconciliation(req, res) {
 
   try {
     const redis = req.redisConnection;
-    const raw = await redis.get("reconciliation:latest");
+    const raw = await redis.get(RECONCILIATION_CACHE_KEY);
 
     if (!raw) {
       return res.json({

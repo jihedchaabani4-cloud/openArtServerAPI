@@ -2,7 +2,7 @@ import "dotenv/config";
 import "../container.js";
 import { Worker } from "bullmq";
 import { createClient } from "@supabase/supabase-js";
-import { workerRedisConnection, redisConnection } from "../queue/redis.js";
+import { workerRedisConnection, redisConnection, RECONCILIATION_CACHE_KEY } from "../queue/redis.js";
 import { walletMaintenanceQueue, WALLET_QUEUE_NAME, scheduleWalletJobs } from "../queue/walletQueue.js";
 import { WalletService, FailedOpsService } from "#platform/billing";
 import { runReservationReaper } from "./reservationReaperWorker.js";
@@ -316,7 +316,7 @@ export async function handleReconcileWallets({ supabaseClient = null } = {}) {
   };
 
   try {
-    await redisConnection.set("reconcile:latest", JSON.stringify(summary));
+    await redisConnection.set(RECONCILIATION_CACHE_KEY, JSON.stringify(summary));
   } catch (redisErr) {
     logger.warn(
       {

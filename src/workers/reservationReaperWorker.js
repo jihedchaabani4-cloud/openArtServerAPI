@@ -27,25 +27,22 @@ export async function reconcileExpiredHolds({
     return [];
   }
 
-  const expiredHolds = typeof activeWallet.reapExpiredHolds === "function"
-    ? await activeWallet.reapExpiredHolds()
-    : (typeof activeWallet.expireStaleHolds === "function" ? await activeWallet.expireStaleHolds() : []);
-
+  const expiredHolds = await activeWallet.reapExpiredHolds();
   const holdsList = Array.isArray(expiredHolds) ? expiredHolds : [];
 
   for (const hold of holdsList) {
     if (activeLifecycle && (hold.workflowId || hold.mediaId)) {
       try {
         await activeLifecycle.failForExpiredHold({
-          holdId: hold.holdId || hold.referenceId || hold.id,
+          holdId: hold.holdId,
           workflowId: hold.workflowId,
           mediaId: hold.mediaId,
           reason: "Generation execution timed out. Your credits have been refunded.",
         });
       } catch (err) {
         activeLogger.warn(
-          { holdId: hold.holdId || hold.referenceId || hold.id, workflowId: hold.workflowId, err: err.message },
-          `Failed to mark media failed for expired hold ${hold.holdId || hold.referenceId || hold.id}: ${err.message}`
+          { holdId: hold.holdId, workflowId: hold.workflowId, err: err.message },
+          `Failed to mark media failed for expired hold ${hold.holdId}: ${err.message}`
         );
       }
     }

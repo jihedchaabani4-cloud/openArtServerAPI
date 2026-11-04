@@ -59,21 +59,20 @@ function specifiers(file) {
   return out;
 }
 
-const CANONICAL_SYSTEMS = new Set([
-  'identity',
-  'billing',
-  'models',
-  'media',
-  'workspace',
-  'character',
-  'element',
-  'workflow-container',
-  'execution',
+const LEGACY_NAMESPACES = new Set([
+  'lib',
+  'utils',
+  'db',
+  'queue',
+  'infrastructure',
+  'platform',
+  'domain',
+  'container.js',
 ]);
 
 function isKnownSystem(name) {
-  if (CANONICAL_SYSTEMS.has(name)) return true;
-  return fs.existsSync(path.join(ROOT, 'src', 'systems', name));
+  if (LEGACY_NAMESPACES.has(name)) return false;
+  return true;
 }
 
 function loadExceptions() {
@@ -355,7 +354,7 @@ if (require.main === module) {
   module.exports = {
     ROOT,
     RULES,
-    CANONICAL_SYSTEMS,
+    LEGACY_NAMESPACES,
     specifiers,
     isComment,
     isKnownSystem,

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { checkRuleR10, specifiers, CANONICAL_SYSTEMS, isExempt } = require("../../scripts/arch-check.cjs");
+const { checkRuleR10, isKnownSystem, LEGACY_NAMESPACES } = require("../../scripts/arch-check.cjs");
 
 describe("Architecture Ratchet Rule R10: Modular Monolith System Boundaries", () => {
     function makeFile(relPath, content) {
@@ -14,21 +14,19 @@ describe("Architecture Ratchet Rule R10: Modular Monolith System Boundaries", ()
         };
     }
 
-    describe("1. Canonical Systems Configuration", () => {
-        it("includes all 9 architectural systems defined in BACKEND_ARCHITECTURE.md", () => {
-            const expected = [
-                "identity",
-                "billing",
-                "models",
-                "media",
-                "workspace",
-                "character",
-                "element",
-                "workflow-container",
-                "execution",
-            ];
-            for (const sys of expected) {
-                assert.ok(CANONICAL_SYSTEMS.has(sys), `Missing canonical system: ${sys}`);
+    describe("1. General System Seam Resolution", () => {
+        it("recognizes storage and any new system name as a system seam", () => {
+            assert.equal(isKnownSystem("storage"), true);
+            assert.equal(isKnownSystem("workspace"), true);
+            assert.equal(isKnownSystem("billing"), true);
+            assert.equal(isKnownSystem("arbitrary-new-system"), true);
+        });
+
+        it("excludes legacy infrastructure namespaces from system seam checks", () => {
+            const expectedLegacy = ["lib", "utils", "db", "queue", "infrastructure", "platform", "domain"];
+            for (const ns of expectedLegacy) {
+                assert.ok(LEGACY_NAMESPACES.has(ns), `Missing legacy namespace: ${ns}`);
+                assert.equal(isKnownSystem(ns), false, `Legacy namespace ${ns} should not be treated as a system`);
             }
         });
     });
@@ -38,6 +36,15 @@ describe("Architecture Ratchet Rule R10: Modular Monolith System Boundaries", ()
             const file = makeFile(
                 "src/controllers/workspaceController.js",
                 `import { createWorkspace, getWorkspace } from "#workspace";\n`
+            );
+            const hits = checkRuleR10(file);
+            assert.equal(hits.length, 0);
+        });
+
+        it("allows external controller to import system public API via alias #storage", () => {
+            const file = makeFile(
+                "src/controllers/mediaController.js",
+                `import { uploadFile } from "#storage";\n`
             );
             const hits = checkRuleR10(file);
             assert.equal(hits.length, 0);
@@ -61,10 +68,19 @@ describe("Architecture Ratchet Rule R10: Modular Monolith System Boundaries", ()
             assert.equal(hits.length, 0);
         });
 
-        it("allows external route to import system public API via relative path ../systems/workspace", () => {
+        it("allows external route to import storage public API via relative path ../systems/storage/index.js", () => {
             const file = makeFile(
-                "src/routes/workspaceRoutes.js",
-                `const workspace = require("../systems/workspace");\n`
+                "src/routes/mediaRoutes.js",
+                `const storage = require("../systems/storage/index.js");\n`
+            );
+            const hits = checkRuleR10(file);
+            assert.equal(hits.length, 0);
+        });
+
+        it("allows external route to import any new system public API via relative path ../systems/any-new-system", () => {
+            const file = makeFile(
+                "src/routes/newRoutes.js",
+                `const newSys = require("../systems/any-new-system");\n`
             );
             const hits = checkRuleR10(file);
             assert.equal(hits.length, 0);
@@ -99,7 +115,7 @@ describe("Architecture Ratchet Rule R10: Modular Monolith System Boundaries", ()
             assert.equal(hits.length, 0);
         });
 
-        it("ignores standard non-system package imports and aliases", () => {
+        it("ignores standard non-system package imports and legacy aliases", () => {
             const file = makeFile(
                 "src/controllers/testController.js",
                 `import express from "express";\n` +
@@ -123,29 +139,21 @@ describe("Architecture Ratchet Rule R10: Modular Monolith System Boundaries", ()
             assert.ok(hits[0].text.includes("#workspace/services/folderService.js"));
         });
 
-        it("flags import { ... } from internal file via alias #workspace/services/folderService.js", () => {
+        it("flags import { ... } from internal file via alias #storage/services/storageService.js", () => {
             const file = makeFile(
-                "src/controllers/workspaceController.js",
-                `import { FolderService } from "#workspace/services/folderService.js";\n`
+                "src/controllers/mediaController.js",
+                `import { StorageService } from "#storage/services/storageService.js";\n`
             );
             const hits = checkRuleR10(file);
             assert.equal(hits.length, 1);
             assert.equal(hits[0].line, 1);
+            assert.ok(hits[0].text.includes("#storage/services/storageService.js"));
         });
 
-        it("flags export { ... } from internal file via alias", () => {
+        it("flags export { ... } from internal file via alias for arbitrary new system", () => {
             const file = makeFile(
                 "src/controllers/index.js",
-                `export { FolderService } from "#workspace/services/folderService.js";\n`
-            );
-            const hits = checkRuleR10(file);
-            assert.equal(hits.length, 1);
-        });
-
-        it("flags export * from internal file via alias", () => {
-            const file = makeFile(
-                "src/controllers/index.js",
-                `export * from "#workspace/services/folderService.js";\n`
+                `export { internalThing } from "#arbitrary-new-system/services/internal.js";\n`
             );
             const hits = checkRuleR10(file);
             assert.equal(hits.length, 1);
@@ -173,6 +181,26 @@ describe("Architecture Ratchet Rule R10: Modular Monolith System Boundaries", ()
             const file = makeFile(
                 "src/controllers/workspaceController.js",
                 `import { FolderService } from "../systems/workspace/services/folderService.js";\n`
+            );
+            const hits = checkRuleR10(file);
+            assert.equal(hits.length, 1);
+            assert.equal(hits[0].line, 1);
+        });
+
+        it("flags external relative deep import into src/systems/storage/services/storageService.js", () => {
+            const file = makeFile(
+                "src/controllers/mediaController.js",
+                `import { StorageService } from "../systems/storage/services/storageService.js";\n`
+            );
+            const hits = checkRuleR10(file);
+            assert.equal(hits.length, 1);
+            assert.equal(hits[0].line, 1);
+        });
+
+        it("flags external relative deep import into src/systems/any-new-system/services/foo.js", () => {
+            const file = makeFile(
+                "src/controllers/fooController.js",
+                `import { foo } from "../systems/any-new-system/services/foo.js";\n`
             );
             const hits = checkRuleR10(file);
             assert.equal(hits.length, 1);

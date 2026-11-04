@@ -1,14 +1,13 @@
 {
   "$schema": "Temporary architectural boundary exceptions governed by ADRs.",
   "description": "Allowed exceptions to boundary ratchet rules. Every entry MUST cite an ADR, rationale, and target phase of removal.",
-  "exceptions": [
-    {
-      "rule": "R10",
-      "from": "src/systems/workflow-container/index.js",
-      "specifierPattern": "^(?:\\.\\./)+platform/workflow/|^#platform/workflow/",
-      "adr": "ADR-0020",
-      "reason": "Transitional Facade-First pattern wrapping legacy workflow services for Phase 6 (Character/Element) while internals remain frozen under Workflow Freeze",
-      "eliminateInPhase": "Phase 7"
-    }
-  ]
+  "_example": {
+    "rule": "R10",
+    "from": "src/controllers/exampleController.js",
+    "specifierPattern": "^#example/services/internal\\.js$",
+    "adr": "ADR-XXXX",
+    "reason": "Temporary access during phased migration",
+    "eliminateInPhase": "Phase N"
+  },
+  "exceptions": []
 }

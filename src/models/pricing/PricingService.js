@@ -18,6 +18,8 @@
  */
 
 import { createLogger } from "../../infrastructure/logging/index.js";
+import { getModel } from "../registry/modelRegistry.js";
+import { calculateRetailCredits } from "./pricingEngine.js";
 
 const pricingLogger = createLogger("pricing-service");
 
@@ -68,11 +70,32 @@ export class PricingService {
     if (error) throw new Error(`[PricingService] DB error: ${error.message}`);
 
     if (!data) {
-      const notFound = new Error(
-        `No active pricing rule found for ${modelKey} / ${operationType} / ${qualityTier}`
-      );
-      notFound.code = "PRICING_NOT_FOUND";
-      throw notFound;
+      try {
+        const model = getModel(modelKey);
+        const creditCost = calculateRetailCredits(model, { quality: qualityTier });
+        const fallbackResult = {
+          id: `manifest-${modelKey}`,
+          modelKey,
+          operationType,
+          qualityTier,
+          creditCost,
+          isActive: true,
+        };
+
+        try {
+          await this.redis.setex(cacheKey, this.CACHE_TTL_SECONDS, JSON.stringify(fallbackResult));
+        } catch (redisErr) {
+          pricingLogger.warn({ event: "pricing.redis_write_error", error: redisErr?.message }, "[PricingService] Redis write error — fallback cache not populated");
+        }
+
+        return { ...fallbackResult, cached: false };
+      } catch (manifestErr) {
+        const notFound = new Error(
+          `No active pricing rule found for ${modelKey} / ${operationType} / ${qualityTier}`
+        );
+        notFound.code = "PRICING_NOT_FOUND";
+        throw notFound;
+      }
     }
 
     const result = {

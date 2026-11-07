@@ -188,7 +188,7 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
         },
         body: JSON.stringify({
           prompt: "A river flowing",
-          model: "seedance_2_5_extend",
+          model: "seedance_2_5",
           project_id: "proj-A",
           folder_id: "00000000-0000-4000-8000-000000000002",
         }),

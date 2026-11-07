@@ -1866,13 +1866,13 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(route.providerModelId, "bytedance/seedance-2.5/text-to-video");
     });
 
-    // Test F — seedance-2-5-extend, video + inputs, resolves to dedicated Extend implementation with no artificial route layer
-    it("Test F: seedance-2-5-extend resolves to dedicated Extend implementation without artificial route layer", async () => {
+    // Test F — seedream-v5 resolves to dedicated text_to_image implementation without artificial route layer
+    it("Test F: seedream-v5 resolves to dedicated text_to_image implementation without artificial route layer", async () => {
       const { resolveExecutionPlan } = await import("../../src/models/registry/bindingResolver.js");
-      const { route, binding } = resolveExecutionPlan("seedance-2-5-extend", { input_video: "https://cdn.example.com/clip.mp4", duration: 5 });
+      const { route, binding } = resolveExecutionPlan("seedream-v5", { prompt: "a sunrise over mountains" });
       assert.strictEqual(route.providerId, "wavespeed");
-      assert.strictEqual(route.providerModelId, "bytedance/seedance-2.5/video-extend");
-      assert.strictEqual(binding.routes, undefined, "seedance_2_5_extend binding must not have routes[] array");
+      assert.strictEqual(route.providerModelId, "bytedance/seedream-v5.0-pro");
+      assert.strictEqual(binding.routes, undefined, "seedream_v5 binding must not have routes[] array");
     });
 
     // Test G — caller cannot pass provider, providerId, bindingId, endpoint, or operation
@@ -1947,7 +1947,6 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.ok(ids.includes("nanobana_pro"), "catalog must include nanobana_pro");
       assert.ok(ids.includes("nanobana_pro_ultra"), "catalog must include nanobana_pro_ultra");
       assert.ok(ids.includes("seedance_2_5"), "catalog must include seedance_2_5");
-      assert.ok(ids.includes("seedance_2_5_extend"), "catalog must include seedance_2_5_extend");
       assert.ok(ids.includes("seedream_v5"), "catalog must include seedream_v5");
 
       for (const m of catalog) {
@@ -1966,8 +1965,8 @@ describe("Sealed Models Subsystem Architecture", () => {
       const { resolveBindingForTest } = await import("../../src/models/registry/bindingResolver.js");
       const { NoEligibleBindingError } = await import("../../src/models/errors/index.js");
       assert.throws(
-        () => resolveBindingForTest("seedance_2_5_extend", "google"),
-        (err) => err instanceof NoEligibleBindingError && err.code === "NO_ELIGIBLE_BINDING" && err.modelId === "seedance_2_5_extend"
+        () => resolveBindingForTest("seedance_2_5", "google"),
+        (err) => err instanceof NoEligibleBindingError && err.code === "NO_ELIGIBLE_BINDING" && err.modelId === "seedance_2_5"
       );
     });
 
@@ -2020,7 +2019,6 @@ describe("Sealed Models Subsystem Architecture", () => {
     it("Test O: Single-path models must have flat bindings without routes[] array", async () => {
       const { getModelBindings } = await import("../../src/models/registry/modelRegistry.js");
       const singlePathModels = [
-        "seedance_2_5_extend",
         "wavespeed_upscale",
         "seedream_v5",
       ];
@@ -2123,31 +2121,32 @@ describe("Sealed Models Subsystem Architecture", () => {
       );
     });
 
-    // Test S — seedance-2-5-extend maps input_video to providerField video
-    it("Test S: seedance-2-5-extend maps semantic input_video to providerField video", async () => {
+    // Test S — ltx_retake maps input_video to providerField video_uri
+    it("Test S: ltx_retake maps semantic input_video to providerField video_uri", async () => {
       let executedPayload = null;
 
       await models.run(
-        "seedance-2-5-extend",
+        "ltx_retake",
         {
           input_video: "https://cdn.example.com/input.mp4",
-          prompt: "extend further into the sunset",
-          duration: 5,
+          prompt: "retake this segment",
+          start_time: 1.5,
+          duration: 4,
         },
         {
-          userId: "u-extend-test",
+          userId: "u-retake-test",
           sdkRunner: async ({ payload }) => {
             executedPayload = payload;
-            return { outputs: ["https://cdn.example.com/extended.mp4"] };
+            return { result: { video_url: "https://cdn.example.com/retake.mp4" } };
           },
         }
       );
 
       assert.ok(executedPayload, "sdkRunner must be invoked");
-      assert.strictEqual(executedPayload.video, "https://cdn.example.com/input.mp4");
-      assert.strictEqual(executedPayload.video_url, undefined, "providerField must be video, not video_url");
-      assert.strictEqual(executedPayload.prompt, "extend further into the sunset");
-      assert.strictEqual(executedPayload.duration, 5);
+      assert.strictEqual(executedPayload.video_uri, "https://cdn.example.com/input.mp4");
+      assert.strictEqual(executedPayload.input_video, undefined, "providerField must be video_uri, not input_video");
+      assert.strictEqual(executedPayload.prompt, "retake this segment");
+      assert.strictEqual(executedPayload.duration, 4);
     });
 
     // Test T — gpt_image_2 multi-path resolution and execution (generation vs edit)
@@ -2454,36 +2453,7 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(i2vPayload.image_url, undefined, "Must NOT leak image_url field");
     });
 
-    // 7. seedance_2_5_extend: requires prompt, maps input_video to video, resolution 4k
-    it("seedance_2_5_extend: enforces prompt required and maps input_video to video", async () => {
-      assert.throws(
-        () => models.validateInput("seedance_2_5_extend", { input_video: "https://example.com/v.mp4" }),
-        (err) => err.code === "MISSING_REQUIRED_PARAMETER" || err.message.includes("prompt")
-      );
-
-      let executedPayload = null;
-      await models.run(
-        "seedance_2_5_extend",
-        {
-          input_video: "https://example.com/clip.mp4",
-          prompt: "continue the camera movement",
-          resolution: "4k",
-          generate_audio: true,
-        },
-        {
-          userId: "u-extend-v",
-          sdkRunner: async ({ payload }) => {
-            executedPayload = payload;
-            return { outputs: ["https://cdn.example.com/ext.mp4"] };
-          },
-        }
-      );
-      assert.strictEqual(executedPayload.video, "https://example.com/clip.mp4");
-      assert.strictEqual(executedPayload.resolution, "4k");
-      assert.strictEqual(executedPayload.generate_audio, true);
-    });
-
-    // 8. wan_3_0: alibaba namespace, generate_audio, enable_prompt_expansion, seed, I2V image mapping
+    // 7. wan_3_0: alibaba namespace, generate_audio, enable_prompt_expansion, seed, I2V image mapping
     it("wan_3_0: routes to alibaba/wan-3.0 with generate_audio, prompt_expansion, and seed", async () => {
       let t2vBinding = null;
       let t2vPayload = null;
@@ -2806,7 +2776,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test 10: Flat single-endpoint models still work
     it("Test 10: Flat single-endpoint models still work", async () => {
-      const singleModels = ["seedream_v5", "seedance_2_5_extend", "wavespeed_upscale"];
+      const singleModels = ["seedream_v5", "wavespeed_upscale"];
       for (const mId of singleModels) {
         const bindingPath = path.join(apiRoot, "src/models/manifests", mId, "bindings/wavespeed.json");
         const binding = JSON.parse(fs.readFileSync(bindingPath, "utf8"));

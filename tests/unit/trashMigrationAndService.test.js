@@ -9,7 +9,7 @@ import { setDb } from "#platform/identity";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const migrationsDir = path.resolve(__dirname, "../../../supabase/migrations");
+const migrationsDir = path.resolve(__dirname, "../../supabase/migrations");
 const trashMigrationPath = path.join(migrationsDir, "20261025180000_create_trash_table.sql");
 
 describe("T1: public.trash Migration, TrashRepository, and TrashService", () => {

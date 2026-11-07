@@ -25,13 +25,17 @@ const TransactionsQuerySchema = z.object({
   beforeId: z.string().uuid().optional(),
 });
 
-const VALID_OPERATION_TYPES = ["IMAGE_GENERATION", "CHARACTER_SHEET"];
+const VALID_OPERATION_TYPES = [
+  "IMAGE_GENERATION",
+  "CHARACTER_SHEET",
+  "VIDEO_GENERATION",
+];
 const VALID_QUALITY_TIERS = ["standard", "hd", "4k"];
 
 const PriceQuerySchema = z.object({
   modelKey: z.string().min(1),
   operationType: z.enum(VALID_OPERATION_TYPES),
-  qualityTier: z.enum(VALID_QUALITY_TIERS),
+  qualityTier: z.enum(VALID_QUALITY_TIERS).default("standard"),
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

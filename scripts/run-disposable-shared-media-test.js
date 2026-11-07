@@ -164,7 +164,7 @@ async function main() {
     `);
 
     // Apply Migration 1: Attach RPC (strictly from canonical supabase/migrations)
-    const attachMigrationPath = path.resolve("..", "supabase", "migrations", "20261020020000_atomic_attach_workflow_reference_media_rpc.sql");
+    const attachMigrationPath = path.resolve(import.meta.dirname, "..", "supabase", "migrations", "20261020020000_atomic_attach_workflow_reference_media_rpc.sql");
     if (!fs.existsSync(attachMigrationPath)) {
       throw new Error(`Canonical migration file missing: ${attachMigrationPath}`);
     }
@@ -172,7 +172,7 @@ async function main() {
     runPsql(attachSql);
 
     // Apply Migration 2: Unlink & Reap RPC (strictly from canonical supabase/migrations)
-    const unlinkMigrationPath = path.resolve("..", "supabase", "migrations", "20261020030000_atomic_unlink_workflow_media_and_reap_orphan_rpc.sql");
+    const unlinkMigrationPath = path.resolve(import.meta.dirname, "..", "supabase", "migrations", "20261020030000_atomic_unlink_workflow_media_and_reap_orphan_rpc.sql");
     if (!fs.existsSync(unlinkMigrationPath)) {
       throw new Error(`Canonical migration file missing: ${unlinkMigrationPath}`);
     }
@@ -183,7 +183,7 @@ async function main() {
 
     // Apply Promoted Migration: 20261024000000_add_auto_primary_to_attach_reference_media.sql (from canonical supabase/migrations)
     console.log("   Applying promoted migration: 20261024000000_add_auto_primary_to_attach_reference_media.sql...");
-    const migrationPath = path.resolve("..", "supabase", "migrations", "20261024000000_add_auto_primary_to_attach_reference_media.sql");
+    const migrationPath = path.resolve(import.meta.dirname, "..", "supabase", "migrations", "20261024000000_add_auto_primary_to_attach_reference_media.sql");
     if (!fs.existsSync(migrationPath)) {
       throw new Error(`Promoted migration file missing: ${migrationPath}`);
     }
@@ -203,7 +203,7 @@ async function main() {
 
     // Verify Rollback: restore 4-arg function, verify pg_proc and service_role-only grants
     console.log("   Testing rollback: 20261024000000_add_auto_primary_to_attach_reference_media_rollback.sql...");
-    const rollbackPath = path.resolve("..", "supabase", "rollbacks", "20261024000000_add_auto_primary_to_attach_reference_media_rollback.sql");
+    const rollbackPath = path.resolve(import.meta.dirname, "..", "supabase", "rollbacks", "20261024000000_add_auto_primary_to_attach_reference_media_rollback.sql");
     if (!fs.existsSync(rollbackPath)) {
       throw new Error(`Rollback file missing: ${rollbackPath}`);
     }

@@ -78,9 +78,17 @@ export function calculateRetailCredits(model, cleanInput = {}, binding = null) {
     }
 
     // 2. Single key — resolution tier (image), duration (video), or scale multiplier (upscale)
-    const lookupKey = resolution ?? cleanInput.duration ?? cleanInput.scale_factor ?? cleanInput.scale;
-    if (lookupKey !== undefined && Object.prototype.hasOwnProperty.call(table, String(lookupKey))) {
-      return table[String(lookupKey)];
+    const singleKeyCandidates = [
+      cleanInput.duration !== undefined && cleanInput.duration !== null ? String(cleanInput.duration) : null,
+      resolution !== undefined && resolution !== null ? String(resolution) : null,
+      cleanInput.scale_factor !== undefined && cleanInput.scale_factor !== null ? String(cleanInput.scale_factor) : null,
+      cleanInput.scale !== undefined && cleanInput.scale !== null ? String(cleanInput.scale) : null,
+    ].filter(Boolean);
+
+    for (const key of singleKeyCandidates) {
+      if (Object.prototype.hasOwnProperty.call(table, key)) {
+        return table[key];
+      }
     }
 
     // 3. table.default fallback

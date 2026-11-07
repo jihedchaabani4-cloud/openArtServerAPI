@@ -114,7 +114,7 @@ async function main() {
     `);
 
     // Read and apply migration SQL
-    const migrationSqlPath = path.resolve("..", "supabase", "migrations", "20261018170000_atomic_wallet_hold_rpcs.sql");
+    const migrationSqlPath = path.resolve(import.meta.dirname, "..", "supabase", "migrations", "20261018170000_atomic_wallet_hold_rpcs.sql");
     const migrationSql = fs.readFileSync(migrationSqlPath, "utf8");
     runPsql(migrationSql);
 

@@ -9,7 +9,7 @@ const __dirname = path.dirname(__filename);
 
 const migrationPath = path.resolve(
   __dirname,
-  "../../../supabase/migrations/20261018162500_update_create_workflow_with_placeholder_media_rpc.sql"
+  "../../supabase/migrations/20261018162500_update_create_workflow_with_placeholder_media_rpc.sql"
 );
 
 function activeSql(sql) {

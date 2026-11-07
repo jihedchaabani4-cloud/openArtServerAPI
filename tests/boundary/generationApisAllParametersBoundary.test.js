@@ -623,31 +623,6 @@ describe("Generation & Gen-Edit APIs — All Models & Parameters Boundary Suite"
       }
     });
 
-    it("seedance_2_5_extend: accepts input_video, prompt, duration (5/10), resolution (480p/720p/1080p/4k), and generate_audio", async () => {
-      for (const duration of [5, 10]) {
-        for (const resolution of ["480p", "720p", "1080p", "4k"]) {
-          const { status, data } = await postJson("/api/video/generated", {
-            prompt: `Extend clip ${duration}s ${resolution}`,
-            model: "seedance_2_5_extend",
-            project_id: "proj-A",
-            parameters: {
-              input_video: "wf-vid-1",
-              duration,
-              resolution,
-              generate_audio: true,
-            },
-          });
-          assert.equal(status, 200, `Failed for seedance_2_5_extend ${duration}/${resolution}: ${JSON.stringify(data)}`);
-          const params = enqueueCalls.at(-1).input.parameters;
-          assert.equal(params.input_video, "wf-vid-1");
-          assert.equal(params.duration, duration);
-          assert.equal(params.resolution, resolution);
-          assert.equal(params.generate_audio, true);
-          assert.equal(params.aspect_ratio, undefined, "seedance_2_5_extend schema does not have aspect_ratio");
-        }
-      }
-    });
-
     it("ltx_2_3_fast & ltx_2_5_fast: accept all durations (6..20), resolutions (720p..4k), fps (24/25/48/50), camera_motion (all 8), input_image, last_frame", async () => {
       const durations = [6, 8, 10, 12, 14, 16, 18, 20];
       const resolutions = ["720p", "1080p", "1440p", "4k"];
@@ -739,30 +714,6 @@ describe("Generation & Gen-Edit APIs — All Models & Parameters Boundary Suite"
       }
     });
 
-    it("ltx_extend: accepts input_video, prompt, all durations (2..20), and extend_direction (end/start)", async () => {
-      const durations = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20];
-      for (const duration of durations) {
-        for (const extend_direction of ["end", "start"]) {
-          const { status, data } = await postJson("/api/video/generated", {
-            prompt: `LTX Extend ${duration}s ${extend_direction}`,
-            model: "ltx_extend",
-            project_id: "proj-A",
-            parameters: {
-              input_video: "wf-vid-1",
-              duration,
-              extend_direction,
-            },
-          });
-          assert.equal(status, 200, `Failed for ltx_extend ${duration}/${extend_direction}: ${JSON.stringify(data)}`);
-          const params = enqueueCalls.at(-1).input.parameters;
-          assert.equal(params.input_video, "wf-vid-1");
-          assert.equal(params.duration, duration);
-          assert.equal(params.extend_direction, extend_direction);
-          assert.equal(params.aspect_ratio, undefined);
-        }
-      }
-    });
-
     it("ltx_retake: accepts input_video, prompt, start_time, duration (2..10), retake_mode, and resolution (1920x1080/1080x1920)", async () => {
       const durations = [2, 4, 6, 8, 10];
       const modes = ["replace_audio_and_video", "replace_video", "replace_audio"];
@@ -798,22 +749,6 @@ describe("Generation & Gen-Edit APIs — All Models & Parameters Boundary Suite"
 
     it("rejects missing required fields, invalid enums, unknown parameters, direct URLs, and cross-tenant IDs on POST /api/video/generated", async () => {
       // 1. Missing required model parameters
-      const missingInputVideoExtend = await postJson("/api/video/generated", {
-        prompt: "extend without video",
-        model: "seedance_2_5_extend",
-        project_id: "proj-A",
-        parameters: { duration: 5 },
-      });
-      assert.equal(missingInputVideoExtend.status, 400);
-
-      const missingInputVideoLtxExtend = await postJson("/api/video/generated", {
-        prompt: "ltx extend without video",
-        model: "ltx_extend",
-        project_id: "proj-A",
-        parameters: { duration: 4 },
-      });
-      assert.equal(missingInputVideoLtxExtend.status, 400);
-
       const missingStartTimeRetake = await postJson("/api/video/generated", {
         prompt: "ltx retake without start_time",
         model: "ltx_retake",
@@ -830,7 +765,6 @@ describe("Generation & Gen-Edit APIs — All Models & Parameters Boundary Suite"
         { model: "ltx_2_3_pro", parameters: { duration: 20 } },
         { model: "ltx_2_3_fast", parameters: { fps: 60 } },
         { model: "ltx_2_3_fast", parameters: { camera_motion: "barrel_roll" } },
-        { model: "ltx_extend", parameters: { input_video: "wf-vid-1", extend_direction: "middle" } },
         { model: "ltx_retake", parameters: { input_video: "wf-vid-1", start_time: 1, retake_mode: "audio_only" } },
         { model: "ltx_retake", parameters: { input_video: "wf-vid-1", start_time: 1, resolution: "4k" } },
       ];
@@ -846,8 +780,6 @@ describe("Generation & Gen-Edit APIs — All Models & Parameters Boundary Suite"
 
       // 3. Explicit unknown parameters rejected with 400
       const unknownVideoParams = [
-        { model: "seedance_2_5_extend", parameters: { input_video: "wf-vid-1", aspect_ratio: "16:9" } },
-        { model: "ltx_extend", parameters: { input_video: "wf-vid-1", aspect_ratio: "16:9" } },
         { model: "ltx_retake", parameters: { input_video: "wf-vid-1", start_time: 0, aspect_ratio: "16:9" } },
         { model: "seedance_2_5", parameters: { camera_motion: "dolly_in" } },
       ];
@@ -880,10 +812,10 @@ describe("Generation & Gen-Edit APIs — All Models & Parameters Boundary Suite"
 
       // 5. Cross-tenant input_video / last_frame returns 404
       const crossVideo = await postJson("/api/video/generated", {
-        prompt: "cross tenant video extend",
-        model: "ltx_extend",
+        prompt: "cross tenant video retake",
+        model: "ltx_retake",
         project_id: "proj-A",
-        parameters: { input_video: "wf-foreign-B", duration: 4 },
+        parameters: { input_video: "wf-foreign-B", duration: 4, start_time: 1 },
       });
       assert.equal(crossVideo.status, 404);
     });

@@ -8,7 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Target migration in supabase/migrations/
-const migrationPath = path.resolve(__dirname, "../../../supabase/migrations/20261018162000_element_workflow_id_nullable.sql");
+const migrationPath = path.resolve(__dirname, "../../supabase/migrations/20261018162000_element_workflow_id_nullable.sql");
 
 function activeSql(sql) {
   return sql.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");

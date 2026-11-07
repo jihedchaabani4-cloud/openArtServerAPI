@@ -12,3 +12,5 @@ Thumbs.db
 .idea/
 docs/plan/scratch/
 graphify-out/
+.scratch/
+scratch/

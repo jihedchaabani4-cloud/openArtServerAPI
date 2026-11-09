@@ -208,7 +208,11 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
 
   describe("Authentication & Boundary Hardening", () => {
     it("returns 401 when request is unauthenticated (no token)", async () => {
-      const res = await fetch(`${baseUrl}/api/projects/proj-A/folders`);
+      const res = await fetch(`${baseUrl}/api/projects/proj-A/folders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Unauth Folder" }),
+      });
       assert.equal(res.status, 401);
     });
 
@@ -217,10 +221,13 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
       process.env.INTERNAL_AUTH_ENABLED = "true";
       try {
         const res = await fetch(`${baseUrl}/api/projects/proj-A/folders`, {
+          method: "POST",
           headers: {
             "x-internal-secret": process.env.INTERNAL_SECRET,
             "x-user-id": "user-A",
+            "Content-Type": "application/json",
           },
+          body: JSON.stringify({ name: "Secret Folder" }),
         });
         assert.equal(res.status, 401); // Internal secret not allowlisted on folder routes
       } finally {
@@ -228,9 +235,14 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
       }
     });
 
-    it("returns 404 when User B tries to list User A's folders (cross-tenant)", async () => {
+    it("returns 404 when User B tries to create a folder in User A's project (cross-tenant)", async () => {
       const res = await fetch(`${baseUrl}/api/projects/proj-A/folders`, {
-        headers: { Authorization: "Bearer token-user-B" },
+        method: "POST",
+        headers: {
+          Authorization: "Bearer token-user-B",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: "Cross Folder" }),
       });
       assert.equal(res.status, 404);
     });
@@ -359,16 +371,12 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
       assert.equal(folders.some((f) => f.id === "f-sub-A1"), false);
     });
 
-    it("lists folders with asset counts ordered by position, then name", async () => {
+    it("confirms standalone GET /api/projects/:projectId/folders is removed (returns 404)", async () => {
       const res = await fetch(`${baseUrl}/api/projects/proj-A/folders`, {
         headers: { Authorization: "Bearer token-user-A" },
       });
 
-      assert.equal(res.status, 200);
-      const data = await res.json();
-      assert(Array.isArray(data.items));
-      assert.equal(data.items.length, 2);
-      assert.equal(data.items[0].assetCount, 1);
+      assert.equal(res.status, 404);
     });
 
     it("Scenario 10: rejects invalid folder name with FOLDER_NAME_INVALID", async () => {

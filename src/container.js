@@ -276,7 +276,7 @@ export const trashService = new TrashService({
     characterService,
 });
 
-export const projectReadService = new ProjectReadService({ db });
+export const projectReadService = new ProjectReadService({ db, folderService });
 export const projectService = new ProjectService({ projectRepo: db.projects });
 export const generationService = new GenerationService({ db });
 export const generationRequestService = new GenerationRequestService({ db, useCaseService, folderService });

@@ -17,7 +17,7 @@ Methods and dependencies are parsed from the code (best effort). "Owns" comes fr
 | `FolderService` | `src/domain/folder` | - | `setWorkflowService`, `list`, `create`, `update`, `remove`, `assertFolderUsable`, `validateAndAssertUsable` | `folderRepo`, `projectRepo`, `workflowService`, `maxDepth`, `maxFoldersPerProject` | `src/container.js` | 4 |
 | `GenerationRequestService` | `src/domain/generation` | - | `requestGeneration` | `db`, `useCaseService`, `folderService`, `modelValidator` | `src/container.js` | 4 |
 | `GenerationService` | `src/domain/generation` | - | `getAssets`, `getUserLibrary`, `getWorkflowDetail`, `deleteGeneration`, `updateGeneration`, `listProjectAssets` | `db` | `src/container.js` | 6 |
-| `ProjectReadService` | `src/domain/project` | - | `getProjectData`, `getWorkflowByMedia` | `db` | `src/container.js` | 3 |
+| `ProjectReadService` | `src/domain/project` | - | `getProjectData`, `getWorkflowByMedia` | `db`, `folderService` | `src/container.js` | 3 |
 | `ProjectService` | `src/domain/project` | - | `listUserProjects`, `createProject`, `updateProject`, `deleteProject` | `projectRepo` | `src/container.js` | 1 |
 | `TrashService` | `src/domain/trash` | Workflow trash lifecycle (move to trash, permanent delete dispatch, and restore) | `requestDelete`, `requestDeleteMany`, `restore`, `restoreAll` | `db`, `workflowService`, `elementService`, `characterService`, `authService` | `src/container.js` | 1 |
 | `PricingService` | `src/models/pricing` | Provides credit cost lookups and Redis caching for model pricing rules. | `getPrice`, `updateRule` | `supabase`, `redis` | `src/container.js` | 2 |

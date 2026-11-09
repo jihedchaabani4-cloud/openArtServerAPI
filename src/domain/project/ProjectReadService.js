@@ -29,8 +29,9 @@ function normalizeMediaStatus(status, url) {
 }
 
 export class ProjectReadService {
-    constructor({ db }) {
+    constructor({ db, folderService = null }) {
         this.db = db;
+        this.folderService = folderService;
     }
 
     async getProjectData({ projectId, userId }) {
@@ -42,10 +43,13 @@ export class ProjectReadService {
             return {
                 projectName: "Unknown Project",
                 projectId: null,
-                sessions: [],
                 workflows: [],
+                trashedWorkflows: [],
                 media: [],
                 elements: [],
+                characters: [],
+                folders: [],
+                collections: [],
             };
         }
 
@@ -93,8 +97,8 @@ export class ProjectReadService {
 
         const projectName = projectData?.project_name || "Unknown Project";
 
-        // Fetch workflows and media concurrently to minimize latency
-        const [workflowsResult, mediaResult] = await Promise.all([
+        // Fetch workflows, media, and folders concurrently to minimize latency
+        const [workflowsResult, mediaResult, foldersResult] = await Promise.all([
             this.db?.workflows?.findByProject
                 ? this.db.workflows
                       .findByProject(projectId, {
@@ -121,6 +125,18 @@ export class ProjectReadService {
                       .order("create_time", { ascending: false })
                       .then((r) => r.data || [])
                       .catch(() => []),
+            this.folderService?.list
+                ? this.folderService.list({ projectId, userId }).then((r) => r.items || []).catch(() => [])
+                : this.db?.folders?.listByProject
+                    ? this.db.folders.listByProject(projectId, userId).catch(() => [])
+                    : (supabaseAdmin || supabase)
+                          .from("folders")
+                          .select("*")
+                          .eq("project_id", projectId)
+                          .order("position", { ascending: true })
+                          .order("create_time", { ascending: true })
+                          .then((r) => r.data || [])
+                          .catch(() => []),
         ]);
 
         const workflows = Array.isArray(workflowsResult)
@@ -532,6 +548,25 @@ export class ProjectReadService {
             };
         });
 
+        const rawFolders = Array.isArray(foldersResult) ? foldersResult : [];
+        const formattedFolders = rawFolders.map((f) => {
+            const count = f.assetCount !== undefined
+                ? f.assetCount
+                : (workflows || []).filter((w) => w.folder_id === f.id).length;
+            return {
+                id: f.id,
+                projectId: f.projectId || f.project_id || projectId,
+                parentId: f.parentId !== undefined ? f.parentId : (f.parent_id ?? null),
+                name: f.name || "Untitled collection",
+                color: f.color ?? null,
+                description: f.description ?? null,
+                position: f.position ?? 0,
+                assetCount: count,
+                createdAt: f.createdAt || f.create_time || null,
+                updatedAt: f.updatedAt || f.updated_at || null,
+            };
+        });
+
         crudOperationLog({
             operation,
             status: "ok",
@@ -539,6 +574,7 @@ export class ProjectReadService {
             projectId,
             workflowCount: formattedWorkflows.length,
             mediaCount: formattedMedia.length,
+            folderCount: formattedFolders.length,
         });
 
         return {
@@ -549,6 +585,8 @@ export class ProjectReadService {
             media: formattedMedia,
             elements: elementsList,
             characters: charactersList,
+            folders: formattedFolders,
+            collections: formattedFolders,
             appConfig: APP_CONFIG,
         };
     }

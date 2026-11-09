@@ -602,11 +602,6 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
   });
 
-  it("TEST R4-41: GET /api/projects/:projectId/folders for foreign project returns 404", async () => {
-    const res = await reqAlice(`/api/projects/${FOREIGN_PROJ_ID}/folders`);
-    assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
-  });
-
   it("TEST R4-42: POST /api/projects/:projectId/folders for foreign project returns 404", async () => {
     const res = await reqAlice(`/api/projects/${FOREIGN_PROJ_ID}/folders`, {
       method: "POST",
@@ -681,7 +676,6 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
       "DELETE /api/folders/:folderId",
       "PATCH /api/folders/:folderId",
       "GET /api/projects/:projectId/assets",
-      "GET /api/projects/:projectId/folders",
       "POST /api/projects/:projectId/folders",
       "DELETE /api/projects/:id",
       "PATCH /api/projects/:id",

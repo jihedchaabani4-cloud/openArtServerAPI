@@ -10,7 +10,6 @@ const router = express.Router();
 router.use(requireAuth);
 
 // Project Folders & Assets
-router.get("/:projectId/folders", foldersController.listProjectFolders);
 router.post("/:projectId/folders", rateLimit("folderWrite"), foldersController.createProjectFolder);
 router.get("/:projectId/assets", projectsController.listAssets);
 

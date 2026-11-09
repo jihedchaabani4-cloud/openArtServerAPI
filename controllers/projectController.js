@@ -15,7 +15,9 @@ export const getProjectData = async (req, res) => {
         if (!project_id || project_id === "null" || project_id === "undefined") {
             return res.json({
                 result: { data: { json: {
-                    projectContents: { sessions: [], workflows: [], trashedWorkflows: [], media: [] },
+                    projectContents: { sessions: [], workflows: [], trashedWorkflows: [], media: [], folders: [], collections: [] },
+                    folders: [],
+                    collections: [],
                     modelConfig,
                     appConfig: {
                         changeLogId: "2026-03-19-v1-3f4e036c-6a67-467f-a0e6-25cff0a0a8ab",
@@ -37,13 +39,17 @@ export const getProjectData = async (req, res) => {
                         projectId:    project_id,
                         appConfig:    data.appConfig,
                         modelConfig,
+                        folders:      data.folders || [],
+                        collections:  data.collections || data.folders || [],
                         projectContents: {
-                            sessions:   data.sessions,
+                            sessions:   data.sessions || [],
                             workflows:  data.workflows,
                             trashedWorkflows: data.trashedWorkflows || [],
                             media:      data.media,
                             elements:   data.elements,
                             characters: data.characters,
+                            folders:    data.folders || [],
+                            collections: data.collections || data.folders || [],
                         },
                     },
                 },

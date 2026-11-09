@@ -179,6 +179,15 @@ describe("Asset Listing with Folder Filters & Pagination (Task F-T7)", () => {
         ) || null
       );
     };
+    db.folders.countAssetsByFolder = async (projectId, userId) => {
+      const counts = {};
+      for (const w of workflows) {
+        if (w.project_id === projectId && w.folder_id) {
+          counts[w.folder_id] = (counts[w.folder_id] || 0) + 1;
+        }
+      }
+      return counts;
+    };
 
     // Mock db.workflows
     db.workflows.listProjectAssets = async (projectId, { folderIds, folderIdNull, limit = 50, cursor } = {}) => {
@@ -439,5 +448,86 @@ describe("Asset Listing with Folder Filters & Pagination (Task F-T7)", () => {
         db.workflows.findByProject = origFindByProject;
       }
     });
+
+    it("returns folders and collections with color and description in /api/workflows/project-data/:projectId", async () => {
+      const origFrom = supabase.from;
+      supabase.from = (table) => {
+        if (table === "project") {
+          return {
+            select: () => ({
+              eq: () => ({
+                single: async () => ({
+                  data: { id: "proj-A", user_id: "user-A", project_name: "Project A" },
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === "media") {
+          return {
+            select: () => ({
+              eq: () => ({
+                order: async () => ({ data: [], error: null }),
+              }),
+            }),
+          };
+        }
+        if (table === "element") {
+          return {
+            select: () => ({
+              in: async () => ({ data: [], error: null }),
+            }),
+          };
+        }
+        return origFrom?.call(supabase, table);
+      };
+
+      const origFindByProject = db.workflows.findByProject;
+      db.workflows.findByProject = async () => [];
+
+      const origListByProject = db.folders.listByProject;
+      db.folders.listByProject = async (projectId, userId) => [
+        {
+          id: "folder-test-1",
+          project_id: projectId,
+          user_id: userId,
+          parent_id: null,
+          name: "Design Assets",
+          color: "#3B82F6",
+          description: "All creative assets",
+          position: 0,
+          create_time: "2026-11-01T10:00:00.000Z",
+        },
+      ];
+
+      try {
+        const res = await fetch(`${baseUrl}/api/workflows/project-data/proj-A`, {
+          headers: { Authorization: "Bearer token-user-A" },
+        });
+
+        assert.equal(res.status, 200);
+        const data = await res.json();
+        const json = data.result?.data?.json;
+        assert.ok(json, "Expected json");
+
+        assert.ok(Array.isArray(json.folders), "Expected json.folders array");
+        assert.ok(Array.isArray(json.collections), "Expected json.collections array");
+        assert.ok(Array.isArray(json.projectContents?.folders), "Expected projectContents.folders");
+        assert.ok(Array.isArray(json.projectContents?.collections), "Expected projectContents.collections");
+
+        const folder = json.projectContents.folders[0];
+        assert.ok(folder);
+        assert.equal(folder.id, "folder-test-1");
+        assert.equal(folder.name, "Design Assets");
+        assert.equal(folder.color, "#3B82F6");
+        assert.equal(folder.description, "All creative assets");
+      } finally {
+        supabase.from = origFrom;
+        db.workflows.findByProject = origFindByProject;
+        db.folders.listByProject = origListByProject;
+      }
+    });
   });
 });
+

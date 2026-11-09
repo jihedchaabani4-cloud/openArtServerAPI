@@ -4,30 +4,6 @@ import { createLogger } from "../src/infrastructure/logging/index.js";
 
 const controllerLogger = createLogger("controller");
 
-/**
- * GET /api/projects/:projectId/folders
- * Returns flat list of project folders with asset counts, ordered by position then name.
- */
-export const listProjectFolders = async (req, res, next) => {
-  const { projectId } = req.params;
-  const userId = req.user?.id;
-
-  controllerLogger.debug({ projectId, userId }, "GET /api/projects/:projectId/folders");
-
-  try {
-    const result = await folderService.list({ projectId, userId });
-    return res.status(200).json(result);
-  } catch (err) {
-    if (err instanceof AppError) {
-      return res.status(err.statusCode).json({
-        ok: false,
-        errorCode: err.errorCode || "APP_ERROR",
-        message: err.message,
-      });
-    }
-    return next(err);
-  }
-};
 
 /**
  * POST /api/projects/:projectId/folders

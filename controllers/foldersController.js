@@ -31,14 +31,14 @@ export const listProjectFolders = async (req, res, next) => {
 
 /**
  * POST /api/projects/:projectId/folders
- * Creates a new folder in the specified project.
+ * Creates a new folder/collection in the specified project.
  */
 export const createProjectFolder = async (req, res, next) => {
   const { projectId } = req.params;
   const userId = req.user?.id;
-  const { name, parentId } = req.body || {};
+  const { name, parentId, color, description } = req.body || {};
 
-  controllerLogger.debug({ projectId, userId, name, parentId }, "POST /api/projects/:projectId/folders");
+  controllerLogger.debug({ projectId, userId, name, parentId, color, description }, "POST /api/projects/:projectId/folders");
 
   const resolvedName = (name === undefined || name === null)
     ? "Untitled collection"
@@ -50,6 +50,8 @@ export const createProjectFolder = async (req, res, next) => {
       userId,
       parentId: parentId || null,
       name: resolvedName,
+      color: color ?? null,
+      description: description ?? null,
     });
     return res.status(201).json(folder);
   } catch (err) {
@@ -65,14 +67,14 @@ export const createProjectFolder = async (req, res, next) => {
 };
 
 /**
- * PATCH /api/folders/:folderId
- * Renames, moves, or reorders an existing folder.
+ * PATCH / PUT /api/folders/:folderId or /api/collections/:collectionId
+ * Unified edit endpoint: updates only the fields provided in the body (name, color, description, parentId, position).
  */
 export const updateFolder = async (req, res, next) => {
-  const { folderId } = req.params;
+  const folderId = req.params.folderId || req.params.collectionId || req.params.id;
   const userId = req.user?.id;
 
-  controllerLogger.debug({ folderId, userId, patch: req.body }, "PATCH /api/folders/:folderId");
+  controllerLogger.debug({ folderId, userId, patch: req.body }, "PATCH/PUT folder/collection");
 
   try {
     const folder = await folderService.update({

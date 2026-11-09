@@ -140,13 +140,15 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
       return folders.filter((f) => f.project_id === projectId && f.user_id === userId).length;
     };
 
-    db.folders.create = async ({ projectId, userId, parentId, name, position }) => {
+    db.folders.create = async ({ projectId, userId, parentId, name, color, description, position }) => {
       const newFolder = {
         id: `f-new-${Date.now()}-${Math.random()}`,
         project_id: projectId,
         user_id: userId,
         parent_id: parentId || null,
         name,
+        color: color || null,
+        description: description || null,
         position,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -159,6 +161,8 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
       const f = folders.find((fol) => fol.id === folderId && fol.user_id === userId);
       if (!f) return null;
       if (patch.name !== undefined) f.name = patch.name;
+      if (patch.color !== undefined) f.color = patch.color;
+      if (patch.description !== undefined) f.description = patch.description;
       if (patch.parentId !== undefined) f.parent_id = patch.parentId;
       if (patch.position !== undefined) f.position = patch.position;
       f.updated_at = new Date().toISOString();
@@ -420,6 +424,92 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
       } finally {
         resetLimitersForTest();
       }
+    });
+
+    it("Scenario 11: creates folder/collection with color and description via POST /api/projects/:id/folders", async () => {
+      const res = await fetch(`${baseUrl}/api/projects/proj-A/folders`, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer token-user-A",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: "Character Styles",
+          color: "#E91E63",
+          description: "All prompt styles and references",
+        }),
+      });
+
+      assert.equal(res.status, 201);
+      const data = await res.json();
+      assert.equal(data.name, "Character Styles");
+      assert.equal(data.color, "#E91E63");
+      assert.equal(data.description, "All prompt styles and references");
+    });
+
+    it("Scenario 12: unified edit updates ONLY color when only color is sent (other fields untouched)", async () => {
+      const res = await fetch(`${baseUrl}/api/folders/f-root-A1`, {
+        method: "PATCH",
+        headers: {
+          Authorization: "Bearer token-user-A",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ color: "#2196F3" }),
+      });
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.id, "f-root-A1");
+      assert.equal(data.color, "#2196F3");
+      assert.equal(data.name, "Scene 1"); // Unchanged
+    });
+
+    it("Scenario 13: unified edit updates ONLY description when only description is sent", async () => {
+      // Set initial color first
+      await fetch(`${baseUrl}/api/folders/f-root-A1`, {
+        method: "PATCH",
+        headers: {
+          Authorization: "Bearer token-user-A",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ color: "#2196F3" }),
+      });
+
+      const res = await fetch(`${baseUrl}/api/folders/f-root-A1`, {
+        method: "PATCH",
+        headers: {
+          Authorization: "Bearer token-user-A",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ description: "Updated collection description" }),
+      });
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.description, "Updated collection description");
+      assert.equal(data.color, "#2196F3"); // Previously set color preserved
+      assert.equal(data.name, "Scene 1"); // Unchanged
+    });
+
+    it("Scenario 14: unified edit updates name, color, and description in one call", async () => {
+      const res = await fetch(`${baseUrl}/api/folders/f-root-A1`, {
+        method: "PATCH",
+        headers: {
+          Authorization: "Bearer token-user-A",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: "Scene 1 - Master",
+          color: "#00BCD4",
+          description: "Master cut collection",
+        }),
+      });
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.name, "Scene 1 - Master");
+      assert.equal(data.color, "#00BCD4");
+      assert.equal(data.description, "Master cut collection");
     });
   });
 });

@@ -85,7 +85,7 @@ export class FolderRepository {
   /**
    * Creates a new folder scoped to project and user.
    */
-  async create({ projectId, userId, parentId = null, name, position = 0 }) {
+  async create({ projectId, userId, parentId = null, name, color = null, description = null, position = 0 }) {
     if (!projectId || !userId || !name) {
       throw new Error("Missing required parameters for folder creation");
     }
@@ -97,6 +97,8 @@ export class FolderRepository {
         user_id: userId,
         parent_id: parentId || null,
         name: String(name).trim(),
+        color: color === null || color === undefined ? null : String(color).trim(),
+        description: description === null || description === undefined ? null : String(description).trim(),
         position: Number.isInteger(position) ? position : 0,
       })
       .select()
@@ -115,6 +117,12 @@ export class FolderRepository {
     const updateData = {};
     if (patch.name !== undefined) {
       updateData.name = String(patch.name).trim();
+    }
+    if (patch.color !== undefined) {
+      updateData.color = patch.color === null ? null : String(patch.color).trim();
+    }
+    if (patch.description !== undefined) {
+      updateData.description = patch.description === null ? null : String(patch.description).trim();
     }
     if (patch.parentId !== undefined) {
       updateData.parent_id = patch.parentId;

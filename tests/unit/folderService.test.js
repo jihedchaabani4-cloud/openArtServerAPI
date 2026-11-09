@@ -75,13 +75,15 @@ describe("FolderService Business Rules & Error Scenarios (Task F-T4)", () => {
       countByProject: async (projectId, userId) => {
         return foldersInDb.filter((f) => f.project_id === projectId && f.user_id === userId).length;
       },
-      create: async ({ projectId, userId, parentId, name, position }) => {
+      create: async ({ projectId, userId, parentId, name, color, description, position }) => {
         const newFolder = {
           id: `f-${Date.now()}-${Math.random()}`,
           project_id: projectId,
           user_id: userId,
           parent_id: parentId || null,
           name,
+          color: color || null,
+          description: description || null,
           position,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
@@ -93,6 +95,8 @@ describe("FolderService Business Rules & Error Scenarios (Task F-T4)", () => {
         const folder = foldersInDb.find((f) => f.id === folderId && f.user_id === userId);
         if (!folder) return null;
         if (patch.name !== undefined) folder.name = patch.name;
+        if (patch.color !== undefined) folder.color = patch.color;
+        if (patch.description !== undefined) folder.description = patch.description;
         if (patch.parentId !== undefined) folder.parent_id = patch.parentId;
         if (patch.parent_id !== undefined) folder.parent_id = patch.parent_id;
         if (patch.position !== undefined) folder.position = patch.position;
@@ -368,6 +372,138 @@ describe("FolderService Business Rules & Error Scenarios (Task F-T4)", () => {
     it("assertFolderUsable returns folder when valid and owned", async () => {
       const result = await service.assertFolderUsable("f-root-1", "user-1", "proj-1");
       assert.equal(result.id, "f-root-1");
+    });
+
+    it("create supports optional color and description", async () => {
+      const created = await service.create({
+        projectId: "proj-1",
+        userId: "user-1",
+        name: "Cyberpunk Art",
+        color: "#9C27B0",
+        description: "Neon aesthetic collection for cyberpunk characters",
+      });
+      assert.equal(created.name, "Cyberpunk Art");
+      assert.equal(created.color, "#9C27B0");
+      assert.equal(created.description, "Neon aesthetic collection for cyberpunk characters");
+    });
+
+    it("unified edit: updates only color when only color is provided", async () => {
+      const updated = await service.update({
+        folderId: "f-root-1",
+        userId: "user-1",
+        patch: { color: "#FF5722" },
+      });
+      assert.equal(updated.id, "f-root-1");
+      assert.equal(updated.name, "Scene 1"); // Unchanged
+      assert.equal(updated.color, "#FF5722");
+    });
+
+    it("unified edit: updates only description when only description is provided", async () => {
+      const updated = await service.update({
+        folderId: "f-root-1",
+        userId: "user-1",
+        patch: { description: "Main assets for scene 1 storyboard" },
+      });
+      assert.equal(updated.id, "f-root-1");
+      assert.equal(updated.name, "Scene 1"); // Unchanged
+      assert.equal(updated.description, "Main assets for scene 1 storyboard");
+    });
+
+    it("unified edit: updates multiple parameters in a single API call", async () => {
+      const updated = await service.update({
+        folderId: "f-root-1",
+        userId: "user-1",
+        patch: {
+          name: "Scene 1 Remastered",
+          color: "#4CAF50",
+          description: "High-resolution renders",
+        },
+      });
+      assert.equal(updated.name, "Scene 1 Remastered");
+      assert.equal(updated.color, "#4CAF50");
+      assert.equal(updated.description, "High-resolution renders");
+    });
+
+    it("unified edit: clears color and description when explicitly set to null", async () => {
+      // First set them
+      await service.update({
+        folderId: "f-root-1",
+        userId: "user-1",
+        patch: { color: "#123456", description: "Temporary description" },
+      });
+      // Then clear them
+      const cleared = await service.update({
+        folderId: "f-root-1",
+        userId: "user-1",
+        patch: { color: null, description: null },
+      });
+      assert.equal(cleared.color, null);
+      assert.equal(cleared.description, null);
+      assert.equal(cleared.name, "Scene 1"); // name remains untouched
+    });
+
+    it("validation: rejects invalid color type or overly long color", async () => {
+      await assert.rejects(
+        async () => {
+          await service.update({
+            folderId: "f-root-1",
+            userId: "user-1",
+            patch: { color: 12345 },
+          });
+        },
+        (err) => {
+          assert.equal(err.errorCode, "FOLDER_COLOR_INVALID");
+          assert.equal(err.statusCode, 400);
+          return true;
+        }
+      );
+
+      await assert.rejects(
+        async () => {
+          await service.update({
+            folderId: "f-root-1",
+            userId: "user-1",
+            patch: { color: "a".repeat(55) },
+          });
+        },
+        (err) => {
+          assert.equal(err.errorCode, "FOLDER_COLOR_INVALID");
+          assert.equal(err.statusCode, 400);
+          return true;
+        }
+      );
+    });
+
+    it("validation: rejects invalid description type or overly long description", async () => {
+      await assert.rejects(
+        async () => {
+          await service.update({
+            folderId: "f-root-1",
+            userId: "user-1",
+            patch: { description: ["invalid"] },
+          });
+        },
+        (err) => {
+          assert.equal(err.errorCode, "FOLDER_DESCRIPTION_INVALID");
+          assert.equal(err.statusCode, 400);
+          return true;
+        }
+      );
+
+      await assert.rejects(
+        async () => {
+          await service.update({
+            folderId: "f-root-1",
+            userId: "user-1",
+            patch: { description: "x".repeat(2001) },
+          });
+        },
+        (err) => {
+          assert.equal(err.errorCode, "FOLDER_DESCRIPTION_INVALID");
+          assert.equal(err.statusCode, 400);
+          return true;
+        }
+      );
     });
 
     it("assertFolderUsable throws NOT_FOUND when folder belongs to another user or project", async () => {

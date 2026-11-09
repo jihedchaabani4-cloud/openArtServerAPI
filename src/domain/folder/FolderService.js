@@ -79,6 +79,36 @@ export class FolderService {
   }
 
   /**
+   * Normalizes and validates folder color string.
+   */
+  _validateColor(color) {
+    if (color === null || color === undefined) return null;
+    if (typeof color !== "string") {
+      throw new FolderError("Folder color must be a string", 400, "FOLDER_COLOR_INVALID");
+    }
+    const trimmed = color.trim();
+    if (trimmed.length > 50) {
+      throw new FolderError("Folder color cannot exceed 50 characters", 400, "FOLDER_COLOR_INVALID");
+    }
+    return trimmed;
+  }
+
+  /**
+   * Normalizes and validates folder description string.
+   */
+  _validateDescription(description) {
+    if (description === null || description === undefined) return null;
+    if (typeof description !== "string") {
+      throw new FolderError("Folder description must be a string", 400, "FOLDER_DESCRIPTION_INVALID");
+    }
+    const trimmed = description.trim();
+    if (trimmed.length > 2000) {
+      throw new FolderError("Folder description cannot exceed 2000 characters", 400, "FOLDER_DESCRIPTION_INVALID");
+    }
+    return trimmed;
+  }
+
+  /**
    * Maps raw database folder row to camelCase public Folder DTO.
    */
   _toFolderDto(folder, assetCount = 0) {
@@ -87,6 +117,8 @@ export class FolderService {
       projectId: folder.project_id,
       parentId: folder.parent_id ?? null,
       name: folder.name,
+      color: folder.color ?? null,
+      description: folder.description ?? null,
       position: folder.position ?? 0,
       assetCount,
       createdAt: folder.created_at,
@@ -121,7 +153,7 @@ export class FolderService {
   /**
    * Creates a new folder within a project.
    */
-  async create({ projectId, userId, parentId = null, name }) {
+  async create({ projectId, userId, parentId = null, name, color = null, description = null }) {
     if (!projectId || !userId) {
       throw new FolderError("Project and User ID required", 400, "VALIDATION_ERROR");
     }
@@ -135,6 +167,8 @@ export class FolderService {
 
     const resolvedName = (name === undefined || name === null) ? "Untitled collection" : name;
     let cleanName = this._validateName(resolvedName);
+    const cleanColor = color !== undefined && color !== null ? this._validateColor(color) : null;
+    const cleanDescription = description !== undefined && description !== null ? this._validateDescription(description) : null;
     const normalizedParentId = parentId || null;
 
     // Check project total folder limit
@@ -206,6 +240,8 @@ export class FolderService {
         userId,
         parentId: normalizedParentId,
         name: cleanName,
+        color: cleanColor,
+        description: cleanDescription,
         position,
       });
 
@@ -223,7 +259,7 @@ export class FolderService {
   }
 
   /**
-   * Updates an existing folder (rename, move, reorder).
+   * Updates an existing folder (rename, move, reorder, color, description).
    */
   async update({ folderId, userId, patch = {} }) {
     if (!folderId || !userId) {
@@ -242,7 +278,17 @@ export class FolderService {
       cleanPatch.name = this._validateName(patch.name);
     }
 
-    // 2. Position reorder
+    // 2. Color update
+    if (patch.color !== undefined) {
+      cleanPatch.color = patch.color === null ? null : this._validateColor(patch.color);
+    }
+
+    // 3. Description update
+    if (patch.description !== undefined) {
+      cleanPatch.description = patch.description === null ? null : this._validateDescription(patch.description);
+    }
+
+    // 4. Position reorder
     if (patch.position !== undefined) {
       if (!Number.isInteger(patch.position) || patch.position < 0) {
         throw new FolderError("Position must be a non-negative integer", 400, "VALIDATION_ERROR");

@@ -53,6 +53,6 @@ Track progress of all 12 Parties and atomic tickets.
   - [x] **Ticket 11.1**: Ratchet zeroing in `arch-baseline.json` (R9 zeroed down completely) [DONE]
   - [x] **Ticket 11.2**: ADR documentation & linkage across the 8 systems (`ADR-001`) [DONE]
   - [x] **Ticket 11.3**: Final full quality gate and factory completion verification [DONE]
-- [ ] **Partie 12: Production Readiness, Final Gate & Delivery** (READY)
-  - [ ] **Ticket 12.1**: Final production readiness and hermetic environment check
-  - [ ] **Ticket 12.2**: Final quality gate validation and clean delivery sign-off
+- [x] **Partie 12: Production Readiness, Final Gate & Delivery** (COMPLETED)
+  - [x] **Ticket 12.1**: Final production readiness and hermetic environment check [DONE]
+  - [x] **Ticket 12.2**: Final quality gate validation and clean delivery sign-off [DONE]

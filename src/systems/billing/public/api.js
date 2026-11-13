@@ -14,6 +14,27 @@ import {
     WalletError,
     BillingError,
 } from "./tools.js";
+import { requireAuth } from "../../../middleware/auth.js";
+import { requireAdmin } from "#platform/identity";
+import { walletRateLimit } from "../../../middleware/walletRateLimit.js";
+import {
+    getCheckoutUrl,
+    handleWebhook,
+    getPurchaseHistory,
+    getCreditPackages,
+} from "../../../../controllers/paymentsController.js";
+import {
+    getBalance,
+    getTransactions,
+    getPrice,
+} from "../../../../controllers/walletController.js";
+import {
+    adminCredit,
+    getAdminWallet,
+    getLatestReconciliation,
+    updatePricingRule,
+    reloadModels,
+} from "../../../../controllers/adminController.js";
 
 const walletLogger = createLogger("wallet_api");
 
@@ -229,4 +250,54 @@ export function createBillingRouter({
 }
 
 const defaultBillingRouter = createBillingRouter();
+
+// ── Payments Router ────────────────────────────────────────────────
+export const paymentsRouter = express.Router();
+paymentsRouter.get("/packages", getCreditPackages);
+paymentsRouter.post("/checkout", requireAuth, getCheckoutUrl);
+paymentsRouter.post("/webhook", express.raw({ type: "application/json" }), handleWebhook);
+paymentsRouter.get("/history", requireAuth, getPurchaseHistory);
+
+// ── Wallet Router ──────────────────────────────────────────────────
+export const walletRouter = express.Router();
+walletRouter.use(async (req, _res, next) => {
+    if (!req.walletService) req.walletService = getWalletService();
+    if (!req.pricingService) {
+        try {
+            const container = await import("../../../container.js");
+            req.pricingService = container.pricingService;
+        } catch {}
+    }
+    next();
+});
+walletRouter.use(requireAuth);
+walletRouter.use(walletRateLimit({ max: 30, windowSec: 60 }));
+walletRouter.get("/balance", getBalance);
+walletRouter.get("/transactions", getTransactions);
+walletRouter.get("/price", getPrice);
+
+// ── Admin Router ───────────────────────────────────────────────────
+export const adminRouter = express.Router();
+adminRouter.use(async (req, _res, next) => {
+    if (!req.walletService) req.walletService = getWalletService();
+    if (!req.pricingService || !req.redisConnection) {
+        try {
+            const container = await import("../../../container.js");
+            req.pricingService = req.pricingService || container.pricingService;
+            req.redisConnection = req.redisConnection || container.redisConnection;
+        } catch {}
+    }
+    next();
+});
+adminRouter.use(requireAuth, requireAdmin);
+adminRouter.post(
+    "/wallet/credit",
+    walletRateLimit({ max: 10, windowSec: 60, keyPrefix: "rate:admin" }),
+    adminCredit
+);
+adminRouter.get("/wallet/:userId", getAdminWallet);
+adminRouter.get("/reconciliation/latest", getLatestReconciliation);
+adminRouter.patch("/pricing/:id", updatePricingRule);
+adminRouter.post("/models/reload", reloadModels);
+
 export default defaultBillingRouter;

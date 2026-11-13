@@ -203,4 +203,5 @@ router.post("/:key/:operation/estimate-price", (req, res) => {
   }
 });
 
+export const modelsRouter = router;
 export default router;

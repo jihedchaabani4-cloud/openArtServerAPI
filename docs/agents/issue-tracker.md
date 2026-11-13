@@ -45,5 +45,8 @@ Track progress of all 12 Parties and atomic tickets.
   - [x] **Ticket 9.2**: V2 DAG Compiler, Runner & Execution Gateways (`internal/runner/`) [DONE]
   - [x] **Ticket 9.3**: UseCase Engine, Worker & Pre-Queue Launch Protocol (`internal/engine/`) [DONE]
   - [x] **Ticket 9.4**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`) [DONE]
-- [ ] **Partie 10: Main Router Cutover & Legacy Folder Cleanup** (READY)
-- [ ] **Partie 11: Full Architecture Verification, Ratchet Zeroing & ADR Linking**
+- [x] **Partie 10: Main Router Cutover & Legacy Folder Cleanup** (COMPLETED)
+  - [x] **Ticket 10.1**: Update `src/api/routes.js` to mount the 8 systems' `public/api.js` routers exclusively [DONE]
+  - [x] **Ticket 10.2**: Verify byte-for-byte parity via route dumping tool (86 routes verified) [DONE]
+  - [x] **Ticket 10.3**: Legacy route re-exports and unit testing (`tests/unit/mainRouterCutover.test.js`) [DONE]
+- [ ] **Partie 11: Full Architecture Verification, Ratchet Zeroing & ADR Linking** (READY)

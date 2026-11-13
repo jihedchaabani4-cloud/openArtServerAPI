@@ -65,5 +65,6 @@ router.delete("/:characterId/media/:mediaId", characterController.removeMediaFro
 router.post("/:characterId/sheet-media", uploadSheet, characterController.setCharacterSheetMedia);
 router.post("/:characterId/upload", uploadSheet, characterController.uploadCharacterMedia);
 
+export const charactersRouter = router;
 export { characterController };
 export default router;

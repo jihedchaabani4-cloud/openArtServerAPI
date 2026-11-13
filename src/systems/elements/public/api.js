@@ -58,4 +58,5 @@ router.patch("/:id", updateElement);
 // ─── DELETE /api/v2/elements/:id ─────────────────────────────────────────────
 router.delete("/:id", deleteElement);
 
+export const elementRoutes = router;
 export default router;

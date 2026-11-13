@@ -148,4 +148,5 @@ identityRouter.get("/me", getMe);
 identityRouter.post("/logout", logout);
 identityRouter.get("/wallet/balance", getWalletBalance);
 
+export const authRouter = identityRouter;
 export default identityRouter;

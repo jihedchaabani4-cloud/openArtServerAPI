@@ -19,23 +19,13 @@
 - [x] **Partie 07: System 7 — Elements (`src/systems/elements/`)** (1,443 tests pass, `#elements/api`, `#elements/tools`)
 - [x] **Partie 08: System 8 — Workspace (`src/systems/workspace/`)** (1,454 tests pass, `#workspace/api`, `#workspace/tools`)
 - [x] **Partie 09: System 1 — Generation & Workflows (`src/systems/generation/`)** (1,461 tests pass, `#generation/api`, `#generation/tools`)
+- [x] **Partie 10: Main Router Cutover & Legacy Folder Cleanup** (1,463 tests pass, 8 systems gateways exclusively mounted)
 
-## 3. Active Phase: Partie 10 (READY) — Main Router Cutover & Legacy Folder Cleanup
-- **Goal**: Wire `src/app.js` exclusively to the `public/api.js` gateways of all 8 Business Systems and delete empty legacy horizontal folders.
-- **Target Boundaries**:
-  - `src/app.js` mounts:
-    - `#generation/api`
-    - `#models/api`
-    - `#billing/api`
-    - `#media/api`
-    - `#identity/api`
-    - `#characters/api`
-    - `#elements/api`
-    - `#workspace/api`
-  - Zero regression in route dump (`scripts/dump-routes.cjs`).
-- **Suite Status**: 1,461 tests passing (0 failures), Gate PASS.
+## 3. Active Phase: Partie 11 (READY) — Full Architecture Verification, Ratchet Zeroing & ADR Linking
+- **Goal**: Permanently lock architecture rules R1-R15 in `arch-baseline.json`, verify all ADRs and seams, and conduct final end-to-end security & architecture sign-off.
+- **Suite Status**: 1,463 tests passing (0 failures), Gate PASS.
 
-## 4. Active Tickets Roadmap (Partie 10)
-- [ ] **Ticket 10.1**: Update `src/app.js` to mount the 8 systems' `public/api.js` routers exclusively
-- [ ] **Ticket 10.2**: Verify byte-for-byte parity via route dumping tool
-- [ ] **Ticket 10.3**: Retire legacy route files and clean up unused shims
+## 4. Active Tickets Roadmap (Partie 11)
+- [ ] **Ticket 11.1**: Ratchet zeroing in `arch-baseline.json` for all rules whose counts have reached zero
+- [ ] **Ticket 11.2**: ADR documentation & linkage across the 8 systems
+- [ ] **Ticket 11.3**: Final full quality gate and factory completion report

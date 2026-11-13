@@ -28,7 +28,9 @@
         "#identity/api": "./src/systems/identity/public/api.js",
         "#identity/tools": "./src/systems/identity/public/tools.js",
         "#media/api": "./src/systems/media/public/api.js",
-        "#media/tools": "./src/systems/media/public/tools.js"
+        "#media/tools": "./src/systems/media/public/tools.js",
+        "#billing/api": "./src/systems/billing/public/api.js",
+        "#billing/tools": "./src/systems/billing/public/tools.js"
     },
     "scripts": {
         "test": "node --import ./tests/setup-env.js --test \"tests/**/*.test.js\"",

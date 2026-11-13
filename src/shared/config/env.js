@@ -7,6 +7,9 @@ export const envConfig = {
   get prettyPrint() { return this.isDevelopment || process.env.LOG_PRETTY === "true"; },
   get frontendUrl() { return process.env.FRONTEND_URL || ""; },
   get baseUrl() { return process.env.BASE_URL || ""; },
+  get initialWalletBalance() {
+    return Number(process.env.INITIAL_WALLET_BALANCE || process.env.DEFAULT_WALLET_BALANCE || 0);
+  },
 };
 
 export const redisConfig = {

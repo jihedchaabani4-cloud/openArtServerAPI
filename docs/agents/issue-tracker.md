@@ -22,11 +22,14 @@ Track progress of all 12 Parties and atomic tickets.
   - [x] **Ticket 3.2**: Media DB Layer (`internal/db/`) [DONE]
   - [x] **Ticket 3.3**: Ingestion, Inspection & Lifecycle Services (`internal/ingestion/`, `internal/services/`) [DONE]
   - [x] **Ticket 3.4**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`) [DONE]
-- [ ] **Partie 04: System 3 — Billing & Wallet (`src/systems/billing/`)** (READY)
-  - [ ] **Ticket 4.1**: Billing Errors & Internal DB Layer (`internal/db/`, `internal/errors.js`)
-  - [ ] **Ticket 4.2**: Two-Phase Credit Hold & Pricing Services (`internal/services/`)
-  - [ ] **Ticket 4.3**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`)
-- [ ] **Partie 05: System 2 — Models Management (`src/systems/models/`)**
+- [x] **Partie 04: System 3 — Billing & Wallet (`src/systems/billing/`)** (COMPLETED)
+  - [x] **Ticket 4.1**: Billing Errors & Internal DB Layer (`internal/db/`, `internal/errors.js`) [DONE]
+  - [x] **Ticket 4.2**: Two-Phase Credit Hold & Pricing Services (`internal/services/`) [DONE]
+  - [x] **Ticket 4.3**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`) [DONE]
+- [ ] **Partie 05: System 2 — Models Management (`src/systems/models/`)** (READY)
+  - [ ] **Ticket 5.1**: Model Schemas, Registry & Pricing Calculation (`internal/registry/`, `internal/pricing/`)
+  - [ ] **Ticket 5.2**: AI Provider Resolvers & Execution Adapters (`internal/providers/`)
+  - [ ] **Ticket 5.3**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`)
 - [ ] **Partie 06: System 6 — Characters (`src/systems/characters/`)**
 - [ ] **Partie 07: System 7 — Elements (`src/systems/elements/`)**
 - [ ] **Partie 08: System 8 — Workspace (`src/systems/workspace/`)**

@@ -13,17 +13,18 @@
 - [x] **Partie 01: Shared Technical Kernel (`src/shared/`)** (1,372 tests pass, `#shared`)
 - [x] **Partie 02: System 5 — Identity & Auth (`src/systems/identity/`)** (1,379 tests pass, `#identity/api`, `#identity/tools`)
 - [x] **Partie 03: System 4 — Media & Storage (`src/systems/media/`)** (1,393 tests pass, `#media/api`, `#media/tools`)
+- [x] **Partie 04: System 3 — Billing & Wallet (`src/systems/billing/`)** (1,405 tests pass, `#billing/api`, `#billing/tools`)
 
-## 3. Active Phase: Partie 04 (READY) — System 3: Billing & Wallet (`src/systems/billing/`)
-- **Goal**: Encapsulate user credit wallets, multi-currency ledger transactions, credit reservation/hold lifecycle, and pricing catalog into `src/systems/billing/`.
+## 3. Active Phase: Partie 05 (READY) — System 2: Models Management (`src/systems/models/`)
+- **Goal**: Create a standalone, extensible **Models Management** Business System owning the AI model registry, input validation schemas, model pricing calculation, and external AI provider adapters (`WaveSpeed`, `Google GenAI`, `LLMService`).
 - **Target Boundaries**:
-  - `src/systems/billing/public/api.js` (`#billing/api`) for wallet and checkout HTTP routes.
-  - `src/systems/billing/public/tools.js` (`#billing/tools`) for inter-system credit hold, settlement, refund, and balance queries.
-  - Subpath imports `#billing/api` and `#billing/tools` in `package.json#imports`.
+  - `src/systems/models/public/api.js` (`#models/api`) for catalog presentation and admin pricing/model reload routes.
+  - `src/systems/models/public/tools.js` (`#models/tools`) for inter-system operations: `getModelConfig`, `validateModelInputs`, `calculateOperationCost`, `executeGeneration`, `executeLLM`.
+  - Subpath imports `#models/api` and `#models/tools` in `package.json#imports`.
   - Zero external imports of `internal/`.
-- **Suite Status**: 1,393 tests passing (0 failures), Gate PASS.
+- **Suite Status**: 1,405 tests passing (0 failures), Gate PASS.
 
-## 4. Active Tickets Roadmap (Partie 04)
-- [ ] **Ticket 4.1**: Billing Errors & Internal DB Layer (`internal/db/WalletRepository.js`, `LedgerRepository.js`, `internal/errors.js`)
-- [ ] **Ticket 4.2**: Two-Phase Credit Hold & Pricing Services (`internal/services/WalletService.js`, `PricingService.js`, `FailedOpsService.js`)
-- [ ] **Ticket 4.3**: Public Gateways, Package Subpath Imports, Legacy Re-exports & Tests (`public/`, `package.json`)
+## 4. Active Tickets Roadmap (Partie 05)
+- [ ] **Ticket 5.1**: Model Schemas, Registry & Pricing Calculation (`internal/registry/`, `internal/pricing/`, `internal/errors.js`)
+- [ ] **Ticket 5.2**: AI Provider Resolvers & Execution Adapters (`internal/providers/WaveSpeedImageResolver.js`, `LLMService.js`, `credentialResolver.js`)
+- [ ] **Ticket 5.3**: Public Gateways, Package Subpath Imports, Legacy Re-exports & Tests (`public/`, `package.json`)

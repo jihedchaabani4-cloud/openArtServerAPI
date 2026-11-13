@@ -15,6 +15,8 @@ export const envConfig = {
   isDevelopment,
   level: process.env.LOG_LEVEL || (isProduction ? "info" : "debug"),
   prettyPrint: isDevelopment || process.env.LOG_PRETTY === "true",
+  frontendUrl: process.env.FRONTEND_URL || "",
+  baseUrl: process.env.BASE_URL || "",
 };
 
 export const redisConfig = {

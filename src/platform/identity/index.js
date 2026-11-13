@@ -1,41 +1,26 @@
 /**
- * Identity Business System (#platform/identity)
- *
- * Public surface for authentication, authorization, ownership verification,
- * and security secret comparison.
+ * Legacy Re-export for Identity Business System (#platform/identity).
+ * Canonical gateway now lives in src/systems/identity/public/tools.js (#identity/tools).
  */
 
-// Errors
 export {
-    IdentityError,
-    IdentityAuthenticationError,
-    IdentityForbiddenError,
-    IdentityNotFoundError,
-    IdentityValidationError,
-} from "./IdentityErrors.js";
-
-// Ownership Guards & Helpers
-export {
-    assertOwns,
-    assertOwnsAny,
-    toMediaIdList,
-    setDb,
-} from "../security/ownership.js";
-
-// Security Comparison & Secret Utilities
-export {
-    safeCompareSecret,
-} from "../security/secretComparison.js";
-
-// Middleware
-export {
-    requireAuth,
-    isInternalSecretAllowedRequest,
-    isInternalSecretAllowedRoute,
-    USER_ID_REGEX,
-} from "../../middleware/auth.js";
-
-export {
-    requireAdmin,
-} from "../../middleware/requireAdmin.js";
-
+  IdentityError,
+  IdentityAuthenticationError,
+  IdentityForbiddenError,
+  IdentityNotFoundError,
+  IdentityValidationError,
+  assertOwns,
+  assertOwnsAny,
+  toMediaIdList,
+  setDb,
+  safeCompareSecret,
+  requireAuth,
+  requireAdmin,
+  isInternalSecretAllowedRequest,
+  isInternalSecretAllowedRoute,
+  USER_ID_REGEX,
+  verifySession,
+  getUserProfile,
+  identityTools,
+  identityTools as default,
+} from "../../systems/identity/public/tools.js";

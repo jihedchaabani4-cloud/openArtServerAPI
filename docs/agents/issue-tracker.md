@@ -13,7 +13,10 @@ Track progress of all 12 Parties and atomic tickets.
   - [x] **Ticket 1.1**: Base Error Hierarchy & Runtime Error Processor (`src/shared/errors/`) [DONE]
   - [x] **Ticket 1.2**: Structured Logging & Tracing Infrastructure (`src/shared/logger/`) [DONE]
   - [x] **Ticket 1.3**: Pure Technical Config & Redis Connection Kernel (`src/shared/config/`, `src/shared/redis/`, `#shared`) [DONE]
-- [ ] **Partie 02: System 5 — Identity & Auth (`src/systems/identity/`)**
+- [x] **Partie 02: System 5 — Identity & Auth (`src/systems/identity/`)** (COMPLETED)
+  - [x] **Ticket 2.1**: Identity Errors & Internal DB Layer (`internal/db/`, `internal/errors.js`) [DONE]
+  - [x] **Ticket 2.2**: Internal Services & Cookie Management (`internal/services/`, `internal/cookies.js`) [DONE]
+  - [x] **Ticket 2.3**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`) [DONE]
 - [ ] **Partie 03: System 4 — Media & Storage (`src/systems/media/`)**
 - [ ] **Partie 04: System 3 — Billing & Wallet (`src/systems/billing/`)**
 - [ ] **Partie 05: System 2 — Models Management (`src/systems/models/`)**

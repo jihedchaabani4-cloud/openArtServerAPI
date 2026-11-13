@@ -8,18 +8,19 @@
   - `docs/architecture/constitution/02_architecture_rules_and_agent_guardrails.md` (The 12 Architecture Rules)
   - `docs/architecture/constitution/03_software_factory_master_prompt_and_plan.md` (Software Factory Plan)
 
-## 2. Active Phase: Partie 01 (COMPLETED) -> Ready for Partie 02
-- **Goal**: Consolidate pure technical kernel (`src/shared/`) containing zero domain or database logic.
+## 2. Active Phase: Partie 02 (COMPLETED) -> Ready for Partie 03
+- **Goal**: Build the first foundation black-box system (`identity`) owning Google OAuth, cookies, user profiles, and `assertOwns()`.
 - **Results**:
-  - `src/shared/errors/` established with hybrid AppError, specialized subclasses, and pure sanitizers.
-  - `src/shared/logger/` established with AsyncLocalStorage context propagation and Pino structured logging.
-  - `src/shared/config/` established with pure environment flags.
-  - `src/shared/redis/` established with resilient Upstash/BullMQ connection singletons.
-  - `#shared` and `#shared/*` registered in `package.json#imports`.
-  - 100% backward compatibility maintained across legacy paths.
-- **Suite Status**: 1,372 tests passing (0 failures), Gate PASS.
+  - `src/systems/identity/public/api.js` (`#identity/api`) mounted for `/api/auth/*`.
+  - `src/systems/identity/public/tools.js` (`#identity/tools`) exposing `verifySession`, `getUserProfile`, `assertOwns`, `assertOwnsAny`, `toMediaIdList`, `requireAuth`, `requireAdmin`.
+  - Database access to `profiles` strictly isolated to `src/systems/identity/internal/db/ProfileRepository.js`.
+  - Supabase Auth SDK calls strictly isolated to `src/systems/identity/internal/db/authClient.js`.
+  - Express isolated exclusively to `public/api.js`.
+  - `#identity/api` and `#identity/tools` registered in `package.json#imports`.
+  - 100% backward compatibility preserved for `routes/authRoutes.js`, `controllers/authController.js`, `src/platform/identity/index.js`, and `src/platform/security/ownership.js`.
+- **Suite Status**: 1,379 tests passing (0 failures), Gate PASS.
 
 ## 3. Active Tickets Roadmap
-- [x] **Ticket 1.1**: Base Error Hierarchy & Runtime Error Processor (`src/shared/errors/`) [DONE]
-- [x] **Ticket 1.2**: Structured Logging & Tracing Infrastructure (`src/shared/logger/`) [DONE]
-- [x] **Ticket 1.3**: Pure Technical Config & Redis Connection Kernel (`src/shared/config/`, `src/shared/redis/`, `#shared`) [DONE]
+- [x] **Ticket 2.1**: Identity Errors & Internal DB Layer (`internal/db/`, `internal/errors.js`) [DONE]
+- [x] **Ticket 2.2**: Internal Services & Cookie Management (`internal/services/`, `internal/cookies.js`) [DONE]
+- [x] **Ticket 2.3**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`) [DONE]

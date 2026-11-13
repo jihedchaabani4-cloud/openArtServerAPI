@@ -35,6 +35,9 @@ Methods and dependencies are parsed from the code (best effort). "Owns" comes fr
 | `QueueDispatchError` | `src/services` | - | - | `name`, `code`, `statusCode`, `cause`, `attempts` | - | 1 |
 | `UseCaseService` | `src/services` | - | `prepareAndEnqueue`, `assertPaidJobHasHold`, `getHoldTTLForUseCase`, `startHoldHeartbeat`, `extendHoldHeartbeat`, `settlePreparedBilling`, `rollbackPreparedBilling`, `executeQueuedUseCase`, `runUseCase`, `getUseCase`, `listUseCases` | `walletService`, `pricingService`, `jobQueueService`, `billingRuntime` | `src/container.js` | 4 |
 | `InMemoryWalletService` | `src/services` | In-memory test double for unit testing Two-Phase Wallet reservation lifecycle. | `setBalance`, `getBalance`, `reserve`, `extendHold`, `commit`, `release`, `rollback`, `reapExpiredHolds` | `balances`, `reservations`, `HOLD_TTL_MS` | - | 0 |
+| `AuthService` | `src/systems/identity/internal/services` | System 5: Identity & Auth | - | - | - | 4 |
+| `OAuthService` | `src/systems/identity/internal/services` | System 5: Identity & Auth | - | - | - | 1 |
+| `OwnershipService` | `src/systems/identity/internal/services` | System 5: Identity & Auth | - | - | - | 2 |
 | `NodeSafetyService` | `src/v2/nodes/safety` | - | - | - | - | 4 |
 
-Services: 30. Without @owns: 21.
+Services: 33. Without @owns: 21.

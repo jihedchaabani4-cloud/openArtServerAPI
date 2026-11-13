@@ -1,21 +1,29 @@
-import express from "express";
-import { signup, login, googleRedirect, googleCallback, getMe, logout, microsoftRedirect, getWalletBalance } from "../controllers/authController.js";
-import { rateLimit } from "../src/middleware/rateLimit.js";
+/**
+ * Legacy Re-export for authRoutes.
+ * Canonical gateway now lives in src/systems/identity/public/api.js (#identity/api)
+ */
+import {
+  identityRouter,
+  signup,
+  login,
+  googleRedirect,
+  googleCallback,
+  getMe,
+  logout,
+  microsoftRedirect,
+  getWalletBalance,
+} from "../src/systems/identity/public/api.js";
 
-const router = express.Router();
+export {
+  identityRouter,
+  signup,
+  login,
+  googleRedirect,
+  googleCallback,
+  getMe,
+  logout,
+  microsoftRedirect,
+  getWalletBalance,
+};
 
-// Email / Password
-router.post("/signup", rateLimit("signupIp"), signup);
-router.post("/login", rateLimit("loginIp"), rateLimit("loginEmail"), login);
-
-// OAuth flows (both return to the same callback)
-router.get("/google", googleRedirect);
-router.get("/microsoft", microsoftRedirect);
-router.get("/callback", googleCallback);
-
-// Session management
-router.get("/me", getMe);
-router.post("/logout", logout);
-router.get("/wallet/balance", getWalletBalance);
-
-export default router;
+export default identityRouter;

@@ -1,5 +1,15 @@
-export { MediaUploadService } from "./MediaUploadService.js";
+/**
+ * Media Ingestion Entry File (Legacy Re-export)
+ *
+ * Canonical implementation now lives in Media & Storage System (#media/tools).
+ */
+
 export {
+    MediaUploadService,
+    MediaInspector,
+    SourceReader,
+    SourceResolver,
+    SourcePolicy,
     DEFAULT_UPLOAD_POLICY,
     ELEMENT_REFERENCE_UPLOAD_POLICY,
     ELEMENT_SHEET_UPLOAD_POLICY,
@@ -7,14 +17,8 @@ export {
     CHARACTER_SHEET_UPLOAD_POLICY,
     CHARACTER_DETAIL_UPLOAD_POLICY,
     UPLOAD_POLICIES,
-} from "./UploadPolicy.js";
-export {
     ValidationError,
     UploadError,
     QuotaError,
     createPayloadTooLargeError,
-} from "./MediaUploadErrors.js";
-export { SourcePolicy } from "./SourcePolicy.js";
-export { SourceReader } from "./SourceReader.js";
-export { SourceResolver } from "./SourceResolver.js";
-export { MediaInspector } from "./MediaInspector.js";
+} from "#media/tools";

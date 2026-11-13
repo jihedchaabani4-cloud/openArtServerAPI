@@ -17,8 +17,15 @@ Track progress of all 12 Parties and atomic tickets.
   - [x] **Ticket 2.1**: Identity Errors & Internal DB Layer (`internal/db/`, `internal/errors.js`) [DONE]
   - [x] **Ticket 2.2**: Internal Services & Cookie Management (`internal/services/`, `internal/cookies.js`) [DONE]
   - [x] **Ticket 2.3**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`) [DONE]
-- [ ] **Partie 03: System 4 — Media & Storage (`src/systems/media/`)**
-- [ ] **Partie 04: System 3 — Billing & Wallet (`src/systems/billing/`)**
+- [x] **Partie 03: System 4 — Media & Storage (`src/systems/media/`)** (COMPLETED)
+  - [x] **Ticket 3.1**: Save-Type Registry & Storage Provider Abstraction (`internal/saveTypes.js`, `internal/storage/`) [DONE]
+  - [x] **Ticket 3.2**: Media DB Layer (`internal/db/`) [DONE]
+  - [x] **Ticket 3.3**: Ingestion, Inspection & Lifecycle Services (`internal/ingestion/`, `internal/services/`) [DONE]
+  - [x] **Ticket 3.4**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`) [DONE]
+- [ ] **Partie 04: System 3 — Billing & Wallet (`src/systems/billing/`)** (READY)
+  - [ ] **Ticket 4.1**: Billing Errors & Internal DB Layer (`internal/db/`, `internal/errors.js`)
+  - [ ] **Ticket 4.2**: Two-Phase Credit Hold & Pricing Services (`internal/services/`)
+  - [ ] **Ticket 4.3**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`)
 - [ ] **Partie 05: System 2 — Models Management (`src/systems/models/`)**
 - [ ] **Partie 06: System 6 — Characters (`src/systems/characters/`)**
 - [ ] **Partie 07: System 7 — Elements (`src/systems/elements/`)**

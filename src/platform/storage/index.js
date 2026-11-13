@@ -1,15 +1,19 @@
 /**
  * Storage Business System Entry File (Rule 3)
  *
- * Public surface:
+ * Public surface re-exported from Media & Storage System (#media/tools):
  * - StorageService: Canonical storage facade class
  * - StorageError, StorageValidationError: System error hierarchy (Rule 8)
  * - InMemoryStorageProvider: In-memory provider (Test-Only, OD-STOR-4)
  */
 
-export { StorageService } from "./StorageService.js";
-export { createStorageService } from "./storageFactory.js";
-export { StorageError, StorageValidationError } from "./StorageErrors.js";
-
-// InMemoryStorageProvider: In-memory provider (Test-Only, OD-STOR-4)
-export { InMemoryStorageProvider } from "./providers/InMemoryStorageProvider.js";
+export {
+    StorageService,
+    createStorageService,
+    StorageError,
+    StorageValidationError,
+    InMemoryStorageProvider,
+    SupabaseStorageProvider,
+    StoragePathResolver,
+    storagePathResolver,
+} from "#media/tools";

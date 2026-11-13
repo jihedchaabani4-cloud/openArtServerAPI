@@ -8,13 +8,14 @@
 //   node scripts/arch-check.cjs --report           list ALL current violations + cross-layer imports
 //   node scripts/arch-check.cjs --init-baseline    create arch-baseline.json (once, human reviews counts)
 //   node scripts/arch-check.cjs --shrink-baseline  lower the baseline after fixing violations (never raises)
+//   node scripts/arch-check.cjs --seed-rule <ID>   seed initial baseline entries for a newly introduced rule
 const fs = require('fs');
 const path = require('path');
 const ratchet = require('./lib/ratchet.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const BASELINE = path.join(ROOT, 'arch-baseline.json');
-const SKIP_DIRS = new Set(['node_modules', '.git', 'coverage', 'dist', 'build', '.next', 'tests', 'test', '__tests__', 'scripts', 'docs', 'supabase']);
+const SKIP_DIRS = new Set(['node_modules', '.git', 'coverage', 'dist', 'build', '.next', 'tests', 'test', '__tests__', 'scripts', 'docs', 'supabase', '.scratch']);
 const CODE_DIRS = ['src', 'routes', 'controllers', 'middleware', 'lib', 'services', 'utils', 'config'];
 
 const rel = (p) => path.relative(ROOT, p).split(path.sep).join('/');
@@ -129,7 +130,10 @@ function checkRuleR10(f, exceptions = loadExceptions()) {
       const subpath = aliasMatch[2] || '';
       if (isKnownSystem(aliasSys)) {
         targetSys = aliasSys;
-        const isPublic = subpath === '' || subpath === 'index' || subpath === 'index.js';
+        // Two-Gateway Rule: only /api or /tools (or /api.js, /tools.js) allowed externally
+        const isPublic = subpath === 'api' || subpath === 'tools' || subpath === 'api.js' || subpath === 'tools.js' ||
+                         // Backward compatibility during migration for index
+                         subpath === '' || subpath === 'index' || subpath === 'index.js';
         if (!isPublic && fromSys !== targetSys) {
           isDeep = true;
         }
@@ -150,11 +154,9 @@ function checkRuleR10(f, exceptions = loadExceptions()) {
           const pathSys = sysRelMatch[1];
           const subpath = sysRelMatch[2] || '';
           targetSys = pathSys;
-          const isPublic = subpath === '' ||
-                           subpath === 'index' ||
-                           subpath === 'index.js' ||
-                           subpath === 'index.cjs' ||
-                           subpath === 'index.mjs';
+          const isPublic = subpath === 'public/api.js' || subpath === 'public/tools.js' ||
+                           subpath === 'public/api' || subpath === 'public/tools' ||
+                           subpath === '' || subpath === 'index' || subpath === 'index.js';
           if (!isPublic && fromSys !== targetSys) {
             isDeep = true;
           }
@@ -170,6 +172,182 @@ function checkRuleR10(f, exceptions = loadExceptions()) {
   }
 
   return hits;
+}
+
+function checkRuleR11(f) {
+  // R11: inside src/systems/<name>/internal/**, forbid imports of its own public/api.js or public/tools.js (Rule 7)
+  const match = f.rel.match(/^src\/systems\/([^/]+)\/internal\//);
+  if (!match) return [];
+  const sys = match[1];
+  const hits = [];
+  for (const s of specifiers(f)) {
+    if (s.spec === `#${sys}/api` || s.spec === `#${sys}/tools` ||
+        s.spec.includes(`/systems/${sys}/public/`)) {
+      hits.push({ line: s.line, text: s.text });
+    }
+  }
+  return hits;
+}
+
+function checkRuleR12(f) {
+  // R12: database & external SDK isolation inside src/systems/
+  // DB clients (supabase, prisma, pg, mongoose) and cloud storage SDKs (S3, R2)
+  // may only be imported inside src/systems/<name>/internal/db/ or dedicated storage adapter
+  if (!f.rel.startsWith('src/systems/')) return [];
+  if (f.rel.includes('/internal/db/') || f.rel.includes('/internal/storage/')) return [];
+
+  const hits = [];
+  for (const s of specifiers(f)) {
+    if (/@supabase\/|supabase|@prisma\/|prisma|\bpg\b|mongoose|@aws-sdk\//i.test(s.spec)) {
+      hits.push({ line: s.line, text: s.text });
+    }
+  }
+  return hits;
+}
+
+function checkRuleR13(f) {
+  // R13: express and web middleware isolated to src/app.js and src/systems/<name>/public/api.js
+  if (!f.rel.startsWith('src/systems/')) return [];
+  if (f.rel.endsWith('/public/api.js') || f.rel.endsWith('/public/api')) return [];
+
+  const hits = [];
+  for (const s of specifiers(f)) {
+    if (/^express(\/.*)?$|^multer$|^cookie-parser$/.test(s.spec)) {
+      hits.push({ line: s.line, text: s.text });
+    }
+  }
+  return hits;
+}
+
+function checkRuleR15(packageJsonPath = path.join(ROOT, 'package.json')) {
+  // R15: Validate package.json #imports for src/systems/
+  if (!fs.existsSync(packageJsonPath)) return [];
+  try {
+    const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+    const imports = pkg.imports || {};
+    const violations = [];
+    for (const [key, target] of Object.entries(imports)) {
+      if (typeof target === 'string' && target.includes('/systems/')) {
+        if (key.includes('*') || target.includes('*')) {
+          violations.push({ line: 1, text: `Wildcard system alias forbidden: ${key} -> ${target}` });
+        } else if (!target.endsWith('/public/api.js') && !target.endsWith('/public/tools.js')) {
+          violations.push({ line: 1, text: `System alias must point to public/api.js or public/tools.js: ${key} -> ${target}` });
+        }
+      }
+    }
+    return violations;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Finds static import cycles across codebase files.
+ */
+function findImportCycles(files, packageImports = null) {
+  const pkg = packageImports || (fs.existsSync(path.join(ROOT, 'package.json'))
+    ? JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).imports || {}
+    : {});
+
+  const known = new Set(files.map((f) => f.rel));
+  const normalizedKnown = new Map();
+  for (const f of files) {
+    normalizedKnown.set(f.rel.toLowerCase(), f.rel);
+  }
+
+  function resolveAlias(spec) {
+    for (const [k, v] of Object.entries(pkg)) {
+      if (k.includes('*')) {
+        const [pre, post] = k.split('*');
+        if (spec.startsWith(pre) && spec.endsWith(post)) {
+          const mid = spec.slice(pre.length, spec.length - post.length);
+          return v.replace('*', mid).replace(/^\.\//, '');
+        }
+      } else if (k === spec) {
+        return v.replace(/^\.\//, '');
+      }
+    }
+    return null;
+  }
+
+  const edges = new Map();
+  for (const f of files) {
+    const out = new Set();
+    for (const s of specifiers(f)) {
+      // Exclude dynamic import() to focus on static execution load-order cycles
+      if (/import\s*\(/.test(s.text)) continue;
+
+      let r = null;
+      if (s.spec.startsWith('.')) {
+        r = path.posix.normalize(path.posix.join(path.posix.dirname(f.rel), s.spec));
+      } else if (s.spec.startsWith('#')) {
+        r = resolveAlias(s.spec);
+      }
+      if (!r) continue;
+
+      const candidates = [r, r + '.js', r + '/index.js'];
+      let hit = candidates.find((c) => known.has(c));
+      if (!hit) {
+        // Case-insensitive fallback
+        const lowerCandidate = candidates.map(c => c.toLowerCase()).find(c => normalizedKnown.has(c));
+        if (lowerCandidate) {
+          hit = normalizedKnown.get(lowerCandidate);
+        }
+      }
+
+      if (hit && hit !== f.rel) {
+        out.add(hit);
+      }
+    }
+    edges.set(f.rel, [...out]);
+  }
+
+  // Tarjan's Strongly Connected Components
+  let idx = 0;
+  const stack = [];
+  const onStack = new Set();
+  const indices = new Map();
+  const lowlinks = new Map();
+  const cycles = [];
+
+  function strongConnect(v) {
+    indices.set(v, idx);
+    lowlinks.set(v, idx);
+    idx++;
+    stack.push(v);
+    onStack.add(v);
+
+    for (const w of edges.get(v) || []) {
+      if (!indices.has(w)) {
+        strongConnect(w);
+        lowlinks.set(v, Math.min(lowlinks.get(v), lowlinks.get(w)));
+      } else if (onStack.has(w)) {
+        lowlinks.set(v, Math.min(lowlinks.get(v), indices.get(w)));
+      }
+    }
+
+    if (lowlinks.get(v) === indices.get(v)) {
+      const component = [];
+      let w;
+      do {
+        w = stack.pop();
+        onStack.delete(w);
+        component.push(w);
+      } while (w !== v);
+
+      if (component.length > 1) {
+        cycles.push(component);
+      }
+    }
+  }
+
+  for (const v of edges.keys()) {
+    if (!indices.has(v)) {
+      strongConnect(v);
+    }
+  }
+
+  return cycles;
 }
 
 const grep = (file, regex) => {
@@ -237,8 +415,23 @@ const RULES = [
   },
   {
     id: 'R10',
-    desc: 'outside src/systems/<name>/, only index.js or #<name> may be imported',
+    desc: 'outside src/systems/<name>/, only public/api.js, public/tools.js, or index.js may be imported',
     run: (f) => checkRuleR10(f),
+  },
+  {
+    id: 'R11',
+    desc: 'inside src/systems/<name>/internal/, forbidden to import own public/api.js or public/tools.js',
+    run: (f) => checkRuleR11(f),
+  },
+  {
+    id: 'R12',
+    desc: 'database and storage clients isolated strictly to internal/db/ or internal/storage/',
+    run: (f) => checkRuleR12(f),
+  },
+  {
+    id: 'R13',
+    desc: 'express and web frameworks isolated strictly to public/api.js',
+    run: (f) => checkRuleR13(f),
   },
 ];
 
@@ -271,6 +464,31 @@ function collect() {
   }
   const mig = migrationViolations();
   violations.push(...mig.violations);
+
+  // R14: Static import cycles across codebase
+  const cycles = findImportCycles(files);
+  for (const cycle of cycles) {
+    const sorted = [...cycle].sort();
+    const cycleSummary = sorted.join(' <-> ');
+    for (const fileRel of sorted) {
+      violations.push({
+        rule: 'R14',
+        key: `R14|${fileRel}`,
+        detail: `${fileRel}:1  Import cycle: ${cycleSummary.slice(0, 100)}...`,
+      });
+    }
+  }
+
+  // R15: package.json #imports validation
+  const pkgViolations = checkRuleR15();
+  for (const pv of pkgViolations) {
+    violations.push({
+      rule: 'R15',
+      key: 'R15|package.json',
+      detail: `package.json:1  ${pv.text}`,
+    });
+  }
+
   return { files, violations, note: mig.note };
 }
 
@@ -288,20 +506,24 @@ function layerReport(files) {
 }
 
 function summary(violations, baseline, fresh) {
-  const ids = [...new Set([...RULES.map((r) => r.id), 'R6'])].sort((a, b) => {
+  const allRuleIds = ['R1', 'R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11', 'R12', 'R13', 'R14', 'R15'];
+  const ids = allRuleIds.sort((a, b) => {
     const numA = parseInt(a.replace(/\D/g, ''), 10);
     const numB = parseInt(b.replace(/\D/g, ''), 10);
     return numA - numB;
   });
   const desc = Object.fromEntries(RULES.map((r) => [r.id, r.desc]));
   desc.R6 = 'migrations with SECURITY DEFINER must REVOKE FROM PUBLIC, anon, authenticated';
+  desc.R14 = 'zero static circular dependencies across codebase modules';
+  desc.R15 = 'package.json #imports must map systems directly to public/api.js or public/tools.js';
+
   const now = {}; const base = {}; const neu = {};
   for (const v of violations) now[v.rule] = (now[v.rule] || 0) + 1;
   for (const [k, n] of Object.entries(baseline || {})) base[k.split('|')[0]] = (base[k.split('|')[0]] || 0) + n;
   for (const x of fresh) neu[x.key.split('|')[0]] = (neu[x.key.split('|')[0]] || 0) + (x.found - x.allowed);
   console.log('Rule  Now  Baseline  New  Description');
   for (const id of ids) {
-    console.log(`${id.padEnd(5)} ${String(now[id] || 0).padStart(3)}  ${String(base[id] || 0).padStart(8)}  ${String(neu[id] || 0).padStart(3)}  ${desc[id]}`);
+    console.log(`${id.padEnd(5)} ${String(now[id] || 0).padStart(3)}  ${String(base[id] || 0).padStart(8)}  ${String(neu[id] || 0).padStart(3)}  ${desc[id] || ''}`);
   }
 }
 
@@ -328,6 +550,23 @@ function main() {
   }
   const baseline = ratchet.loadBaseline(BASELINE);
   if (!baseline) { console.error('No arch-baseline.json. A human must run: node scripts/arch-check.cjs --init-baseline'); return 1; }
+
+  if (arg === '--seed-rule') {
+    const targetRule = process.argv[3];
+    if (!targetRule) { console.error('Usage: --seed-rule <RULE_ID>'); return 1; }
+    const updatedBaseline = { ...baseline };
+    let seededCount = 0;
+    for (const [k, v] of Object.entries(counts)) {
+      if (k.startsWith(`${targetRule}|`) && !updatedBaseline[k]) {
+        updatedBaseline[k] = v;
+        seededCount++;
+      }
+    }
+    ratchet.writeBaseline(BASELINE, updatedBaseline);
+    console.log(`Seeded ${seededCount} baseline entries for rule ${targetRule}.`);
+    return 0;
+  }
+
   if (arg === '--shrink-baseline') {
     const next = ratchet.shrink(counts, baseline);
     ratchet.writeBaseline(BASELINE, next);
@@ -361,6 +600,11 @@ if (require.main === module) {
     loadExceptions,
     isExempt,
     checkRuleR10,
+    checkRuleR11,
+    checkRuleR12,
+    checkRuleR13,
+    checkRuleR15,
+    findImportCycles,
     collect,
   };
 }

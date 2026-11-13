@@ -3,7 +3,7 @@
  * Formats model catalog entries for client consumption, calculating default costs and caching the presentation model.
  */
 
-import { calculateCost, getCatalog } from "./index.js";
+import { calculateCost, getCatalog } from "./catalogQueries.js";
 
 function safeCalculateCost(modelKey, input) {
     try {
@@ -42,8 +42,4 @@ export function getModelConfig(options = {}) {
 
     cachedModelConfig = { models };
     return cachedModelConfig;
-}
-
-export function clearModelConfigCache() {
-    cachedModelConfig = null;
 }

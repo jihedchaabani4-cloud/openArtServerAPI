@@ -9,7 +9,7 @@ import {
   estimateNodeBillingAmount,
   getRunBillingAccumulator,
   getGateways,
-} from "./workflowRunner.js";
+} from "./nodeBilling.js";
 import { jobQueueService } from "../../services/jobQueueService.js";
 import { db } from "../../container.js";
 import { nodeFailure, nodeSuccess } from "../runtime/nodeEnvelope.js";

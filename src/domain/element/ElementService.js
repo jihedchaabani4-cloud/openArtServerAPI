@@ -21,7 +21,7 @@ import { MediaRepository } from "../../db/MediaRepository.js";
 import { WorkflowMediaRepository } from "../../db/WorkflowMediaRepository.js";
 import { ElementMediaService } from "./ElementMediaService.js";
 import { ElementAnalysisService } from "./ElementAnalysisService.js";
-import promptBuilderProService from "./promptBuilderProService.js";
+import promptBuilderProService, { extractElementTokens } from "./promptBuilderProService.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
 
 const logger = createLogger("element_service");
@@ -546,7 +546,29 @@ export class ElementService {
             if (elem) resolvedElements.push(elem);
         }
 
-        return promptBuilderProService.buildMultiElementPayload({ userPrompt, elements: resolvedElements, projectId });
+        // Resolve @ElementName tokens from DB using this instance's getElementContextForPrompt
+        if (projectId && typeof userPrompt === "string") {
+            const tokens = extractElementTokens(userPrompt);
+            for (const token of tokens) {
+                try {
+                    const ctx = await this.getElementContextForPrompt({ nameOrId: token, projectId });
+                    if (ctx) {
+                        resolvedElements.push({
+                            name:             ctx.name,
+                            description:      ctx.description,
+                            reference_images: ctx.referenceImageUrls,
+                            _contextNote:     ctx.contextNote,
+                        });
+                    } else {
+                        logger.warn({ token, projectId }, `[ElementService] @${token} not found in project ${projectId} — skipping`);
+                    }
+                } catch (err) {
+                    logger.warn({ token, projectId, error: err.message }, `[ElementService] Failed to resolve @${token}`);
+                }
+            }
+        }
+
+        return promptBuilderProService.buildMultiElementPayload({ userPrompt, elements: resolvedElements });
     }
 }
 

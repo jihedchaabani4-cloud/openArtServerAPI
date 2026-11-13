@@ -1,11 +1,9 @@
 /**
  * Prompt Builder Pro Service
  * Assembles non-bleeding prompt payloads for gpt-image-2 / Flux.
- * V1: Supports @ElementName token resolution via elementService.
+ * Pure service: does not perform DB lookups directly. Elements are passed as plain DTOs.
  * Feature: 018-element-reference-system
  */
-
-import { getElementContextForPrompt } from "./elementService.js";
 
 // ─── @ElementName Token Resolver ─────────────────────────────────────────────
 
@@ -15,7 +13,8 @@ import { getElementContextForPrompt } from "./elementService.js";
  * @param {string} prompt
  * @returns {string[]} Array of matched token names (without @)
  */
-function extractElementTokens(prompt) {
+export function extractElementTokens(prompt) {
+    if (!prompt || typeof prompt !== "string") return [];
     // Match @"Quoted Name" or @SingleWord (letters, numbers, underscores)
     const matches = [...prompt.matchAll(/@"([^"]+)"|@([a-zA-Z0-9_]+)/g)];
     return matches.map(m => m[1] || m[2]);
@@ -26,7 +25,8 @@ function extractElementTokens(prompt) {
  * @param {string} prompt
  * @returns {string}
  */
-function stripElementTokens(prompt) {
+export function stripElementTokens(prompt) {
+    if (!prompt || typeof prompt !== "string") return "";
     return prompt
         .replace(/@"[^"]+"/g, "")
         .replace(/@[a-zA-Z0-9_]+/g, "")
@@ -34,22 +34,19 @@ function stripElementTokens(prompt) {
         .trim();
 }
 
-
-
 // ─── Service Class ────────────────────────────────────────────────────────────
 
 export class PromptBuilderProService {
     /**
      * Build a multi-element scene generation prompt payload.
-     * Resolves @ElementName tokens from the database when projectId is provided.
+     * Pure function: elements must be pre-resolved by caller.
      *
      * @param {Object} params
      * @param {string} params.userPrompt         - The main user scene description (may contain @ElementName)
-     * @param {Array<Object>} [params.elements]  - Direct element objects (bypass DB lookup)
-     * @param {string} [params.projectId]        - Project scope for @token resolution
+     * @param {Array<Object>} [params.elements]  - Resolved element objects
      * @returns {Promise<{ compiled_prompt, reference_sheets, negative_prompt, referenceImages, contextNote, scenePrompt }>}
      */
-    async buildMultiElementPayload({ userPrompt, elements = [], projectId }) {
+    async buildMultiElementPayload({ userPrompt, elements = [] }) {
         if (!userPrompt || typeof userPrompt !== "string") {
             throw new Error("ERR_INVALID_PARAMS: userPrompt is required");
         }
@@ -58,28 +55,6 @@ export class PromptBuilderProService {
         const referenceSheets = [];
         const contextNotes    = [];
         const resolvedElements = [...elements];
-
-        // ── Resolve @ElementName tokens from DB (when projectId provided) ──
-        if (projectId) {
-            const tokens = extractElementTokens(userPrompt);
-            for (const token of tokens) {
-                try {
-                    const ctx = await getElementContextForPrompt({ nameOrId: token, projectId });
-                    if (ctx) {
-                        resolvedElements.push({
-                            name:               ctx.name,
-                            description:        ctx.description,
-                            reference_images:   ctx.referenceImageUrls,
-                            _contextNote:       ctx.contextNote,
-                        });
-                    } else {
-                        console.warn(`[promptBuilderProService] @${token} not found in project ${projectId} — skipping`);
-                    }
-                } catch (err) {
-                    console.warn(`[promptBuilderProService] Failed to resolve @${token}:`, err.message);
-                }
-            }
-        }
 
         // ── Strip @tokens from scene prompt ──
         const scenePrompt = stripElementTokens(userPrompt);

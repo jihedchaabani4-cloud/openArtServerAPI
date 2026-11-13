@@ -36,48 +36,10 @@ try {
   modelsLogger.error({ error: err.message }, `Registry boot initialization error: ${err.message}`);
 }
 
-// --- getCatalog ---------------------------------------------------------------
+import { getCatalog, calculateCost } from "./catalogQueries.js";
 
-/**
- * Returns catalog of available models matching optional filters.
- * Exposes a safe, frontend-ready Model contract without leaking provider internals.
- * Single canonical parameter representation: parameters.
- */
-export function getCatalog(filters = {}) {
-  const { models } = getRegistry();
-  const entries = [];
-
-  for (const [modelId, model] of models.entries()) {
-    const isSystemOnly = Boolean(model.systemOnly || model.visibility === "internal");
-
-    // Filter out system-only models by default unless explicitly requested
-    if (!filters.includeSystem && !filters.systemOnly && isSystemOnly) continue;
-    if (filters.systemOnly && !isSystemOnly) continue;
-
-    const schema = model.canonicalInputs || getModelSchemaInternal(model);
-
-    const entry = {
-      id: model.id,
-      modelId: model.id,
-      modelFamily: model.id,
-      displayName: model.displayName,
-      description: model.description || "",
-      iconUrl: model.iconUrl || "",
-      domain: model.domain,
-      parameters: schema,
-      retailPricing: model.retailPricing || null,
-      status: model.status || "active",
-      version: model.version || "1.0.0",
-    };
-
-    if (filters.domain && entry.domain !== filters.domain) continue;
-    if (filters.status && entry.status !== filters.status) continue;
-
-    entries.push(entry);
-  }
-
-  return entries;
-}
+// Re-export query functions
+export { getCatalog, calculateCost };
 
 // --- getModelSchema -----------------------------------------------------------
 
@@ -150,48 +112,6 @@ export function validateInput(modelFamily, rawInput = {}) {
   return validateCanonicalInput(modelContract.parameters, rawInput);
 }
 
-// --- calculateCost ------------------------------------------------------------
-
-/**
- * Computes fixed retail credit cost for a model based on semantic parameters.
- *
- * MODEL-FIRST ARCHITECTURE:
- * External callers supply ONLY modelFamily and canonical semantic input.
- * The configured provider and its execution route are resolved entirely internally.
- * Guarantees quote implementation === execution implementation.
- *
- * @param {string} modelFamily
- * @param {object} cleanInput
- * @param {object} [options={}]
- * @returns {number} Integer credit cost
- */
-export function calculateCost(modelFamily, cleanInput = {}, options = {}) {
-  const { model, route, planIdentity } = resolveExecutionPlan(modelFamily, cleanInput, options);
-  validateBindingConstraints(route, cleanInput);
-  const cost = calculateRetailCredits(model, cleanInput, route);
-
-  modelsLogger.info(
-    {
-      modelFamily,
-      providerId: route.providerId,
-      routeId: route.id || route.routeId || "default",
-      credits: cost,
-      planIdentity: planIdentity?.id,
-      event: LogEvents.MODELS_COST_CALCULATED,
-    },
-    `Cost calculated: ${cost} credits for ${modelFamily} via ${route.providerId}`
-  );
-
-  if (options.returnQuote || options.includePlanIdentity) {
-    return {
-      credits: cost,
-      planIdentity: planIdentity?.id || null,
-      planDetails: planIdentity || null,
-    };
-  }
-
-  return cost;
-}
 
 // --- estimatePrice ------------------------------------------------------------
 

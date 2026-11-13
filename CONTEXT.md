@@ -15,17 +15,17 @@
 - [x] **Partie 03: System 4 — Media & Storage (`src/systems/media/`)** (1,393 tests pass, `#media/api`, `#media/tools`)
 - [x] **Partie 04: System 3 — Billing & Wallet (`src/systems/billing/`)** (1,405 tests pass, `#billing/api`, `#billing/tools`)
 - [x] **Partie 05: System 2 — Models Management (`src/systems/models/`)** (1,418 tests pass, `#models/api`, `#models/tools`)
+- [x] **Partie 06: System 6 — Characters (`src/systems/characters/`)** (1,431 tests pass, `#characters/api`, `#characters/tools`)
 
-## 3. Active Phase: Partie 06 (READY) — System 6: Characters (`src/systems/characters/`)
-- **Goal**: Refactor `Character Domain & Controller` (currently 0.05 cohesion) into a clean, high-cohesion Business System managing Character CRUD, traits, and reference media via `#media/tools`, while removing direct AI generation logic (`CharacterGenerationService`).
+## 3. Active Phase: Partie 07 (READY) — System 7: Elements (`src/systems/elements/`)
+- **Goal**: Isolate `Elements` into `src/systems/elements/` owning element CRUD, guidelines, and trait extraction, using `#media/tools` for element images.
 - **Target Boundaries**:
-  - `src/systems/characters/public/api.js` (`#characters/api`) for `/api/characters/*` CRUD routes.
-  - `src/systems/characters/public/tools.js` (`#characters/tools`) for inter-system operations: `getCharacterPromptContext`, `validateCharacterExists`, `attachCharacterSheetResult`.
-  - Subpath imports `#characters/api` and `#characters/tools` in `package.json#imports`.
+  - `src/systems/elements/public/api.js` (`#elements/api`) for `/api/elements/*` CRUD routes.
+  - `src/systems/elements/public/tools.js` (`#elements/tools`) for inter-system operations: `getElementPromptContext`, `validateElementsExist`.
+  - Subpath imports `#elements/api` and `#elements/tools` in `package.json#imports`.
   - Zero external imports of `internal/`.
-- **Suite Status**: 1,418 tests passing (0 failures), Gate PASS.
+- **Suite Status**: 1,431 tests passing (0 failures), Gate PASS.
 
-## 4. Active Tickets Roadmap (Partie 06)
-- [ ] **Ticket 6.1**: Character Service, Media Service & Repositories (`internal/services/`, `internal/db/`, `internal/errors.js`)
-- [ ] **Ticket 6.2**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`)
-- [ ] **Ticket 6.3**: Deprecate Direct Generation Calls & Reroute to System 1 Generation (`characterSheetUseCase`)
+## 4. Active Tickets Roadmap (Partie 07)
+- [ ] **Ticket 7.1**: Element Service, Media Service, Repositories & Trait Extraction (`internal/services/`, `internal/db/`, `internal/errors.js`)
+- [ ] **Ticket 7.2**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`)

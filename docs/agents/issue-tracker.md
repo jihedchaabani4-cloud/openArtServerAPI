@@ -30,11 +30,13 @@ Track progress of all 12 Parties and atomic tickets.
   - [x] **Ticket 5.1**: Model Schemas, Registry & Pricing Calculation (`internal/registry/`, `internal/pricing/`, `internal/errors.js`) [DONE]
   - [x] **Ticket 5.2**: AI Provider Resolvers & Execution Adapters (`internal/providers/`, `internal/execution/`) [DONE]
   - [x] **Ticket 5.3**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`) [DONE]
-- [ ] **Partie 06: System 6 — Characters (`src/systems/characters/`)** (READY)
-  - [ ] **Ticket 6.1**: Character Service, Media Service & Repositories (`internal/services/`, `internal/db/`, `internal/errors.js`)
-  - [ ] **Ticket 6.2**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`)
-  - [ ] **Ticket 6.3**: Deprecate Direct Generation Calls & Reroute to System 1 Generation (`characterSheetUseCase`)
-- [ ] **Partie 07: System 7 — Elements (`src/systems/elements/`)**
+- [x] **Partie 06: System 6 — Characters (`src/systems/characters/`)** (COMPLETED)
+  - [x] **Ticket 6.1**: Character Service, Media Service & Repositories (`internal/services/`, `internal/db/`, `internal/errors.js`) [DONE]
+  - [x] **Ticket 6.2**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`) [DONE]
+  - [x] **Ticket 6.3**: Deprecate Direct Generation Calls & Reroute to System 1 Generation (`characterSheetUseCase`) [DONE]
+- [ ] **Partie 07: System 7 — Elements (`src/systems/elements/`)** (READY)
+  - [ ] **Ticket 7.1**: Element Service, Media Service, Repositories & Trait Extraction (`internal/services/`, `internal/db/`, `internal/errors.js`)
+  - [ ] **Ticket 7.2**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`)
 - [ ] **Partie 08: System 8 — Workspace (`src/systems/workspace/`)**
 - [ ] **Partie 09: System 1 — Generation & Workflows (`src/systems/generation/`)**
 - [ ] **Partie 10: Main Router Cutover & Legacy Folder Cleanup**

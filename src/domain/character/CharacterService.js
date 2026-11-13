@@ -1,4 +1,5 @@
 /**
+ * @owns System 6: Characters
  * CharacterService
  * Canonical owner of all Character entity operations, lifecycle, and domain orchestration.
  *

@@ -32,7 +32,9 @@
         "#billing/api": "./src/systems/billing/public/api.js",
         "#billing/tools": "./src/systems/billing/public/tools.js",
         "#models/api": "./src/systems/models/public/api.js",
-        "#models/tools": "./src/systems/models/public/tools.js"
+        "#models/tools": "./src/systems/models/public/tools.js",
+        "#characters/api": "./src/systems/characters/public/api.js",
+        "#characters/tools": "./src/systems/characters/public/tools.js"
     },
     "scripts": {
         "test": "node --import ./tests/setup-env.js --test \"tests/**/*.test.js\"",

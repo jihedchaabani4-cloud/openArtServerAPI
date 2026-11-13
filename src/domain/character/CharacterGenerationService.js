@@ -1,4 +1,5 @@
 /**
+ * @owns System 6: Characters
  * CharacterGenerationService
  * Dedicated Domain Service owning character AI generation orchestration:
  * - UseCase job dispatching for character 3-view turnaround sheet ("character-sheet-v1")

@@ -1,4 +1,5 @@
 /**
+ * @owns System 6: Characters
  * CharacterMediaService
  * Dedicated Domain Service owning character media storage and database orchestration.
  * Handles turnaround body sheet uploads, detail reference images, and media cleanup.

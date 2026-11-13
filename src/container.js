@@ -35,8 +35,7 @@ import { WorkflowBillingGateway } from "./infrastructure/billing/workflowBilling
 import { MediaService, MediaWorkflowLifecycleService } from "#platform/media/index.js";
 import { WorkflowLifecycleService } from "#platform/workflow/WorkflowService.js";
 import { MediaUploadService } from "#platform/media-ingestion/index.js";
-import { CharacterService } from "#domain/character/CharacterService.js";
-import { CharacterMediaService } from "#domain/character/CharacterMediaService.js";
+import { CharacterService, CharacterMediaService } from "#characters/tools";
 import { ElementService } from "#domain/element/ElementService.js";
 import { ElementMediaService } from "#domain/element/ElementMediaService.js";
 import { ElementAnalysisService } from "#domain/element/ElementAnalysisService.js";

@@ -20,9 +20,9 @@ Methods and dependencies are parsed from the code (best effort). "Owns" comes fr
 | `ProjectReadService` | `src/domain/project` | - | `getProjectData`, `getWorkflowByMedia` | `db`, `folderService` | `src/container.js` | 3 |
 | `ProjectService` | `src/domain/project` | - | `listUserProjects`, `createProject`, `updateProject`, `deleteProject` | `projectRepo` | `src/container.js` | 1 |
 | `TrashService` | `src/domain/trash` | Workflow trash lifecycle (move to trash, permanent delete dispatch, and restore) | `requestDelete`, `requestDeleteMany`, `restore`, `restoreAll` | `db`, `workflowService`, `elementService`, `characterService`, `authService` | `src/container.js` | 1 |
-| `PricingService` | `src/models/pricing` | Provides credit cost lookups and Redis caching for model pricing rules. | `getPrice`, `updateRule` | `supabase`, `redis` | `src/container.js` | 2 |
-| `LLMService` | `src/platform/ai` | - | `generate`, `generateText`, `generateJSON`, `analyzeVision`, `parseJSON` | `defaultModel` | - | 5 |
-| `PromptService` | `src/platform/ai` | - | `complete`, `completeJSON`, `checkPrompt`, `optimizePrompt`, `generateDnaFromPrompt`, `expandMinimalDna`, `processEditIntent`, `generateProfessionalPromptFromDna`, `generateNegativePrompt`, `generateSceneVariations` | `modelFamily` | `src/container.js` | 2 |
+| `PricingService` | `src/models/pricing` | Provides credit cost lookups and Redis caching for model pricing rules. | `getPrice`, `updateRule` | `supabase`, `redis` | `src/container.js` | 4 |
+| `LLMService` | `src/platform/ai` | - | `generate`, `generateText`, `generateJSON`, `analyzeVision`, `parseJSON` | `defaultModel` | - | 7 |
+| `PromptService` | `src/platform/ai` | - | `complete`, `completeJSON`, `checkPrompt`, `optimizePrompt`, `generateDnaFromPrompt`, `expandMinimalDna`, `processEditIntent`, `generateProfessionalPromptFromDna`, `generateNegativePrompt`, `generateSceneVariations` | `modelFamily` | `src/container.js` | 4 |
 | `FailedOpsService` | `src/platform/billing` | Legacy re-export for FailedOpsService. | - | - | `src/systems/billing/public/tools.js`, `src/workers/walletWorker.js` | 6 |
 | `WalletService` | `src/platform/billing` | Legacy re-export for WalletService. | - | - | `src/systems/billing/public/tools.js`, `src/workers/walletWorker.js` | 8 |
 | `MediaUploadService` | `src/platform/media-ingestion` | Stateless binary media validation, 4K WebP optimization, storage upload, and compensating discard. | `upload`, `discard` | `storageService` | `src/container.js`, `src/systems/media/public/tools.js` | 11 |

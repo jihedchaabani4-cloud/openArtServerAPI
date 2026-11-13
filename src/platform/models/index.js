@@ -1,13 +1,13 @@
 /**
  * Models Business System (#platform/models)
  *
- * Public surface for model registry, catalog presentation, parameter validation,
- * execution planning, pricing calculations, provider runtime execution,
- * and platform LLM / Prompt services.
+ * Legacy Platform Facade Re-export.
+ * Canonical gateway now lives in src/systems/models/public/tools.js (#models/tools)
+ * and src/systems/models/public/api.js (#models/api).
  */
 
-// Typed Errors (Rule 8) & Legacy Compatibility
 export {
+    // Typed Errors (Rule 8) & Legacy Compatibility
     ModelsError,
     ModelsValidationError,
     ModelsNotFoundError,
@@ -33,10 +33,8 @@ export {
     BindingOperationMismatchError,
     ConfigIntegrityError,
     NoEligibleBindingError,
-} from "./ModelsErrors.js";
 
-// Core Models Facade Capabilities
-export {
+    // Core Models Facade Capabilities
     getCatalog,
     getModelSchema,
     getSchema,
@@ -48,19 +46,18 @@ export {
     reloadRegistry,
     getRegistryStats,
     getModelConfig,
-} from "../../models/index.js";
 
-// Pricing Service
-export {
+    // Inter-system tools
+    validateModelInputs,
+    calculateOperationCost,
+    executeGeneration,
+    executeLLM,
+
+    // Pricing Service
     PricingService,
-} from "../../models/pricing/PricingService.js";
 
-// Platform AI, LLM & Prompt Services
-export {
+    // Platform AI, LLM & Prompt Services
     LLMService,
     llmService,
-} from "../ai/LLMService.js";
-
-export {
     PromptService,
-} from "../ai/PromptService.js";
+} from "#models/tools";

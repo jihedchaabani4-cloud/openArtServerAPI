@@ -26,11 +26,14 @@ Track progress of all 12 Parties and atomic tickets.
   - [x] **Ticket 4.1**: Billing Errors & Internal DB Layer (`internal/db/`, `internal/errors.js`) [DONE]
   - [x] **Ticket 4.2**: Two-Phase Credit Hold & Pricing Services (`internal/services/`) [DONE]
   - [x] **Ticket 4.3**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`) [DONE]
-- [ ] **Partie 05: System 2 — Models Management (`src/systems/models/`)** (READY)
-  - [ ] **Ticket 5.1**: Model Schemas, Registry & Pricing Calculation (`internal/registry/`, `internal/pricing/`)
-  - [ ] **Ticket 5.2**: AI Provider Resolvers & Execution Adapters (`internal/providers/`)
-  - [ ] **Ticket 5.3**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`)
-- [ ] **Partie 06: System 6 — Characters (`src/systems/characters/`)**
+- [x] **Partie 05: System 2 — Models Management (`src/systems/models/`)** (COMPLETED)
+  - [x] **Ticket 5.1**: Model Schemas, Registry & Pricing Calculation (`internal/registry/`, `internal/pricing/`, `internal/errors.js`) [DONE]
+  - [x] **Ticket 5.2**: AI Provider Resolvers & Execution Adapters (`internal/providers/`, `internal/execution/`) [DONE]
+  - [x] **Ticket 5.3**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`) [DONE]
+- [ ] **Partie 06: System 6 — Characters (`src/systems/characters/`)** (READY)
+  - [ ] **Ticket 6.1**: Character Service, Media Service & Repositories (`internal/services/`, `internal/db/`, `internal/errors.js`)
+  - [ ] **Ticket 6.2**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`)
+  - [ ] **Ticket 6.3**: Deprecate Direct Generation Calls & Reroute to System 1 Generation (`characterSheetUseCase`)
 - [ ] **Partie 07: System 7 — Elements (`src/systems/elements/`)**
 - [ ] **Partie 08: System 8 — Workspace (`src/systems/workspace/`)**
 - [ ] **Partie 09: System 1 — Generation & Workflows (`src/systems/generation/`)**

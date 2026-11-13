@@ -1,4 +1,5 @@
 /**
+ * @owns System 7: Elements
  * ElementService
  * Application / Domain Service for the AI Element Reference System — V1 Direct Save
  * Feature: 018-element-reference-system

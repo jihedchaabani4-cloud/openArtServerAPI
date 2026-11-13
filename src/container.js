@@ -36,9 +36,7 @@ import { MediaService, MediaWorkflowLifecycleService } from "#platform/media/ind
 import { WorkflowLifecycleService } from "#platform/workflow/WorkflowService.js";
 import { MediaUploadService } from "#platform/media-ingestion/index.js";
 import { CharacterService, CharacterMediaService } from "#characters/tools";
-import { ElementService } from "#domain/element/ElementService.js";
-import { ElementMediaService } from "#domain/element/ElementMediaService.js";
-import { ElementAnalysisService } from "#domain/element/ElementAnalysisService.js";
+import { ElementService, ElementMediaService, ElementAnalysisService } from "#elements/tools";
 import { ProjectReadService } from "#domain/project/ProjectReadService.js";
 import { ProjectService } from "#domain/project/ProjectService.js";
 import { GenerationService } from "#domain/generation/GenerationService.js";

@@ -1,4 +1,5 @@
 /**
+ * @owns System 7: Elements
  * ElementAnalysisService.js
  * Standalone AI Vision Analysis & Taste Profile Service.
  * Handles element media retrieval, multimodal LLM vision inspection via central LLMService,

@@ -34,10 +34,12 @@ Track progress of all 12 Parties and atomic tickets.
   - [x] **Ticket 6.1**: Character Service, Media Service & Repositories (`internal/services/`, `internal/db/`, `internal/errors.js`) [DONE]
   - [x] **Ticket 6.2**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`) [DONE]
   - [x] **Ticket 6.3**: Deprecate Direct Generation Calls & Reroute to System 1 Generation (`characterSheetUseCase`) [DONE]
-- [ ] **Partie 07: System 7 — Elements (`src/systems/elements/`)** (READY)
-  - [ ] **Ticket 7.1**: Element Service, Media Service, Repositories & Trait Extraction (`internal/services/`, `internal/db/`, `internal/errors.js`)
-  - [ ] **Ticket 7.2**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`)
-- [ ] **Partie 08: System 8 — Workspace (`src/systems/workspace/`)**
+- [x] **Partie 07: System 7 — Elements (`src/systems/elements/`)** (COMPLETED)
+  - [x] **Ticket 7.1**: Element Service, Media Service, Repositories & Trait Extraction (`internal/services/`, `internal/db/`, `internal/errors.js`) [DONE]
+  - [x] **Ticket 7.2**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`) [DONE]
+- [ ] **Partie 08: System 8 — Workspace (`src/systems/workspace/`)** (READY)
+  - [ ] **Ticket 8.1**: Project, Folder, and Trash Repositories, Services, and Errors (`internal/services/`, `internal/db/`, `internal/errors.js`)
+  - [ ] **Ticket 8.2**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`)
 - [ ] **Partie 09: System 1 — Generation & Workflows (`src/systems/generation/`)**
 - [ ] **Partie 10: Main Router Cutover & Legacy Folder Cleanup**
 - [ ] **Partie 11: Full Architecture Verification, Ratchet Zeroing & ADR Linking**

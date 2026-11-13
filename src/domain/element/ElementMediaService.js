@@ -1,4 +1,5 @@
 /**
+ * @owns System 7: Elements
  * ElementMediaService
  * Canonical owner of all Element media lifecycle, storage uploads, and media DB rows.
  *

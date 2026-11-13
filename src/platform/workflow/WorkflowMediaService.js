@@ -1,5 +1,6 @@
 /**
  * WorkflowMediaService
+ * @owns System 1: Generation & Workflows
  * Dedicated Platform Service owning workflow media associations:
  * - Setting and switching primary media for a workflow
  * - Detaching media variations into independent workflow containers

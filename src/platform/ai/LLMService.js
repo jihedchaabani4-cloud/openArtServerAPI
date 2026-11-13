@@ -1,6 +1,6 @@
 /**
  * LLMService.js
- * Central Platform Unified LLM & Multimodal Vision Service.
+ * @owns System 1: Generation & Workflows — Central Platform Unified LLM & Multimodal Vision Service.
  *
  * Single Source of Truth for all LLM operations across the platform
  * (Element Analysis, LLM Workflow Nodes, Prompt Engineering, and Vision).

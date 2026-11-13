@@ -1,11 +1,7 @@
-import express from "express";
-import * as videoController from "../controllers/videoController.js";
-import { requireAuth } from "../src/middleware/auth.js";
-import { rateLimit } from "../src/middleware/rateLimit.js";
+/**
+ * Video Router — Legacy Facade
+ *
+ * Re-exports videoRouter from System 1 Generation (#generation/api).
+ */
 
-const router = express.Router();
-
-/** POST /api/video/generated — Video generation via Video UseCase flow */
-router.post("/generated", requireAuth, rateLimit("videoGeneration"), videoController.generateVideo);
-
-export default router;
+export { videoRouter as default, videoRouter } from "#generation/api";

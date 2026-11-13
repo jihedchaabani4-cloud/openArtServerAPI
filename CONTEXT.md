@@ -18,18 +18,24 @@
 - [x] **Partie 06: System 6 — Characters (`src/systems/characters/`)** (1,431 tests pass, `#characters/api`, `#characters/tools`)
 - [x] **Partie 07: System 7 — Elements (`src/systems/elements/`)** (1,443 tests pass, `#elements/api`, `#elements/tools`)
 - [x] **Partie 08: System 8 — Workspace (`src/systems/workspace/`)** (1,454 tests pass, `#workspace/api`, `#workspace/tools`)
+- [x] **Partie 09: System 1 — Generation & Workflows (`src/systems/generation/`)** (1,461 tests pass, `#generation/api`, `#generation/tools`)
 
-## 3. Active Phase: Partie 09 (READY) — System 1: Generation & Workflows (`src/systems/generation/`)
-- **Goal**: Consolidate `UseCaseService`, `JobQueueService`, `UseCaseWorker`, `V2 Composable DAG Workflow Engine` (`workflowRunner`, `nodeExecutor`, `compileWorkflow`), and `PromptIntelligenceService` (`PromptBuilderProService`, skills) into `src/systems/generation/`.
+## 3. Active Phase: Partie 10 (READY) — Main Router Cutover & Legacy Folder Cleanup
+- **Goal**: Wire `src/app.js` exclusively to the `public/api.js` gateways of all 8 Business Systems and delete empty legacy horizontal folders.
 - **Target Boundaries**:
-  - `src/systems/generation/public/api.js` (`#generation/api`) for all generation, workflow runs, images, video, and prompt endpoints.
-  - `src/systems/generation/public/tools.js` (`#generation/tools`) for inter-system operations.
-  - Subpath imports `#generation/api` and `#generation/tools` in `package.json#imports`.
-  - Zero external imports of `internal/`.
-- **Suite Status**: 1,454 tests passing (0 failures), Gate PASS.
+  - `src/app.js` mounts:
+    - `#generation/api`
+    - `#models/api`
+    - `#billing/api`
+    - `#media/api`
+    - `#identity/api`
+    - `#characters/api`
+    - `#elements/api`
+    - `#workspace/api`
+  - Zero regression in route dump (`scripts/dump-routes.cjs`).
+- **Suite Status**: 1,461 tests passing (0 failures), Gate PASS.
 
-## 4. Active Tickets Roadmap (Partie 09)
-- [ ] **Ticket 9.1**: Prompt Intelligence Service & Prompt Skills (`internal/prompt/`)
-- [ ] **Ticket 9.2**: V2 DAG Compiler, Runner & Execution Gateways (`internal/runner/`)
-- [ ] **Ticket 9.3**: UseCase Engine, Worker & Pre-Queue Launch Protocol (`internal/engine/`, `internal/queue/`)
-- [ ] **Ticket 9.4**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`)
+## 4. Active Tickets Roadmap (Partie 10)
+- [ ] **Ticket 10.1**: Update `src/app.js` to mount the 8 systems' `public/api.js` routers exclusively
+- [ ] **Ticket 10.2**: Verify byte-for-byte parity via route dumping tool
+- [ ] **Ticket 10.3**: Retire legacy route files and clean up unused shims

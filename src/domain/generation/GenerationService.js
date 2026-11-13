@@ -1,6 +1,6 @@
 /**
  * GenerationService
- * Domain Service — owns all generation read/mutation business logic and project asset listings.
+ * @owns System 1: Generation & Workflows — generation read/mutation business logic and project asset listings.
  *
  * Owns:
  * - Generation reads and mutations (generationsQuery / generationsMutation)

@@ -1,6 +1,6 @@
 /**
  * WorkflowService (platform layer)
- * Canonical domain owner of all workflow lifecycle operations.
+ * @owns System 1: Generation & Workflows — Canonical domain owner of all workflow lifecycle operations.
  *
  * This file re-exports WorkflowLifecycleService which extends WorkflowServiceBase.
  * Feature: 026-backend-platform-layer-refactor

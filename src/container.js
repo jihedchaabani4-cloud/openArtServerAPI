@@ -38,15 +38,20 @@ import { MediaUploadService } from "#platform/media-ingestion/index.js";
 import { CharacterService, CharacterMediaService } from "#characters/tools";
 import { ElementService, ElementMediaService, ElementAnalysisService } from "#elements/tools";
 import { ProjectService, ProjectReadService, FolderService, TrashService, configureWorkspace } from "#workspace/tools";
-import { GenerationService } from "#domain/generation/GenerationService.js";
-import { GenerationRequestService } from "#domain/generation/GenerationRequestService.js";
+import {
+    GenerationService,
+    GenerationRequestService,
+    promptService,
+    UseCaseService,
+    jobQueueService,
+} from "#generation/tools";
 import { WorkflowStorageGateway } from "./infrastructure/storage/workflowStorageGateway.js";
 import { AssetUploadService } from "./domain/asset/AssetUploadService.js";
 
 
 
 // ─── Services ────────────────────────────────────────────────────────────────
-export const promptService  = new PromptService();
+export { promptService };
 export const storageService = createStorageService({ client: supabaseAdmin });
 const walletServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || null;
 
@@ -180,17 +185,8 @@ if (failedOpsService) {
 }
 
 // ─── DB (new 7-table schema) ─────────────────────────────────────────────────
-export const db = {
-    projects:  new ProjectRepository(),   // table: project
-    workflows: new WorkflowRepository(),  // table: workflow
-    media:     new MediaRepository(),     // table: media
-    workflowMedia: new WorkflowMediaRepository(), // table: workflow_media
-    configs:   new GenerationConfigRepository(), // tables: generation_config + generation_config_reference
-    characters: new CharacterRepository(), // Dedicated Character Domain Repository
-    elements:   new ElementRepository(),   // Dedicated Element Domain Repository
-    folders:    new FolderRepository(),    // Dedicated Folders Domain Repository
-    trash:      new TrashRepository(),     // Dedicated Workflow Trash Repository
-};
+import { db } from "./db/dbInstance.js";
+export { db };
 
 // ─── Workflow Architecture (feature 008) ─────────────────────────────────────
 export const workflowEventRecorder = new WorkflowEventRecorder();
@@ -203,10 +199,14 @@ export const workflowStorageGateway = new WorkflowStorageGateway({
     lifecycleService: _lifecycleService,
 });
 
+import { configureDefaultGateways } from "./v2/bootstrap.js";
+configureDefaultGateways(() => ({
+    billing: workflowBillingGateway,
+    storage: workflowStorageGateway,
+    events: workflowEventRecorder,
+}));
 
 // ─── UseCase & Job Queue Services ─────────────────────────────────────────────
-import { UseCaseService } from "./services/useCaseService.js";
-import { jobQueueService } from "./services/jobQueueService.js";
 export { jobQueueService };
 export const useCaseService = new UseCaseService({ walletService, pricingService, jobQueueService, db });
 

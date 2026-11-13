@@ -1,3 +1,7 @@
+/**
+ * jobQueueService
+ * @owns System 1: Generation & Workflows — BullMQ queue dispatch and lifecycle management.
+ */
 import { Queue } from "bullmq";
 import { randomUUID } from "node:crypto";
 import { getCleanContext, createLogger, LogEvents } from "../infrastructure/logging/index.js";

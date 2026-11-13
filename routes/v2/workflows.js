@@ -1,18 +1,7 @@
-import express from "express";
-import {
-  getHealth,
-  submitWorkflowRun,
-  getWorkflowRunStatus,
-} from "../../controllers/v2/workflowsController.js";
-import { requireAuth } from "../../src/middleware/auth.js";
+/**
+ * V2 Workflows Router — Legacy Facade
+ *
+ * Re-exports v2WorkflowsRouter from System 1 Generation (#generation/api).
+ */
 
-const router = express.Router();
-
-// Public health check route
-router.get("/health", getHealth);
-
-// Authenticated workflow routes
-router.post("/run", requireAuth, submitWorkflowRun);
-router.get("/runs/:run_id", requireAuth, getWorkflowRunStatus);
-
-export default router;
+export { v2WorkflowsRouter as default, v2WorkflowsRouter } from "#generation/api";

@@ -1,5 +1,6 @@
 /**
  * NodeSafetyService
+ * @owns System 1: Generation & Workflows
  * ─────────────────────────────────────────────────────────────────────────────
  * Centralised input validation & sanitisation layer for all V2 generation
  * nodes.  Every node calls its dedicated assertXxx() at the very start of

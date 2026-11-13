@@ -5,7 +5,7 @@ import { jobQueueService } from "../../services/jobQueueService.js";
 import { getValueAtPath, executeNodeJob } from "./nodeExecutor.js";
 import { formatWorkflowError } from "../runtime/errorPolicy.js";
 import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";
-import { db } from "../../container.js";
+import { db } from "../../db/dbInstance.js";
 import { failWorkflowPendingMedia } from "../../platform/media/MediaLifecycleService.js";
 import {
   PersistedBillingAccumulator,

@@ -1,6 +1,6 @@
 /**
  * GenerationRequestService
- * Application Domain Service — orchestrates the lifecycle of generation requests (image/video):
+ * @owns System 1: Generation & Workflows — orchestrates the lifecycle of generation requests (image/video).
  *   1. Folder validation
  *   2. Workflow & Media placeholder row persistence
  *   3. Relation linking via WorkflowMedia

@@ -8,7 +8,7 @@
  *   - Discards unknown references silently with an internal warning (no client error).
  */
 
-import { db } from "../../container.js";
+import { db } from "../../db/dbInstance.js";
 import { elementRepository } from "../../db/ElementRepository.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
 import { assertOwns, assertOwnsAny } from "#platform/identity";

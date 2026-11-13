@@ -4,6 +4,7 @@ const authLogger = createLogger("workflow_auth");
 
 /**
  * WorkflowAuthorizationService
+ * @owns System 1: Generation & Workflows
  * Dedicated security and ownership verification service for workflows and media assets.
  * Encapsulates internal service-to-service secrets, development bypasses, and project owner checks.
  */

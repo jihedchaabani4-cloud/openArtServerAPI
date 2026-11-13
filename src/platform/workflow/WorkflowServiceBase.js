@@ -1,5 +1,6 @@
 /**
  * WorkflowServiceBase
+ * @owns System 1: Generation & Workflows
  * Platform Service — owns workflow entity lifecycle, metadata mutation,
  * moving workflows across folders/projects, cascading deletion,
  * and entity synchronization.

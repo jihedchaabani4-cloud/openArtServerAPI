@@ -38,7 +38,9 @@
         "#elements/api": "./src/systems/elements/public/api.js",
         "#elements/tools": "./src/systems/elements/public/tools.js",
         "#workspace/api": "./src/systems/workspace/public/api.js",
-        "#workspace/tools": "./src/systems/workspace/public/tools.js"
+        "#workspace/tools": "./src/systems/workspace/public/tools.js",
+        "#generation/api": "./src/systems/generation/public/api.js",
+        "#generation/tools": "./src/systems/generation/public/tools.js"
     },
     "scripts": {
         "test": "node --import ./tests/setup-env.js --test \"tests/**/*.test.js\"",

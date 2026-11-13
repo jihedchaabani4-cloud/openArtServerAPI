@@ -43,7 +43,7 @@ function getRegistriesForPrepare() {
 
 /**
  * Unified UseCase Service
- * Canonical entry point for all business UseCase operations and execution.
+ * @owns System 1: Generation & Workflows — Canonical entry point for all business UseCase operations and execution.
  */
 export class UseCaseService {
   constructor({

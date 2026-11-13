@@ -11,7 +11,7 @@ import {
   getGateways,
 } from "./nodeBilling.js";
 import { jobQueueService } from "../../services/jobQueueService.js";
-import { db } from "../../container.js";
+import { db } from "../../db/dbInstance.js";
 import { nodeFailure, nodeSuccess } from "../runtime/nodeEnvelope.js";
 import { formatWorkflowError } from "../runtime/errorPolicy.js";
 import { createLogger, LogEvents } from "../../infrastructure/logging/index.js";

@@ -1,3 +1,7 @@
+/**
+ * PromptService
+ * @owns System 1: Generation & Workflows — prompt optimization, completion and translation.
+ */
 import { llmService } from "./LLMService.js";
 import { createLogger } from "../../infrastructure/logging/index.js";
 

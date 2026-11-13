@@ -31,12 +31,6 @@ export function crudOperationLog({
     return payload;
 }
 
-export class CrudServiceError extends Error {
-    constructor(message, { statusCode = 500, errorCode = "CRUD_ERROR", ...fields } = {}) {
-        super(message);
-        this.name = "CrudServiceError";
-        this.statusCode = statusCode;
-        this.errorCode = errorCode;
-        Object.assign(this, fields);
-    }
-}
+import { CrudServiceError } from "../shared/errors/index.js";
+export { CrudServiceError };
+

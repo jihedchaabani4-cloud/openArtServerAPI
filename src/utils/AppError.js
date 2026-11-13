@@ -1,10 +1,8 @@
-export class AppError extends Error {
-    constructor(message, statusCode) {
-        super(message);
-        this.statusCode = statusCode;
-        this.status = `${statusCode}`.startsWith('4') ? 'fail' : 'error';
-        this.isOperational = true;
-
-        Error.captureStackTrace(this, this.constructor);
-    }
-}
+/**
+ * Legacy Re-export for AppError.
+ * Canonical implementation now lives in src/shared/errors/
+ */
+export {
+  AppError,
+  AppError as default,
+} from "../shared/errors/index.js";

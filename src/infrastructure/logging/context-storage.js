@@ -1,8 +1,6 @@
 /**
- * AsyncLocalStorage storage instance for propagating LogContext.
+ * Legacy Re-export for context storage.
  */
-import { AsyncLocalStorage } from "node:async_hooks";
-
-export const asyncLocalStorage = new AsyncLocalStorage();
-
+export { asyncLocalStorage } from "../../shared/logger/context-storage.js";
+import { asyncLocalStorage } from "../../shared/logger/context-storage.js";
 export default asyncLocalStorage;

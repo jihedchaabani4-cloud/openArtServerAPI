@@ -9,7 +9,10 @@ Track progress of all 12 Parties and atomic tickets.
   - [x] **Ticket 0.2**: Break Cycle 2 (`ElementService.js` <-> `promptBuilderProService.js`) -> pure prompt builder (Completed: 1,344 tests pass)
   - [x] **Ticket 0.3**: Break Cycle 3 (`catalogPresentation.js` <-> `models/index.js`) -> `catalogQueries.js` (Completed)
   - [x] **Ticket 0.4**: Tighten `scripts/arch-check.cjs` with rules R10-R15 + Cycle Detector (Completed: 1,358 tests pass)
-- [ ] **Partie 01: Shared Technical Kernel (`src/shared/`)**
+- [x] **Partie 01: Shared Technical Kernel (`src/shared/`)** (COMPLETED)
+  - [x] **Ticket 1.1**: Base Error Hierarchy & Runtime Error Processor (`src/shared/errors/`) [DONE]
+  - [x] **Ticket 1.2**: Structured Logging & Tracing Infrastructure (`src/shared/logger/`) [DONE]
+  - [x] **Ticket 1.3**: Pure Technical Config & Redis Connection Kernel (`src/shared/config/`, `src/shared/redis/`, `#shared`) [DONE]
 - [ ] **Partie 02: System 5 — Identity & Auth (`src/systems/identity/`)**
 - [ ] **Partie 03: System 4 — Media & Storage (`src/systems/media/`)**
 - [ ] **Partie 04: System 3 — Billing & Wallet (`src/systems/billing/`)**

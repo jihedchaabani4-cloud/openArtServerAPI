@@ -8,16 +8,18 @@
   - `docs/architecture/constitution/02_architecture_rules_and_agent_guardrails.md` (The 12 Architecture Rules)
   - `docs/architecture/constitution/03_software_factory_master_prompt_and_plan.md` (Software Factory Plan)
 
-## 2. Active Phase: Partie 00 (COMPLETED) -> Ready for Partie 01
-- **Goal**: Break 3 circular dependencies and establish mechanical architectural guardrails in `scripts/arch-check.cjs`.
-- **Target Systems in Scope**:
-  - `src/v2/runner/` (Workflow DAG runner & node execution)
-  - `src/domain/element/` (Element reference & prompt builder)
-  - `src/models/` (Catalog presentation & sealed model subsystem)
-- **Baseline Test Suite Status**: 1,358 tests passing, 0 failures.
+## 2. Active Phase: Partie 01 (COMPLETED) -> Ready for Partie 02
+- **Goal**: Consolidate pure technical kernel (`src/shared/`) containing zero domain or database logic.
+- **Results**:
+  - `src/shared/errors/` established with hybrid AppError, specialized subclasses, and pure sanitizers.
+  - `src/shared/logger/` established with AsyncLocalStorage context propagation and Pino structured logging.
+  - `src/shared/config/` established with pure environment flags.
+  - `src/shared/redis/` established with resilient Upstash/BullMQ connection singletons.
+  - `#shared` and `#shared/*` registered in `package.json#imports`.
+  - 100% backward compatibility maintained across legacy paths.
+- **Suite Status**: 1,372 tests passing (0 failures), Gate PASS.
 
 ## 3. Active Tickets Roadmap
-- [x] **Ticket 0.1**: Break Cycle 1 (`src/v2/runner/nodeExecutor.js` <-> `src/v2/runner/workflowRunner.js`) via `nodeBilling.js` [DONE - 1,340 tests passing]
-- [x] **Ticket 0.2**: Break Cycle 2 (`src/domain/element/ElementService.js` <-> `src/domain/element/promptBuilderProService.js`) by making prompt builder pure [DONE - 1,344 tests passing]
-- [x] **Ticket 0.3**: Break Cycle 3 (`src/models/catalogPresentation.js` <-> `src/models/index.js`) via `src/models/catalogQueries.js` [DONE]
-- [x] **Ticket 0.4**: Implement systems guardrails R10-R15 + Cycle Detector in `scripts/arch-check.cjs` [DONE - 1,358 tests passing]
+- [x] **Ticket 1.1**: Base Error Hierarchy & Runtime Error Processor (`src/shared/errors/`) [DONE]
+- [x] **Ticket 1.2**: Structured Logging & Tracing Infrastructure (`src/shared/logger/`) [DONE]
+- [x] **Ticket 1.3**: Pure Technical Config & Redis Connection Kernel (`src/shared/config/`, `src/shared/redis/`, `#shared`) [DONE]

@@ -1,8 +1,7 @@
-import pino from "pino";
+/**
+ * Runtime logger re-export from shared logger.
+ */
+import { baseLogger } from "../shared/logger/index.js";
 
-export const logger = pino({
-  level: process.env.LOG_LEVEL || "info",
-  timestamp: pino.stdTimeFunctions.isoTime,
-});
-
+export const logger = baseLogger;
 export default logger;

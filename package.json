@@ -22,7 +22,9 @@
         "#domain/project/*.js": "./src/domain/project/*.js",
         "#queue/*.js": "./src/queue/*.js",
         "#infrastructure/*.js": "./src/infrastructure/*.js",
-        "#container.js": "./src/container.js"
+        "#container.js": "./src/container.js",
+        "#shared": "./src/shared/index.js",
+        "#shared/*": "./src/shared/*"
     },
     "scripts": {
         "test": "node --import ./tests/setup-env.js --test \"tests/**/*.test.js\"",

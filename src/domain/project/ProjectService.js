@@ -1,6 +1,6 @@
 /**
  * ProjectService
- * Domain Service — owns project lifecycle, naming, user scoping, and project DTO mapping.
+ * @owns System 8: Workspace — project lifecycle, naming, user scoping, and project DTO mapping.
  *
  * Public methods:
  *   - listUserProjects(userId)

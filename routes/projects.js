@@ -1,21 +1,7 @@
-import express from "express";
-import * as projectsController from "../controllers/projectsController.js";
-import * as foldersController from "../controllers/foldersController.js";
-import { requireAuth } from "../src/middleware/auth.js";
-import { rateLimit } from "../src/middleware/rateLimit.js";
+/**
+ * Projects Router — Legacy Facade
+ *
+ * Re-exports projectsRouter from System 8 Workspace (#workspace/api).
+ */
 
-const router = express.Router();
-
-// Apply auth middleware to all project routes
-router.use(requireAuth);
-
-// Project Folders & Assets
-router.post("/:projectId/folders", rateLimit("folderWrite"), foldersController.createProjectFolder);
-router.get("/:projectId/assets", projectsController.listAssets);
-
-router.get("/", projectsController.getAll);
-router.post("/", projectsController.create);
-router.patch("/:id", projectsController.update);
-router.delete("/:id", projectsController.remove);
-
-export default router;
+export { projectsRouter as default, projectsRouter } from "#workspace/api";

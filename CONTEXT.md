@@ -17,16 +17,19 @@
 - [x] **Partie 05: System 2 — Models Management (`src/systems/models/`)** (1,418 tests pass, `#models/api`, `#models/tools`)
 - [x] **Partie 06: System 6 — Characters (`src/systems/characters/`)** (1,431 tests pass, `#characters/api`, `#characters/tools`)
 - [x] **Partie 07: System 7 — Elements (`src/systems/elements/`)** (1,443 tests pass, `#elements/api`, `#elements/tools`)
+- [x] **Partie 08: System 8 — Workspace (`src/systems/workspace/`)** (1,454 tests pass, `#workspace/api`, `#workspace/tools`)
 
-## 3. Active Phase: Partie 08 (READY) — System 8: Workspace (`src/systems/workspace/`)
-- **Goal**: Isolate `Workspace` into `src/systems/workspace/` owning projects, folders, and trash lifecycle management.
+## 3. Active Phase: Partie 09 (READY) — System 1: Generation & Workflows (`src/systems/generation/`)
+- **Goal**: Consolidate `UseCaseService`, `JobQueueService`, `UseCaseWorker`, `V2 Composable DAG Workflow Engine` (`workflowRunner`, `nodeExecutor`, `compileWorkflow`), and `PromptIntelligenceService` (`PromptBuilderProService`, skills) into `src/systems/generation/`.
 - **Target Boundaries**:
-  - `src/systems/workspace/public/api.js` (`#workspace/api`) for `/api/projects/*`, `/api/folders/*`, `/api/trash/*` routes.
-  - `src/systems/workspace/public/tools.js` (`#workspace/tools`) for inter-system operations: project/folder validation and lifecycle queries.
-  - Subpath imports `#workspace/api` and `#workspace/tools` in `package.json#imports`.
+  - `src/systems/generation/public/api.js` (`#generation/api`) for all generation, workflow runs, images, video, and prompt endpoints.
+  - `src/systems/generation/public/tools.js` (`#generation/tools`) for inter-system operations.
+  - Subpath imports `#generation/api` and `#generation/tools` in `package.json#imports`.
   - Zero external imports of `internal/`.
-- **Suite Status**: 1,443 tests passing (0 failures), Gate PASS.
+- **Suite Status**: 1,454 tests passing (0 failures), Gate PASS.
 
-## 4. Active Tickets Roadmap (Partie 08)
-- [ ] **Ticket 8.1**: Project, Folder, and Trash Repositories, Services, and Errors (`internal/services/`, `internal/db/`, `internal/errors.js`)
-- [ ] **Ticket 8.2**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`)
+## 4. Active Tickets Roadmap (Partie 09)
+- [ ] **Ticket 9.1**: Prompt Intelligence Service & Prompt Skills (`internal/prompt/`)
+- [ ] **Ticket 9.2**: V2 DAG Compiler, Runner & Execution Gateways (`internal/runner/`)
+- [ ] **Ticket 9.3**: UseCase Engine, Worker & Pre-Queue Launch Protocol (`internal/engine/`, `internal/queue/`)
+- [ ] **Ticket 9.4**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`)

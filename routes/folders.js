@@ -1,13 +1,7 @@
-import express from "express";
-import * as foldersController from "../controllers/foldersController.js";
-import { requireAuth } from "../src/middleware/auth.js";
-import { rateLimit } from "../src/middleware/rateLimit.js";
+/**
+ * Folders Router — Legacy Facade
+ *
+ * Re-exports foldersRouter from System 8 Workspace (#workspace/api).
+ */
 
-const router = express.Router();
-
-router.use(requireAuth);
-
-router.patch("/:folderId", rateLimit("folderWrite"), foldersController.updateFolder);
-router.delete("/:folderId", rateLimit("folderWrite"), foldersController.deleteFolder);
-
-export default router;
+export { foldersRouter as default, foldersRouter } from "#workspace/api";

@@ -37,14 +37,11 @@ import { WorkflowLifecycleService } from "#platform/workflow/WorkflowService.js"
 import { MediaUploadService } from "#platform/media-ingestion/index.js";
 import { CharacterService, CharacterMediaService } from "#characters/tools";
 import { ElementService, ElementMediaService, ElementAnalysisService } from "#elements/tools";
-import { ProjectReadService } from "#domain/project/ProjectReadService.js";
-import { ProjectService } from "#domain/project/ProjectService.js";
+import { ProjectService, ProjectReadService, FolderService, TrashService, configureWorkspace } from "#workspace/tools";
 import { GenerationService } from "#domain/generation/GenerationService.js";
 import { GenerationRequestService } from "#domain/generation/GenerationRequestService.js";
-import { FolderService } from "./domain/folder/FolderService.js";
 import { WorkflowStorageGateway } from "./infrastructure/storage/workflowStorageGateway.js";
 import { AssetUploadService } from "./domain/asset/AssetUploadService.js";
-import { TrashService } from "./domain/trash/TrashService.js";
 
 
 
@@ -275,6 +272,7 @@ export const trashService = new TrashService({
 
 export const projectReadService = new ProjectReadService({ db, folderService });
 export const projectService = new ProjectService({ projectRepo: db.projects });
+configureWorkspace({ trashService, projectService });
 export const generationService = new GenerationService({ db });
 export const generationRequestService = new GenerationRequestService({ db, useCaseService, folderService });
 

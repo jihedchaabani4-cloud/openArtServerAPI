@@ -37,9 +37,13 @@ Track progress of all 12 Parties and atomic tickets.
 - [x] **Partie 07: System 7 — Elements (`src/systems/elements/`)** (COMPLETED)
   - [x] **Ticket 7.1**: Element Service, Media Service, Repositories & Trait Extraction (`internal/services/`, `internal/db/`, `internal/errors.js`) [DONE]
   - [x] **Ticket 7.2**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`) [DONE]
-- [ ] **Partie 08: System 8 — Workspace (`src/systems/workspace/`)** (READY)
-  - [ ] **Ticket 8.1**: Project, Folder, and Trash Repositories, Services, and Errors (`internal/services/`, `internal/db/`, `internal/errors.js`)
-  - [ ] **Ticket 8.2**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`)
-- [ ] **Partie 09: System 1 — Generation & Workflows (`src/systems/generation/`)**
+- [x] **Partie 08: System 8 — Workspace (`src/systems/workspace/`)** (COMPLETED)
+  - [x] **Ticket 8.1**: Project, Folder, and Trash Repositories, Services, and Errors (`internal/services/`, `internal/db/`, `internal/errors.js`) [DONE]
+  - [x] **Ticket 8.2**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`) [DONE]
+- [ ] **Partie 09: System 1 — Generation & Workflows (`src/systems/generation/`)** (READY)
+  - [ ] **Ticket 9.1**: Prompt Intelligence Service & Prompt Skills (`internal/prompt/`)
+  - [ ] **Ticket 9.2**: V2 DAG Compiler, Runner & Execution Gateways (`internal/runner/`)
+  - [ ] **Ticket 9.3**: UseCase Engine, Worker & Pre-Queue Launch Protocol (`internal/engine/`, `internal/queue/`)
+  - [ ] **Ticket 9.4**: Public Gateways, Package Subpath Imports & Legacy Re-exports (`public/`, `package.json`)
 - [ ] **Partie 10: Main Router Cutover & Legacy Folder Cleanup**
 - [ ] **Partie 11: Full Architecture Verification, Ratchet Zeroing & ADR Linking**

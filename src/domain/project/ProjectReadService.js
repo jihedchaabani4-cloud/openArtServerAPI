@@ -1,3 +1,7 @@
+/**
+ * ProjectReadService
+ * @owns System 8: Workspace — project read and aggregation service
+ */
 import { supabase, supabaseAdmin } from "../../../lib/supabase.js";
 import { getCatalog } from "../../models/index.js";
 import { crudOperationLog, CrudServiceError } from "../../utils/crudOperationLog.js";

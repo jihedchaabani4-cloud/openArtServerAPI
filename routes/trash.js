@@ -1,12 +1,7 @@
-import express from "express";
-import * as trashController from "../controllers/trashController.js";
-import { requireAuth } from "../src/middleware/auth.js";
+/**
+ * Trash Router — Legacy Facade
+ *
+ * Re-exports trashRouter from System 8 Workspace (#workspace/api).
+ */
 
-const router = express.Router();
-
-router.use(requireAuth);
-
-router.post("/restore-all", trashController.restoreAllWorkflows);
-router.post("/:workflowId/restore", trashController.restoreWorkflow);
-
-export default router;
+export { trashRouter as default, trashRouter } from "#workspace/api";

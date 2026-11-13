@@ -36,7 +36,9 @@
         "#characters/api": "./src/systems/characters/public/api.js",
         "#characters/tools": "./src/systems/characters/public/tools.js",
         "#elements/api": "./src/systems/elements/public/api.js",
-        "#elements/tools": "./src/systems/elements/public/tools.js"
+        "#elements/tools": "./src/systems/elements/public/tools.js",
+        "#workspace/api": "./src/systems/workspace/public/api.js",
+        "#workspace/tools": "./src/systems/workspace/public/tools.js"
     },
     "scripts": {
         "test": "node --import ./tests/setup-env.js --test \"tests/**/*.test.js\"",

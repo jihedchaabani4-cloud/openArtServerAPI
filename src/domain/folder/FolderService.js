@@ -1,3 +1,7 @@
+/**
+ * FolderService
+ * @owns System 8: Workspace — folder tree hierarchy, lifecycle, and validations
+ */
 import { AppError } from "../../utils/AppError.js";
 import {
   indexById,

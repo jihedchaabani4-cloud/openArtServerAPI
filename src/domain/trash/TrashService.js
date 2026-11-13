@@ -1,6 +1,6 @@
 /**
  * TrashService
- * @owns Workflow trash lifecycle (move to trash, permanent delete dispatch, and restore)
+ * @owns System 8: Workspace — Workflow trash lifecycle (move to trash, permanent delete dispatch, and restore)
  *
  * Public methods:
  *   - requestDelete({ kind, id, userId, req })

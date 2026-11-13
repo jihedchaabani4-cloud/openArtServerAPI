@@ -1,5 +1,6 @@
 /**
  * AssetUploadService
+ * @owns System 4: Media & Storage
  * Dedicated application service owning standalone asset upload orchestration.
  *
  * Owns:

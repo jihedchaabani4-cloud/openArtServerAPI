@@ -6,14 +6,14 @@ Methods and dependencies are parsed from the code (best effort). "Owns" comes fr
 
 | Service | Folder | Owns | Public methods | Constructor deps | Registered in (new X) | Referenced by (files) |
 |---|---|---|---|---|---|---|
-| `AssetUploadService` | `src/domain/asset` | - | `uploadAsset` | `db`, `mediaUploadService`, `workflowMediaService`, `authService`, `mediaService`, `folderService` | `src/container.js` | 2 |
+| `AssetUploadService` | `src/domain/asset` | System 4: Media & Storage | `uploadAsset` | `db`, `mediaUploadService`, `workflowMediaService`, `authService`, `mediaService`, `folderService` | `src/container.js` | 2 |
 | `CharacterGenerationService` | `src/domain/character` | System 6: Characters | `enqueueSheetGeneration`, `generateDescription` | `db`, `useCaseService` | `src/domain/character/CharacterService.js` | 4 |
 | `CharacterMediaService` | `src/domain/character` | System 6: Characters | `uploadSheetMedia`, `uploadDetailMedia`, `removeDetailMedia` | `db`, `storageService`, `mediaUploadService`, `workflowMediaService`, `authService` | `src/container.js` | 5 |
 | `CharacterService` | `src/domain/character` | System 6: Characters | `setUseCaseService`, `createCharacter`, `updateCharacter`, `deleteCharacter`, `setCharacterSheetMedia`, `addMediaToCharacter`, `removeMediaFromCharacter`, `generateCharacterSheet`, `generateDescription` | `db`, `workflowService`, `useCaseService`, `mediaService`, `generationService` | `src/container.js` | 4 |
 | `ElementAnalysisService` | `src/domain/element` | System 7: Elements | `analyzeElement`, `generateDescription`, `editElement`, `fetchWorkflowContext`, `runVisionLLMAnalysis`, `persistElementMetadata` | - | `src/container.js`, `src/domain/element/ElementService.js` | 5 |
 | `ElementMediaService` | `src/domain/element` | System 7: Elements | `ingestElementSources`, `setElementCover`, `clearElementCover`, `setCoverIfNone`, `assertUploadAllowed`, `addReferenceMedia`, `removeReferenceMedia`, `setSheetMedia` | `db`, `storageService`, `mediaUploadService`, `workflowMediaService`, `authService` | `src/container.js`, `src/domain/element/ElementService.js` | 6 |
 | `ElementService` | `src/domain/element` | System 7: Elements | `createElement`, `listProjectElements`, `getElementById`, `setElementCover`, `setPrimaryMedia`, `getElementContextForPrompt`, `Immutable`, `updateElement`, `deleteElement`, `analyzeElement`, `addImageToElement`, `buildPromptPayload` | `db`, `workflowService`, `mediaService`, `elementMediaService`, `analysisService` | `src/container.js` | 5 |
-| `PromptBuilderProService` | `src/domain/element` | - | `buildMultiElementPayload`, `buildMultiElementPayloadSync` | - | - | 4 |
+| `PromptBuilderProService` | `src/domain/element` | System 1: Generation & Workflows | `buildMultiElementPayload`, `buildMultiElementPayloadSync` | - | - | 4 |
 | `FolderService` | `src/domain/folder` | System 8: Workspace — folder tree hierarchy, lifecycle, and validations | `setWorkflowService`, `list`, `create`, `update`, `remove`, `assertFolderUsable`, `validateAndAssertUsable` | `folderRepo`, `projectRepo`, `workflowService`, `maxDepth`, `maxFoldersPerProject` | `src/container.js` | 8 |
 | `GenerationRequestService` | `src/domain/generation` | System 1: Generation & Workflows — orchestrates the lifecycle of generation requests (image/video). | `requestGeneration` | `db`, `useCaseService`, `folderService`, `modelValidator` | `src/container.js` | 7 |
 | `GenerationService` | `src/domain/generation` | System 1: Generation & Workflows — generation read/mutation business logic and project asset listings. | `getAssets`, `getUserLibrary`, `getWorkflowDetail`, `deleteGeneration`, `updateGeneration`, `listProjectAssets` | `db` | `src/container.js` | 9 |
@@ -48,4 +48,4 @@ Methods and dependencies are parsed from the code (best effort). "Owns" comes fr
 | `StorageService` | `src/systems/media/internal/storage` | Physical object storage operations, storage key construction and validation, and storage provider delegation. | `buildKey`, `validateFolder`, `extractKey`, `extractStoragePath`, `upload`, `getPublicUrl`, `delete`, `deleteFiles`, `deleteByUrl` | `bucketName`, `provider`, `paths` | `src/platform/storage/storageFactory.js`, `src/systems/media/internal/storage/storageFactory.js` | 12 |
 | `NodeSafetyService` | `src/v2/nodes/safety` | System 1: Generation & Workflows | - | - | - | 6 |
 
-Services: 41. Without @owns: 2.
+Services: 41. Without @owns: 0.

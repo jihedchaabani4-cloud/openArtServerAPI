@@ -20,12 +20,12 @@
 - [x] **Partie 08: System 8 — Workspace (`src/systems/workspace/`)** (1,454 tests pass, `#workspace/api`, `#workspace/tools`)
 - [x] **Partie 09: System 1 — Generation & Workflows (`src/systems/generation/`)** (1,461 tests pass, `#generation/api`, `#generation/tools`)
 - [x] **Partie 10: Main Router Cutover & Legacy Folder Cleanup** (1,463 tests pass, 8 systems gateways exclusively mounted)
+- [x] **Partie 11: Full Architecture Verification, Ratchet Zeroing & ADR Linking** (1,463 tests pass, R9 zeroed, ADR-001 published)
 
-## 3. Active Phase: Partie 11 (READY) — Full Architecture Verification, Ratchet Zeroing & ADR Linking
-- **Goal**: Permanently lock architecture rules R1-R15 in `arch-baseline.json`, verify all ADRs and seams, and conduct final end-to-end security & architecture sign-off.
+## 3. Active Phase: Partie 12 (READY) — Production Readiness, Final Gate & Delivery
+- **Goal**: Complete final factory sign-off, verify CI/CD readiness, and assemble final delivery documentation.
 - **Suite Status**: 1,463 tests passing (0 failures), Gate PASS.
 
-## 4. Active Tickets Roadmap (Partie 11)
-- [ ] **Ticket 11.1**: Ratchet zeroing in `arch-baseline.json` for all rules whose counts have reached zero
-- [ ] **Ticket 11.2**: ADR documentation & linkage across the 8 systems
-- [ ] **Ticket 11.3**: Final full quality gate and factory completion report
+## 4. Active Tickets Roadmap (Partie 12)
+- [ ] **Ticket 12.1**: Final production readiness and hermetic environment check
+- [ ] **Ticket 12.2**: Final quality gate validation and clean delivery sign-off

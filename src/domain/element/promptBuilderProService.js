@@ -1,5 +1,6 @@
 /**
  * Prompt Builder Pro Service
+ * @owns System 1: Generation & Workflows
  * Assembles non-bleeding prompt payloads for gpt-image-2 / Flux.
  * Pure service: does not perform DB lookups directly. Elements are passed as plain DTOs.
  * Feature: 018-element-reference-system

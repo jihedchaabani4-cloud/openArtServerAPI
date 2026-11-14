@@ -219,6 +219,31 @@ export async function rollbackCredits(inputOrRef, ctx = {}) {
 }
 
 /**
+ * Extends the TTL of an active reservation (hold heartbeat).
+ *
+ * @param {string|object} inputOrRef
+ * @param {number|object} [ttlSecondsOrCtx=300]
+ * @param {{ walletService?: any }} [ctx]
+ * @returns {Promise<Object|null>}
+ */
+export async function extendHold(inputOrRef, ttlSecondsOrCtx = 300, ctx = {}) {
+    const resolvedCtx = (typeof ttlSecondsOrCtx === "object" && ttlSecondsOrCtx !== null) ? ttlSecondsOrCtx : ctx;
+    const holdId = typeof inputOrRef === "string"
+        ? inputOrRef
+        : (inputOrRef?.holdId || inputOrRef?.referenceId || inputOrRef?.reservation?.referenceId);
+    const ttlSeconds = typeof ttlSecondsOrCtx === "number"
+        ? ttlSecondsOrCtx
+        : (inputOrRef?.ttlSeconds ?? inputOrRef?.additionalSeconds ?? 300);
+
+    if (!holdId || typeof holdId !== "string" || !holdId.trim()) {
+        throw new BillingValidationError("holdId / referenceId is required to extend hold");
+    }
+
+    const service = _resolveWalletService(resolvedCtx);
+    return service.extendHold(holdId, Number(ttlSeconds) || 300);
+}
+
+/**
  * Adds credits directly to a user's wallet.
  *
  * @param {{ userId?: string, amount: number, referenceId: string, metadata?: object }} input
@@ -343,6 +368,7 @@ export default {
     reserveCredits,
     settleCredits,
     rollbackCredits,
+    extendHold,
     addCredits,
     listTransactions,
     listCreditPackages,

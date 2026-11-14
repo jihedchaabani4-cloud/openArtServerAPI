@@ -10,7 +10,7 @@ import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { isWorkflowReferenceQuotaError } from "../src/platform/media-ingestion/MediaUploadErrors.js";
+import { isWorkflowReferenceQuotaError } from "#media/tools";
 
 const PG_PORT = 54400;
 const PG_USER = "postgres";

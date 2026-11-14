@@ -1,9 +1,9 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
-import * as models from "../../src/models/index.js";
-import { executeVideoGeneration } from "../../src/v2/nodes/videoGenerationNode.js";
-import { registerProviderRunner, unregisterProviderRunner } from "../../src/models/runtime/providerRuntimeRegistry.js";
-import { resolveMediaMetadata } from "../../src/platform/media/mediaMetadataResolver.js";
+import * as models from "#models/tools";
+import { executeVideoGeneration } from "#generation/tools";
+import { registerProviderRunner, unregisterProviderRunner } from "#models/tools";
+import { resolveMediaMetadata } from "#media/tools";
 
 describe("LTX Video Models Capability and Aspect Ratio Boundary", () => {
   before(() => {

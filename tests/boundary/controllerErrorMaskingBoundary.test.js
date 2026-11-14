@@ -30,8 +30,8 @@ import {
     removeMediaFromCharacter,
     setCharacterSheetMedia,
     uploadCharacterMedia,
-} from "../../controllers/characterController.js";
-import { safePublicRouteError } from "../../src/utils/safePublicRouteError.js";
+} from "#characters/api";
+import { safePublicRouteError } from "#shared";
 
 function leakyError() {
     return new Error("connect ECONNREFUSED 10.0.0.4:5432 credential=sk-internal-77");

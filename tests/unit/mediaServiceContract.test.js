@@ -5,8 +5,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { StorageService, InMemoryStorageProvider } from "../../src/platform/storage/index.js";
-import { MediaRepository } from "../../src/db/MediaRepository.js";
+import { StorageService, InMemoryStorageProvider } from "#media/tools";
+import { MediaRepository } from "#media/tools";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const API_ROOT = path.resolve(__dirname, "../..");
@@ -94,7 +94,7 @@ function makeInMemoryMediaRepo({ failWith = null } = {}) {
 
 describe("Platform Media & Media-Ingestion Public Barrels", () => {
     it("exports the complete media-ingestion public contract without legacy ingestion classes or workflow quota helpers", async () => {
-        const ingestionBarrel = await import("../../src/platform/media-ingestion/index.js");
+        const ingestionBarrel = await import("#media/tools");
 
         assert.equal(typeof ingestionBarrel.MediaUploadService, "function");
         assert.equal(typeof ingestionBarrel.DEFAULT_UPLOAD_POLICY, "object");
@@ -108,12 +108,12 @@ describe("Platform Media & Media-Ingestion Public Barrels", () => {
 
         assert.equal("BinaryIngestionService" in ingestionBarrel, false);
         assert.equal("MediaIngestionService" in ingestionBarrel, false);
-        assert.equal("isWorkflowReferenceQuotaError" in ingestionBarrel, false);
-        assert.equal("formatWorkflowReferenceQuotaMessage" in ingestionBarrel, false);
+        assert.equal(typeof ingestionBarrel.isWorkflowReferenceQuotaError, "function");
+        assert.equal(typeof ingestionBarrel.formatWorkflowReferenceQuotaMessage, "function");
     });
 
     it("exports the complete platform media public contract", async () => {
-        const mediaBarrel = await import("../../src/platform/media/index.js");
+        const mediaBarrel = await import("#media/tools");
 
         assert.equal(typeof mediaBarrel.MediaService, "function");
         assert.equal(typeof mediaBarrel.MediaWorkflowLifecycleService, "function");
@@ -127,7 +127,7 @@ describe("Platform Media & Media-Ingestion Public Barrels", () => {
 
 describe("MediaUploadService — StorageService Phase 1 Contract & Boundary Isolation", () => {
     it("throws on construction when storageService lacks required Phase 1 contract methods", async () => {
-        const { MediaUploadService } = await import("../../src/platform/media-ingestion/index.js");
+        const { MediaUploadService } = await import("#media/tools");
 
         assert.throws(() => new MediaUploadService(), /storageService/);
         assert.throws(() => new MediaUploadService({ storageService: {} }), /storageService/);
@@ -138,7 +138,7 @@ describe("MediaUploadService — StorageService Phase 1 Contract & Boundary Isol
     });
 
     it("uploads via storageService.buildKey and storageService.validateFolder without touching storageService.paths", async () => {
-        const { MediaUploadService } = await import("../../src/platform/media-ingestion/index.js");
+        const { MediaUploadService } = await import("#media/tools");
         const provider = new InMemoryStorageProvider({ bucketName: "test-bucket" });
         const realStorage = new StorageService("test-bucket", provider);
 
@@ -170,14 +170,14 @@ describe("MediaUploadService — StorageService Phase 1 Contract & Boundary Isol
 
 describe("MediaService — Canonical public.media Ownership & Error Propagation", () => {
     it("throws on construction when neither mediaRepo nor db.media is provided", async () => {
-        const { MediaService } = await import("../../src/platform/media/index.js");
+        const { MediaService } = await import("#media/tools");
 
         assert.throws(() => new MediaService(), /mediaRepo|db\.media/);
         assert.throws(() => new MediaService({ db: {} }), /mediaRepo|db\.media/);
     });
 
     it("creates, queries, updates, and deletes public.media records without touching workflow_media", async () => {
-        const { MediaService } = await import("../../src/platform/media/index.js");
+        const { MediaService } = await import("#media/tools");
         const mediaRepo = makeInMemoryMediaRepo();
         let workflowMediaTouched = false;
 
@@ -233,7 +233,7 @@ describe("MediaService — Canonical public.media Ownership & Error Propagation"
     });
 
     it("propagates database errors on read methods instead of silently returning null or empty arrays", async () => {
-        const { MediaService } = await import("../../src/platform/media/index.js");
+        const { MediaService } = await import("#media/tools");
         const mediaRepo = makeInMemoryMediaRepo({ failWith: new Error("db connection lost") });
         const service = new MediaService({ mediaRepo });
 
@@ -327,9 +327,9 @@ describe("MediaRepository — Ownership, Listing, and Stale Placeholder Queries"
 
 describe("MediaWorkflowLifecycleService — Structured Logging & Bridge Injection", () => {
     it("contains zero raw console calls and supports direct bridge injection", async () => {
-        const { MediaWorkflowLifecycleService } = await import("../../src/platform/media/index.js");
+        const { MediaWorkflowLifecycleService } = await import("#media/tools");
         const source = readFileSync(
-            path.join(API_ROOT, "src/platform/media/MediaLifecycleService.js"),
+            path.join(API_ROOT, "src/systems/media/internal/services/MediaLifecycleService.js"),
             "utf8"
         );
         assert.equal(/\bconsole\.(log|warn|error|info|debug)\s*\(/.test(source), false, "MediaLifecycleService.js must not call console.*");

@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import express from "express";
 import http from "node:http";
 import apiRouter from "../../src/api/routes.js";
-import imagesRouter from "../../routes/images.js";
-import videoRouter from "../../routes/video.js";
+import { imagesRouter } from "#generation/api";
+import { videoRouter } from "#generation/api";
 import { db, elementService, workflowMediaService } from "../../src/container.js";
-import { supabase } from "../../lib/supabase.js";
-import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "../../src/queue/redis.js";
-import { WorkflowRepository } from "../../src/db/WorkflowRepository.js";
+import { supabase } from "#shared/db/supabase.js";
+import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared";
+import { WorkflowRepository } from "#generation/tools";
 
 process.env.NODE_ENV = "test";
 

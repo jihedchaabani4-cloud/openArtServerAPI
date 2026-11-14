@@ -8,14 +8,14 @@ import { fileURLToPath } from "node:url";
 import {
     StorageService,
     InMemoryStorageProvider,
-} from "../../src/platform/storage/index.js";
-import { StoragePathResolver } from "../../src/platform/storage/StoragePathResolver.js";
-import { IStorageProvider } from "../../src/platform/storage/IStorageProvider.js";
-import { SupabaseStorageProvider } from "../../src/platform/storage/providers/SupabaseStorageProvider.js";
+} from "#media/tools";
+import { StoragePathResolver } from "#media/tools";
+import { IStorageProvider } from "#media/tools";
+import { SupabaseStorageProvider } from "#media/tools";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
-const STORAGE_DIR = path.join(REPO_ROOT, "src/platform/storage");
+const STORAGE_DIR = path.join(REPO_ROOT, "src/systems/media/internal/storage");
 
 const VALID_PNG_BYTES = Buffer.from([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -242,9 +242,9 @@ describe("StorageService — Architecture, Dependency Isolation & Public Contrac
 
     it("StorageValidationError conforms to StorageError, AppError, and catches MZ executable sniffing", async () => {
         const { StorageError, StorageValidationError } = await import(
-            "../../src/platform/storage/StorageErrors.js"
+            "#media/tools"
         );
-        const { AppError } = await import("../../src/errors/AppError.js");
+        const { AppError } = await import("#shared");
 
         const err = new StorageValidationError("Test validation error");
         assert.ok(err instanceof StorageError, "Expected err to be instanceof StorageError");
@@ -275,8 +275,8 @@ describe("StorageService — Architecture, Dependency Isolation & Public Contrac
     });
 
     it("StorageService fails closed without a provider, and createStorageService factory constructs with client", async () => {
-        const { createStorageService } = await import("../../src/platform/storage/index.js");
-        const { StorageError } = await import("../../src/platform/storage/StorageErrors.js");
+        const { createStorageService } = await import("#media/tools");
+        const { StorageError } = await import("#media/tools");
 
         // Fails closed without provider
         assert.throws(
@@ -310,7 +310,7 @@ describe("StorageService — Architecture, Dependency Isolation & Public Contrac
     describe("StorageService SVG/XML sub-condition independent security coverage", () => {
         it('rejects "<svg" sub-condition independently without script markup', async () => {
             const { StorageValidationError } = await import(
-                "../../src/platform/storage/StorageErrors.js"
+                "#media/tools"
             );
             const provider = new InMemoryStorageProvider({ bucketName: "test_bucket" });
             const service = new StorageService({ bucketName: "test_bucket", provider });
@@ -331,7 +331,7 @@ describe("StorageService — Architecture, Dependency Isolation & Public Contrac
 
         it('rejects "<?xml" sub-condition independently without script markup', async () => {
             const { StorageValidationError } = await import(
-                "../../src/platform/storage/StorageErrors.js"
+                "#media/tools"
             );
             const provider = new InMemoryStorageProvider({ bucketName: "test_bucket" });
             const service = new StorageService({ bucketName: "test_bucket", provider });
@@ -352,7 +352,7 @@ describe("StorageService — Architecture, Dependency Isolation & Public Contrac
 
         it('rejects "<xml" sub-condition independently without script markup', async () => {
             const { StorageValidationError } = await import(
-                "../../src/platform/storage/StorageErrors.js"
+                "#media/tools"
             );
             const provider = new InMemoryStorageProvider({ bucketName: "test_bucket" });
             const service = new StorageService({ bucketName: "test_bucket", provider });
@@ -373,7 +373,7 @@ describe("StorageService — Architecture, Dependency Isolation & Public Contrac
 
         it('rejects "xmlns svg namespace" sub-condition independently without script markup', async () => {
             const { StorageValidationError } = await import(
-                "../../src/platform/storage/StorageErrors.js"
+                "#media/tools"
             );
             const provider = new InMemoryStorageProvider({ bucketName: "test_bucket" });
             const service = new StorageService({ bucketName: "test_bucket", provider });

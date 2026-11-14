@@ -2,8 +2,8 @@ import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import app from "../../index.js";
-import { supabase } from "../../lib/supabase.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+import { supabase } from "#shared/db/supabase.js";
+import { redisConnection, workerRedisConnection } from "#shared";
 import { workflowService } from "../../src/container.js";
 
 describe("Boundary — global error handler never leaks internal 5xx messages", () => {

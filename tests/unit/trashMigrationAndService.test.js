@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { TrashRepository } from "../../src/db/TrashRepository.js";
-import { TrashService } from "../../src/domain/trash/TrashService.js";
-import { setDb } from "#platform/identity";
+import { TrashRepository } from "#workspace/tools";
+import { TrashService } from "#workspace/tools";
+import { setDb } from "#identity/tools";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

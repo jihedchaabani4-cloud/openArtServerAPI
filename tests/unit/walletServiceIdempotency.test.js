@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { createWalletService } from "../../src/platform/billing/billingFactory.js";
-import { WalletError } from "../../src/platform/billing/BillingErrors.js";
+import { createWalletService } from "#billing/tools";
+import { WalletError } from "#billing/tools";
 
 /**
  * Stateful repository test double emulating the exact PostgreSQL RPC behaviors

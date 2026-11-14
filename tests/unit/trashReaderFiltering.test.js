@@ -1,13 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { supabase, supabaseAdmin } from "../../lib/supabase.js";
-import { WorkflowRepository } from "../../src/db/WorkflowRepository.js";
-import { ElementRepository } from "../../src/db/ElementRepository.js";
-import { CharacterRepository } from "../../src/db/CharacterRepository.js";
-import { FolderRepository } from "../../src/db/FolderRepository.js";
-import { ProjectReadService } from "../../src/domain/project/ProjectReadService.js";
-import { WorkflowAuthorizationService } from "../../src/platform/workflow/WorkflowAuthorizationService.js";
-import { assertOwns, setDb } from "#platform/identity";
+import { supabase, supabaseAdmin } from "#shared/db/supabase.js";
+import { WorkflowRepository } from "#generation/tools";
+import { ElementRepository } from "#elements/tools";
+import { CharacterRepository } from "#characters/tools";
+import { FolderRepository } from "#workspace/tools";
+import { ProjectReadService } from "#workspace/tools";
+import { WorkflowAuthorizationService } from "#generation/tools";
+import { assertOwns, setDb } from "#identity/tools";
 
 /**
  * Builds an in-memory Supabase table query simulator supporting:

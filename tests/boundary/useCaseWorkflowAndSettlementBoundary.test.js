@@ -11,15 +11,15 @@
 
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { executeNodePersistence } from "../../src/v2/runner/nodeExecutor.js";
+import { executeNodePersistence } from "#generation/tools";
 import {
   PersistedBillingAccumulator,
   initializeGateways,
-} from "../../src/v2/runner/workflowRunner.js";
-import { registerNodeExecutor, registry } from "../../src/v2/nodes/index.js";
+} from "#generation/tools";
+import { registerNodeExecutor, registry } from "#generation/tools";
 import { useCaseService, db } from "../../src/container.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
-import { bootstrapV2 } from "../../src/v2/bootstrap.js";
+import { redisConnection, workerRedisConnection } from "#shared";
+import { bootstrapV2 } from "#generation/tools";
 
 bootstrapV2();
 

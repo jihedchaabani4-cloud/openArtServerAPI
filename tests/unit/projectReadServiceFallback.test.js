@@ -1,8 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ProjectReadService } from "../../src/domain/project/ProjectReadService.js";
-import { MediaRepository } from "../../src/db/MediaRepository.js";
-import { supabase } from "../../lib/supabase.js";
+import { ProjectReadService } from "#workspace/tools";
+import { MediaRepository } from "#media/tools";
+import { supabase } from "#shared/db/supabase.js";
 
 describe("ProjectReadService - Primary Media Fallback & Items Attachment", () => {
     it("returns saved generation parameters in project data", async () => {

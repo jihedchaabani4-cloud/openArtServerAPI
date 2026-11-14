@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ProjectService } from "../../src/domain/project/ProjectService.js";
-import { ProjectReadService } from "../../src/domain/project/ProjectReadService.js";
+import { ProjectService } from "#workspace/tools";
+import { ProjectReadService } from "#workspace/tools";
 
 describe("Slice B: ProjectService & Repository isolation", () => {
     it("ProjectService.listUserProjects delegates to projectRepo and maps name/thumbnail", async () => {

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { GenerationRequestService } from "../../src/domain/generation/GenerationRequestService.js";
-import { AppError } from "../../src/utils/AppError.js";
+import { GenerationRequestService } from "#generation/tools";
+import { AppError } from "#shared";
 
 describe("GenerationRequestService unit tests", () => {
     it("successfully creates workflow, media placeholders, and dispatches to useCaseService", async () => {

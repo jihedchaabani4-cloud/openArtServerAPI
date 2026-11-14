@@ -1,9 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { executeNodePersistence } from "../../src/v2/runner/nodeExecutor.js";
-import { GenerationService } from "../../src/domain/generation/GenerationService.js";
-import { GenerationRequestService } from "../../src/domain/generation/GenerationRequestService.js";
-import { failWorkflowPendingMedia } from "../../src/platform/media/MediaLifecycleService.js";
+import { executeNodePersistence } from "#generation/tools";
+import { GenerationService } from "#generation/tools";
+import { GenerationRequestService } from "#generation/tools";
+import { failWorkflowPendingMedia } from "#media/tools";
 
 describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", () => {
 

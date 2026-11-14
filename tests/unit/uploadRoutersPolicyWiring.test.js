@@ -4,29 +4,29 @@ import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import express from "express";
-import assetsRouter from "../../routes/assets.js";
-import mediaIngestRouter from "../../routes/mediaIngestRoutes.js";
-import elementRoutes from "../../routes/elementRoutes.js";
-import charactersRouter from "../../routes/characters.js";
-import { supabase } from "../../lib/supabase.js";
+import { assetsRouter } from "#media/api";
+import { mediaIngestRouter } from "#media/api";
+import elementRoutes from "#elements/api";
+import charactersRouter from "#characters/api";
+import { supabase } from "#shared/db/supabase.js";
 import { assetUploadService, elementMediaService, characterService, db } from "../../src/container.js";
 import {
     createUploadMiddleware,
     resolveMiddlewarePolicy,
-} from "../../src/middleware/uploadMiddleware.js";
+} from "#media/api";
 import {
     CHARACTER_SHEET_UPLOAD_POLICY,
     CHARACTER_DETAIL_UPLOAD_POLICY,
-} from "../../src/platform/media-ingestion/UploadPolicy.js";
+} from "#media/tools";
 import {
     rateLimitRedisConnection,
     redisConnection,
     workerRedisConnection,
-} from "../../src/queue/redis.js";
+} from "#shared";
 import {
     resetActiveUploadsForTest,
     resetInFlightBytesForTest,
-} from "../../src/middleware/sizeLimitedStorage.js";
+} from "#media/tools";
 
 const VALID_PNG_1X1 = Buffer.from([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,

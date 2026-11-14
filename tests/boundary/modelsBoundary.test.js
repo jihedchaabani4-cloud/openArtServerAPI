@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Test against ONLY the public facade!
-import * as models from "../../src/models/index.js";
+import * as models from "#models/tools";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -147,15 +147,17 @@ describe("Sealed Models Subsystem Architecture", () => {
       return fileList;
     }
 
-    it("ZERO production files outside src/models/ import internal models modules", () => {
+    it("ZERO production files outside src/systems/models/ import internal models modules", () => {
       const searchDirs = [
-        path.join(apiRoot, "src", "use-cases"),
-        path.join(apiRoot, "src", "v2"),
-        path.join(apiRoot, "src", "services"),
-        path.join(apiRoot, "src", "platform"),
-        path.join(apiRoot, "src", "domain"),
-        path.join(apiRoot, "controllers"),
-        path.join(apiRoot, "routes"),
+        path.join(apiRoot, "src", "api"),
+        path.join(apiRoot, "src", "shared"),
+        path.join(apiRoot, "src", "systems", "billing"),
+        path.join(apiRoot, "src", "systems", "identity"),
+        path.join(apiRoot, "src", "systems", "media"),
+        path.join(apiRoot, "src", "systems", "characters"),
+        path.join(apiRoot, "src", "systems", "elements"),
+        path.join(apiRoot, "src", "systems", "workspace"),
+        path.join(apiRoot, "src", "systems", "generation"),
         path.join(apiRoot, "scripts"),
       ];
 
@@ -205,7 +207,7 @@ describe("Sealed Models Subsystem Architecture", () => {
     });
 
     it("src/models/ has ZERO upward imports into use-cases, workflow, controllers, or billing config", () => {
-      const modelsDir = path.join(apiRoot, "src", "models");
+      const modelsDir = path.join(apiRoot, "src", "systems", "models");
       const modelsFiles = getAllSourceFiles(modelsDir);
 
       const upwardPatterns = [
@@ -338,7 +340,7 @@ describe("Sealed Models Subsystem Architecture", () => {
     });
 
     it("unambiguous active configuration: rejects multiple active bindings per operation", async () => {
-      const { initRegistry } = await import("../../src/models/registry/modelRegistry.js");
+      const { initRegistry } = await import("#models/tools");
       // The validator enforces that in Phase 1, only one binding per (model, op) can be active
       const reg = initRegistry({ forceReload: true });
       assert.ok(reg.models.size > 0);
@@ -462,7 +464,7 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.ok(wavespeedCalled, "WaveSpeed should execute under default config");
 
       // 2. Switch provider configuration to Google
-      const { getRegistry } = await import("../../src/models/registry/modelRegistry.js");
+      const { getRegistry } = await import("#models/tools");
       const { bindings } = getRegistry();
       const ws = bindings.get("nanobana_pro:text_to_image:wavespeed");
       const g = bindings.get("nanobana_pro:text_to_image:google");
@@ -722,7 +724,7 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.ok(wavespeedExecuted, "Test 1: WaveSpeed should be executed under default configuration");
 
       // Test 2: Change configuration in registry: nanobana_pro → Google
-      const { getRegistry } = await import("../../src/models/registry/modelRegistry.js");
+      const { getRegistry } = await import("#models/tools");
       const { bindings } = getRegistry();
       const wsBinding = bindings.get("nanobana_pro:text_to_image:wavespeed");
       const gBinding = bindings.get("nanobana_pro:text_to_image:google");
@@ -960,7 +962,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // TEST 7 — Provider switch
     it("TEST 7: Provider switch from WaveSpeed to Google executes with identical caller invocation", async () => {
-      const { getRegistry } = await import("../../src/models/registry/modelRegistry.js");
+      const { getRegistry } = await import("#models/tools");
       const { bindings } = getRegistry();
       const ws = bindings.get("nanobana_pro:text_to_image:wavespeed");
       const g = bindings.get("nanobana_pro:text_to_image:google");
@@ -1040,11 +1042,9 @@ describe("Sealed Models Subsystem Architecture", () => {
     });
 
     // TEST 10 — No provider leakage
-    it("TEST 10: No provider leakage across application layers (src/v2, src/use-cases, controllers)", () => {
+    it("TEST 10: No provider leakage across application layers (src/systems/generation)", () => {
       const dirsToScan = [
-        path.join(apiRoot, "src", "v2"),
-        path.join(apiRoot, "src", "use-cases"),
-        path.join(apiRoot, "controllers"),
+        path.join(apiRoot, "src", "systems", "generation"),
       ];
 
       function scanDir(dir) {
@@ -1080,9 +1080,9 @@ describe("Sealed Models Subsystem Architecture", () => {
     // TEST 11 — No generic operation taxonomy
     it("TEST 11: Models Core does not contain inferOperation or hardcoded provider operation decisions", () => {
       const coreFiles = [
-        path.join(apiRoot, "src", "models", "index.js"),
-        path.join(apiRoot, "src", "models", "execution", "modelRunner.js"),
-        path.join(apiRoot, "src", "models", "schema", "schemaValidator.js"),
+        path.join(apiRoot, "src", "systems", "models", "public", "tools.js"),
+        path.join(apiRoot, "src", "systems", "models", "internal", "execution", "modelRunner.js"),
+        path.join(apiRoot, "src", "systems", "models", "internal", "schema", "schemaValidator.js"),
       ];
 
       for (const file of coreFiles) {
@@ -1103,9 +1103,9 @@ describe("Sealed Models Subsystem Architecture", () => {
     // TEST 12 — No model-specific provider branches
     it("TEST 12: Generic runners and core contain no model-specific or provider-specific branches", () => {
       const genericFiles = [
-        path.join(apiRoot, "src", "models", "execution", "modelRunner.js"),
-        path.join(apiRoot, "src", "models", "execution", "runtimeExecutor.js"),
-        path.join(apiRoot, "src", "models", "runtime", "routeResolver.js"),
+        path.join(apiRoot, "src", "systems", "models", "internal", "execution", "modelRunner.js"),
+        path.join(apiRoot, "src", "systems", "models", "internal", "execution", "runtimeExecutor.js"),
+        path.join(apiRoot, "src", "systems", "models", "internal", "runtime", "routeResolver.js"),
       ];
 
       const forbiddenBranchPatterns = [
@@ -1130,7 +1130,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // TEST 13 — Capability isolation (semantic capabilities do not dictate provider routing)
     it("TEST 13: Capability isolation: model capabilities describe input vocabulary; provider route resolution depends only on semantic input and route rules", async () => {
-      const { getModel } = await import("../../src/models/registry/modelRegistry.js");
+      const { getModel } = await import("#models/tools");
       const model = getModel("nanobana_pro");
       const originalCaps = { ...model.capabilities };
 
@@ -1461,7 +1461,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // TEST 13 — WaveSpeed runner purity
     it("TEST 13: WaveSpeed runner contains zero model-specific or routing-specific conditionals", () => {
-      const runnerPath = path.join(apiRoot, "src", "models", "runtime", "wavespeed", "runner.js");
+      const runnerPath = path.join(apiRoot, "src", "systems", "models", "internal", "runtime", "wavespeed", "runner.js");
       const runnerCode = fs.readFileSync(runnerPath, "utf8");
 
       const forbiddenRoutingPatterns = [
@@ -1484,11 +1484,11 @@ describe("Sealed Models Subsystem Architecture", () => {
     // TEST 14 — Generic core purity
     it("TEST 14: Generic Models Core contains zero provider-specific or model-specific branching", () => {
       const coreFiles = [
-        path.join(apiRoot, "src", "models", "index.js"),
-        path.join(apiRoot, "src", "models", "execution", "modelRunner.js"),
-        path.join(apiRoot, "src", "models", "registry", "bindingResolver.js"),
-        path.join(apiRoot, "src", "models", "pricing", "pricingEngine.js"),
-        path.join(apiRoot, "src", "models", "schema", "schemaValidator.js"),
+        path.join(apiRoot, "src", "systems", "models", "public", "tools.js"),
+        path.join(apiRoot, "src", "systems", "models", "internal", "execution", "modelRunner.js"),
+        path.join(apiRoot, "src", "systems", "models", "internal", "registry", "bindingResolver.js"),
+        path.join(apiRoot, "src", "systems", "models", "internal", "pricing", "pricingEngine.js"),
+        path.join(apiRoot, "src", "systems", "models", "internal", "schema", "schemaValidator.js"),
       ];
 
       for (const file of coreFiles) {
@@ -1572,7 +1572,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // TEST 16 — Wallet isolation
     it("TEST 16: WaveSpeed provider execution layer has zero imports or dependencies on wallet systems", () => {
-      const wavespeedDir = path.join(apiRoot, "src", "models", "runtime", "wavespeed");
+      const wavespeedDir = path.join(apiRoot, "src", "systems", "models", "internal", "runtime", "wavespeed");
 
       function walkDir(dir) {
         let results = [];
@@ -1613,7 +1613,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // TEST 17 — Google remains independent
     it("TEST 17: Provider isolation: resolving Google bindings does not invoke WaveSpeed resolver logic", async () => {
-      const { resolveProviderRoute } = await import("../../src/models/runtime/providerRuntimeRegistry.js");
+      const { resolveProviderRoute } = await import("#models/tools");
 
       const googleBinding = {
         modelId: "nanobana_pro",
@@ -1632,7 +1632,7 @@ describe("Sealed Models Subsystem Architecture", () => {
     // TEST 18 — No WaveSpeed LLM
     it("TEST 18: No WaveSpeed LLM infrastructure exists (excluded by architecture; LLM is Google Studio only)", async () => {
       // 18a: No llm directory in wavespeed runtime
-      const wavespeedLlmDir = path.join(apiRoot, "src", "models", "runtime", "wavespeed", "llm");
+      const wavespeedLlmDir = path.join(apiRoot, "src", "systems", "models", "internal", "runtime", "wavespeed", "llm");
       assert.strictEqual(fs.existsSync(wavespeedLlmDir), false, "WaveSpeed runtime must NOT contain llm directory");
 
       // 18b: No WaveSpeed LLM bindings in manifests
@@ -1644,7 +1644,7 @@ describe("Sealed Models Subsystem Architecture", () => {
       }
 
       // 18c: Calling WaveSpeed route resolution with domain "llm" explicitly throws UnsupportedCapabilityError
-      const { resolveWaveSpeedRoute } = await import("../../src/models/runtime/wavespeed/resolver.js");
+      const { resolveWaveSpeedRoute } = await import("../../src/systems/models/internal/runtime/wavespeed/resolver.js");
       assert.throws(
         () => resolveWaveSpeedRoute(
           { modelId: "test_llm", providerId: "wavespeed", routes: [] },
@@ -1657,7 +1657,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // TEST 19 — Route evaluator condition-count precedence and ambiguity detection
     it("TEST 19: Route evaluator enforces condition-count precedence and throws on conflicting ambiguous matches", async () => {
-      const { evaluateWaveSpeedRoutes } = await import("../../src/models/runtime/wavespeed/common/routeEvaluator.js");
+      const { evaluateWaveSpeedRoutes } = await import("../../src/systems/models/internal/runtime/wavespeed/common/routeEvaluator.js");
 
       const mockBinding = {
         modelId: "mock_model",
@@ -1713,7 +1713,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // TEST 20 — Route unreachable detection
     it("TEST 20: Parameters matching zero routes throw UnsupportedCapabilityError with parameter diagnostics", async () => {
-      const { evaluateWaveSpeedRoutes } = await import("../../src/models/runtime/wavespeed/common/routeEvaluator.js");
+      const { evaluateWaveSpeedRoutes } = await import("../../src/systems/models/internal/runtime/wavespeed/common/routeEvaluator.js");
 
       const mockBinding = {
         modelId: "mock_strict",
@@ -1732,7 +1732,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // TEST 21 — Capability purity & operation taxonomy rejection
     it("TEST 21: Model capabilities contain no provider operation taxonomy and config validator rejects operation keys", async () => {
-      const { getRegistry } = await import("../../src/models/registry/modelRegistry.js");
+      const { getRegistry } = await import("#models/tools");
       const { models: loadedModels } = getRegistry();
 
       const forbiddenOps = new Set([
@@ -1823,7 +1823,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test A — nano-banana-pro, prompt only, resolves correctly
     it("Test A: nano-banana-pro, prompt only, resolves correctly to generation route", async () => {
-      const { resolveExecutionPlan } = await import("../../src/models/registry/bindingResolver.js");
+      const { resolveExecutionPlan } = await import("#models/tools");
       const { route } = resolveExecutionPlan("nano-banana-pro", { prompt: "a sunrise over the mountains", resolution: "1k" });
       assert.strictEqual(route.providerId, "wavespeed");
       assert.strictEqual(route.id, "generation");
@@ -1832,7 +1832,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test B — nano-banana-pro, prompt + input_image, resolves to WaveSpeed edit
     it("Test B: nano-banana-pro, prompt + input_image, resolves to WaveSpeed edit implementation", async () => {
-      const { resolveExecutionPlan } = await import("../../src/models/registry/bindingResolver.js");
+      const { resolveExecutionPlan } = await import("#models/tools");
       const { route } = resolveExecutionPlan("nano-banana-pro", { prompt: "add sunglasses", input_image: "https://cdn.example.com/source.png" });
       assert.strictEqual(route.providerId, "wavespeed");
       assert.strictEqual(route.id, "edit");
@@ -1841,7 +1841,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test C — nano-banana-pro-ultra, prompt only, resolves to WaveSpeed Ultra generation endpoint
     it("Test C: nano-banana-pro-ultra, prompt only, resolves to WaveSpeed Ultra generation endpoint", async () => {
-      const { resolveExecutionPlan } = await import("../../src/models/registry/bindingResolver.js");
+      const { resolveExecutionPlan } = await import("#models/tools");
       const { route } = resolveExecutionPlan("nano-banana-pro-ultra", { prompt: "hyper-realistic landscape", resolution: "4k" });
       assert.strictEqual(route.providerId, "wavespeed");
       assert.strictEqual(route.id, "generation");
@@ -1850,7 +1850,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test D — nano-banana-pro-ultra, prompt + input_image, resolves to WaveSpeed Ultra edit endpoint
     it("Test D: nano-banana-pro-ultra, prompt + input_image, resolves to WaveSpeed Ultra edit endpoint", async () => {
-      const { resolveExecutionPlan } = await import("../../src/models/registry/bindingResolver.js");
+      const { resolveExecutionPlan } = await import("#models/tools");
       const { route } = resolveExecutionPlan("nano-banana-pro-ultra", { prompt: "retouch face", input_image: "https://cdn.example.com/portrait.png", resolution: "4k" });
       assert.strictEqual(route.providerId, "wavespeed");
       assert.strictEqual(route.id, "edit");
@@ -1859,7 +1859,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test E — seedance-2-5, prompt only, resolves to text_to_video
     it("Test E: seedance-2-5, prompt only, resolves to text_to_video", async () => {
-      const { resolveExecutionPlan } = await import("../../src/models/registry/bindingResolver.js");
+      const { resolveExecutionPlan } = await import("#models/tools");
       const { route } = resolveExecutionPlan("seedance-2-5", { prompt: "cinematic drone flight over waterfall", duration: 5 });
       assert.strictEqual(route.providerId, "wavespeed");
       assert.strictEqual(route.id, "text_to_video");
@@ -1868,7 +1868,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test F — seedream-v5 resolves to dedicated text_to_image implementation without artificial route layer
     it("Test F: seedream-v5 resolves to dedicated text_to_image implementation without artificial route layer", async () => {
-      const { resolveExecutionPlan } = await import("../../src/models/registry/bindingResolver.js");
+      const { resolveExecutionPlan } = await import("#models/tools");
       const { route, binding } = resolveExecutionPlan("seedream-v5", { prompt: "a sunrise over mountains" });
       assert.strictEqual(route.providerId, "wavespeed");
       assert.strictEqual(route.providerModelId, "bytedance/seedream-v5.0-pro");
@@ -1911,11 +1911,11 @@ describe("Sealed Models Subsystem Architecture", () => {
       const fs = await import("fs");
       const path = await import("path");
       const coreFiles = [
-        "src/models/index.js",
-        "src/models/execution/modelRunner.js",
-        "src/models/pricing/pricingEngine.js",
-        "src/models/registry/bindingResolver.js",
-        "src/models/schema/schemaValidator.js",
+        "src/systems/models/public/tools.js",
+        "src/systems/models/internal/execution/modelRunner.js",
+        "src/systems/models/internal/pricing/pricingEngine.js",
+        "src/systems/models/internal/registry/bindingResolver.js",
+        "src/systems/models/internal/schema/schemaValidator.js",
       ];
       for (const relPath of coreFiles) {
         const fullPath = path.resolve(relPath);
@@ -1962,8 +1962,8 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test K — requesting a Model under a provider with no eligible binding returns distinct typed NoEligibleBindingError (C7)
     it("Test K: requesting a Model under a provider with no eligible binding returns distinct typed NoEligibleBindingError", async () => {
-      const { resolveBindingForTest } = await import("../../src/models/registry/bindingResolver.js");
-      const { NoEligibleBindingError } = await import("../../src/models/errors/index.js");
+      const { resolveBindingForTest } = await import("#models/tools");
+      const { NoEligibleBindingError } = await import("#models/tools");
       assert.throws(
         () => resolveBindingForTest("seedance_2_5", "google"),
         (err) => err instanceof NoEligibleBindingError && err.code === "NO_ELIGIBLE_BINDING" && err.modelId === "seedance_2_5"
@@ -1972,7 +1972,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test L — manifest validator rejects model.json using canonicalParameters (C1)
     it("Test L: manifest validator rejects model.json using canonicalParameters instead of canonicalInputs", async () => {
-      const { ConfigIntegrityError } = await import("../../src/models/errors/index.js");
+      const { ConfigIntegrityError } = await import("#models/tools");
       assert.throws(
         () => {
           const invalidModelDef = {
@@ -2000,7 +2000,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test N — Wan 3.0 topology (T2V and I2V)
     it("Test N: Wan 3.0 resolves text_to_video and image_to_video correctly", async () => {
-      const { resolveExecutionPlan } = await import("../../src/models/registry/bindingResolver.js");
+      const { resolveExecutionPlan } = await import("#models/tools");
       
       const planT2V = resolveExecutionPlan("wan_3_0", { prompt: "a sunset scene", duration: 5 });
       assert.strictEqual(planT2V.route.id, "text_to_video");
@@ -2017,7 +2017,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test O — Single-path models must not declare routes[]
     it("Test O: Single-path models must have flat bindings without routes[] array", async () => {
-      const { getModelBindings } = await import("../../src/models/registry/modelRegistry.js");
+      const { getModelBindings } = await import("#models/tools");
       const singlePathModels = [
         "wavespeed_upscale",
         "seedream_v5",
@@ -2038,7 +2038,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test P — Multi-path models declare routes[]
     it("Test P: Multi-path models declare declarative routes[] array with when conditions", async () => {
-      const { getModelBindings } = await import("../../src/models/registry/modelRegistry.js");
+      const { getModelBindings } = await import("#models/tools");
       const multiPathModels = [
         "nanobana_pro",
         "nanobana_pro_ultra",
@@ -2065,8 +2065,8 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test Q — Ambiguity Test: two routes with equal specificity and priority throw ConfigIntegrityError
     it("Test Q: Ambiguity Test — equal specificity and equal priority throws ConfigIntegrityError", async () => {
-      const { evaluateWaveSpeedRoutes } = await import("../../src/models/runtime/wavespeed/common/routeEvaluator.js");
-      const { ConfigIntegrityError } = await import("../../src/models/errors/index.js");
+      const { evaluateWaveSpeedRoutes } = await import("../../src/systems/models/internal/runtime/wavespeed/common/routeEvaluator.js");
+      const { ConfigIntegrityError } = await import("#models/tools");
 
       const mockBinding = {
         modelId: "test_ambiguity_model",
@@ -2099,8 +2099,8 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test R — No Match Test: semantic input matching no route throws UnsupportedCapabilityError
     it("Test R: No Match Test — unmatched semantic input throws UnsupportedCapabilityError", async () => {
-      const { evaluateWaveSpeedRoutes } = await import("../../src/models/runtime/wavespeed/common/routeEvaluator.js");
-      const { UnsupportedCapabilityError } = await import("../../src/models/errors/index.js");
+      const { evaluateWaveSpeedRoutes } = await import("../../src/systems/models/internal/runtime/wavespeed/common/routeEvaluator.js");
+      const { UnsupportedCapabilityError } = await import("#models/tools");
 
       const mockBinding = {
         modelId: "test_nomatch_model",
@@ -2151,7 +2151,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test T — gpt_image_2 multi-path resolution and execution (generation vs edit)
     it("Test T: gpt_image_2 resolves generation and edit routes correctly and wraps input_image", async () => {
-      const { resolveExecutionPlan } = await import("../../src/models/registry/bindingResolver.js");
+      const { resolveExecutionPlan } = await import("#models/tools");
 
       // 1. Generation (prompt only)
       const planGen = resolveExecutionPlan("gpt_image_2", { prompt: "a cute kitten", resolution: "1k" });
@@ -2213,8 +2213,8 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test V — Mutating model.capabilities does NOT affect route resolution
     it("Test V: Mutating model.capabilities does NOT affect route resolution (passive documentation)", async () => {
-      const { getRegistry } = await import("../../src/models/registry/modelRegistry.js");
-      const { resolveExecutionPlan } = await import("../../src/models/registry/bindingResolver.js");
+      const { getRegistry } = await import("#models/tools");
+      const { resolveExecutionPlan } = await import("#models/tools");
       const reg = getRegistry();
       const m = reg.models.get("nanobana_pro");
       const originalCaps = { ...m.capabilities };
@@ -2237,7 +2237,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test W — HTTP router POST /:key/estimate-price canonical endpoint
     it("Test W: HTTP router POST /:key/estimate-price calculates price without operation parameter", async () => {
-      const modelsRouter = (await import("../../routes/modelsRoute.js")).default;
+      const modelsRouter = (await import("#models/api")).default;
       const routeLayer = modelsRouter.stack.find(
         (layer) => layer.route && layer.route.path === "/:key/estimate-price" && layer.route.methods.post
       );
@@ -2540,7 +2540,7 @@ describe("Sealed Models Subsystem Architecture", () => {
     it("Test 1: Common parameter definition exists once at Model + Provider level", () => {
       const modelsToCheck = ["seedance_2_5", "wan_3_0", "nanobana_pro", "gpt_image_2"];
       for (const mId of modelsToCheck) {
-        const bindingPath = path.join(apiRoot, "src/models/manifests", mId, "bindings/wavespeed.json");
+        const bindingPath = path.join(apiRoot, "src/systems/models/internal/manifests", mId, "bindings/wavespeed.json");
         const binding = JSON.parse(fs.readFileSync(bindingPath, "utf8"));
         assert.ok(binding.parameters, `Binding for ${mId} must declare common "parameters" object at root`);
         assert.ok(typeof binding.parameters === "object" && Object.keys(binding.parameters).length > 0);
@@ -2550,7 +2550,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test 2: Operations reference existing parameters through requiredInputs
     it("Test 2: Operations reference existing parameters through requiredInputs", () => {
-      const bindingPath = path.join(apiRoot, "src/models/manifests/seedance_2_5/bindings/wavespeed.json");
+      const bindingPath = path.join(apiRoot, "src/systems/models/internal/manifests/seedance_2_5/bindings/wavespeed.json");
       const binding = JSON.parse(fs.readFileSync(bindingPath, "utf8"));
       const routes = binding.routes || binding.operations;
       assert.ok(Array.isArray(routes) && routes.length >= 3);
@@ -2572,7 +2572,7 @@ describe("Sealed Models Subsystem Architecture", () => {
     it("Test 3: No duplicated full parameter definitions exist inside operations", () => {
       const modelsToCheck = ["seedance_2_5", "wan_3_0", "nanobana_pro", "nanobana_pro_ultra", "gpt_image_2"];
       for (const mId of modelsToCheck) {
-        const bindingPath = path.join(apiRoot, "src/models/manifests", mId, "bindings/wavespeed.json");
+        const bindingPath = path.join(apiRoot, "src/systems/models/internal/manifests", mId, "bindings/wavespeed.json");
         const binding = JSON.parse(fs.readFileSync(bindingPath, "utf8"));
         const routes = binding.routes || binding.operations || [];
         for (const route of routes) {
@@ -2622,7 +2622,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test 5: Operation-specific override does not mutate the common definition
     it("Test 5: Operation-specific override does not mutate the common definition", async () => {
-      const { evaluateWaveSpeedRoutes } = await import("../../src/models/runtime/wavespeed/common/routeEvaluator.js");
+      const { evaluateWaveSpeedRoutes } = await import("../../src/systems/models/internal/runtime/wavespeed/common/routeEvaluator.js");
       const baseBinding = {
         id: "mock_model.wavespeed",
         modelId: "mock_model",
@@ -2696,7 +2696,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test 8: reference_to_video selects correctly when intentionally supported
     it("Test 8: reference_to_video selects correctly when intentionally supported", async () => {
-      const { evaluateWaveSpeedRoutes } = await import("../../src/models/runtime/wavespeed/common/routeEvaluator.js");
+      const { evaluateWaveSpeedRoutes } = await import("../../src/systems/models/internal/runtime/wavespeed/common/routeEvaluator.js");
       const refBinding = {
         id: "ref_model.wavespeed",
         modelId: "ref_model",
@@ -2778,7 +2778,7 @@ describe("Sealed Models Subsystem Architecture", () => {
     it("Test 10: Flat single-endpoint models still work", async () => {
       const singleModels = ["seedream_v5", "wavespeed_upscale"];
       for (const mId of singleModels) {
-        const bindingPath = path.join(apiRoot, "src/models/manifests", mId, "bindings/wavespeed.json");
+        const bindingPath = path.join(apiRoot, "src/systems/models/internal/manifests", mId, "bindings/wavespeed.json");
         const binding = JSON.parse(fs.readFileSync(bindingPath, "utf8"));
         assert.strictEqual(binding.routes, undefined, `${mId} must have no routes array`);
         assert.ok(binding.endpoint, `${mId} must have root endpoint`);
@@ -2790,7 +2790,7 @@ describe("Sealed Models Subsystem Architecture", () => {
     // Static Architectural Deduplication Invariant Test (Section 22)
     it("Static Architectural Deduplication Test: Rejects route that duplicates common parameters", () => {
       const { ConfigIntegrityError } = models;
-      const manifestPath = path.join(apiRoot, "src/models/manifests/seedance_2_5/bindings/wavespeed.json");
+      const manifestPath = path.join(apiRoot, "src/systems/models/internal/manifests/seedance_2_5/bindings/wavespeed.json");
       const originalContent = fs.readFileSync(manifestPath, "utf8");
 
       try {

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { MediaService } from "../../src/platform/media/index.js";
+import { MediaService } from "#media/tools";
 
 describe("MediaService — strict public.media ownership boundary", () => {
   it("persists canonical media rows to public.media and never writes to workflow_media", async () => {

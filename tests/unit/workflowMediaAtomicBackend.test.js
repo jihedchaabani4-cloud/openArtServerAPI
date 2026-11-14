@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createWorkflowWithMediaAtomic, createWorkflowWithMedia } from "../../src/db/workflowMediaOps.js";
-import { supabase } from "../../lib/supabase.js";
+import { createWorkflowWithMediaAtomic, createWorkflowWithMedia } from "#media/tools";
+import { supabase } from "#shared/db/supabase.js";
 
 describe("createWorkflowWithMediaAtomic backend implementation (no RPC dependency)", () => {
   it("creates workflow, media placeholder, links workflow_media and sets primary media purely in backend", async () => {

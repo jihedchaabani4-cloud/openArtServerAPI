@@ -3,17 +3,17 @@ process.env.NODE_ENV = "test";
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
+import { WorkflowMediaService } from "#generation/tools";
 import {
     QuotaError,
     ValidationError,
     UploadError,
     formatWorkflowReferenceQuotaMessage,
     isWorkflowReferenceQuotaError,
-} from "../../src/platform/media-ingestion/MediaUploadErrors.js";
-import { CrudServiceError } from "../../src/utils/crudOperationLog.js";
-import { baseLogger } from "../../src/infrastructure/logging/index.js";
-import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
+} from "#media/tools";
+import { CrudServiceError } from "#shared";
+import { baseLogger } from "#shared";
+import { WorkflowMediaRepository } from "#media/tools";
 
 function createMockHarness() {
     const workflows = new Map();

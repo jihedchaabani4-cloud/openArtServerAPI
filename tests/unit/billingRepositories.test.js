@@ -2,12 +2,12 @@ process.env.NODE_ENV = "test";
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { WalletRepository } from "../../src/platform/billing/repositories/WalletRepository.js";
-import { TransactionRepository } from "../../src/platform/billing/repositories/TransactionRepository.js";
-import { FailedOpsRepository } from "../../src/platform/billing/repositories/FailedOpsRepository.js";
-import { CreditPackageRepository } from "../../src/platform/billing/repositories/CreditPackageRepository.js";
-import { WalletError, BillingError } from "../../src/platform/billing/BillingErrors.js";
-import { createBillingRepositories } from "../../src/platform/billing/billingFactory.js";
+import { WalletRepository } from "#billing/tools";
+import { TransactionRepository } from "#billing/tools";
+import { FailedOpsRepository } from "#billing/tools";
+import { CreditPackageRepository } from "#billing/tools";
+import { WalletError, BillingError } from "#billing/tools";
+import { createBillingRepositories } from "#billing/tools";
 
 function makeMockSupabase() {
     const rpcCalls = [];

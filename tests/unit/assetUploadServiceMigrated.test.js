@@ -15,8 +15,8 @@
 
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { AssetUploadService } from "../../src/domain/asset/AssetUploadService.js";
-import { DEFAULT_UPLOAD_POLICY } from "../../src/platform/media-ingestion/UploadPolicy.js";
+import { AssetUploadService } from "#media/tools";
+import { DEFAULT_UPLOAD_POLICY } from "#media/tools";
 
 const VALID_PNG_1X1 = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
@@ -422,7 +422,7 @@ describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaS
     });
 
     it("9. StoragePathResolver.validateFolderSegment enforces whitelist of allowed storage folders", async () => {
-        const { StoragePathResolver } = await import("../../src/platform/storage/StoragePathResolver.js");
+        const { StoragePathResolver } = await import("#media/tools");
         // Allowed folders
         assert.equal(StoragePathResolver.validateFolderSegment("uploads"), "uploads");
         assert.equal(StoragePathResolver.validateFolderSegment("element-references"), "element-references");
@@ -443,7 +443,7 @@ describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaS
     });
 
     it("10. Integrated 4-step rollback with real WorkflowMediaService: executes unlink -> delete media -> discard -> delete containerWf", async () => {
-        const { WorkflowMediaService } = await import("../../src/platform/workflow/WorkflowMediaService.js");
+        const { WorkflowMediaService } = await import("#generation/tools");
 
         const orderEvents = [];
         const discarded = [];
@@ -589,8 +589,8 @@ describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaS
     });
 
     it("12. Real storage folder enforcement: uploadAsset with real MediaUploadService stores image strictly under uploads/ even if folder='element-references' is passed", async () => {
-        const { MediaUploadService } = await import("../../src/platform/media-ingestion/MediaUploadService.js");
-        const { StoragePathResolver } = await import("../../src/platform/storage/StoragePathResolver.js");
+        const { MediaUploadService } = await import("#media/tools");
+        const { StoragePathResolver } = await import("#media/tools");
 
         let savedStorageKey = null;
         const resolver = new StoragePathResolver();

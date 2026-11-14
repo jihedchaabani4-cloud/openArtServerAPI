@@ -1,8 +1,8 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { assertOwns, assertOwnsAny } from "#platform/identity";
+import { assertOwns, assertOwnsAny } from "#identity/tools";
 import { db } from "../../src/container.js";
-import { AppError } from "../../src/utils/AppError.js";
+import { AppError } from "#shared";
 
 describe("Workflow Ownership with NULL Project User ID (Task F-T2)", () => {
   let origFindWorkflowById;

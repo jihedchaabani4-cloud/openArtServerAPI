@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { NodeSafetyService } from "../../src/v2/nodes/safety/NodeSafetyService.js";
+import { NodeSafetyService } from "#generation/tools";
 
 describe("D2.4 — Generic Prompt Safety Ceiling (7000 chars) Boundary Tests", () => {
   it("TEST 1: assertVideoInputs and assertImageInputs accept a 3500-character expressive prompt without throwing", () => {

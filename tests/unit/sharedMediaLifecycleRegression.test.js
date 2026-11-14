@@ -16,11 +16,11 @@
  */
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { CharacterMediaService } from "../../src/domain/character/CharacterMediaService.js";
-import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
-import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
-import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
-import { assertOwns, setDb } from "#platform/identity";
+import { CharacterMediaService } from "#characters/tools";
+import { ElementMediaService } from "#elements/tools";
+import { WorkflowMediaService } from "#generation/tools";
+import { WorkflowMediaRepository } from "#media/tools";
+import { assertOwns, setDb } from "#identity/tools";
 
 describe("Shared-Media Lifecycle Regression & Hardening", () => {
 

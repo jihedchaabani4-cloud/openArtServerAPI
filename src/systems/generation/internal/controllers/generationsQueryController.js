@@ -1,0 +1,42 @@
+/**
+ * generationsQueryController.js — thin HTTP adapter.
+ * All business logic delegated to GenerationService.
+ * Feature: 026-backend-platform-layer-refactor
+ */
+import { getGenerationServices } from "../services/serviceAccessor.js";
+
+export const getAssets = async (req, res) => {
+    try {
+        const { project_id } = req.params;
+        if (!project_id || project_id === "null") return res.json({ ok: true, data: [] });
+        const { limit, offset } = req.query;
+        const { generationService } = getGenerationServices();
+        const result = await generationService.getAssets(req.user.id, project_id, { limit, offset });
+        res.json({ ok: true, ...result });
+    } catch (err) {
+        res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+    }
+};
+
+export const getUserLibrary = async (req, res) => {
+    try {
+        const { project_id, limit, offset } = req.query;
+        const { generationService } = getGenerationServices();
+        const result = await generationService.getUserLibrary(req.user.id, { projectId: project_id, limit, offset });
+        res.json({ ok: true, ...result });
+    } catch (err) {
+        res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+    }
+};
+
+export const getLibraryWorkflowDetail = async (req, res) => {
+    try {
+        const { workflow_id } = req.params;
+        if (!workflow_id) return res.status(400).json({ ok: false, message: "workflow_id is required" });
+        const { generationService } = getGenerationServices();
+        const data = await generationService.getWorkflowDetail(req.user.id, workflow_id);
+        res.json({ ok: true, data });
+    } catch (err) {
+        res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+    }
+};

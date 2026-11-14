@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { AppError } from "../../src/errors/AppError.js";
+import { AppError } from "#shared";
 import {
     IdentityError,
     IdentityAuthenticationError,
@@ -17,7 +17,7 @@ import {
     isInternalSecretAllowedRequest,
     isInternalSecretAllowedRoute,
     USER_ID_REGEX,
-} from "#platform/identity";
+} from "#identity/tools";
 
 describe("Identity System Public Contract (#platform/identity)", () => {
     describe("1. Exported Error Hierarchy", () => {

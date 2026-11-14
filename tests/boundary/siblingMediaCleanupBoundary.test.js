@@ -1,10 +1,10 @@
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { executeNodeJob } from "../../src/v2/runner/nodeExecutor.js";
-import { executeOrchestration } from "../../src/v2/runner/workflowRunner.js";
-import { RunRepository } from "../../src/v2/runner/runRepository.js";
-import { UseCaseService } from "../../src/services/useCaseService.js";
-import { MediaRepository } from "../../src/db/MediaRepository.js";
+import { executeNodeJob } from "#generation/tools";
+import { executeOrchestration } from "#generation/tools";
+import { RunRepository } from "#generation/tools";
+import { UseCaseService } from "#generation/tools";
+import { MediaRepository } from "#media/tools";
 import { db } from "../../src/container.js";
 
 describe("Sibling Media Cleanup & Deadlock Boundary Tests (Task T8 / BUG-08)", () => {

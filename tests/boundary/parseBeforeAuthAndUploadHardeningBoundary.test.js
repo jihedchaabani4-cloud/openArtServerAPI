@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import crypto from "node:crypto";
 import app from "../../index.js";
-import { supabase } from "../../lib/supabase.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
-import { setLimiterForTest, resetLimitersForTest } from "../../src/middleware/rateLimit.js";
-import { MediaInspector } from "../../src/platform/media-ingestion/MediaInspector.js";
+import { supabase } from "#shared/db/supabase.js";
+import { redisConnection, workerRedisConnection } from "#shared";
+import { setLimiterForTest, resetLimitersForTest } from "#identity/tools";
+import { MediaInspector } from "#media/tools";
 
 describe("RC1.4-D2.2 — Parse-Before-Auth and Upload Hardening Boundary Tests", () => {
   let server;
@@ -35,7 +35,7 @@ describe("RC1.4-D2.2 — Parse-Before-Auth and Upload Hardening Boundary Tests",
       supabase.auth.getUser = origGetUser;
     }
     try {
-      const { rateLimitRedisConnection } = await import("../../src/queue/redis.js");
+      const { rateLimitRedisConnection } = await import("#shared");
       await rateLimitRedisConnection?.quit().catch(() => rateLimitRedisConnection?.disconnect());
     } catch {}
     try {
@@ -205,7 +205,7 @@ describe("RC1.4-D2.2 — Parse-Before-Auth and Upload Hardening Boundary Tests",
 
   // ── (f) Fail-fast rate limiter Redis connection ───────────────────────────
   it("TEST D2.2-f: Dedicated rate-limiter Redis client has enableOfflineQueue: false", async () => {
-    const { rateLimitRedisConnection } = await import("../../src/queue/redis.js");
+    const { rateLimitRedisConnection } = await import("#shared");
     assert.ok(rateLimitRedisConnection, "rateLimitRedisConnection must be exported");
     assert.equal(
       rateLimitRedisConnection.options.enableOfflineQueue,

@@ -3,8 +3,8 @@ process.env.NODE_ENV = "test";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { CharacterMediaService } from "../../src/domain/character/CharacterMediaService.js";
-import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
+import { CharacterMediaService } from "#characters/tools";
+import { WorkflowMediaService } from "#generation/tools";
 
 function setupBugHarness() {
     const workflows = new Map();

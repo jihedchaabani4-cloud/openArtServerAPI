@@ -1,8 +1,8 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { getAll, create, update, remove } from "../../controllers/projectsController.js";
+import { getAll, create, update, remove } from "#workspace/api";
 import { projectService } from "../../src/container.js";
-import { AppError } from "../../src/utils/AppError.js";
+import { AppError } from "#shared";
 
 describe("projectsController unit tests", () => {
     let originalListUserProjects;

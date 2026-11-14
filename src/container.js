@@ -1,7 +1,4 @@
 import "dotenv/config";
-import { PromptService } from "#platform/ai/PromptService.js";
-import { createStorageService } from "#platform/storage";
-import { supabase, supabaseAdmin } from "#lib/supabase.js";
 import {
     WalletService,
     FailedOpsService,
@@ -9,59 +6,60 @@ import {
     configureBilling,
     createWalletService,
     createFailedOpsService,
-    createBillingRepositories,
-} from "#platform/billing";
-import { PricingService } from "./models/pricing/PricingService.js";
-import { createClient } from "@supabase/supabase-js";
-import { redisConnection } from "#queue/redis.js";
-import { createLogger } from "./infrastructure/logging/index.js";
+    getUsageEventRepository,
+    getCreditPackageRepository,
+    getWalletRepository,
+    getTransactionRepository,
+} from "#billing/tools";
+import { PricingService } from "#models/tools";
+import { redisConnection, createLogger, envConfig } from "#shared";
 
 const systemLogger = createLogger("system");
 
 // ─── Repositories ───────────────────────────────────────────────────────────
-import { ProjectRepository }          from "#db/ProjectRepository.js";
-import { WorkflowRepository }         from "#db/WorkflowRepository.js";
-import { MediaRepository }            from "#db/MediaRepository.js";
-import { WorkflowMediaRepository }     from "#db/WorkflowMediaRepository.js";
-import { GenerationConfigRepository } from "#db/GenerationConfigRepository.js";
-import { CharacterRepository }        from "#db/CharacterRepository.js";
-import { ElementRepository }          from "#db/ElementRepository.js";
-import { FolderRepository }           from "#db/FolderRepository.js";
-import { TrashRepository }            from "#db/TrashRepository.js";
-
-// ─── Infrastructure ───────────────────────────────────────────────────────────
-import { WorkflowEventRecorder } from "./infrastructure/events/workflowEventRecorder.js";
-import { WorkflowBillingGateway } from "./infrastructure/billing/workflowBillingGateway.js";
-import { MediaService, MediaWorkflowLifecycleService } from "#platform/media/index.js";
-import { WorkflowLifecycleService } from "#platform/workflow/WorkflowService.js";
-import { MediaUploadService } from "#platform/media-ingestion/index.js";
-import { CharacterService } from "#domain/character/CharacterService.js";
-import { CharacterMediaService } from "#domain/character/CharacterMediaService.js";
-import { ElementService } from "#domain/element/ElementService.js";
-import { ElementMediaService } from "#domain/element/ElementMediaService.js";
-import { ElementAnalysisService } from "#domain/element/ElementAnalysisService.js";
-import { ProjectReadService } from "#domain/project/ProjectReadService.js";
-import { ProjectService } from "#domain/project/ProjectService.js";
-import { GenerationService } from "#domain/generation/GenerationService.js";
-import { GenerationRequestService } from "#domain/generation/GenerationRequestService.js";
-import { FolderService } from "./domain/folder/FolderService.js";
-import { WorkflowStorageGateway } from "./infrastructure/storage/workflowStorageGateway.js";
-import { AssetUploadService } from "./domain/asset/AssetUploadService.js";
-import { TrashService } from "./domain/trash/TrashService.js";
-
-
+import { ProjectRepository, FolderRepository, TrashRepository, ProjectService, ProjectReadService, FolderService, TrashService, configureWorkspace } from "#workspace/tools";
+import {
+    WorkflowRepository,
+    GenerationConfigRepository,
+    GenerationService,
+    GenerationRequestService,
+    WorkflowLifecycleService,
+    PromptService,
+    promptService,
+    UseCaseService,
+    jobQueueService,
+    configureGeneration,
+    configureDefaultGateways,
+    WorkflowEventRecorder,
+    WorkflowBillingGateway,
+    WorkflowStorageGateway,
+} from "#generation/tools";
+import {
+    MediaRepository,
+    WorkflowMediaRepository,
+    MediaService,
+    MediaWorkflowLifecycleService,
+    MediaUploadService,
+    AssetUploadService,
+    getStorageService,
+    configureMedia,
+} from "#media/tools";
+import { CharacterRepository, CharacterService, CharacterMediaService, configureCharacters } from "#characters/tools";
+import { ElementRepository, ElementService, ElementMediaService, ElementAnalysisService, configureElements } from "#elements/tools";
+import { setDb as setIdentityDb } from "#identity/tools";
 
 // ─── Services ────────────────────────────────────────────────────────────────
-export const promptService  = new PromptService();
-export const storageService = createStorageService({ client: supabaseAdmin });
-const walletServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || null;
+export { promptService };
+export const storageService = getStorageService();
+const walletServiceKey = envConfig.supabaseServiceRoleKey || null;
 
 /**
  * Evaluates whether current runtime is in production mode.
  * Any environment other than explicit "development" or "test" is treated as production (fail-safe).
  */
 export function isProductionEnvironment() {
-    const env = (process.env.NODE_ENV || "").trim().toLowerCase();
+    const rawEnv = envConfig.getEnvVar("NODE_ENV") || "";
+    const env = rawEnv.trim().toLowerCase();
     return env !== "development" && env !== "test";
 }
 
@@ -70,8 +68,8 @@ export function isProductionEnvironment() {
  */
 export function assertWalletConfiguredForEnvironment() {
     const isProd = isProductionEnvironment();
-    const hasUrl = Boolean(process.env.SUPABASE_URL);
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
+    const hasUrl = Boolean(envConfig.rawSupabaseUrl);
+    const key = envConfig.supabaseServiceRoleKey;
     const hasKey = Boolean(key);
 
     if (isProd && (!hasUrl || !hasKey)) {
@@ -79,7 +77,7 @@ export function assertWalletConfiguredForEnvironment() {
             .filter(Boolean)
             .join(", ");
         throw new Error(
-            `Fatal: WalletService is required in production mode (NODE_ENV=${process.env.NODE_ENV || "unset"}). Missing: ${missing}`
+            `Fatal: WalletService is required in production mode (NODE_ENV=${envConfig.getEnvVar("NODE_ENV") || "unset"}). Missing: ${missing}`
         );
     }
 }
@@ -89,17 +87,18 @@ export function assertWalletConfiguredForEnvironment() {
  */
 export function assertSecurityConfiguredForEnvironment() {
     const isProd = isProductionEnvironment();
-    const secret = process.env.INTERNAL_SECRET;
+    const secret = envConfig.internalSecret;
 
     if (isProd) {
         if (!secret || typeof secret !== "string" || secret.trim().length < 32) {
             throw new Error(
-                `Fatal: INTERNAL_SECRET is required in production mode (NODE_ENV=${process.env.NODE_ENV || "unset"}) and must be at least 32 characters long.`
+                `Fatal: INTERNAL_SECRET is required in production mode (NODE_ENV=${envConfig.getEnvVar("NODE_ENV") || "unset"}) and must be at least 32 characters long.`
             );
         }
-        if (process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) {
+        const rawBypass = envConfig.getEnvVar("DEV_AUTH_BYPASS");
+        if (rawBypass === "true" || rawBypass === true) {
             throw new Error(
-                `Fatal: DEV_AUTH_BYPASS cannot be enabled in production mode (NODE_ENV=${process.env.NODE_ENV || "unset"}).`
+                `Fatal: DEV_AUTH_BYPASS cannot be enabled in production mode (NODE_ENV=${envConfig.getEnvVar("NODE_ENV") || "unset"}).`
             );
         }
     }
@@ -113,8 +112,8 @@ export function assertRateLimitConfiguredForEnvironment(logger = systemLogger) {
     const isProd = isProductionEnvironment();
     if (!isProd) return;
 
-    const store = (process.env.RATE_LIMIT_STORE || "").trim().toLowerCase();
-    const allowMemory = process.env.ALLOW_IN_MEMORY_RATE_LIMIT === "true";
+    const store = (envConfig.getEnvVar("RATE_LIMIT_STORE") || "").trim().toLowerCase();
+    const allowMemory = envConfig.allowInMemoryRateLimit;
 
     if (store === "redis") {
         return;
@@ -129,7 +128,7 @@ export function assertRateLimitConfiguredForEnvironment(logger = systemLogger) {
     }
 
     throw new Error(
-        `Fatal: RATE_LIMIT_STORE must be set to 'redis' in production mode (NODE_ENV=${process.env.NODE_ENV || "unset"}), or set ALLOW_IN_MEMORY_RATE_LIMIT=true for single-instance staging.`
+        `Fatal: RATE_LIMIT_STORE must be set to 'redis' in production mode (NODE_ENV=${envConfig.getEnvVar("NODE_ENV") || "unset"}), or set ALLOW_IN_MEMORY_RATE_LIMIT=true for single-instance staging.`
     );
 }
 
@@ -137,20 +136,25 @@ assertWalletConfiguredForEnvironment();
 assertSecurityConfiguredForEnvironment();
 assertRateLimitConfiguredForEnvironment();
 
-const _supabaseForBilling = process.env.SUPABASE_URL && walletServiceKey
-    ? createClient(process.env.SUPABASE_URL, walletServiceKey)
+const _hasBillingConfig = Boolean(envConfig.rawSupabaseUrl && walletServiceKey);
+export const usageEventRepo = _hasBillingConfig
+    ? getUsageEventRepository()
     : null;
-export const usageEventRepo = _supabaseForBilling
-    ? new UsageEventRepository(_supabaseForBilling)
+export const creditPackageRepo = _hasBillingConfig
+    ? getCreditPackageRepository()
+    : null;
+export const billingRepos = _hasBillingConfig
+    ? {
+        walletRepo: getWalletRepository(),
+        txRepo: getTransactionRepository(),
+        transactionRepo: getTransactionRepository(),
+        usageEventRepo,
+        creditPackageRepo,
+    }
     : null;
 
-export const billingRepos = _supabaseForBilling
-    ? createBillingRepositories(_supabaseForBilling, { catalogClient: supabase })
-    : null;
-export const creditPackageRepo = billingRepos?.creditPackageRepo || null;
-
-export const walletService  = _supabaseForBilling
-    ? createWalletService({ client: _supabaseForBilling, usageEventRepo })
+export const walletService = _hasBillingConfig
+    ? createWalletService({ usageEventRepo })
     : null;
 
 if (walletService) {
@@ -161,22 +165,21 @@ if (walletService) {
 }
 
 // ─── Pricing Service (DB-backed + Redis cache) ────────────────────────────────
-const _supabaseForPricing = process.env.SUPABASE_URL && walletServiceKey
-    ? createClient(process.env.SUPABASE_URL, walletServiceKey)
-    : null;
-export const pricingService = _supabaseForPricing
-    ? new PricingService(_supabaseForPricing, redisConnection)
+export const pricingService = _hasBillingConfig
+    ? new PricingService({ redis: redisConnection })
     : null;
 
 if (pricingService) {
+    configureBilling({ pricingService, redisConnection });
     systemLogger.debug("PricingService initialized");
 } else {
+    configureBilling({ redisConnection });
     systemLogger.warn("PricingService disabled: missing Supabase config");
 }
 
 // ─── Failed Operations Service ────────────────────────────────────────────────
-export const failedOpsService = _supabaseForBilling
-    ? createFailedOpsService({ client: _supabaseForBilling })
+export const failedOpsService = _hasBillingConfig
+    ? createFailedOpsService()
     : null;
 
 if (failedOpsService) {
@@ -186,17 +189,20 @@ if (failedOpsService) {
 }
 
 // ─── DB (new 7-table schema) ─────────────────────────────────────────────────
+const configRepo = new GenerationConfigRepository();
 export const db = {
-    projects:  new ProjectRepository(),   // table: project
-    workflows: new WorkflowRepository(),  // table: workflow
-    media:     new MediaRepository(),     // table: media
-    workflowMedia: new WorkflowMediaRepository(), // table: workflow_media
-    configs:   new GenerationConfigRepository(), // tables: generation_config + generation_config_reference
-    characters: new CharacterRepository(), // Dedicated Character Domain Repository
-    elements:   new ElementRepository(),   // Dedicated Element Domain Repository
-    folders:    new FolderRepository(),    // Dedicated Folders Domain Repository
-    trash:      new TrashRepository(),     // Dedicated Workflow Trash Repository
+    projects:          new ProjectRepository(),
+    workflows:         new WorkflowRepository(),
+    media:             new MediaRepository(),
+    workflowMedia:     new WorkflowMediaRepository(),
+    configs:           configRepo,
+    generationConfigs: configRepo,
+    characters:        new CharacterRepository(),
+    elements:          new ElementRepository(),
+    folders:           new FolderRepository(),
+    trash:             new TrashRepository(),
 };
+setIdentityDb(db);
 
 // ─── Workflow Architecture (feature 008) ─────────────────────────────────────
 export const workflowEventRecorder = new WorkflowEventRecorder();
@@ -204,15 +210,21 @@ export const workflowBillingGateway = new WorkflowBillingGateway({ walletService
 
 const _lifecycleService = new MediaWorkflowLifecycleService({ db });
 export const mediaWorkflowLifecycleService = _lifecycleService;
+configureBilling({ lifecycleService: _lifecycleService });
+
 export const workflowStorageGateway = new WorkflowStorageGateway({
     v1Db: db,
     lifecycleService: _lifecycleService,
 });
 
+const _defaultGatewaysFactory = () => ({
+    billing: workflowBillingGateway,
+    storage: workflowStorageGateway,
+    events: workflowEventRecorder,
+});
+configureDefaultGateways(_defaultGatewaysFactory);
 
 // ─── UseCase & Job Queue Services ─────────────────────────────────────────────
-import { UseCaseService } from "./services/useCaseService.js";
-import { jobQueueService } from "./services/jobQueueService.js";
 export { jobQueueService };
 export const useCaseService = new UseCaseService({ walletService, pricingService, jobQueueService, db });
 
@@ -263,6 +275,7 @@ export const elementService = new ElementService({
     mediaService: elementMediaService,
     analysisService: new ElementAnalysisService(),
 });
+configureElements({ elementService, elementMediaService });
 
 workflowService.setEntitySyncHandlers({
     syncCharacter: (targetWorkflowId, updates, userId) => characterService.updateCharacter({ characterId: targetWorkflowId, updates, userId }),
@@ -280,4 +293,17 @@ export const projectReadService = new ProjectReadService({ db, folderService });
 export const projectService = new ProjectService({ projectRepo: db.projects });
 export const generationService = new GenerationService({ db });
 export const generationRequestService = new GenerationRequestService({ db, useCaseService, folderService });
-
+configureCharacters({ characterService, characterMediaService, trashService });
+configureMedia({ db, assetUploadService, workflowService, storageService, mediaUploadService, mediaService });
+configureWorkspace({ trashService, projectService, folderService, projectReadService, generationService });
+configureGeneration({
+    generationService,
+    generationRequestService,
+    workflowService,
+    projectReadService,
+    characterService,
+    elementService,
+    trashService,
+    useCaseService,
+    db,
+});

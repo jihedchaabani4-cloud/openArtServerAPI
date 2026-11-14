@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import crypto from "node:crypto";
 import app from "../../index.js";
-import { supabase } from "../../lib/supabase.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+import { supabase } from "#shared/db/supabase.js";
+import { redisConnection, workerRedisConnection } from "#shared";
 
 describe("RC1.4-D2 — Body Size & Multer Limits Boundary Tests", () => {
   let server;

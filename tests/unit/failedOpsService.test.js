@@ -5,9 +5,9 @@ import {
     FAILED_OPS_BACKOFF_BASE_MS,
     FAILED_OPS_BACKOFF_MULTIPLIER,
     FAILED_OPS_DEFAULT_MAX_RETRIES,
-} from "../../src/platform/billing/FailedOpsService.js";
-import { handleRetryFailedOps, replayOperation } from "../../src/workers/walletWorker.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+} from "#billing/tools";
+import { handleRetryFailedOps, replayOperation } from "#billing/tools";
+import { redisConnection, workerRedisConnection } from "#shared";
 
 /**
  * Stateful in-memory repository double for FailedOpsRepository.

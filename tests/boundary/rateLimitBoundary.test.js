@@ -285,7 +285,7 @@ describe("Rate Limit Middleware", () => {
   // ── 8. Unknown policy ─────────────────────────────────────────────────────
   describe("Unknown policy", () => {
     it("throws at construction time when policy name is unknown", async () => {
-      const { rateLimit } = await import("../../src/middleware/rateLimit.js");
+      const { rateLimit } = await import("#identity/tools");
       assert.throws(
         () => rateLimit("nonExistentPolicy"),
         /Unknown policy "nonExistentPolicy"/,

@@ -6,7 +6,7 @@ import {
   assertWalletConfiguredForEnvironment,
   assertRateLimitConfiguredForEnvironment,
 } from "../../src/container.js";
-import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared";
 
 describe("RC1.2-S2 — NODE_ENV and Rate Limit Fail-Safe Boundary Tests", () => {
   let origEnv;

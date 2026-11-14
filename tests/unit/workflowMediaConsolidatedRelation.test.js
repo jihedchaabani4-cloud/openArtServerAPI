@@ -1,11 +1,11 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
-import { WorkflowRepository } from "../../src/db/WorkflowRepository.js";
-import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
-import { ProjectReadService } from "../../src/domain/project/ProjectReadService.js";
-import { V1StorageBridge } from "../../src/v2/services/v1StorageBridge.js";
-import { supabase, supabaseAdmin } from "../../lib/supabase.js";
+import { WorkflowMediaRepository } from "#media/tools";
+import { WorkflowRepository } from "#generation/tools";
+import { WorkflowMediaService } from "#generation/tools";
+import { ProjectReadService } from "#workspace/tools";
+import { V1StorageBridge } from "#generation/tools";
+import { supabase, supabaseAdmin } from "#shared/db/supabase.js";
 
 describe("ADR-0007: Consolidated workflow_media Relation and Schema Pruning", () => {
     beforeEach(() => {

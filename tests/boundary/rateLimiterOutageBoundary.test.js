@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import express from "express";
 import { RateLimiterMemory, RateLimiterRedis } from "rate-limiter-flexible";
-import { rateLimit, resetLimitersForTest, setLimiterForTest } from "../../src/middleware/rateLimit.js";
-import { walletRateLimit } from "../../src/middleware/walletRateLimit.js";
-import paymentsRouter from "../../routes/payments.js";
+import { rateLimit, resetLimitersForTest, setLimiterForTest } from "#identity/tools";
+import { walletRateLimit } from "#identity/tools";
+import { paymentsRouter } from "#billing/api";
 
 describe("RC1.4-D1.2 — Rate Limiter Outage Policy Boundary Tests", () => {
   before(() => {
@@ -15,7 +15,7 @@ describe("RC1.4-D1.2 — Rate Limiter Outage Policy Boundary Tests", () => {
   after(async () => {
     resetLimitersForTest();
     try {
-      const { redisConnection, workerRedisConnection } = await import("../../src/queue/redis.js");
+      const { redisConnection, workerRedisConnection } = await import("#shared");
       await redisConnection?.quit().catch(() => redisConnection?.disconnect());
       await workerRedisConnection?.quit().catch(() => workerRedisConnection?.disconnect());
     } catch {}

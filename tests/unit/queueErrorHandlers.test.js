@@ -1,9 +1,9 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
-import { redisConnection } from "../../src/queue/redis.js";
-import { getUseCaseQueue } from "../../src/services/jobQueueService.js";
-import { useCaseWorker } from "../../src/workers/useCaseWorker.js";
-import { walletMaintenanceQueue } from "../../src/queue/walletQueue.js";
+import { redisConnection } from "#shared";
+import { getUseCaseQueue } from "#generation/tools";
+import { useCaseWorker } from "#generation/tools";
+import { walletMaintenanceQueue } from "#billing/tools";
 
 // Prevent ioredis reconnect backoff loop in unit test environment
 if (redisConnection?.options) {

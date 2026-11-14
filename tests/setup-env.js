@@ -22,9 +22,9 @@ process.env.FAL_KEY = process.env.FAL_KEY || "placeholder-fal-test-key";
 process.env.HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || "placeholder-hf-test-key";
 
 // Hermetic In-Memory Storage & Run Repository Mocking
-const { supabase, supabaseAdmin } = await import("../lib/supabase.js");
-const { RunRepository } = await import("../src/v2/runner/runRepository.js");
-const { WorkflowMediaRepository } = await import("../src/db/WorkflowMediaRepository.js");
+const { supabase, supabaseAdmin } = await import("#shared/db/supabase.js");
+const { RunRepository } = await import("#generation/tools");
+const { WorkflowMediaRepository } = await import("#media/tools");
 
 RunRepository.useMemoryFallback = true;
 WorkflowMediaRepository.enableTestMemoryFallback();

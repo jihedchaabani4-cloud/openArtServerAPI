@@ -2,11 +2,11 @@ import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import http from "node:http";
-import imagesRouter from "../../routes/images.js";
-import videoRouter from "../../routes/video.js";
+import { imagesRouter } from "#generation/api";
+import { videoRouter } from "#generation/api";
 import { db, useCaseService } from "../../src/container.js";
-import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
-import { supabase } from "../../lib/supabase.js";
+import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared";
+import { supabase } from "#shared/db/supabase.js";
 
 describe("Project Ownership Security & Boundary Tests (Task T2a)", () => {
   let server;

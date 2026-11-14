@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { UseCaseBillingRuntime, buildCompactCostBreakdown } from "../../src/v2/runtime/useCaseBillingRuntime.js";
-import { WalletService } from "../../src/platform/billing/WalletService.js";
+import { UseCaseBillingRuntime, buildCompactCostBreakdown } from "#generation/tools";
+import { WalletService } from "#billing/tools";
 
 describe("D2.3 — Compact Billing Metadata & UTF-8 Byte Validation Boundary Tests", () => {
   it("TEST 1: buildCompactCostBreakdown extracts only totalCredits and node credits, stripping all heavy inputs", () => {

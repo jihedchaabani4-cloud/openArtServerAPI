@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { handleExpireStaleHolds } from "../../src/workers/walletWorker.js";
-import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
-import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
+import { handleExpireStaleHolds } from "#billing/tools";
+import { WorkflowMediaRepository } from "#media/tools";
+import { WorkflowMediaService } from "#generation/tools";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -205,11 +205,11 @@ describe("Ticket 07: BullMQ Reservation Reaper Worker & Media Deletion Concurren
 
   it("TEST 5: Zero console.* calls in production worker, queue, and billing files", () => {
     const targetFiles = [
-      "src/workers/walletWorker.js",
-      "src/queue/walletQueue.js",
-      "src/platform/billing/FailedOpsService.js",
-      "src/models/pricing/PricingService.js",
-      "src/platform/billing/UsageEventRepository.js",
+      "src/systems/billing/internal/workers/walletWorker.js",
+      "src/systems/billing/internal/workers/walletQueue.js",
+      "src/systems/billing/internal/services/FailedOpsService.js",
+      "src/systems/models/internal/services/PricingService.js",
+      "src/systems/billing/internal/db/UsageEventRepository.js",
     ];
 
     const violations = [];

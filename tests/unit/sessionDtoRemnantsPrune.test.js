@@ -1,10 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ProjectReadService } from "../../src/domain/project/ProjectReadService.js";
-import { toAssetDto } from "../../src/domain/assetDto.js";
-import { WorkflowRepository } from "../../src/db/WorkflowRepository.js";
-import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
-import { supabase, supabaseAdmin } from "../../lib/supabase.js";
+import { ProjectReadService } from "#workspace/tools";
+import { toAssetDto } from "#shared";
+import { WorkflowRepository } from "#generation/tools";
+import { WorkflowMediaRepository } from "#media/tools";
+import { supabase, supabaseAdmin } from "#shared/db/supabase.js";
 
 describe("Ticket 02: Legacy Session DTO & Repository Remnants Pruning", () => {
   it("ProjectReadService.getProjectData does NOT return sessions or metadata.sessionId", async () => {
@@ -204,7 +204,7 @@ describe("Ticket 02: Legacy Session DTO & Repository Remnants Pruning", () => {
   });
 
   it("regression: getUserLibrary and listProjectAssets resolve primary media from canonical workflow_media into toAssetDto", async () => {
-    const { GenerationService } = await import("../../src/domain/generation/GenerationService.js");
+    const { GenerationService } = await import("#generation/tools");
 
     const testWfId = "00000000-0000-4000-a000-000000000099";
     const primaryMediaId = "00000000-0000-4000-a000-000000000077";
@@ -332,7 +332,7 @@ describe("Ticket 02: Legacy Session DTO & Repository Remnants Pruning", () => {
   });
 
   it("listProjectAssets error propagation: propagates and reports workflowMedia query failure without swallowing", async () => {
-    const { GenerationService } = await import("../../src/domain/generation/GenerationService.js");
+    const { GenerationService } = await import("#generation/tools");
 
     const mockDb = {
       projects: {
@@ -373,7 +373,7 @@ describe("Ticket 02: Legacy Session DTO & Repository Remnants Pruning", () => {
   });
 
   it("real WorkflowMediaRepository.findByWorkflowIds contract: transforms canonical relation and joined media into domain objects for GenerationService", async () => {
-    const { GenerationService } = await import("../../src/domain/generation/GenerationService.js");
+    const { GenerationService } = await import("#generation/tools");
 
     const targetWorkflowId = "00000000-0000-4000-a000-000000000111";
     const primaryMediaId = "00000000-0000-4000-a000-000000000777";
@@ -543,7 +543,7 @@ describe("Ticket 02: Legacy Session DTO & Repository Remnants Pruning", () => {
   });
 
   it("listProjectAssets dependency failure: throws DEPENDENCY_ERROR when workflowMedia repository method is unavailable", async () => {
-    const { GenerationService } = await import("../../src/domain/generation/GenerationService.js");
+    const { GenerationService } = await import("#generation/tools");
 
     const serviceWithoutRepo = new GenerationService({
       db: {

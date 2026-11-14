@@ -1,17 +1,17 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { requireAuth } from "../../src/middleware/auth.js";
-import healthRouter from "../../routes/health.js";
-import readyRouter, { _resetReadinessCacheForTest } from "../../routes/ready.js";
-import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
-import { StorageService } from "../../src/platform/storage/StorageService.js";
+import { requireAuth } from "#identity/tools";
+import healthRouter from "../../src/api/probes/health.js";
+import readyRouter, { _resetReadinessCacheForTest } from "../../src/api/probes/ready.js";
+import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared";
+import { StorageService } from "#media/tools";
 import http from "node:http";
 import express from "express";
-import workflowsRouter from "../../routes/workflows.js";
+import { workflowsRouter } from "#generation/api";
 import { assertSecurityConfiguredForEnvironment, workflowService, projectReadService } from "../../src/container.js";
-import { supabase } from "../../lib/supabase.js";
-import { WorkflowAuthorizationService } from "../../src/platform/workflow/WorkflowAuthorizationService.js";
-import { ProjectReadService } from "../../src/domain/project/ProjectReadService.js";
+import { supabase } from "#shared/db/supabase.js";
+import { WorkflowAuthorizationService } from "#generation/tools";
+import { ProjectReadService } from "#workspace/tools";
 
 const VALID_TEST_SECRET = "test-internal-secret-for-d26-auth-min-32-chars-ok!";
 

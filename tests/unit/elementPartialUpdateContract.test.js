@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ElementService } from "../../src/domain/element/ElementService.js";
-import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
+import { ElementService } from "#elements/tools";
+import { ElementMediaService } from "#elements/tools";
 
 describe("Element PATCH /api/v2/elements/:id Partial Update Contract", () => {
     function createMockDb() {
@@ -365,7 +365,7 @@ describe("Element PATCH /api/v2/elements/:id Partial Update Contract", () => {
     });
 
     it("8. Controller PATCH /api/v2/elements/:id maps req.body with coverMediaId and returns 200 with updated element", async () => {
-        const { updateElement } = await import("../../controllers/elementController.js");
+        const { updateElement } = await import("#elements/api");
         const { elementService, db } = await import("../../src/container.js");
 
         const originalUpdate = elementService.updateElement;

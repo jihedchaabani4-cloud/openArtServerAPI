@@ -1,8 +1,8 @@
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { executeLLMNode } from "../../src/v2/nodes/llmNode.js";
-import { llmService } from "../../src/platform/ai/LLMService.js";
-import { loadRegistries } from "../../src/v2/registry/registryLoader.js";
+import { executeLLMNode } from "#generation/tools";
+import { llmService } from "#generation/tools";
+import { loadRegistries } from "#generation/tools";
 
 describe("Content Moderation Fail-Closed & Prompt Unification Boundary Tests (Task T9)", () => {
   let originalGenerate;

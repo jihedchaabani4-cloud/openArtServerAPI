@@ -2,7 +2,7 @@ process.env.NODE_ENV = "test";
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ProjectRepository } from "../../src/db/ProjectRepository.js";
+import { ProjectRepository } from "#workspace/tools";
 
 /**
  * Minimal fake of the Supabase query builder at the repository's client()

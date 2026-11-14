@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { getLatestReconciliation } from "../../controllers/adminController.js";
-import { RECONCILIATION_CACHE_KEY } from "../../src/queue/redis.js";
+import { getLatestReconciliation } from "#billing/api";
+import { RECONCILIATION_CACHE_KEY } from "#shared";
 
 describe("Admin Reconciliation Cache Key and Controller Unit Tests", () => {
     describe("1. Shared Cache Key Behavioral Alignment", () => {
@@ -136,7 +136,7 @@ describe("Admin Reconciliation Cache Key and Controller Unit Tests", () => {
 
     describe("3. Route Security Verification", () => {
         it("verifies adminRouter stack mounts requireAuth and requireAdmin before routes", async () => {
-            const adminRouter = (await import("../../routes/admin.js")).default;
+            const { adminRouter } = await import("#billing/api");
             const middlewareNames = adminRouter.stack
                 .map((layer) => layer.handle?.name || layer.name)
                 .filter(Boolean);

@@ -12,10 +12,10 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
-import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
-import { CharacterMediaService } from "../../src/domain/character/CharacterMediaService.js";
-import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
+import { WorkflowMediaService } from "#generation/tools";
+import { ElementMediaService } from "#elements/tools";
+import { CharacterMediaService } from "#characters/tools";
+import { WorkflowMediaRepository } from "#media/tools";
 
 describe("Unified Shared-Media Orphan Reaping & Attach Protocol", () => {
 

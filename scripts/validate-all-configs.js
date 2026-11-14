@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { initRegistry } from "../src/models/index.js";
+import { initRegistry } from "#models/tools";
 
 console.log("==================================================");
 console.log("  Models Management System — CI Config Validator  ");

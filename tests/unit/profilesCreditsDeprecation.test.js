@@ -1,10 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { supabase, supabaseAdmin } from "../../lib/supabase.js";
-import { signup, getWalletBalance } from "../../controllers/authController.js";
+import { supabase, supabaseAdmin } from "#shared/db/supabase.js";
+import { signup, getWalletBalance } from "#identity/api";
 import { walletService } from "../../src/container.js";
-import { WorkflowRepository } from "../../src/db/WorkflowRepository.js";
-import { ProjectReadService } from "../../src/domain/project/ProjectReadService.js";
+import { WorkflowRepository } from "#generation/tools";
+import { ProjectReadService } from "#workspace/tools";
 
 describe("profiles.credits & workflow.variation_index Deprecation Verification", () => {
   it("signup: createProfile does not write credits to profiles table (isolated mocks)", async () => {

@@ -1,12 +1,12 @@
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert";
-import { UseCaseService } from "../../src/services/useCaseService.js";
-import { UseCaseBillingRuntime } from "../../src/v2/runtime/useCaseBillingRuntime.js";
-import { WorkflowBillingGateway } from "../../src/infrastructure/billing/workflowBillingGateway.js";
+import { UseCaseService } from "#generation/tools";
+import { UseCaseBillingRuntime } from "#generation/tools";
+import { WorkflowBillingGateway } from "#generation/tools";
 import { assertWalletConfiguredForEnvironment } from "../../src/container.js";
-import { bootstrapV2 } from "../../src/v2/bootstrap.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
-import { registerNodeExecutor, registry } from "../../src/v2/nodes/index.js";
+import { bootstrapV2 } from "#generation/tools";
+import { redisConnection, workerRedisConnection } from "#shared";
+import { registerNodeExecutor, registry } from "#generation/tools";
 
 bootstrapV2();
 
@@ -173,7 +173,7 @@ describe("F2.4-a — Wallet Misconfiguration & Zero Price Invariants", () => {
   });
 
   it("TEST 6: WalletService.reserve throws PRICING_CONFIG_ERROR for invalid amounts (undefined, null, NaN, -1, 'abc')", async () => {
-    const { WalletService } = await import("../../src/platform/billing/WalletService.js");
+    const { WalletService } = await import("#billing/tools");
     const wallet = new WalletService("https://mock.supabase.co", "mock-key");
     const invalidAmounts = [undefined, null, NaN, -1, -5, "abc", "0", {}, []];
 
@@ -197,7 +197,7 @@ describe("F2.4-a — Wallet Misconfiguration & Zero Price Invariants", () => {
   });
 
   it("TEST 7: calculateWorkflowBillingPlan throws PRICING_CONFIG_ERROR if pricing calculation returns invalid cost and NEVER defaults to 0", async () => {
-    const { calculateWorkflowBillingPlan } = await import("../../src/use-cases/workflowBillingPlan.js");
+    const { calculateWorkflowBillingPlan } = await import("#generation/tools");
 
     const plan = {
       nodes: [
@@ -242,9 +242,9 @@ describe("F2.4-a — Wallet Misconfiguration & Zero Price Invariants", () => {
   });
 
   it("TEST 8: pricing failure at prepare time through real controller -> placeholders failed, no hold, clean 500 with INTERNAL_ERROR + traceId", async () => {
-    const { generateImage } = await import("../../controllers/imageController.js");
+    const { generateImage } = await import("#generation/api");
     const { db, useCaseService } = await import("../../src/container.js");
-    const { InMemoryWalletService } = await import("../../src/services/walletService.js");
+    const { InMemoryWalletService } = await import("../helpers/inMemoryWalletService.js");
 
     const wallet = new InMemoryWalletService();
     await wallet.setBalance("user-pricing-fail", 100);

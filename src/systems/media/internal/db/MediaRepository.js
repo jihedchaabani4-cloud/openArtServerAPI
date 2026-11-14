@@ -1,0 +1,432 @@
+import { supabase } from "./mediaClient.js";
+import { createLogger } from "#shared";
+
+const mediaRepositoryLogger = createLogger("media_repository");
+
+export class MediaRepository {
+    constructor() {
+        this.tableName = "media";
+    }
+
+    client() {
+        return supabase;
+    }
+
+    async findById(id, select = "*") {
+        const { data, error } = await this.client().from(this.tableName).select(select).eq("id", id).maybeSingle();
+        if (error) throw error;
+        return data;
+    }
+
+    async updateFields(id, fields) {
+        const { data, error } = await this.client().from(this.tableName).update(fields).eq("id", id).select().single();
+        if (error) throw error;
+        return data;
+    }
+
+    async delete(id) {
+        const { error } = await this.client().from(this.tableName).delete().eq("id", id);
+        if (error) throw error;
+    }
+
+    async deleteById(id) {
+        return this.delete(id);
+    }
+
+    /**
+     * Creates a media record.
+     * url is stored directly (no media_versions table in new schema).
+     *
+     * @param {string} step_id - "CAE" for init/upload | "CAM", "CAU"... for edits
+     */
+    async createMedia({
+        workflow_id: _ignoredWorkflowId,
+        user_id: _ignoredUserId,
+        format: _ignoredFormat,
+        project_id,
+        step_id,
+        url,
+        width,
+        height,
+        ...extra
+    }) {
+        const resolvedWidth = width ? Number(width) : 1024;
+        const resolvedHeight = height ? Number(height) : 1024;
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .insert({
+                project_id,
+                step_id,
+                url,
+                width: resolvedWidth,
+                height: resolvedHeight,
+                ...extra
+            })
+            .select()
+            .single();
+        if (error) throw error;
+        return data;
+    }
+
+    async findByWorkflow(workflow_id) {
+        const { data, error } = await this.client()
+            .from("workflow_media")
+            .select(`
+                workflow_id,
+                role,
+                created_at,
+                media:media_id (*)
+            `)
+            .eq("workflow_id", workflow_id)
+            .order("created_at", { ascending: true });
+
+        if (error) throw error;
+
+        return (data || [])
+            .map((row) => {
+                const media = Array.isArray(row.media) ? row.media[0] : row.media;
+                if (!media) return null;
+                return {
+                    ...media,
+                    workflow_id: row.workflow_id,
+                    workflowId: row.workflow_id,
+                    role: row.role,
+                    mediaRole: row.role,
+                    workflow_media_created_at: row.created_at,
+                };
+            })
+            .filter(Boolean);
+    }
+
+    async findLatestByWorkflow(workflow_id) {
+        const { data, error } = await this.client()
+            .from("workflow_media")
+            .select(`
+                workflow_id,
+                role,
+                created_at,
+                workflow:workflow_id (
+                    workflow_type
+                ),
+                media:media_id (*)
+            `)
+            .eq("workflow_id", workflow_id)
+            .order("created_at", { ascending: false });
+
+        if (error) throw error;
+
+        for (const row of data || []) {
+            const media = Array.isArray(row.media) ? row.media[0] : row.media;
+            if (media && media.url) {
+                const wf = Array.isArray(row.workflow) ? row.workflow[0] : row.workflow;
+                return {
+                    ...media,
+                    workflow_id: row.workflow_id,
+                    workflowId: row.workflow_id,
+                    role: row.role,
+                    mediaRole: row.role,
+                    workflow: wf || media.workflow || null,
+                };
+            }
+        }
+        return null;
+    }
+
+    async findMediaByIdOrWorkflow(id) {
+        if (!id || typeof id !== "string") return null;
+        const { data: byId, error: byIdErr } = await this.client()
+            .from(this.tableName)
+            .select("*")
+            .eq("id", id)
+            .not("url", "is", null)
+            .limit(1)
+            .maybeSingle();
+
+        if (!byIdErr && byId) {
+            return byId;
+        }
+
+        try {
+            return await this.findLatestByWorkflow(id);
+        } catch (error) {
+            mediaRepositoryLogger.warn(
+                { mediaOrWorkflowId: id, message: error.message },
+                "findMediaByIdOrWorkflow failed"
+            );
+            return null;
+        }
+    }
+
+    async findByProject(project_id, limit = 30, offset = 0) {
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("*")
+            .eq("project_id", project_id)
+            .order("create_time", { ascending: false })
+            .range(offset, offset + limit - 1);
+        if (error) throw error;
+        return data;
+    }
+
+    async findByProjectAll(project_id) {
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("id, step_id, url, width, height, create_time, status, error_message, generation_config")
+            .eq("project_id", project_id)
+            .order("create_time", { ascending: false });
+        if (!error && data) return data;
+
+        const fallback = await this.client()
+            .from(this.tableName)
+            .select(`
+                id, step_id, url, width, height, create_time, status, error_message,
+                generation_config_id,
+                generation_config (
+                    id, prompt, model, aspect_ratio, generation_type, seed, visibility
+                )
+            `)
+            .eq("project_id", project_id)
+            .order("create_time", { ascending: false });
+        if (!fallback.error && fallback.data) return fallback.data;
+
+        const baseFallback = await this.client()
+            .from(this.tableName)
+            .select("id, step_id, url, width, height, create_time, status, error_message, generation_config_id")
+            .eq("project_id", project_id)
+            .order("create_time", { ascending: false });
+        if (baseFallback.error) throw baseFallback.error;
+        return baseFallback.data || [];
+    }
+
+    /**
+     * Finds media with its generation_config and workflow context via workflow_media.
+     */
+    async findWithContext(id) {
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("*")
+            .eq("id", id)
+            .single();
+        if (error) throw error;
+
+        const { data: relRow } = await this.client()
+            .from("workflow_media")
+            .select(`
+                workflow_id,
+                role,
+                workflow:workflow_id (
+                    id, display_name, workflow_type
+                )
+            `)
+            .eq("media_id", id)
+            .order("created_at", { ascending: true })
+            .limit(1)
+            .maybeSingle();
+
+        const wf = Array.isArray(relRow?.workflow) ? relRow.workflow[0] : relRow?.workflow;
+        return {
+            ...data,
+            workflow_id: relRow?.workflow_id || null,
+            role: relRow?.role || null,
+            workflow: wf || null,
+        };
+    }
+
+    async updateUrl(id, url) {
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .update({ url })
+            .eq("id", id)
+            .select()
+            .single();
+        if (error) throw error;
+        return data;
+    }
+
+    async updateFields(id, fields) {
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .update(fields)
+            .eq("id", id)
+            .select()
+            .single();
+        if (error) throw error;
+        return data;
+    }
+
+    async updateMedia(id, fields) {
+        return this.updateFields(id, fields);
+    }
+
+    async findByUrl(url) {
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("*")
+            .eq("url", url)
+            .maybeSingle();
+        if (error) throw error;
+        return data;
+    }
+
+    /**
+     * Deletes a media record by id and unlinks its workflow_media association.
+     * @param {string} mediaId
+     * @param {string} workflowId
+     */
+    async deleteByIdAndWorkflow(mediaId, workflowId) {
+        if (workflowId) {
+            await this.client()
+                .from("workflow_media")
+                .delete()
+                .eq("workflow_id", workflowId)
+                .eq("media_id", mediaId);
+        }
+        const { error } = await this.client()
+            .from(this.tableName)
+            .delete()
+            .eq("id", mediaId);
+        if (error) throw error;
+    }
+
+    /**
+     * Fetches multiple media records by their IDs in one query.
+     * Used by GenerationService to resolve primary media for a batch of workflows.
+     */
+    async findByIds(ids) {
+        if (!ids || ids.length === 0) return [];
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("id, step_id, url, width, height, status, error_message, create_time")
+            .in("id", ids);
+        if (error) throw error;
+        return data || [];
+    }
+
+    /**
+     * Resolves the user_id that owns the project containing this media.
+     * Used for media ownership authorization checks without leaking Supabase into domain services.
+     */
+    async findOwnerByMediaId(mediaId) {
+        if (!mediaId) return null;
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("id, project:project!project_id(user_id)")
+            .eq("id", mediaId)
+            .maybeSingle();
+        if (error || !data) return null;
+        return data.project?.user_id || null;
+    }
+
+    /**
+     * Paginated media query scoped to a project.
+     * Used by GenerationService.getAssets.
+     * @param {string}  projectId
+     * @param {Object}  opts
+     * @param {string}  [opts.sessionId]  - optional workflow session filter
+     * @param {number}  [opts.limit=30]
+     * @param {number}  [opts.offset=0]
+     */
+    async findByProjectPaginated(projectId, { sessionId, limit = 30, offset = 0 } = {}) {
+        let query = this.client()
+            .from(this.tableName)
+            .select("id, url, width, height, step_id, create_time, generation_config")
+            .eq("project_id", projectId)
+            .order("create_time", { ascending: false })
+            .range(Number(offset), Number(offset) + Number(limit) - 1);
+        // Note: session_id filtering on media goes through workflow join; kept as-is per original controller behaviour
+        const { data, error } = await query;
+        if (error) throw error;
+        return data || [];
+    }
+
+    /**
+     * Atomically marks all pending and processing media records for a given workflow as failed.
+     * Guaranteed to NEVER overwrite records in terminal statuses ('completed', 'failed', 'success').
+     * @param {string} workflow_id
+     * @param {string} [errorMessage]
+     * @returns {Promise<Array>}
+     */
+    async failPendingMediaByWorkflow(workflow_id, errorMessage = null) {
+        if (!workflow_id) return [];
+        const { data: links, error: linkErr } = await this.client()
+            .from("workflow_media")
+            .select("media_id")
+            .eq("workflow_id", workflow_id);
+        if (linkErr) throw linkErr;
+
+        const mediaIds = [...new Set((links || []).map((row) => row.media_id).filter(Boolean))];
+        if (mediaIds.length === 0) return [];
+
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .update({
+                status: "failed",
+                error_message: errorMessage || "Generation failed",
+            })
+            .in("id", mediaIds)
+            .in("status", ["processing", "pending"])
+            .select();
+        if (error) throw error;
+        return data || [];
+    }
+
+    /**
+     * Fetches the media record joined with its project owner for fail-closed ownership verification.
+     * Propagates database errors to the caller so infrastructure faults never masquerade as missing rows.
+     *
+     * @param {string} mediaId
+     * @returns {Promise<{ id: string, project: { user_id: string|null }|null }|null>}
+     */
+    async findMediaOwnershipRecord(mediaId) {
+        if (!mediaId) return null;
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("id, project:project!project_id(user_id)")
+            .eq("id", mediaId)
+            .maybeSingle();
+        if (error) throw error;
+        return data || null;
+    }
+
+    /**
+     * Lists lightweight media rows (`id, url, project_id`) for orphan scanning and diagnostics.
+     *
+     * @param {Object} [options]
+     * @param {string|null} [options.projectId=null]
+     * @param {number} [options.limit=500]
+     * @returns {Promise<Array<{ id: string, url: string|null, project_id: string|null }>>}
+     */
+    async listAll({ projectId = null, limit = 500 } = {}) {
+        let query = this.client()
+            .from(this.tableName)
+            .select("id, url, project_id");
+        if (projectId) {
+            query = query.eq("project_id", projectId);
+        }
+        if (limit) {
+            query = query.limit(limit);
+        }
+        const { data, error } = await query;
+        if (error) throw error;
+        return data || [];
+    }
+
+    /**
+     * Finds media placeholders stuck in 'processing' or 'pending' before cutoffIso.
+     *
+     * @param {string} cutoffIso - ISO 8601 timestamp string
+     * @returns {Promise<Array<{ id: string, status: string, create_time: string, project_id: string|null }>>}
+     */
+    async findStalePlaceholders(cutoffIso) {
+        if (!cutoffIso) return [];
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("id, status, create_time, project_id")
+            .in("status", ["processing", "pending"])
+            .lt("create_time", cutoffIso);
+        if (error) throw error;
+        return data || [];
+    }
+}
+
+

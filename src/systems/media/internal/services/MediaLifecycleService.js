@@ -1,0 +1,552 @@
+/**
+ * MediaWorkflowLifecycleService
+ *
+ * @owns Media generation placeholder lifecycle and stale-placeholder recovery transitions.
+ */
+
+import { V1StorageBridge } from "./v1StorageBridge.js";
+
+async function getV1StorageBridge() {
+  return V1StorageBridge;
+}
+import { resolveMediaMetadata } from "./mediaMetadataResolver.js";
+import { createLogger } from "#shared";
+
+const lifecycleLogger = createLogger("media_lifecycle");
+
+/** Canonical media statuses written to the V1 `media` table. */
+export const MEDIA_WORKFLOW_STATUS = {
+  PROCESSING: "processing",
+  SUCCESS: "success",
+  FAILED: "failed",
+};
+
+const PROVIDER_BACKED_NODE_TYPES = new Set([
+  "image-generation",
+  "video-generation",
+]);
+
+function normalizeError(error, fallback = "Generation failed") {
+  if (!error) return fallback;
+  if (typeof error === "string") return error;
+  return error.message || fallback;
+}
+
+/**
+ * Atomically marks all pending and processing media records for a given workflow as failed.
+ * Guaranteed to NEVER overwrite records in terminal statuses ('completed', 'failed', 'success').
+ * Supports direct repository atomic query as well as fallback iteration.
+ *
+ * @param {Object} db - Database container or { media: ... }
+ * @param {string} workflowId - Target workflow ID
+ * @param {string|Error} error - Error message or object
+ * @returns {Promise<Array>}
+ */
+export async function failWorkflowPendingMedia(db, workflowId, error) {
+  if (!workflowId || !db?.media) return [];
+  const message = normalizeError(error);
+
+  if (typeof db.media.failPendingMediaByWorkflow === "function") {
+    try {
+      return await db.media.failPendingMediaByWorkflow(workflowId, message);
+    } catch {
+      // Fallback below
+    }
+  }
+
+  try {
+    const list = await db.media.findByWorkflow(workflowId);
+    const pendings = list?.filter((m) => m.status === "processing" || m.status === "pending") || [];
+    const updated = [];
+    for (const p of pendings) {
+      await db.media.updateMedia(p.id, {
+        status: "failed",
+        error_message: message,
+      }).then((r) => updated.push(r)).catch(() => {});
+    }
+    return updated;
+  } catch {
+    return [];
+  }
+}
+
+function inferStepId(nodeType, input = {}, stepIdOverride = null) {
+  if (stepIdOverride && !["character_sheet", "character_detail", "element_sheet", "element_reference"].includes(stepIdOverride)) {
+    return stepIdOverride;
+  }
+  if (input?.step_id && !["character_sheet", "character_detail", "element_sheet", "element_reference"].includes(input.step_id)) {
+    return input.step_id;
+  }
+  if (input?.stepId && !["character_sheet", "character_detail", "element_sheet", "element_reference"].includes(input.stepId)) {
+    return input.stepId;
+  }
+  return "GEN";
+}
+
+function buildDisplayName(input = {}) {
+  const name = input?.name || input?.title || input?.concept || input?.prompt || "";
+  const raw = String(name).trim();
+  if (!raw) {
+    return input?.type === "character" || input?.workflowId === "character-sheet-v1" || input?.stepId === "character_sheet"
+      ? "Untitled Character"
+      : "Untitled Element";
+  }
+  return raw.length > 60 ? `${raw.slice(0, 60)}…` : raw;
+}
+
+function buildGenerationConfig(nodeType, input = {}) {
+  const meta = resolveMediaMetadata(input);
+  return {
+    prompt: input?.prompt || "",
+    model: input?.model || "unknown",
+    aspect_ratio: meta.aspect_ratio || input?.aspect_ratio || "SQUARE",
+    generation_type: "TEXT_ONLY",
+  };
+}
+
+export function normalizeNodeMediaOutputs(nodeConfig, output, { runId, nodeId } = {}) {
+  if (!nodeConfig || !output) return [];
+
+  const withContext = (asset, type) => ({
+    ...asset,
+    runId,
+    nodeId,
+    type: asset.type || type,
+    metadata: { ...(asset.metadata || {}) },
+  });
+
+  if (nodeConfig.type === "image-generation") {
+    return (output.assets || []).map((asset) => withContext(asset, "image"));
+  }
+
+  return [];
+}
+
+
+/**
+ * Single source of truth for V1 workflow + media lifecycle:
+ *   Phase 1 — create placeholder (status=processing)
+ *   Phase 2 — complete (status=success) or fail (status=failed)
+ */
+export class MediaWorkflowLifecycleService {
+  constructor({ db = null, bridge = null } = {}) {
+    this.db = db;
+    this.bridge = bridge;
+    if (bridge) {
+      this._bridgeReady = Promise.resolve(bridge);
+    } else if (db) {
+      this._bridgeReady = getV1StorageBridge().then((Cls) => {
+        this.bridge = new Cls({ db });
+        return this.bridge;
+      });
+    } else {
+      this._bridgeReady = Promise.resolve(null);
+    }
+  }
+
+  async _getBridge() {
+    if (this.bridge) return this.bridge;
+    return this._bridgeReady;
+  }
+
+  isProviderBackedNodeType(nodeType) {
+    return PROVIDER_BACKED_NODE_TYPES.has(nodeType);
+  }
+
+  async resolveProjectId(userId, input = {}) {
+    if (input.project_id || input.projectId) {
+      return input.project_id || input.projectId;
+    }
+    return null;
+  }
+
+  /**
+   * Domain-specific creation: Character Placeholder
+   */
+  async createCharacterPlaceholder({ userId, input = {}, runId = null, displayName = null, stepId = "GEN" }) {
+    return this.startPlaceholder({
+      userId,
+      nodeType: "image-generation",
+      input,
+      runId,
+      workflowId: "character-sheet-v1",
+      displayName: displayName || input.name || input.title || input.prompt || "Untitled Character",
+      workflowType: "CHARACTER",
+      stepId,
+    });
+  }
+
+  /**
+   * Domain-specific creation: Element Placeholder
+   */
+  async createElementPlaceholder({ userId, input = {}, runId = null, displayName = null, stepId = "CAE" }) {
+    return this.startPlaceholder({
+      userId,
+      nodeType: "image-generation",
+      input,
+      runId,
+      workflowId: "element-sheet-v1",
+      displayName: displayName || input.name || "Untitled Element",
+      workflowType: "ELEMENT_SHEET",
+      stepId,
+    });
+  }
+
+  /**
+   * Domain-specific creation: Generation Placeholder
+   */
+  async createGenerationPlaceholder({ userId, nodeType = "image-generation", input = {}, runId = null, displayName = null, stepId = null }) {
+    return this.startPlaceholder({
+      userId,
+      nodeType,
+      input,
+      runId,
+      workflowType: "GENERATION",
+      stepId,
+    });
+  }
+
+  /**
+   * Phase 1 — create one workflow + media placeholder.
+   * @returns {{ workflowId: string, mediaId: string } | null}
+   */
+  async startPlaceholder({
+    userId,
+    nodeType,
+    input = {},
+    runId = null,
+    workflowId = null,
+    displayName = null,
+    workflowType = "GENERATION",
+    stepId = null,
+  }) {
+    const bridge = await this._getBridge();
+    if (!bridge || !userId) return null;
+
+    try {
+      const projectId = await this.resolveProjectId(userId, input);
+      if (!projectId) return null;
+
+      const sessionId = input.session_id || input.sessionId || null;
+      const effectiveStepId = inferStepId(nodeType, input, stepId);
+
+      // If workflowId is provided, attach media directly to the existing parent workflow container
+      const targetWfId = input.workflow_id || input.workflowId || workflowId;
+      if (targetWfId && typeof targetWfId === "string" && targetWfId.trim() && targetWfId !== "character-sheet-v1") {
+        try {
+          const media = await bridge.appendV1Placeholder({
+            workflowId: targetWfId.trim(),
+            projectId,
+            stepId: effectiveStepId,
+            config: buildGenerationConfig(nodeType, input),
+          });
+          if (media) {
+            lifecycleLogger.info(
+              { event: "media_lifecycle.placeholder_appended", workflowId: targetWfId.trim(), mediaId: media.id },
+              "Appended placeholder to existing parent workflow"
+            );
+            return { workflowId: targetWfId.trim(), mediaId: media.id };
+          }
+        } catch (appendErr) {
+          lifecycleLogger.warn(
+            { event: "media_lifecycle.placeholder_append_notice", workflowId: targetWfId.trim(), err: appendErr?.message },
+            "Notice appending placeholder to parent workflow"
+          );
+        }
+      }
+
+      const effectiveWorkflowType = workflowType || "GENERATION";
+
+      const { workflow, media } = await bridge.createV1Placeholder({
+        userId,
+        projectId,
+        sessionId,
+        displayName: displayName || buildDisplayName(input),
+        workflowType: effectiveWorkflowType,
+        stepId: effectiveStepId,
+        config: buildGenerationConfig(nodeType, input),
+      });
+
+      lifecycleLogger.info(
+        { event: "media_lifecycle.placeholder_started", runId: runId || null, workflowId: workflow.id, mediaId: media.id },
+        "Started media placeholder"
+      );
+
+      return { workflowId: workflow.id, mediaId: media.id };
+    } catch (err) {
+      lifecycleLogger.error(
+        { event: "media_lifecycle.start_placeholder_failed", runId: runId || null, err: err?.message },
+        "startPlaceholder failed"
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Phase 1 — create N placeholders (e.g. image count).
+   */
+  async startPlaceholders({
+    userId,
+    nodeType,
+    input = {},
+    count = 1,
+    runId = null,
+    workflowId = null,
+  }) {
+    const total = Math.max(1, Number(count) || 1);
+    const placeholders = [];
+
+    for (let i = 0; i < total; i++) {
+      const placeholder = await this.startPlaceholder({
+        userId,
+        nodeType,
+        input,
+        runId,
+        workflowId,
+      });
+      if (placeholder) placeholders.push(placeholder);
+    }
+
+    return placeholders;
+  }
+
+  /**
+   * Phase 1 — V2 node helper: derive count from node config and create placeholders.
+   */
+  async startPlaceholdersForNode({ runId, nodeConfig, resolvedInputs = {}, run }) {
+    if (!this.isProviderBackedNodeType(nodeConfig?.type)) return [];
+
+    const count =
+      nodeConfig.type === "image-generation"
+        ? Math.max(
+            1,
+            Number(resolvedInputs?.count ?? nodeConfig?.resolved_inputs?.count ?? 1)
+          )
+        : 1;
+
+    const projectId = resolvedInputs?.project_id || resolvedInputs?.projectId || run?.project_id || run?.projectId || run?.input?.project_id || run?.input?.projectId;
+
+    const inputWithProject = {
+      ...resolvedInputs,
+      ...(projectId ? { project_id: projectId, projectId } : {})
+    };
+
+    const isCharacterWorkflow = run?.use_case_id === "character-sheet-v1" || run?.useCaseId === "character-sheet-v1" || resolvedInputs?.workflow_type === "CHARACTER_SHEET" || resolvedInputs?.workflow_type === "CHARACTER";
+
+    const workflowType = isCharacterWorkflow ? "CHARACTER_SHEET" : (resolvedInputs?.workflow_type || "GENERATION");
+
+    return this.startPlaceholders({
+      userId: run?.user_id || null,
+      nodeType: nodeConfig.type,
+      input: inputWithProject,
+      count,
+      runId,
+      workflowId: run?.workflow_id || null,
+      workflowType,
+    });
+  }
+
+  /**
+   * Phase 2 — mark one placeholder as success.
+   */
+  async completePlaceholder(mediaId, asset) {
+    const bridge = await this._getBridge();
+    if (!bridge || !mediaId) return false;
+
+    const url = (asset?.url || "").trim();
+    if (!url) {
+      return this.failPlaceholder(
+        mediaId,
+        "Provider returned success but no asset URL"
+      );
+    }
+
+    try {
+      await bridge.finalizeV1Media(
+        mediaId,
+        {
+          url,
+          width: asset?.width,
+          height: asset?.height,
+        },
+        MEDIA_WORKFLOW_STATUS.SUCCESS
+      );
+      return true;
+    } catch (err) {
+      lifecycleLogger.error(
+        { event: "media_lifecycle.complete_placeholder_failed", mediaId, err: err?.message },
+        "completePlaceholder failed"
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Phase 2 — mark one placeholder as failed.
+   */
+  async failPlaceholder(mediaId, error) {
+    const bridge = await this._getBridge();
+    if (!bridge || !mediaId) return false;
+
+    try {
+      await bridge.failV1Media(mediaId, normalizeError(error));
+      return true;
+    } catch (err) {
+      lifecycleLogger.error(
+        { event: "media_lifecycle.fail_placeholder_failed", mediaId, err: err?.message },
+        "failPlaceholder failed"
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Phase 2 — finalize by explicit status (gateway compat).
+   */
+  async finalizePlaceholder(mediaId, asset, status = MEDIA_WORKFLOW_STATUS.SUCCESS, error = null) {
+    if (status === MEDIA_WORKFLOW_STATUS.SUCCESS) {
+      return this.completePlaceholder(mediaId, asset);
+    }
+    return this.failPlaceholder(mediaId, error || "Node execution failed");
+  }
+
+  /**
+   * Phase 2 — zip placeholders with assets on success.
+   */
+  async completePlaceholders(placeholders = [], assets = []) {
+    const results = [];
+
+    for (let i = 0; i < placeholders.length; i++) {
+      const placeholder = placeholders[i];
+      // If assets has fewer items (e.g. 1 asset for multiple placeholders), reuse single asset
+      const asset = assets[i] || (assets.length === 1 ? assets[0] : null);
+      if (!placeholder?.mediaId) continue;
+
+      const ok = await this.completePlaceholder(placeholder.mediaId, asset);
+      results.push({ ...placeholder, asset, ok });
+    }
+
+    return results;
+  }
+
+  /**
+   * Phase 2 — mark every placeholder failed (error path).
+   */
+  async failPlaceholders(placeholders = [], error) {
+    const message = normalizeError(error);
+    const results = [];
+
+    for (const placeholder of placeholders) {
+      if (!placeholder?.mediaId) continue;
+      const ok = await this.failPlaceholder(placeholder.mediaId, message);
+      results.push({ ...placeholder, ok });
+    }
+
+    return results;
+  }
+
+  /**
+   * Phase 2 — V2 node helper: map node output to assets and finalize placeholders.
+   */
+  async finalizeOutputsForNode({
+    placeholders = [],
+    nodeConfig,
+    output,
+    runId,
+    nodeId,
+  }) {
+    if (!this.isProviderBackedNodeType(nodeConfig?.type)) return [];
+
+    const assets = normalizeNodeMediaOutputs(nodeConfig, output, { runId, nodeId });
+    return this.completePlaceholders(placeholders, assets);
+  }
+
+  /**
+   * Domain recovery: reconcile and mark media associated with an expired billing hold as failed.
+   * Centralizes media status transition for worker crashes / unhandled execution drops.
+   *
+   * @param {Object} params
+   * @param {string} params.holdId
+   * @param {string} [params.workflowId]
+   * @param {string} [params.mediaId]
+   * @param {string} [params.reason]
+   * @returns {Promise<boolean>}
+   */
+  async failForExpiredHold({
+    holdId,
+    workflowId,
+    mediaId = null,
+    reason = "Generation execution timed out. Your credits have been refunded.",
+  } = {}) {
+    const bridge = await this._getBridge();
+    if (!bridge) return false;
+
+    try {
+      if (mediaId) {
+        return await this.failPlaceholder(mediaId, reason);
+      }
+
+      if (workflowId && bridge.db?.media) {
+        const list = await bridge.db.media.findByWorkflow(workflowId).catch(() => []);
+        const pending = list?.find((m) => m.status === "processing" || m.status === "pending");
+        if (pending?.id) {
+          return await this.failPlaceholder(pending.id, reason);
+        }
+      }
+
+      return false;
+    } catch (err) {
+      lifecycleLogger.error(
+        { event: "media_lifecycle.fail_expired_hold_failed", holdId, workflowId: workflowId || null, mediaId, err: err?.message },
+        "failForExpiredHold failed"
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Sweeps and marks any orphan or crashed media placeholders that have exceeded
+   * their processing TTL (default: 30 minutes) as failed.
+   *
+   * @param {Object} [options]
+   * @param {number} [options.maxAgeMinutes=30]
+   * @param {string} [options.reason]
+   * @returns {Promise<number>} Number of swept placeholders
+   */
+  async sweepStalePlaceholders({
+    maxAgeMinutes = 30,
+    reason = "Generation execution timed out. Placeholder expired.",
+  } = {}) {
+    const bridge = await this._getBridge();
+    if (!bridge?.db?.media) return 0;
+
+    try {
+      const cutoffTime = new Date(Date.now() - maxAgeMinutes * 60 * 1000).toISOString();
+      const staleItems = typeof bridge.db.media.findStalePlaceholders === "function"
+        ? await bridge.db.media.findStalePlaceholders(cutoffTime)
+        : [];
+
+      let sweptCount = 0;
+      for (const item of staleItems) {
+        if (item?.id) {
+          await this.failPlaceholder(item.id, reason);
+          sweptCount++;
+        }
+      }
+      return sweptCount;
+    } catch {
+      return 0;
+    }
+  }
+
+  extractAsset(output, nodeType) {
+    return this.bridge?.extractAsset(output, nodeType) ?? null;
+  }
+
+  getAspectRatio(width, height) {
+    return this.bridge?.getAspectRatio(width, height) ?? "SQUARE";
+  }
+}
+
+
+export default MediaWorkflowLifecycleService;

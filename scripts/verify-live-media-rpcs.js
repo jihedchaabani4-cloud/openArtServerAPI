@@ -8,7 +8,7 @@
  *   cd apiOpenArt; node scripts/verify-live-media-rpcs.js
  */
 
-import { supabaseAdmin } from "../lib/supabase.js";
+import { supabaseAdmin } from "#shared";
 
 async function verifyLiveRpcs() {
   console.log("================================================================================");

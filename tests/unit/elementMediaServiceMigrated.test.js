@@ -2,13 +2,13 @@ process.env.NODE_ENV = "test";
 
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
+import { ElementMediaService } from "#elements/tools";
 import {
     ELEMENT_REFERENCE_UPLOAD_POLICY,
     ELEMENT_SHEET_UPLOAD_POLICY,
     ELEMENT_SOURCES_UPLOAD_POLICY,
-} from "../../src/platform/media-ingestion/UploadPolicy.js";
-import { CrudServiceError } from "../../src/utils/crudOperationLog.js";
+} from "#media/tools";
+import { CrudServiceError } from "#shared";
 
 describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMediaService (Ticket 05)", () => {
     let mockDb;

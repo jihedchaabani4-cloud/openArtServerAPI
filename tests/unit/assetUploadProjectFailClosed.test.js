@@ -2,10 +2,10 @@ process.env.NODE_ENV = "test";
 
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { AssetUploadService } from "../../src/domain/asset/AssetUploadService.js";
-import { MediaService } from "../../src/platform/media/MediaService.js";
-import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
-import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
+import { AssetUploadService } from "#media/tools";
+import { MediaService } from "#media/tools";
+import { WorkflowMediaRepository } from "#media/tools";
+import { WorkflowMediaService } from "#generation/tools";
 
 const VALID_PNG_BUFFER = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",

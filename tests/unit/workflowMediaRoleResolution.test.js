@@ -1,9 +1,9 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { db } from "../../src/container.js";
-import { resolveAsCharacter, resolveAsElement } from "../../src/v2/resolvers/WorkflowReferenceResolver.js";
-import { CharacterMediaService } from "../../src/domain/character/CharacterMediaService.js";
-import { elementRepository } from "../../src/db/ElementRepository.js";
+import { resolveAsCharacter, resolveAsElement } from "#generation/tools";
+import { CharacterMediaService } from "#characters/tools";
+import { elementRepository } from "#elements/tools";
 
 describe("workflow_media role-based domain resolution", () => {
   const originals = {};

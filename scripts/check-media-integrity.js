@@ -10,7 +10,7 @@
  */
 
 import "dotenv/config";
-import { supabaseAdmin, supabase } from "../lib/supabase.js";
+import { supabaseAdmin, supabase } from "#shared";
 
 const PAGE_SIZE = 1000;
 

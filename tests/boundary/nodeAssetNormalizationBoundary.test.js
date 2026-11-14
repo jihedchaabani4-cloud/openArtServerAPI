@@ -24,13 +24,13 @@ process.env.NODE_ENV = "test";
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 
 import assert from "node:assert/strict";
-import { executeImageGeneration } from "../../src/v2/nodes/imageGenerationNode.js";
-import { executeVideoGeneration } from "../../src/v2/nodes/videoGenerationNode.js";
-import { executeNodePersistence } from "../../src/v2/runner/nodeExecutor.js";
-import { registerProviderRunner, unregisterProviderRunner, getRunner } from "../../src/models/runtime/providerRuntimeRegistry.js";
-import { getModelBindings } from "../../src/models/registry/modelRegistry.js";
+import { executeImageGeneration } from "#generation/tools";
+import { executeVideoGeneration } from "#generation/tools";
+import { executeNodePersistence } from "#generation/tools";
+import { registerProviderRunner, unregisterProviderRunner, getRunner } from "#models/tools";
+import { getModelBindings } from "#models/tools";
 import { db } from "../../src/container.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+import { redisConnection, workerRedisConnection } from "#shared";
 
 after(async () => {
   try {

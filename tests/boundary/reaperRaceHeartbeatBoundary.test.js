@@ -1,9 +1,9 @@
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { InMemoryWalletService } from "../../src/services/walletService.js";
-import { WalletService } from "../../src/platform/billing/WalletService.js";
-import { executeNodePersistence } from "../../src/v2/runner/nodeExecutor.js";
-import { UseCaseService } from "../../src/services/useCaseService.js";
+import { InMemoryWalletService } from "../helpers/inMemoryWalletService.js";
+import { WalletService } from "#billing/tools";
+import { executeNodePersistence } from "#generation/tools";
+import { UseCaseService } from "#generation/tools";
 import { db } from "../../src/container.js";
 
 describe("Reservation Reaper Race & Hold Heartbeat Boundary Tests (Task T10 / BUG-03)", () => {

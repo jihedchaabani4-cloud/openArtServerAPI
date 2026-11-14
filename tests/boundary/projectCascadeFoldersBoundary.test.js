@@ -2,9 +2,9 @@ import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import http from "node:http";
-import projectsRouter from "../../routes/projects.js";
-import { supabase } from "../../lib/supabase.js";
-import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "../../src/queue/redis.js";
+import { projectsRouter } from "#workspace/api";
+import { supabase } from "#shared/db/supabase.js";
+import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared";
 
 process.env.NODE_ENV = "test";
 

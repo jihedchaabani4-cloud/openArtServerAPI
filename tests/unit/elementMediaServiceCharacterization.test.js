@@ -2,8 +2,8 @@ process.env.NODE_ENV = "test";
 
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
-import { CrudServiceError } from "../../src/utils/crudOperationLog.js";
+import { ElementMediaService } from "#elements/tools";
+import { CrudServiceError } from "#shared";
 
 describe("ElementMediaService Characterization (Pre-migration baseline)", () => {
     let mockDb;

@@ -1,8 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
-import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
-import { CrudServiceError } from "../../src/utils/crudOperationLog.js";
+import { WorkflowMediaService } from "#generation/tools";
+import { WorkflowMediaRepository } from "#media/tools";
+import { CrudServiceError } from "#shared";
 
 describe("Shared-Media Unlink Safe Fallback & Schema Integrity Boundary", () => {
   it("TEST 1: Missing RPC (error 42883) fails closed with SERVICE_UNAVAILABLE and preserves storage", async () => {

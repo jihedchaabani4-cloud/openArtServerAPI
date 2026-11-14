@@ -2,10 +2,10 @@ import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import http from "node:http";
-import imagesRouter from "../../routes/images.js";
+import { imagesRouter } from "#generation/api";
 import { db, useCaseService } from "../../src/container.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
-import { supabase } from "../../lib/supabase.js";
+import { redisConnection, workerRedisConnection } from "#shared";
+import { supabase } from "#shared/db/supabase.js";
 
 describe("RC1.1-R3 — Count Parameter Current Server Behavior Test", () => {
   let server;

@@ -5,15 +5,15 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { Readable } from "node:stream";
 import app, { isScopedLargeBodyRoute, normalizeRoutePath } from "../../index.js";
-import { supabase } from "../../lib/supabase.js";
-import { StorageService } from "../../src/platform/storage/StorageService.js";
-import { MediaInspector } from "../../src/platform/media-ingestion/MediaInspector.js";
-import { createSizeLimitedMemoryStorage, resetActiveUploadsForTest } from "../../src/middleware/sizeLimitedStorage.js";
-import { requireAuth } from "../../src/middleware/auth.js";
-import { setLimiterForTest, resetLimitersForTest } from "../../src/middleware/rateLimit.js";
-import { registerProviderRunner, unregisterProviderRunner } from "../../src/models/runtime/providerRuntimeRegistry.js";
-import { resolveBindingForTest } from "../../src/models/registry/bindingResolver.js";
-import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "../../src/queue/redis.js";
+import { supabase } from "#shared/db/supabase.js";
+import { StorageService } from "#media/tools";
+import { MediaInspector } from "#media/tools";
+import { createSizeLimitedMemoryStorage, resetActiveUploadsForTest } from "#media/tools";
+import { requireAuth } from "#identity/tools";
+import { setLimiterForTest, resetLimitersForTest } from "#identity/tools";
+import { registerProviderRunner, unregisterProviderRunner } from "#models/tools";
+import { resolveBindingForTest } from "#models/tools";
+import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared";
 
 // Helper to construct real valid byte signatures for 11 format variants
 function createSampleBytes(format) {

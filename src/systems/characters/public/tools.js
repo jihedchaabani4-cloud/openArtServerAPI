@@ -27,6 +27,11 @@ import {
     CharactersConflictError,
     CharactersUnauthorizedError,
 } from "../internal/errors.js";
+import { setCharacterServices } from "../internal/services/serviceAccessor.js";
+
+export function configureCharacters(services = {}) {
+    setCharacterServices(services);
+}
 
 // ── Inter-System Tools Functions ──────────────────────────────────────────────
 

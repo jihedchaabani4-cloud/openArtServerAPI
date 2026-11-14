@@ -1,15 +1,9 @@
 /**
- * Duck-typing predicate detecting Readable stream instances.
- *
- * @param {unknown} candidate - Value to inspect
- * @returns {boolean} True if value implements Node stream or Web stream reader contracts
+ * streamUtils (Legacy Re-export)
+ * Canonical implementation now lives in src/systems/media/internal/storage/streamUtils.js
+ * accessible via #media/tools.
  */
-export function isStream(candidate) {
-    return (
-        candidate !== null &&
-        typeof candidate === "object" &&
-        (typeof candidate.pipe === "function" ||
-            typeof candidate[Symbol.asyncIterator] === "function" ||
-            typeof candidate.getReader === "function")
-    );
-}
+import { isStream } from "#media/tools";
+
+export { isStream };
+export default { isStream };

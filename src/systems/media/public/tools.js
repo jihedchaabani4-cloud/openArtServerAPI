@@ -13,6 +13,11 @@ import {
     linkWorkflowMediaForCreatedRow,
     markMediaStatus,
     markMediaFailed as internalMarkMediaFailed,
+    createWorkflowWithMedia,
+    createWorkflowWithMediaAtomic,
+    appendMediaToWorkflow,
+    WORKFLOW_MEDIA_ROLES,
+    normalizeWorkflowMediaRole,
     inferWorkflowMediaRole,
     getMediaSupabaseClient,
     getMediaSupabaseAdminClient,
@@ -21,18 +26,29 @@ import {
     StorageService,
     StoragePathResolver,
     createStorageService,
+    IStorageProvider,
     InMemoryStorageProvider,
     SupabaseStorageProvider,
     storagePathResolver,
     StorageError,
     StorageValidationError,
+    isStream,
 } from "../internal/storage/index.js";
 import {
     MediaUploadService,
+    AssetUploadService,
     MediaInspector,
     SourceResolver,
     SourceReader,
     SourcePolicy,
+    extractImageMetadata,
+    extractVideoMetadata,
+    extractMediaMetadata,
+    createSizeLimitedMemoryStorage,
+    resetActiveUploadsForTest,
+    resetInFlightBytesForTest,
+    getActiveUploadsCountForTest,
+    getInFlightBytesForTest,
     DEFAULT_UPLOAD_POLICY,
     ELEMENT_REFERENCE_UPLOAD_POLICY,
     ELEMENT_SHEET_UPLOAD_POLICY,
@@ -44,6 +60,10 @@ import {
     ValidationError,
     UploadError,
     QuotaError,
+    WORKFLOW_REFERENCE_QUOTA_PREFIX,
+    WORKFLOW_REFERENCE_QUOTA_PATTERN,
+    formatWorkflowReferenceQuotaMessage,
+    isWorkflowReferenceQuotaError,
 } from "../internal/ingestion/index.js";
 import {
     MediaService,
@@ -54,6 +74,7 @@ import {
     normalizeNodeMediaOutputs,
     MEDIA_WORKFLOW_STATUS,
 } from "../internal/services/index.js";
+import { setMediaServices } from "../internal/services/serviceAccessor.js";
 import {
     MediaError,
     MediaValidationError,
@@ -70,6 +91,14 @@ let _storageService = null;
 let _mediaUploadService = null;
 let _mediaService = null;
 let _assetUploadService = null;
+
+export function configureMedia(services = {}) {
+    if (services.assetUploadService) _assetUploadService = services.assetUploadService;
+    if (services.storageService) _storageService = services.storageService;
+    if (services.mediaUploadService) _mediaUploadService = services.mediaUploadService;
+    if (services.mediaService) _mediaService = services.mediaService;
+    setMediaServices(services);
+}
 
 export function getMediaRepository() {
     if (!_mediaRepo) {
@@ -242,11 +271,16 @@ export async function persistExternalMedia({
  * @param {string} [params.errorMessage]
  * @returns {Promise<{ mediaId: string, status: string, errorCode: string }>}
  */
-export async function markMediaFailed({
-    mediaId,
-    errorCode = "MEDIA_FAILED",
-    errorMessage = null,
-} = {}) {
+export async function markMediaFailed(firstArg = {}, secondArg, thirdArg) {
+    if (secondArg !== undefined || thirdArg !== undefined) {
+        return internalMarkMediaFailed(firstArg, secondArg, thirdArg);
+    }
+
+    const {
+        mediaId,
+        errorCode = "MEDIA_FAILED",
+        errorMessage = null,
+    } = firstArg || {};
     if (!mediaId) throw new MediaValidationError("mediaId is required for markMediaFailed");
 
     const repo = getMediaRepository();
@@ -377,11 +411,13 @@ export {
     StorageService,
     StoragePathResolver,
     createStorageService,
+    IStorageProvider,
     InMemoryStorageProvider,
     SupabaseStorageProvider,
     storagePathResolver,
     StorageError,
     StorageValidationError,
+    isStream,
 
     // Repositories
     MediaRepository,
@@ -389,14 +425,28 @@ export {
     createMediaInWorkflow,
     linkWorkflowMediaForCreatedRow,
     markMediaStatus,
+    createWorkflowWithMedia,
+    createWorkflowWithMediaAtomic,
+    appendMediaToWorkflow,
+    WORKFLOW_MEDIA_ROLES,
+    normalizeWorkflowMediaRole,
     inferWorkflowMediaRole,
 
     // Ingestion & Policies
     MediaUploadService,
+    AssetUploadService,
     MediaInspector,
     SourceResolver,
     SourceReader,
     SourcePolicy,
+    extractImageMetadata,
+    extractVideoMetadata,
+    extractMediaMetadata,
+    createSizeLimitedMemoryStorage,
+    resetActiveUploadsForTest,
+    resetInFlightBytesForTest,
+    getActiveUploadsCountForTest,
+    getInFlightBytesForTest,
     DEFAULT_UPLOAD_POLICY,
     ELEMENT_REFERENCE_UPLOAD_POLICY,
     ELEMENT_SHEET_UPLOAD_POLICY,
@@ -408,6 +458,10 @@ export {
     ValidationError,
     UploadError,
     QuotaError,
+    WORKFLOW_REFERENCE_QUOTA_PREFIX,
+    WORKFLOW_REFERENCE_QUOTA_PATTERN,
+    formatWorkflowReferenceQuotaMessage,
+    isWorkflowReferenceQuotaError,
 
     // Services
     MediaService,

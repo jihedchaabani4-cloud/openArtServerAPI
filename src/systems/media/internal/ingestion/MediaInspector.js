@@ -5,8 +5,8 @@
  */
 
 import sharp from "sharp";
-import { extractVideoMetadata } from "../../../../utils/MediaMetadataExtractor.js";
-import { calculateAspectRatio } from "../../../../utils/ratioUtils.js";
+import { extractVideoMetadata } from "./MediaMetadataExtractor.js";
+import { calculateAspectRatio } from "#shared";
 
 function getResolutionLabel(w, h) {
     if (!w || !h) return null;

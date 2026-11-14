@@ -19,10 +19,7 @@ import { randomUUID } from "node:crypto";
 import { SourceResolver } from "./SourceResolver.js";
 import { DEFAULT_UPLOAD_POLICY } from "./UploadPolicy.js";
 import { MediaUploadService } from "./MediaUploadService.js";
-import { WorkflowMediaService } from "../../../../platform/workflow/WorkflowMediaService.js";
-import { WorkflowAuthorizationService } from "../../../../platform/workflow/WorkflowAuthorizationService.js";
-import { crudOperationLog, CrudServiceError } from "../../../../utils/crudOperationLog.js";
-import { calculateAspectRatio } from "../../../../utils/ratioUtils.js";
+import { crudOperationLog, CrudServiceError, calculateAspectRatio } from "#shared";
 
 export class AssetUploadService {
     /**

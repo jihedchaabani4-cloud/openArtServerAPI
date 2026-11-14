@@ -10,14 +10,13 @@
  */
 
 import { Router } from "express";
-import * as characterController from "../../../../controllers/characterController.js";
-import { requireAuth } from "../../../../src/middleware/auth.js";
-import { rateLimit } from "../../../../src/middleware/rateLimit.js";
-import { createUploadMiddleware } from "../../../../src/middleware/uploadMiddleware.js";
+import * as characterController from "../internal/controllers/characterController.js";
+import { requireAuth, rateLimit } from "#identity/tools";
+import { createUploadMiddleware } from "#media/api";
 import {
     CHARACTER_SHEET_UPLOAD_POLICY,
     CHARACTER_DETAIL_UPLOAD_POLICY,
-} from "../../../../src/platform/media-ingestion/UploadPolicy.js";
+} from "#media/tools";
 
 const uploadSheet = createUploadMiddleware(CHARACTER_SHEET_UPLOAD_POLICY);
 const uploadDetail = createUploadMiddleware(CHARACTER_DETAIL_UPLOAD_POLICY);
@@ -64,6 +63,18 @@ router.post("/:characterId/media", uploadDetail, characterController.addMediaToC
 router.delete("/:characterId/media/:mediaId", characterController.removeMediaFromCharacter);
 router.post("/:characterId/sheet-media", uploadSheet, characterController.setCharacterSheetMedia);
 router.post("/:characterId/upload", uploadSheet, characterController.uploadCharacterMedia);
+
+export const {
+    createCharacter,
+    generateCharacterSheet,
+    generateCharacterDescription,
+    updateCharacter,
+    deleteCharacter,
+    addMediaToCharacter,
+    removeMediaFromCharacter,
+    setCharacterSheetMedia,
+    uploadCharacterMedia,
+} = characterController;
 
 export const charactersRouter = router;
 export { characterController };

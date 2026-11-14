@@ -27,6 +27,15 @@ export const envConfig = {
     }
     return 6;
   },
+  get characterMaxDetailMedia() {
+    return Number(process.env.CHARACTER_MAX_DETAIL_MEDIA) || 5;
+  },
+  get maxConcurrentUploadsPerUser() {
+    return Number(process.env.MAX_CONCURRENT_UPLOADS_PER_USER) || 0;
+  },
+  get maxInFlightUploadBytes() {
+    return Number(process.env.MAX_IN_FLIGHT_UPLOAD_BYTES) || 0;
+  },
 };
 
 

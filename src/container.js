@@ -1,6 +1,5 @@
 import "dotenv/config";
 import { PromptService } from "#platform/ai/PromptService.js";
-import { createStorageService } from "#platform/storage";
 import { supabase, supabaseAdmin } from "#lib/supabase.js";
 import {
     WalletService,
@@ -32,10 +31,16 @@ import { TrashRepository }            from "#db/TrashRepository.js";
 // ─── Infrastructure ───────────────────────────────────────────────────────────
 import { WorkflowEventRecorder } from "./infrastructure/events/workflowEventRecorder.js";
 import { WorkflowBillingGateway } from "./infrastructure/billing/workflowBillingGateway.js";
-import { MediaService, MediaWorkflowLifecycleService } from "#platform/media/index.js";
+import {
+    MediaService,
+    MediaWorkflowLifecycleService,
+    MediaUploadService,
+    AssetUploadService,
+    createStorageService,
+    configureMedia,
+} from "#media/tools";
 import { WorkflowLifecycleService } from "#platform/workflow/WorkflowService.js";
-import { MediaUploadService } from "#platform/media-ingestion/index.js";
-import { CharacterService, CharacterMediaService } from "#characters/tools";
+import { CharacterService, CharacterMediaService, configureCharacters } from "#characters/tools";
 import { ElementService, ElementMediaService, ElementAnalysisService, configureElements } from "#elements/tools";
 import { ProjectService, ProjectReadService, FolderService, TrashService, configureWorkspace } from "#workspace/tools";
 
@@ -47,7 +52,6 @@ import {
     jobQueueService,
 } from "#generation/tools";
 import { WorkflowStorageGateway } from "./infrastructure/storage/workflowStorageGateway.js";
-import { AssetUploadService } from "./domain/asset/AssetUploadService.js";
 
 
 
@@ -277,6 +281,8 @@ export const projectReadService = new ProjectReadService({ db, folderService });
 export const projectService = new ProjectService({ projectRepo: db.projects });
 export const generationService = new GenerationService({ db });
 export const generationRequestService = new GenerationRequestService({ db, useCaseService, folderService });
+configureCharacters({ characterService, characterMediaService, trashService });
+configureMedia({ db, assetUploadService, workflowService, storageService, mediaUploadService, mediaService });
 configureWorkspace({ trashService, projectService, folderService, projectReadService, generationService });
 
 

@@ -1,9 +1,6 @@
 /**
- * Legacy Re-export for CharacterRepository.
- * Canonical implementation now lives in src/systems/characters/internal/db/CharacterRepository.js
- * accessible via #characters/tools.
+ * Backward compatibility re-export.
+ * @owns System 6: Characters
  */
-import { CharacterRepository, characterRepository } from "#characters/tools";
-
-export { CharacterRepository, characterRepository };
-export default characterRepository;
+export * from "#characters/tools";
+export { characterRepository as default } from "#characters/tools";

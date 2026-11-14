@@ -1,5 +1,6 @@
-import { crudOperationLog } from "../../../../utils/crudOperationLog.js";
+import { crudOperationLog } from "#shared";
 import { WorkflowMediaRepository } from "./WorkflowMediaRepository.js";
+import { getMediaDb } from "../services/serviceAccessor.js";
 
 let defaultRepo = null;
 
@@ -14,13 +15,9 @@ async function resolveWorkflowMediaRepo(db) {
     if (db?.workflowMedia?.linkMedia) {
         return db.workflowMedia;
     }
-    try {
-        const container = await import("../container.js");
-        if (container?.db?.workflowMedia?.linkMedia) {
-            return container.db.workflowMedia;
-        }
-    } catch {
-        // Ignore container load failures in isolated environments
+    const configuredDb = getMediaDb();
+    if (configuredDb?.workflowMedia?.linkMedia) {
+        return configuredDb.workflowMedia;
     }
     return getDefaultRepo();
 }

@@ -1,12 +1,11 @@
-import { BaseRepository } from "../../../../db/BaseRepository.js";
-import { supabaseAdmin } from "./mediaClient.js";
+import { supabase, supabaseAdmin } from "./mediaClient.js";
 import { inferWorkflowMediaRole } from "./workflowMediaRole.js";
 import { formatWorkflowReferenceQuotaMessage } from "../ingestion/MediaUploadErrors.js";
 import { envConfig } from "#shared";
 
 const memoryWorkflowMedia = [];
 
-export class WorkflowMediaRepository extends BaseRepository {
+export class WorkflowMediaRepository {
     static _testMemoryEnabled = false;
 
     static enableTestMemoryFallback() {
@@ -42,7 +41,7 @@ export class WorkflowMediaRepository extends BaseRepository {
     }
 
     constructor() {
-        super("workflow_media");
+        this.tableName = "workflow_media";
     }
 
     _isMemoryMode() {
@@ -56,7 +55,28 @@ export class WorkflowMediaRepository extends BaseRepository {
     }
 
     client() {
-        return supabaseAdmin || super.client();
+        return supabaseAdmin || supabase;
+    }
+
+    async findById(id, select = "*") {
+        const { data, error } = await this.client().from(this.tableName).select(select).eq("id", id).maybeSingle();
+        if (error) throw error;
+        return data;
+    }
+
+    async updateFields(id, fields) {
+        const { data, error } = await this.client().from(this.tableName).update(fields).eq("id", id).select().single();
+        if (error) throw error;
+        return data;
+    }
+
+    async delete(id) {
+        const { error } = await this.client().from(this.tableName).delete().eq("id", id);
+        if (error) throw error;
+    }
+
+    async deleteById(id) {
+        return this.delete(id);
     }
 
     _getClientOrThrow() {

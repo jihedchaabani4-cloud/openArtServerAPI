@@ -26,8 +26,7 @@ import { SourcePolicy } from "./SourcePolicy.js";
 import { MediaInspector } from "./MediaInspector.js";
 import { DEFAULT_UPLOAD_POLICY } from "./UploadPolicy.js";
 import { ValidationError, UploadError } from "./MediaUploadErrors.js";
-import { crudOperationLog, CrudServiceError } from "../../../../utils/crudOperationLog.js";
-import { calculateAspectRatio } from "../../../../utils/ratioUtils.js";
+import { crudOperationLog, CrudServiceError, calculateAspectRatio } from "#shared";
 
 const MIME_TO_EXT = Object.freeze({
     "image/jpeg": "jpg",

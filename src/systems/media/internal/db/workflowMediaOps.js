@@ -1,4 +1,3 @@
-import { GenerationError } from "../../../../errors/GenerationErrors.js";
 import { supabase } from "./mediaClient.js";
 import { createLogger } from "#shared";
 import { createMediaInWorkflow, linkWorkflowMediaForCreatedRow } from "./workflowMediaLinker.js";
@@ -26,7 +25,7 @@ export async function markMediaStatus(db, media_id, status, error_message = null
 export async function markMediaFailed(db, media_id, error) {
     let message = "sorry famam mouchkla 7awel a fuie momment";
 
-    if (error instanceof GenerationError) {
+    if (error && typeof error.getDisplayMessage === "function") {
         message = error.getDisplayMessage();
     } else if (typeof error === 'string') {
         message = error;

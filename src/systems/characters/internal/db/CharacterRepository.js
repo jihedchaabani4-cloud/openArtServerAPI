@@ -4,13 +4,12 @@
  * Interacts with the `characters` table (traits, persona, 3-view turnaround specs).
  * Isolated inside internal/db/ per Rule 6 and Rule 12.
  */
-import { supabaseAdmin } from "../../../../../lib/supabase.js";
-import { BaseRepository } from "../../../../db/BaseRepository.js";
-import { trashRepository } from "../../../../db/TrashRepository.js";
+import { supabaseAdmin } from "./characterClient.js";
+import { trashRepository } from "#workspace/tools";
 
-export class CharacterRepository extends BaseRepository {
+export class CharacterRepository {
     constructor() {
-        super("characters");
+        this.tableName = "characters";
     }
 
     /**
@@ -18,6 +17,23 @@ export class CharacterRepository extends BaseRepository {
      */
     client() {
         return supabaseAdmin;
+    }
+
+    async findById(id, select = "*") {
+        const { data, error } = await this.client().from(this.tableName).select(select).eq("id", id).maybeSingle();
+        if (error) throw error;
+        return data;
+    }
+
+    async updateFields(id, fields) {
+        const { data, error } = await this.client().from(this.tableName).update(fields).eq("id", id).select().single();
+        if (error) throw error;
+        return data;
+    }
+
+    async delete(id) {
+        const { error } = await this.client().from(this.tableName).delete().eq("id", id);
+        if (error) throw error;
     }
 
     // ── CRUD operations ──────────────────────────────────────────────────────

@@ -2,9 +2,9 @@ process.env.NODE_ENV = "test";
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { StoragePathResolver, storagePathResolver } from "../../src/platform/storage/StoragePathResolver.js";
-import { StorageService, InMemoryStorageProvider } from "../../src/platform/storage/index.js";
-import { MediaUploadService } from "../../src/platform/media-ingestion/index.js";
+import { StoragePathResolver, storagePathResolver } from "#media/tools";
+import { StorageService, InMemoryStorageProvider } from "#media/tools";
+import { MediaUploadService } from "#media/tools";
 
 const resolver = storagePathResolver || new StoragePathResolver();
 

@@ -1,9 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
-import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
-import { ElementService } from "../../src/domain/element/ElementService.js";
-import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
+import { WorkflowMediaService } from "#generation/tools";
+import { WorkflowMediaRepository } from "#media/tools";
+import { ElementService } from "#elements/tools";
+import { ElementMediaService } from "#elements/tools";
 
 describe("Generic Workflow Primary Media — Centralize and Reuse Canonical Contract", () => {
     function createMockDb() {
@@ -443,7 +443,7 @@ describe("Generic Workflow Primary Media — Centralize and Reuse Canonical Cont
     });
 
     it("11. Controller PATCH /api/workflows/:id/primary-media supports primaryMediaId in req.body", async () => {
-        const { setPrimaryMedia } = await import("../../controllers/workflowsController.js");
+        const { setPrimaryMedia } = await import("#generation/api");
         const { workflowService } = await import("../../src/container.js");
 
         let invokedParams = null;

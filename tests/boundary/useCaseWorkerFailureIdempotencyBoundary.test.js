@@ -1,8 +1,8 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { handleUseCaseWorkerFailure } from "../../src/workers/useCaseWorker.js";
+import { handleUseCaseWorkerFailure } from "#generation/tools";
 import { useCaseService, db } from "../../src/container.js";
-import { InMemoryWalletService } from "../../src/services/walletService.js";
+import { InMemoryWalletService } from "../helpers/inMemoryWalletService.js";
 
 describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency & Boot Assertions", () => {
   let originalRollback;
@@ -94,16 +94,22 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency & Boot Asser
 
   it("TEST 2: walletWorker imports container to ensure boot assertions run", async () => {
     const fs = await import("node:fs");
-    const content = fs.readFileSync(new URL("../../src/workers/walletWorker.js", import.meta.url), "utf8");
+    const content = fs.readFileSync(
+      new URL("../../src/systems/billing/internal/workers/walletWorker.js", import.meta.url),
+      "utf8"
+    );
     assert.ok(
       content.includes("container.js"),
-      "walletWorker.js must import container.js to execute fail-fast boot assertions"
+      "walletWorker.js must reference container.js boot assertions"
     );
   });
 
   it("TEST 3: useCaseWorker registers exactly one 'failed' event listener (no duplicate registration)", async () => {
     const fs = await import("node:fs");
-    const content = fs.readFileSync(new URL("../../src/workers/useCaseWorker.js", import.meta.url), "utf8");
+    const content = fs.readFileSync(
+      new URL("../../src/systems/generation/internal/workers/useCaseWorker.js", import.meta.url),
+      "utf8"
+    );
     
     // Count occurrences of .on("failed", ...) in useCaseWorker.js
     const failedListenerMatches = content.match(/\.on\(\s*["']failed["']\s*,\s*handleUseCaseWorkerFailure\s*\)/g) || [];

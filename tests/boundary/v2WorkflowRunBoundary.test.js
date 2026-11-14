@@ -2,9 +2,9 @@ import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import http from "node:http";
-import v2WorkflowsRouter from "../../routes/v2/workflows.js";
-import { RunRepository } from "../../src/v2/runner/runRepository.js";
-import { supabase } from "../../lib/supabase.js";
+import { v2WorkflowsRouter } from "#generation/api";
+import { RunRepository } from "#generation/tools";
+import { supabase } from "#shared/db/supabase.js";
 
 describe("V2 Workflow Run Security & Boundary Tests (Task T3)", () => {
   let server;

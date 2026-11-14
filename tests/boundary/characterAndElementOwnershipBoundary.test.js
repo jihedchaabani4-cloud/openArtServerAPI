@@ -2,11 +2,11 @@ import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import http from "node:http";
-import charactersRouter from "../../routes/characters.js";
-import elementRoutes from "../../routes/elementRoutes.js";
+import charactersRouter from "#characters/api";
+import elementRoutes from "#elements/api";
 import { db, characterService, elementService } from "../../src/container.js";
-import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
-import { supabase } from "../../lib/supabase.js";
+import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared";
+import { supabase } from "#shared/db/supabase.js";
 
 // @covers POST /api/characters/:characterId/generate-sheet
 // @covers PATCH /api/characters/:characterId

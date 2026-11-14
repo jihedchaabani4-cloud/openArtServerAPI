@@ -34,8 +34,16 @@ export { RunRepository } from "../db/RunRepository.js";
 export { NodeSafetyService } from "../v2/nodes/safety/NodeSafetyService.js";
 export { bootstrapV2, configureDefaultGateways } from "../v2/bootstrap.js";
 export { V1StorageBridge } from "../v2/services/v1StorageBridge.js";
-export { UseCaseBillingRuntime } from "../v2/runtime/useCaseBillingRuntime.js";
-export { formatWorkflowError, sanitizeClientError, DEFAULT_APOLOGY_MESSAGE, toRuntimeError } from "../v2/runtime/errorPolicy.js";
+export { UseCaseBillingRuntime, buildCompactCostBreakdown } from "../v2/runtime/useCaseBillingRuntime.js";
+export {
+    formatWorkflowError,
+    sanitizeClientError,
+    DEFAULT_APOLOGY_MESSAGE,
+    toRuntimeError,
+    RUNTIME_ERROR_CODES,
+    ERROR_CATEGORIES,
+    ERROR_POLICY,
+} from "../v2/runtime/errorPolicy.js";
 export {
     resolveWorkflowReferences,
     resolveWorkflowReference,

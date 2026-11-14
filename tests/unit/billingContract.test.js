@@ -2,7 +2,7 @@ process.env.NODE_ENV = "test";
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { AppError } from "../../src/errors/AppError.js";
+import { AppError } from "#shared";
 import {
     getCreditBalance,
     reserveCredits,
@@ -20,7 +20,7 @@ import {
     BillingConflictError,
     BillingConfigurationError,
     WalletError,
-} from "#platform/billing";
+} from "#billing/tools";
 
 function makeFakeWalletService({ initialBalance = 100 } = {}) {
     const balances = new Map();

@@ -1,6 +1,6 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
-import { WalletService } from "../../src/platform/billing/WalletService.js";
+import { WalletService } from "#billing/tools";
 
 describe("Ticket 06: Atomic Wallet Hold RPCs Boundary Tests (Hardened)", () => {
   after(() => {

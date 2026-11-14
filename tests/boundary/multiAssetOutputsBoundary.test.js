@@ -1,11 +1,11 @@
 import { describe, it, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { executeNodePersistence } from "../../src/v2/runner/nodeExecutor.js";
+import { executeNodePersistence } from "#generation/tools";
 import { db } from "../../src/container.js";
-import { calculateCost } from "../../src/models/index.js";
-import { calculateWorkflowBillingPlan } from "../../src/use-cases/workflowBillingPlan.js";
-import * as imageController from "../../controllers/imageController.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+import { calculateCost } from "#models/tools";
+import { calculateWorkflowBillingPlan } from "#generation/tools";
+import * as imageController from "#generation/api";
+import { redisConnection, workerRedisConnection } from "#shared";
 
 after(async () => {
   try {
@@ -217,7 +217,7 @@ describe("Multi-Asset Outputs & Count Boundary (F2.4-b)", () => {
   });
 
   it("TEST 5: calculateRetailCredits does NOT multiply by count", async () => {
-    const { calculateRetailCredits } = await import("../../src/models/pricing/pricingEngine.js");
+    const { calculateRetailCredits } = await import("#models/tools");
     const model = { retailPricing: { table: { "1k": 8, default: 8 } } };
     const cost1 = calculateRetailCredits(model, { resolution: "1k", count: 1 });
     const cost4 = calculateRetailCredits(model, { resolution: "1k", count: 4 });

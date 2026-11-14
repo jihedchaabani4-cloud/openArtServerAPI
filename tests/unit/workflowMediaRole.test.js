@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { inferWorkflowMediaRole, WORKFLOW_MEDIA_ROLES } from "../../src/db/workflowMediaRole.js";
+import { inferWorkflowMediaRole, WORKFLOW_MEDIA_ROLES } from "#media/tools";
 
 describe("workflow media role inference", () => {
   it("maps legacy generation and upload step ids to canonical roles", () => {

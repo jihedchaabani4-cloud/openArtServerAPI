@@ -1,9 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ElementRepository } from "../../src/db/ElementRepository.js";
-import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
-import { ElementService } from "../../src/domain/element/ElementService.js";
-import { resolveAsElement } from "../../src/v2/resolvers/WorkflowReferenceResolver.js";
+import { ElementRepository } from "#elements/tools";
+import { ElementMediaService } from "#elements/tools";
+import { ElementService } from "#elements/tools";
+import { resolveAsElement } from "#generation/tools";
 
 const VALID_ELEMENT_ID = "11111111-1111-4111-8111-111111111111";
 const VALID_WORKFLOW_ID = "22222222-2222-4222-8222-222222222222";
@@ -16,7 +16,7 @@ describe("ADR-0009: element.source_images deprecation & decoupling", () => {
       let insertPayload = null;
       const repo = new ElementRepository();
 
-      const { supabase } = await import("../../lib/supabase.js");
+      const { supabase } = await import("#shared/db/supabase.js");
       const originalFrom = supabase.from;
 
       try {
@@ -54,7 +54,7 @@ describe("ADR-0009: element.source_images deprecation & decoupling", () => {
     it("update() does NOT allow source_images in update patch", async () => {
       let updatePayload = null;
       const repo = new ElementRepository();
-      const { supabase } = await import("../../lib/supabase.js");
+      const { supabase } = await import("#shared/db/supabase.js");
       const originalFrom = supabase.from;
 
       try {
@@ -294,7 +294,7 @@ describe("ADR-0009: element.source_images deprecation & decoupling", () => {
   describe("4. WorkflowReferenceResolver", () => {
     it("resolveAsElement resolves reference media without reading elem.source_images", async () => {
       const { db } = await import("../../src/container.js");
-      const { elementRepository } = await import("../../src/db/ElementRepository.js");
+      const { elementRepository } = await import("#elements/tools");
 
       const elemData = {
         id: VALID_ELEMENT_ID,

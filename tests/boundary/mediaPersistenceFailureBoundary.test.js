@@ -1,8 +1,8 @@
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { executeNodeJob, executeNodePersistence } from "../../src/v2/runner/nodeExecutor.js";
-import { RunRepository } from "../../src/v2/runner/runRepository.js";
-import { startWorkflowRun } from "../../src/v2/runner/workflowRunner.js";
+import { executeNodeJob, executeNodePersistence } from "#generation/tools";
+import { RunRepository } from "#generation/tools";
+import { startWorkflowRun } from "#generation/tools";
 import { db } from "../../src/container.js";
 
 describe("Media Persistence Failure Boundary Tests (Task T7 / BUG-02)", () => {

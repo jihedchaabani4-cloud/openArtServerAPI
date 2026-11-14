@@ -1,6 +1,6 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { FolderService, FolderError } from "../../src/domain/folder/FolderService.js";
+import { FolderService, FolderError } from "#workspace/tools";
 
 describe("FolderService Business Rules & Error Scenarios (Task F-T4)", () => {
   let foldersInDb;

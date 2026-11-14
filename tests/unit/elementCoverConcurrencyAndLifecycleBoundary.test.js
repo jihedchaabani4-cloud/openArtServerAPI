@@ -1,8 +1,8 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
-import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
-import { ElementService } from "../../src/domain/element/ElementService.js";
+import { WorkflowMediaRepository } from "#media/tools";
+import { ElementMediaService } from "#elements/tools";
+import { ElementService } from "#elements/tools";
 
 describe("Element Cover Concurrency and Lifecycle Boundary Contract", () => {
     let repo;

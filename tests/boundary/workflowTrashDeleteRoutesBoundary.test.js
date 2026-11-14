@@ -2,12 +2,12 @@ import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import http from "node:http";
-import workflowsRouter from "../../routes/workflows.js";
-import elementRoutes from "../../routes/elementRoutes.js";
-import charactersRouter from "../../routes/characters.js";
+import { workflowsRouter } from "#generation/api";
+import elementRoutes from "#elements/api";
+import charactersRouter from "#characters/api";
 import { db, workflowService } from "../../src/container.js";
-import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
-import { supabase } from "../../lib/supabase.js";
+import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared";
+import { supabase } from "#shared/db/supabase.js";
 
 // @covers DELETE /api/workflows/workflows/:id
 // @covers DELETE /api/workflows/:id

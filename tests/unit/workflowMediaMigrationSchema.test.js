@@ -120,7 +120,7 @@ describe("Database Migration 010 Drop Legacy Media Columns & Rollback (B2)", () 
   });
 
   it("simulates migration 010 forward and rollback cycle across all 10 step_ids and a multi-linked asset in an isolated in-memory harness", async () => {
-    const { inferWorkflowMediaRole } = await import("../../src/db/workflowMediaRole.js");
+    const { inferWorkflowMediaRole } = await import("#media/tools");
 
     const stepFixtures = [
       { id: "m-1", step_id: "upload", workflow_id: "wf-upload", wf_type: "UPLOAD", expectedRole: "original" },

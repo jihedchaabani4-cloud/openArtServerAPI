@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { toPublicPackage, PUBLIC_PACKAGE_FIELDS } from "../../controllers/payments/paymentsUtils.js";
+import { toPublicPackage, PUBLIC_PACKAGE_FIELDS } from "#billing/api";
 
 describe("PaymentsUtils — toPublicPackage Allowlist (Commit 1a-3)", () => {
     const legacyBlocklist = (pkg) => {

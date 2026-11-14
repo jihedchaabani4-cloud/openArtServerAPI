@@ -1,10 +1,10 @@
 import { describe, it, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { startWorkflowRun } from "../../src/v2/runner/workflowRunner.js";
-import { RunRepository } from "../../src/v2/runner/runRepository.js";
-import * as workflowRunnerModule from "../../src/v2/runner/workflowRunner.js";
-import { UseCaseService } from "../../src/services/useCaseService.js";
-import * as useCaseRunner from "../../src/use-cases/useCaseRunner.js";
+import { startWorkflowRun } from "#generation/tools";
+import { RunRepository } from "#generation/tools";
+import * as workflowRunnerModule from "#generation/tools";
+import { UseCaseService } from "#generation/tools";
+import * as useCaseRunner from "#generation/tools";
 
 describe("Orchestration Error & Billing Settlement Boundary Tests (BUG-01)", () => {
   let settledCalls = [];

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ElementService } from "../../src/domain/element/ElementService.js";
-import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
+import { ElementService } from "#elements/tools";
+import { ElementMediaService } from "#elements/tools";
 
 describe("Element Canonical Cover via workflow_media.is_primary & sourceImages Elimination", () => {
     function createMockDb() {
@@ -296,7 +296,7 @@ describe("Element Canonical Cover via workflow_media.is_primary & sourceImages E
     });
 
     it("10. Controller createElement succeeds with 201 without sourceImages in req.body", async () => {
-        const { createElement } = await import("../../controllers/elementController.js");
+        const { createElement } = await import("#elements/api");
         const { db, elementService } = await import("../../src/container.js");
 
         const originalCreate = elementService.createElement;
@@ -336,7 +336,7 @@ describe("Element Canonical Cover via workflow_media.is_primary & sourceImages E
     });
 
     it("11. Controller updateElement updates cover and enforces validation via PATCH /api/v2/elements/:id", async () => {
-        const { updateElement } = await import("../../controllers/elementController.js");
+        const { updateElement } = await import("#elements/api");
         const { elementService, db } = await import("../../src/container.js");
 
         const originalUpdate = elementService.updateElement;

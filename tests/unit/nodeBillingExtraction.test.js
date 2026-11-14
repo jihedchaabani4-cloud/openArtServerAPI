@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 describe("Ticket 0.1 Unit Test: nodeBilling extraction and runner boundary", () => {
   it("imports nodeBilling cleanly and exports required functions", async () => {
-    const nodeBilling = await import("../../src/v2/runner/nodeBilling.js");
+    const nodeBilling = await import("#generation/tools");
 
     assert.equal(typeof nodeBilling.estimateNodeBillingAmount, "function");
     assert.equal(typeof nodeBilling.reserveNodeBilling, "function");
@@ -23,7 +23,7 @@ describe("Ticket 0.1 Unit Test: nodeBilling extraction and runner boundary", () 
   });
 
   it("calculates estimateNodeBillingAmount correctly for non-billable and billable types", async () => {
-    const { estimateNodeBillingAmount } = await import("../../src/v2/runner/nodeBilling.js");
+    const { estimateNodeBillingAmount } = await import("#generation/tools");
 
     // Non-billable node type returns 0
     const nonBillableCost = estimateNodeBillingAmount({ type: "prompt-builder", id: "p1" });
@@ -39,7 +39,7 @@ describe("Ticket 0.1 Unit Test: nodeBilling extraction and runner boundary", () 
   });
 
   it("workflowRunner re-exports all nodeBilling items for backward compatibility", async () => {
-    const runner = await import("../../src/v2/runner/workflowRunner.js");
+    const runner = await import("#generation/tools");
 
     assert.equal(typeof runner.estimateNodeBillingAmount, "function");
     assert.equal(typeof runner.reserveNodeBilling, "function");
@@ -56,7 +56,7 @@ describe("Ticket 0.1 Unit Test: nodeBilling extraction and runner boundary", () 
   it("nodeExecutor does NOT import from workflowRunner", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
-    const fileUrl = new URL("../../src/v2/runner/nodeExecutor.js", import.meta.url);
+    const fileUrl = new URL("../../src/systems/generation/internal/v2/runner/nodeExecutor.js", import.meta.url);
     const code = fs.readFileSync(fileUrl, "utf8");
 
     const hasWorkflowRunnerImport = /from\s+["'].*workflowRunner(\.js)?["']/.test(code);

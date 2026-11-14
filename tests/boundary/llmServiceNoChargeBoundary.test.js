@@ -1,9 +1,8 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { LLMService, llmService, ALLOWED_INTERNAL_REASONS } from "../../src/platform/ai/LLMService.js";
-import { executeLLMNode } from "../../src/v2/nodes/llmNode.js";
-import { ElementAnalysisService } from "../../src/domain/element/ElementAnalysisService.js";
-import { PromptService } from "../../src/platform/ai/PromptService.js";
+import { LLMService, llmService, ALLOWED_INTERNAL_REASONS, PromptService } from "#models/tools";
+import { executeLLMNode } from "#generation/tools";
+import { ElementAnalysisService } from "#elements/tools";
 
 describe("LLMService NoCharge Defense & UserId Enforcement (Task T5)", () => {
   let capturedRunOptions = [];

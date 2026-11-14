@@ -4,9 +4,9 @@ import express from "express";
 import http from "node:http";
 import apiRouter from "../../src/api/routes.js";
 import { db, useCaseService, folderService, workflowService } from "../../src/container.js";
-import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
-import { supabase } from "../../lib/supabase.js";
-import { resetLimitersForTest } from "../../src/middleware/rateLimit.js";
+import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared";
+import { supabase } from "#shared/db/supabase.js";
+import { resetLimitersForTest } from "#identity/tools";
 
 describe("Generation & Gen-Edit APIs — All Models & Parameters Boundary Suite", () => {
   let server;

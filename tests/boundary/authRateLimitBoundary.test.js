@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import express from "express";
 import cookieParser from "cookie-parser";
-import authRouter from "../../routes/authRoutes.js";
-import { supabase } from "../../lib/supabase.js";
+import { identityRouter as authRouter } from "#identity/api";
+import { supabase } from "#shared/db/supabase.js";
 import { walletService } from "../../src/container.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+import { redisConnection, workerRedisConnection } from "#shared";
 
 describe("RC1.4-D1 — Auth Rate Limiting Boundary Tests", () => {
   let server;

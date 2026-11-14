@@ -1,10 +1,10 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import dns from "node:dns/promises";
-import { StorageService } from "../../src/platform/storage/StorageService.js";
-import { MediaUploadService } from "../../src/platform/media-ingestion/MediaUploadService.js";
-import { SourceReader } from "../../src/platform/media-ingestion/SourceReader.js";
-import { CHARACTER_DETAIL_UPLOAD_POLICY } from "../../src/platform/media-ingestion/UploadPolicy.js";
+import { StorageService } from "#media/tools";
+import { MediaUploadService } from "#media/tools";
+import { SourceReader } from "#media/tools";
+import { CHARACTER_DETAIL_UPLOAD_POLICY } from "#media/tools";
 
 const VALID_1PX_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",

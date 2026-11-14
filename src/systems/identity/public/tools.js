@@ -28,6 +28,7 @@ export {
   resetLimitersForTest,
   setLimiterForTest,
 } from "../internal/middleware/rateLimit.js";
+export { RATE_LIMIT_POLICIES } from "#shared";
 export { walletRateLimit } from "../internal/middleware/walletRateLimit.js";
 export { safeCompareSecret } from "../internal/security/secretComparison.js";
 

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { CharacterMediaService } from "../../src/domain/character/CharacterMediaService.js";
-import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
+import { CharacterMediaService } from "#characters/tools";
+import { ElementMediaService } from "#elements/tools";
 
 describe("Workflow ID resolution to media relation in Character & Element services", () => {
   it("CharacterMediaService.uploadDetailMedia with workflow ID resolves source media and links workflow_media relation with role 'detail'", async () => {

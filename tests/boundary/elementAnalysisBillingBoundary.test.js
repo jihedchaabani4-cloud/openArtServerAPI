@@ -13,13 +13,13 @@
 
 import { describe, it, before, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { llmService, LLMService } from "../../src/platform/ai/LLMService.js";
-import { ElementAnalysisService } from "../../src/domain/element/ElementAnalysisService.js";
-import { createElement, analyzeElement } from "../../controllers/elementController.js";
+import { llmService, LLMService } from "#generation/tools";
+import { ElementAnalysisService } from "#elements/tools";
+import { createElement, analyzeElement } from "#elements/api";
 import { elementService, characterService, db } from "../../src/container.js";
-import { executeLLMNode } from "../../src/v2/nodes/llmNode.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
-import { PromptService } from "../../src/platform/ai/PromptService.js";
+import { executeLLMNode } from "#generation/tools";
+import { redisConnection, workerRedisConnection } from "#shared";
+import { PromptService } from "#generation/tools";
 
 after(async () => {
   try {

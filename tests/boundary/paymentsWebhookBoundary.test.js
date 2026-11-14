@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import http from "node:http";
 import express from "express";
-import paymentsRouter from "../../routes/payments.js";
+import { paymentsRouter } from "#billing/api";
 import { walletService } from "../../src/container.js";
-import { supabase } from "../../lib/supabase.js";
-import { WalletError } from "../../src/platform/billing/WalletService.js";
+import { supabase } from "#shared/db/supabase.js";
+import { WalletError } from "#billing/tools";
 
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+import { redisConnection, workerRedisConnection } from "#shared";
 
 describe("RC1.2-S4 — Lemon Squeezy Payments Webhook Boundary Tests", () => {
   let server;
@@ -286,7 +286,7 @@ describe("RC1.2-S4 — Lemon Squeezy Payments Webhook Boundary Tests", () => {
       },
     };
 
-    const { handleWebhook } = await import("../../controllers/paymentsController.js");
+    const { handleWebhook } = await import("#billing/api");
     await handleWebhook(fakeReq, fakeRes);
 
     assert.equal(statusCode, 400);
@@ -295,7 +295,7 @@ describe("RC1.2-S4 — Lemon Squeezy Payments Webhook Boundary Tests", () => {
   });
 
   it("TEST WEBHOOK-8: Webhook returns HTTP 500 when credit() fails closed with BillingConfigurationError", async () => {
-    const { BillingConfigurationError } = await import("../../src/platform/billing/BillingErrors.js");
+    const { BillingConfigurationError } = await import("#billing/tools");
     walletService.credit = async () => {
       throw new BillingConfigurationError("[WalletService] RPC credit_wallet missing (PGRST202 / schema cache): fail closed");
     };

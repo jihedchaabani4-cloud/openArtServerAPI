@@ -2,8 +2,8 @@ import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import app from "../../index.js";
-import { supabase } from "../../lib/supabase.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+import { supabase } from "#shared/db/supabase.js";
+import { redisConnection, workerRedisConnection } from "#shared";
 
 describe("STEP 3: Multipart 2 files route-level error safety boundary test", () => {
   let server;
@@ -32,7 +32,7 @@ describe("STEP 3: Multipart 2 files route-level error safety boundary test", () 
       supabase.auth.getUser = origGetUser;
     }
     try {
-      const { rateLimitRedisConnection } = await import("../../src/queue/redis.js");
+      const { rateLimitRedisConnection } = await import("#shared");
       await rateLimitRedisConnection?.quit().catch(() => rateLimitRedisConnection?.disconnect());
     } catch {}
     try {

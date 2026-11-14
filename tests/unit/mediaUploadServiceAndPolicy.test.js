@@ -9,23 +9,23 @@ import {
     ELEMENT_SOURCES_UPLOAD_POLICY,
     CHARACTER_SHEET_UPLOAD_POLICY,
     CHARACTER_DETAIL_UPLOAD_POLICY,
-} from "../../src/platform/media-ingestion/UploadPolicy.js";
+} from "#media/tools";
 import {
     ValidationError,
     UploadError,
     QuotaError,
-} from "../../src/platform/media-ingestion/MediaUploadErrors.js";
-import { MediaUploadService } from "../../src/platform/media-ingestion/MediaUploadService.js";
-import { SourceReader } from "../../src/platform/media-ingestion/SourceReader.js";
-import { SourcePolicy } from "../../src/platform/media-ingestion/SourcePolicy.js";
+} from "#media/tools";
+import { MediaUploadService } from "#media/tools";
+import { SourceReader } from "#media/tools";
+import { SourcePolicy } from "#media/tools";
 import {
     createUploadMiddleware,
     resolveMiddlewarePolicy,
-} from "../../src/middleware/uploadMiddleware.js";
+} from "#media/api";
 import {
     resetActiveUploadsForTest,
     resetInFlightBytesForTest,
-} from "../../src/middleware/sizeLimitedStorage.js";
+} from "#media/tools";
 
 process.env.NODE_ENV = "test";
 
@@ -625,7 +625,7 @@ describe("MediaUploadService Seam 1 Contract", () => {
     });
 
     it("discard() logs and throws UploadError when Supabase remove() returns { error } through StorageService.deleteFiles", async () => {
-        const { StorageService } = await import("../../src/platform/storage/StorageService.js");
+        const { StorageService } = await import("#media/tools");
         const mockProvider = {
             async deleteFiles(paths) {
                 // Simulate SupabaseStorageProvider receiving an error from supabase.storage.from().remove()

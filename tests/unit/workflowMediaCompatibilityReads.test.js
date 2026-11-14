@@ -1,12 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { MediaRepository } from "../../src/db/MediaRepository.js";
-import { WorkflowRepository } from "../../src/db/WorkflowRepository.js";
-import { ProjectReadService } from "../../src/domain/project/ProjectReadService.js";
-import { GenerationService } from "../../src/domain/generation/GenerationService.js";
-import { CharacterMediaService } from "../../src/domain/character/CharacterMediaService.js";
-import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
-import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
+import { MediaRepository } from "#media/tools";
+import { WorkflowRepository } from "#generation/tools";
+import { ProjectReadService } from "#workspace/tools";
+import { GenerationService } from "#generation/tools";
+import { CharacterMediaService } from "#characters/tools";
+import { WorkflowMediaService } from "#generation/tools";
+import { ElementMediaService } from "#elements/tools";
 
 function makeQuery(result, onCall = () => {}) {
   const query = {

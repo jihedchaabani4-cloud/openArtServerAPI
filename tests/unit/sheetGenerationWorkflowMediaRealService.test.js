@@ -4,15 +4,15 @@ if (!process.env.NODE_ENV) {
 
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { CharacterGenerationService } from "../../src/domain/character/CharacterGenerationService.js";
-import { ElementService } from "../../src/domain/element/ElementService.js";
-import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
-import { createWorkflowWithMediaAtomic } from "../../src/db/workflowMediaOps.js";
-import { failWorkflowPendingMedia } from "../../src/platform/media/MediaLifecycleService.js";
-import { supabase } from "../../lib/supabase.js";
-import { setDb } from "#platform/identity";
-import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
-import { BillingConfigurationError } from "../../src/platform/billing/BillingErrors.js";
+import { CharacterGenerationService } from "#characters/tools";
+import { ElementService } from "#elements/tools";
+import { ElementMediaService } from "#elements/tools";
+import { createWorkflowWithMediaAtomic } from "#media/tools";
+import { failWorkflowPendingMedia } from "#media/tools";
+import { supabase } from "#shared/db/supabase.js";
+import { setDb } from "#identity/tools";
+import { WorkflowMediaRepository } from "#media/tools";
+import { BillingConfigurationError } from "#billing/tools";
 
 describe("Sheet Generation real service layer tests — workflow_media integrity", () => {
   let originalRpc;
@@ -432,9 +432,9 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
 
   it("5. Worker crash handler: refunds credits idempotently (exactly once on double failure / retry / timeout) and marks direct media failed", async () => {
     process.env.NODE_ENV = "test";
-    const { handleUseCaseWorkerFailure, useCaseWorker } = await import("../../src/workers/useCaseWorker.js");
+    const { handleUseCaseWorkerFailure, useCaseWorker } = await import("#generation/tools");
     const { useCaseService, db } = await import("../../src/container.js");
-    const { redisConnection, workerRedisConnection, rateLimitRedisConnection } = await import("../../src/queue/redis.js");
+    const { redisConnection, workerRedisConnection, rateLimitRedisConnection } = await import("#shared");
 
     let actualRefundCount = 0;
     const mediaTable = new Map();
@@ -442,7 +442,7 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
     mediaTable.set(targetMediaId, { id: targetMediaId, status: "processing" });
 
     const origRollbackPreparedBilling = useCaseService.rollbackPreparedBilling;
-    const { WalletService } = await import("../../src/platform/billing/WalletService.js");
+    const { WalletService } = await import("#billing/tools");
 
     // Part A: Real WalletService rollbackFallback and rollbackHoldIdempotent tests
     const walletsTable = new Map();

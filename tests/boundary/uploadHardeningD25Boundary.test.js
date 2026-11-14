@@ -5,22 +5,22 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { Readable } from "node:stream";
 import app from "../../index.js";
-import { supabase } from "../../lib/supabase.js";
-import { StorageService } from "../../src/platform/storage/StorageService.js";
-import { MediaUploadService } from "../../src/platform/media-ingestion/MediaUploadService.js";
+import { supabase } from "#shared/db/supabase.js";
+import { StorageService } from "#media/tools";
+import { MediaUploadService } from "#media/tools";
 import {
   createSizeLimitedMemoryStorage,
   resetActiveUploadsForTest,
   resetInFlightBytesForTest,
   getInFlightBytesForTest,
-} from "../../src/middleware/sizeLimitedStorage.js";
-import { requireAuth, isInternalSecretAllowedRoute } from "../../src/middleware/auth.js";
+} from "#media/tools";
+import { requireAuth, isInternalSecretAllowedRoute } from "#identity/tools";
 import {
   redisConnection,
   workerRedisConnection,
   rateLimitRedisConnection,
   waitForRateLimitRedis,
-} from "../../src/queue/redis.js";
+} from "#shared";
 
 const VALID_TEST_SECRET = "configured-valid-test-secret-at-least-32-chars";
 

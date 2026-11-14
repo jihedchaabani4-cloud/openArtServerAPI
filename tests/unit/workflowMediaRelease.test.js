@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
-import { WorkflowService } from "../../src/platform/workflow/WorkflowServiceBase.js";
+import { WorkflowMediaService } from "#generation/tools";
+import { WorkflowService } from "#generation/tools";
 
 function createHarness() {
   const mediaRows = [

@@ -5,22 +5,22 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { Readable } from "node:stream";
 import app from "../../index.js";
-import { supabase } from "../../lib/supabase.js";
-import { StorageService } from "../../src/platform/storage/StorageService.js";
-import { MediaInspector } from "../../src/platform/media-ingestion/MediaInspector.js";
+import { supabase } from "#shared/db/supabase.js";
+import { StorageService } from "#media/tools";
+import { MediaInspector } from "#media/tools";
 import {
   createSizeLimitedMemoryStorage,
   resetActiveUploadsForTest,
   getActiveUploadsCountForTest,
-} from "../../src/middleware/sizeLimitedStorage.js";
-import { requireAuth } from "../../src/middleware/auth.js";
+} from "#media/tools";
+import { requireAuth } from "#identity/tools";
 import {
   redisConnection,
   workerRedisConnection,
   rateLimitRedisConnection,
   waitForRateLimitRedis,
-} from "../../src/queue/redis.js";
-import { baseLogger } from "../../src/infrastructure/logging/index.js";
+} from "#shared";
+import { baseLogger } from "#shared";
 
 // Helper sample bytes for D2.4 tests
 function createD24SampleBytes(type) {

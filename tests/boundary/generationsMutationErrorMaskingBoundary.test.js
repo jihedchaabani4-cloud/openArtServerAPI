@@ -22,7 +22,7 @@
  */
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { deleteItem, toggleLike } from "../../controllers/generationsMutationController.js";
+import { deleteItem, toggleItemLike as toggleLike } from "#generation/api";
 import { db, workflowService } from "../../src/container.js";
 
 const INTERNAL_ERROR = Object.assign(

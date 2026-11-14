@@ -4,7 +4,7 @@ import fs from "node:fs";
 
 describe("Ticket 0.2 Unit Test: promptBuilderProService purity and ElementService token resolution", () => {
   it("promptBuilderProService.js has zero imports (pure service)", () => {
-    const fileUrl = new URL("../../src/domain/element/promptBuilderProService.js", import.meta.url);
+    const fileUrl = new URL("../../src/systems/elements/internal/services/promptBuilderProService.js", import.meta.url);
     const code = fs.readFileSync(fileUrl, "utf8");
 
     const hasAnyImport = /^\s*import\s+/m.test(code);
@@ -13,7 +13,7 @@ describe("Ticket 0.2 Unit Test: promptBuilderProService purity and ElementServic
 
   it("exports token extraction and stripping helpers", async () => {
     const { extractElementTokens, stripElementTokens } = await import(
-      "../../src/domain/element/promptBuilderProService.js"
+      "#elements/tools"
     );
 
     assert.equal(typeof extractElementTokens, "function");
@@ -28,8 +28,8 @@ describe("Ticket 0.2 Unit Test: promptBuilderProService purity and ElementServic
   });
 
   it("buildMultiElementPayload builds prompt payload correctly with plain element DTOs", async () => {
-    const { default: promptBuilder } = await import(
-      "../../src/domain/element/promptBuilderProService.js"
+    const { promptBuilderProService: promptBuilder } = await import(
+      "#elements/tools"
     );
 
     const payload = await promptBuilder.buildMultiElementPayload({
@@ -54,7 +54,7 @@ describe("Ticket 0.2 Unit Test: promptBuilderProService purity and ElementServic
   });
 
   it("ElementService.buildPromptPayload resolves @tokens using instance db and getElementContextForPrompt", async () => {
-    const { ElementService } = await import("../../src/domain/element/ElementService.js");
+    const { ElementService } = await import("#elements/tools");
 
     const mockElement = {
       id: "elem-123",

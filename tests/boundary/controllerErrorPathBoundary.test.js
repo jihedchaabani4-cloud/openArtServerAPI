@@ -23,14 +23,14 @@
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import * as imageController from "../../controllers/imageController.js";
-import * as videoController from "../../controllers/videoController.js";
-import * as characterController from "../../controllers/characterController.js";
+import * as imageController from "#generation/api";
+import * as videoController from "#generation/api";
+import * as characterController from "#characters/api";
 import { db, useCaseService, characterService } from "../../src/container.js";
-import { InMemoryWalletService } from "../../src/services/walletService.js";
-import { UseCaseBillingRuntime } from "../../src/v2/runtime/useCaseBillingRuntime.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
-import { bootstrapV2 } from "../../src/v2/bootstrap.js";
+import { InMemoryWalletService } from "../helpers/inMemoryWalletService.js";
+import { UseCaseBillingRuntime } from "#generation/tools";
+import { redisConnection, workerRedisConnection } from "#shared";
+import { bootstrapV2 } from "#generation/tools";
 
 bootstrapV2();
 

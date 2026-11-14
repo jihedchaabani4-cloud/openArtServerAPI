@@ -1,19 +1,19 @@
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert";
 import { randomUUID } from "node:crypto";
-import { UseCaseService } from "../../src/services/useCaseService.js";
-import { UseCaseBillingRuntime } from "../../src/v2/runtime/useCaseBillingRuntime.js";
-import { InMemoryWalletService } from "../../src/services/walletService.js";
+import { UseCaseService } from "#generation/tools";
+import { UseCaseBillingRuntime } from "#generation/tools";
+import { InMemoryWalletService } from "../helpers/inMemoryWalletService.js";
 import { db, useCaseService, characterService } from "../../src/container.js";
-import { bootstrapV2 } from "../../src/v2/bootstrap.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
-import { RunRepository } from "../../src/v2/runner/runRepository.js";
-import { registerNodeExecutor, registry } from "../../src/v2/nodes/index.js";
-import { RUNTIME_ERROR_CODES } from "../../src/v2/runtime/errorPolicy.js";
-import { ERROR_POLICY } from "../../src/runtime/errorPolicy.js";
-import { generateImage } from "../../controllers/imageController.js";
-import { generateVideo } from "../../controllers/videoController.js";
-import { generateCharacterSheet, createCharacter } from "../../controllers/characterController.js";
+import { bootstrapV2 } from "#generation/tools";
+import { redisConnection, workerRedisConnection } from "#shared";
+import { RunRepository } from "#generation/tools";
+import { registerNodeExecutor, registry } from "#generation/tools";
+import { RUNTIME_ERROR_CODES } from "#generation/tools";
+import { ERROR_POLICY } from "#generation/tools";
+import { generateImage } from "#generation/api";
+import { generateVideo } from "#generation/api";
+import { generateCharacterSheet, createCharacter } from "#characters/api";
 
 bootstrapV2();
 

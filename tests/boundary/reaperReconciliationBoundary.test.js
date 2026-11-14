@@ -1,8 +1,8 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
-import { InMemoryWalletService } from "../../src/services/walletService.js";
-import { MediaWorkflowLifecycleService } from "../../src/platform/media/MediaLifecycleService.js";
-import { runReservationReaper } from "../../src/workers/reservationReaperWorker.js";
+import { InMemoryWalletService } from "../helpers/inMemoryWalletService.js";
+import { MediaWorkflowLifecycleService } from "#media/tools";
+import { runReservationReaper } from "#billing/tools";
 import { mediaWorkflowLifecycleService, db } from "../../src/container.js";
 
 describe("Reservation Reaper & Media Reconciliation Boundary Tests", () => {
@@ -107,7 +107,7 @@ describe("Reservation Reaper & Media Reconciliation Boundary Tests", () => {
 
   it("TEST 4: runReservationReaper reconciles orphaned holds and marks media as failed", async () => {
     // Set up a mock in-memory hold that is expired
-    const inMemoryWallet = (await import("../../src/services/walletService.js")).walletService;
+    const inMemoryWallet = (await import("../helpers/inMemoryWalletService.js")).walletService;
     await inMemoryWallet.setBalance("user-reaper-test", 100);
 
     let failedHoldParam = null;

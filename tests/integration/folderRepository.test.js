@@ -1,6 +1,6 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { FolderRepository } from "../../src/db/FolderRepository.js";
+import { FolderRepository } from "#workspace/tools";
 
 describe("FolderRepository Integration & Isolation (Task F-T3)", () => {
   let mockStorage = [];

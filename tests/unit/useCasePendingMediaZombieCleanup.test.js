@@ -1,7 +1,7 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
-import { UseCaseService } from "../../src/services/useCaseService.js";
-import { registerAllUseCases } from "../../src/use-cases/registerUseCases.js";
+import { UseCaseService } from "#generation/tools";
+import { registerAllUseCases } from "#generation/tools";
 
 describe("Sprint R2: UseCase Pending Media Zombie Cleanup", () => {
   before(() => {

@@ -4,7 +4,7 @@ import fs from "node:fs";
 
 describe("Ticket 0.3 Unit Test: catalogPresentation and models/index.js cycle break", () => {
   it("catalogPresentation.js does NOT import models/index.js", () => {
-    const fileUrl = new URL("../../src/models/catalogPresentation.js", import.meta.url);
+    const fileUrl = new URL("../../src/systems/models/internal/catalogPresentation.js", import.meta.url);
     const code = fs.readFileSync(fileUrl, "utf8");
 
     const hasIndexImport = /from\s+["'].*index(\.js)?["']/.test(code);
@@ -15,7 +15,7 @@ describe("Ticket 0.3 Unit Test: catalogPresentation and models/index.js cycle br
   });
 
   it("catalogQueries.js exports getCatalog and calculateCost", async () => {
-    const queries = await import("../../src/models/catalogQueries.js");
+    const queries = await import("#models/tools");
     assert.equal(typeof queries.getCatalog, "function");
     assert.equal(typeof queries.calculateCost, "function");
 
@@ -28,8 +28,8 @@ describe("Ticket 0.3 Unit Test: catalogPresentation and models/index.js cycle br
     assert.ok(cost > 0);
   });
 
-  it("models/index.js preserves public API contract for getCatalog, calculateCost, and getModelConfig", async () => {
-    const models = await import("../../src/models/index.js");
+  it("models/tools preserves public API contract for getCatalog, calculateCost, and getModelConfig", async () => {
+    const models = await import("#models/tools");
 
     assert.equal(typeof models.getCatalog, "function");
     assert.equal(typeof models.calculateCost, "function");
@@ -38,8 +38,8 @@ describe("Ticket 0.3 Unit Test: catalogPresentation and models/index.js cycle br
     const catalog = models.getCatalog();
     assert.ok(Array.isArray(catalog));
 
-    const config = models.getModelConfig();
+    const config = models.getModelConfig("gpt_image_2");
     assert.ok(config);
-    assert.ok(Array.isArray(config.models));
+    assert.equal(config.id, "gpt_image_2");
   });
 });

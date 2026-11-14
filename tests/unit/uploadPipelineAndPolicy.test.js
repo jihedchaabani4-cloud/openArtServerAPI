@@ -1,12 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { SourcePolicy, MediaUploadService } from "../../src/platform/media-ingestion/index.js";
-import { createUploadMiddleware } from "../../src/middleware/uploadMiddleware.js";
-import { StorageService, InMemoryStorageProvider } from "../../src/platform/storage/index.js";
-import { AssetUploadService } from "../../src/domain/asset/AssetUploadService.js";
-import { MediaService } from "../../src/platform/media/index.js";
-import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
-import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
+import { SourcePolicy, MediaUploadService } from "#media/tools";
+import { createUploadMiddleware } from "#media/api";
+import { StorageService, InMemoryStorageProvider } from "#media/tools";
+import { AssetUploadService } from "#media/tools";
+import { MediaService } from "#media/tools";
+import { WorkflowMediaRepository } from "#media/tools";
+import { WorkflowMediaService } from "#generation/tools";
 
 const VALID_PNG_BUFFER = Buffer.from([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -207,7 +207,7 @@ describe("Canonical Primary-Media Persistence & WorkflowMedia Contract", () => {
             },
         };
 
-        const { ElementMediaService } = await import("../../src/domain/element/ElementMediaService.js");
+        const { ElementMediaService } = await import("#elements/tools");
         let uploadCalled = false;
         const mockUploadService = {
             upload: async ({ files }) => {
@@ -268,7 +268,7 @@ describe("Canonical Primary-Media Persistence & WorkflowMedia Contract", () => {
     it("WorkflowMediaRepository & BaseRepository route to supabaseAdmin to bypass RLS in server operations", async () => {
         const repo = new WorkflowMediaRepository();
         const client = repo.client();
-        const { supabaseAdmin } = await import("../../lib/supabase.js");
+        const { supabaseAdmin } = await import("#shared/db/supabase.js");
         assert.equal(client, supabaseAdmin, "WorkflowMediaRepository.client() must return supabaseAdmin");
     });
 });

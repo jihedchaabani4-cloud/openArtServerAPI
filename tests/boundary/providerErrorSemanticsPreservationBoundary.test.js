@@ -5,8 +5,8 @@ import {
   toRuntimeError,
   RUNTIME_ERROR_CODES,
   ERROR_CATEGORIES,
-} from "../../src/v2/runtime/errorPolicy.js";
-import { ProviderTransientError } from "../../src/models/errors/index.js";
+} from "#generation/tools";
+import { ProviderTransientError } from "#models/tools";
 
 describe("D2.5 — Provider Error Semantics & Upstream Fault Mapping Boundary Tests", () => {
   it("TEST 1: formatWorkflowError maps PROVIDER_UNAVAILABLE to UPSTREAM_FAULT and retryable: true", () => {
@@ -57,7 +57,7 @@ describe("D2.5 — Provider Error Semantics & Upstream Fault Mapping Boundary Te
   });
 
   it("TEST 4: normalizeError preserves terminal: true and retryable: false for polling terminal failures", async () => {
-    const { normalizeError } = await import("../../src/models/execution/errorNormalizer.js");
+    const { normalizeError } = await import("#models/tools");
     const terminalErr = new Error("LTX job failed: Service unavailable on worker");
     terminalErr.terminal = true;
     terminalErr.retryable = false;
@@ -71,7 +71,7 @@ describe("D2.5 — Provider Error Semantics & Upstream Fault Mapping Boundary Te
   });
 
   it("TEST 5: RuntimeExecutor does NOT retry when an error is marked terminal", async () => {
-    const { RuntimeExecutor } = await import("../../src/models/execution/runtimeExecutor.js");
+    const { RuntimeExecutor } = await import("#models/tools");
     const executor = new RuntimeExecutor();
 
     let attempts = 0;

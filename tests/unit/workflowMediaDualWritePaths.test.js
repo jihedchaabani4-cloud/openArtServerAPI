@@ -1,17 +1,17 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { db, useCaseService } from "../../src/container.js";
-import { generateImage } from "../../controllers/imageController.js";
-import { generateVideo } from "../../controllers/videoController.js";
-import { CharacterGenerationService } from "../../src/domain/character/CharacterGenerationService.js";
-import { CharacterMediaService } from "../../src/domain/character/CharacterMediaService.js";
-import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
-import { MediaService } from "../../src/platform/media/MediaService.js";
-import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
-import { MediaRepository } from "../../src/db/MediaRepository.js";
-import { ElementRepository } from "../../src/db/ElementRepository.js";
-import { createWorkflowWithMedia, appendMediaToWorkflow } from "../../src/db/workflowMediaOps.js";
-import * as workflowMediaLinker from "../../src/db/workflowMediaLinker.js";
+import { generateImage } from "#generation/api";
+import { generateVideo } from "#generation/api";
+import { CharacterGenerationService } from "#characters/tools";
+import { CharacterMediaService } from "#characters/tools";
+import { ElementMediaService } from "#elements/tools";
+import { MediaService } from "#media/tools";
+import { WorkflowMediaService } from "#generation/tools";
+import { MediaRepository } from "#media/tools";
+import { ElementRepository } from "#elements/tools";
+import { createWorkflowWithMedia, appendMediaToWorkflow } from "#media/tools";
+import * as workflowMediaLinker from "#media/tools";
 
 function makeRes() {
   return {

@@ -72,7 +72,7 @@ export const RUNTIME_ERROR_CODES = Object.freeze({
   INTERNAL_ERROR: "INTERNAL_ERROR",
 });
 
-const DEFAULT_DECISIONS = Object.freeze({
+export const DEFAULT_DECISIONS = Object.freeze({
   // ── USER FAULTS ────────────────────────────────────────────────────────────
   [RUNTIME_ERROR_CODES.CONTENT_SAFETY_VIOLATION]: {
     category: ERROR_CATEGORIES.USER_FAULT,
@@ -629,6 +629,8 @@ export function logErrorReport(report) {
 /**
  * Unified Error System Namespace
  */
+export const ERROR_POLICY = DEFAULT_DECISIONS;
+
 export const ErrorSystem = Object.freeze({
   process: processSystemError,
   decide: getErrorDecision,

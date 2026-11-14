@@ -11,12 +11,12 @@
 
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { executeNodePersistence } from "../../src/v2/runner/nodeExecutor.js";
-import { startWorkflowRun } from "../../src/v2/runner/workflowRunner.js";
-import { run as runUseCase } from "../../src/use-cases/useCaseRunner.js";
+import { executeNodePersistence } from "#generation/tools";
+import { startWorkflowRun } from "#generation/tools";
+import { run as runUseCase } from "#generation/tools";
 import { db } from "../../src/container.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
-import { bootstrapV2 } from "../../src/v2/bootstrap.js";
+import { redisConnection, workerRedisConnection } from "#shared";
+import { bootstrapV2 } from "#generation/tools";
 
 bootstrapV2();
 

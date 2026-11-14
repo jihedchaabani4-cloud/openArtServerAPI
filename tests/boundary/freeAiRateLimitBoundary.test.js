@@ -2,12 +2,12 @@ import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import express from "express";
-import characterRouter from "../../routes/characters.js";
-import elementRouter from "../../routes/elementRoutes.js";
+import characterRouter from "#characters/api";
+import elementRouter from "#elements/api";
 import { characterService, elementService } from "../../src/container.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+import { redisConnection, workerRedisConnection } from "#shared";
 
-import { supabase } from "../../lib/supabase.js";
+import { supabase } from "#shared/db/supabase.js";
 
 describe("RC1.3-W4 — Free AI/Vision Rate Limiting Boundary Tests", () => {
   let server;

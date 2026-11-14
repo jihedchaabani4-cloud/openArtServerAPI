@@ -17,15 +17,15 @@
 
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { RunRepository } from "../../src/v2/runner/runRepository.js";
-import { executeNodePersistence } from "../../src/v2/runner/nodeExecutor.js";
-import { CharacterGenerationService } from "../../src/domain/character/CharacterGenerationService.js";
-import { generateImage } from "../../controllers/imageController.js";
-import { generateVideo } from "../../controllers/videoController.js";
+import { RunRepository } from "#generation/tools";
+import { executeNodePersistence } from "#generation/tools";
+import { CharacterGenerationService } from "#characters/tools";
+import { generateImage } from "#generation/api";
+import { generateVideo } from "#generation/api";
 import { useCaseService, db } from "../../src/container.js";
-import { registerNodeExecutor, registry } from "../../src/v2/nodes/index.js";
-import { redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
-import { bootstrapV2 } from "../../src/v2/bootstrap.js";
+import { registerNodeExecutor, registry } from "#generation/tools";
+import { redisConnection, workerRedisConnection } from "#shared";
+import { bootstrapV2 } from "#generation/tools";
 
 bootstrapV2();
 

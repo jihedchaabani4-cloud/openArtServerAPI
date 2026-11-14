@@ -1,9 +1,9 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { generateImage } from "../../controllers/imageController.js";
-import { generateVideo } from "../../controllers/videoController.js";
+import { generateImage } from "#generation/api";
+import { generateVideo } from "#generation/api";
 import { generationRequestService, db } from "../../src/container.js";
-import { AppError } from "../../src/utils/AppError.js";
+import { AppError } from "#shared";
 
 describe("imageController and videoController unit tests", () => {
     let originalRequestGeneration;

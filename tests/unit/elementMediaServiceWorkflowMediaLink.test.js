@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
+import { ElementMediaService } from "#elements/tools";
 
 describe("Ticket 04: ElementMediaService workflow_media link hardening", () => {
   it("ingestElementSources always links workflow_media even when mediaIngestionService is present", async () => {

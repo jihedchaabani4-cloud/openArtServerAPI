@@ -4,9 +4,9 @@ import express from "express";
 import http from "node:http";
 import apiRouter from "../../src/api/routes.js";
 import { db, walletService, useCaseService, folderService, workflowService } from "../../src/container.js";
-import { supabase } from "../../lib/supabase.js";
-import { V1StorageBridge } from "../../src/v2/services/v1StorageBridge.js";
-import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "../../src/queue/redis.js";
+import { supabase } from "#shared/db/supabase.js";
+import { V1StorageBridge } from "#generation/tools";
+import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared";
 
 process.env.NODE_ENV = "test";
 

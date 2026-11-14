@@ -1,8 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import CharacterMediaService from "../../src/domain/character/CharacterMediaService.js";
-import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
-import { ProjectReadService } from "../../src/domain/project/ProjectReadService.js";
+import { CharacterMediaService } from "#characters/tools";
+import { ElementMediaService } from "#elements/tools";
+import { ProjectReadService } from "#workspace/tools";
 
 describe("ADR-0008 Decoupling media.step_id (provenance) from workflow_media.role (domain relationship)", () => {
   it("CharacterMediaService: linking existing media preserves technical step_id and sets role: 'sheet'", async () => {
@@ -270,7 +270,7 @@ describe("ADR-0008 Decoupling media.step_id (provenance) from workflow_media.rol
   it("ProjectReadService: secondary workflow media retains original step_id and returns canonical role", async () => {
     const projectId = "11111111-1111-4111-8111-111111111111";
     const userId = "22222222-2222-4222-8222-222222222222";
-    const { supabase, supabaseAdmin } = await import("../../lib/supabase.js");
+    const { supabase, supabaseAdmin } = await import("#shared/db/supabase.js");
 
     const origFrom = supabase.from;
     const origAdminFrom = supabaseAdmin.from;

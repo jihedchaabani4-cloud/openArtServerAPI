@@ -2,10 +2,10 @@ import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import http from "node:http";
-import workflowsRouter from "../../routes/workflows.js";
+import { workflowsRouter } from "#generation/api";
 import { db } from "../../src/container.js";
-import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
-import { supabase } from "../../lib/supabase.js";
+import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared";
+import { supabase } from "#shared/db/supabase.js";
 
 describe("RC1.1-R2 — Collection Items Ownership & Generic Delete Helpers Boundary Tests", () => {
   let server;

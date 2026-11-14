@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import express from "express";
 import http from "node:http";
 import { assertSecurityConfiguredForEnvironment } from "../../src/container.js";
-import { safeCompareSecret } from "#platform/identity";
-import workflowsRouter from "../../routes/workflows.js";
+import { safeCompareSecret } from "#identity/tools";
+import { workflowsRouter } from "#generation/api";
 import { projectReadService } from "../../src/container.js";
-import { supabase } from "../../lib/supabase.js";
-import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
+import { supabase } from "#shared/db/supabase.js";
+import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared";
 
 describe("RC1.1-R1 — Internal Secret Security & Timing-Safe Enforcement", () => {
   let origEnv;

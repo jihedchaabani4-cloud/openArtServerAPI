@@ -16,14 +16,14 @@ import assert from "node:assert/strict";
 process.env.SUPABASE_URL = "";
 process.env.SUPABASE_SERVICE_ROLE_KEY = "";
 
-import { RunRepository } from "../../src/v2/runner/runRepository.js";
+import { RunRepository } from "#generation/tools";
 RunRepository.useMemoryFallback = true;
 
 import {
   startWorkflowRun,
   getRunBillingAccumulator,
   initializeGateways,
-} from "../../src/v2/runner/workflowRunner.js";
+} from "#generation/tools";
 
 // ── Minimal stub gateways ─────────────────────────────────────────────────────
 const stubBilling = {
@@ -224,7 +224,7 @@ describe("BUG-09 — distributed accumulator persistence", () => {
 
   after(async () => {
     try {
-      const { redisConnection, workerRedisConnection } = await import("../../src/queue/redis.js");
+      const { redisConnection, workerRedisConnection } = await import("#shared");
       await redisConnection?.quit().catch(() => redisConnection?.disconnect());
       await workerRedisConnection?.quit().catch(() => workerRedisConnection?.disconnect());
     } catch {}

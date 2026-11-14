@@ -1,10 +1,10 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
-import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
-import { ElementService } from "../../src/domain/element/ElementService.js";
-import { createPreUploadElementCapacityGuard } from "../../src/middleware/elementUploadGuard.js";
-import { CrudServiceError } from "../../src/utils/crudOperationLog.js";
+import { WorkflowMediaRepository } from "#media/tools";
+import { ElementMediaService } from "#elements/tools";
+import { ElementService } from "#elements/tools";
+import { createPreUploadElementCapacityGuard } from "#elements/api";
+import { CrudServiceError } from "#shared";
 
 describe("Element Maximum 6 Reference Media Boundary & Enforcement", () => {
     let repo;

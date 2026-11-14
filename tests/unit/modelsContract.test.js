@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { AppError } from "../../src/errors/AppError.js";
+import { AppError } from "#shared";
 import {
     ModelsError,
     ModelsValidationError,
@@ -25,7 +25,7 @@ import {
     LLMService,
     llmService,
     PromptService,
-} from "#platform/models";
+} from "#models/tools";
 
 describe("Models System Public Contract (#platform/models)", () => {
     describe("1. Exported Error Hierarchy", () => {

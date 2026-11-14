@@ -1,10 +1,10 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert";
 import apiRouter from "../../src/api/routes.js";
-import imagesRouter from "../../routes/images.js";
-import videoRouter from "../../routes/video.js";
-import { getUseCase } from "../../src/use-cases/useCaseRegistry.js";
-import { registerAllUseCases } from "../../src/use-cases/registerUseCases.js";
+import { imagesRouter } from "#generation/api";
+import { videoRouter } from "#generation/api";
+import { getUseCase } from "#generation/tools";
+import { registerAllUseCases } from "#generation/tools";
 
 describe("Generation API Boundary & Separation Tests", () => {
   after(() => {
@@ -107,9 +107,9 @@ describe("Generation API Boundary & Separation Tests", () => {
   });
 
   it("TEST 5: Image Generation Workflow Billing Plan calculates cost without LLM parameter error", async () => {
-    const { compileWorkflowById } = await import("../../src/v2/compiler/compileWorkflow.js");
-    const { calculateWorkflowBillingPlan } = await import("../../src/use-cases/workflowBillingPlan.js");
-    const { loadRegistries } = await import("../../src/v2/registry/registryLoader.js");
+    const { compileWorkflowById } = await import("#generation/tools");
+    const { calculateWorkflowBillingPlan } = await import("#generation/tools");
+    const { loadRegistries } = await import("#generation/tools");
 
     const plan = compileWorkflowById("image-generation-v1", loadRegistries());
 
@@ -131,9 +131,9 @@ describe("Generation API Boundary & Separation Tests", () => {
   });
 
   it("TEST 6: Video Generation Workflow compiles and calculates billing plan for video models", async () => {
-    const { compileWorkflowById } = await import("../../src/v2/compiler/compileWorkflow.js");
-    const { calculateWorkflowBillingPlan } = await import("../../src/use-cases/workflowBillingPlan.js");
-    const { loadRegistries } = await import("../../src/v2/registry/registryLoader.js");
+    const { compileWorkflowById } = await import("#generation/tools");
+    const { calculateWorkflowBillingPlan } = await import("#generation/tools");
+    const { loadRegistries } = await import("#generation/tools");
 
     const plan = compileWorkflowById("video-generation-v1", loadRegistries());
 
@@ -156,7 +156,7 @@ describe("Generation API Boundary & Separation Tests", () => {
   });
 
   it("TEST 7: estimateNodeBillingAmount handles LLM node inputs with skills without capability error", async () => {
-    const { estimateNodeBillingAmount } = await import("../../src/v2/runner/workflowRunner.js");
+    const { estimateNodeBillingAmount } = await import("#generation/tools");
 
     const nodeConfig = { id: "llm_translate", type: "llm" };
     const resolvedInputs = {

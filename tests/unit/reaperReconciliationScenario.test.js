@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { reconcileExpiredHolds, runReservationReaper } from "../../src/workers/reservationReaperWorker.js";
+import { reconcileExpiredHolds, runReservationReaper } from "#billing/tools";
 
 describe("Stale Holds Reaper & Media Reconciliation Scenarios (Option 2)", () => {
     describe("1. Scenario: Server Cron wins race and reconciles media state", () => {

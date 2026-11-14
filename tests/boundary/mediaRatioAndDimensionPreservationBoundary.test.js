@@ -1,8 +1,8 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { resolveMediaMetadata } from "../../src/platform/media/mediaMetadataResolver.js";
-import { calculateAspectRatio } from "../../src/utils/ratioUtils.js";
+import { resolveMediaMetadata } from "#media/tools";
+import { calculateAspectRatio } from "#shared";
 
 describe("D2.6 — Media Ratio & Dimension Preservation Boundary Tests", () => {
   after(() => {
@@ -52,7 +52,7 @@ describe("D2.6 — Media Ratio & Dimension Preservation Boundary Tests", () => {
   });
 
   it("TEST 3: V1StorageBridge createV1Placeholder uses resolveMediaMetadata instead of hardcoded 1024x1024", async () => {
-    const { V1StorageBridge } = await import("../../src/v2/services/v1StorageBridge.js");
+    const { V1StorageBridge } = await import("#generation/tools");
     let insertedMediaData = null;
     let insertedConfigData = null;
 
@@ -109,7 +109,7 @@ describe("D2.6 — Media Ratio & Dimension Preservation Boundary Tests", () => {
   });
 
   it("TEST 4: V1StorageBridge finalizeV1Media preserves placeholder dimensions when asset has no width/height", async () => {
-    const { V1StorageBridge } = await import("../../src/v2/services/v1StorageBridge.js");
+    const { V1StorageBridge } = await import("#generation/tools");
     let updatedFields = null;
 
     const mockDb = {
@@ -147,7 +147,7 @@ describe("D2.6 — Media Ratio & Dimension Preservation Boundary Tests", () => {
   });
 
   it("TEST 5: MediaWorkflowLifecycleService preserves ratio in generation_config and placeholder dimensions", async () => {
-    const { MediaWorkflowLifecycleService } = await import("../../src/platform/media/MediaLifecycleService.js");
+    const { MediaWorkflowLifecycleService } = await import("#media/tools");
     let insertedMedia = null;
     let insertedConfig = null;
     let updatedMedia = null;
@@ -210,7 +210,7 @@ describe("D2.6 — Media Ratio & Dimension Preservation Boundary Tests", () => {
   });
 
   it("TEST 6: nodeExecutor executeNodePersistence preserves placeholder dimensions when provider asset lacks width/height", async () => {
-    const { executeNodePersistence } = await import("../../src/v2/runner/nodeExecutor.js");
+    const { executeNodePersistence } = await import("#generation/tools");
 
     let updatedMedia = null;
     const mockDb = {
@@ -259,7 +259,7 @@ describe("D2.6 — Media Ratio & Dimension Preservation Boundary Tests", () => {
   });
 
   it("TEST 7: CharacterMediaService uploadDetailMedia preserves ingested 16:9 dimensions via resolveMediaMetadata", async () => {
-    const { CharacterMediaService } = await import("../../src/domain/character/CharacterMediaService.js");
+    const { CharacterMediaService } = await import("#characters/tools");
 
     let createdMediaRow = null;
     const mockDb = {
@@ -322,7 +322,7 @@ describe("D2.6 — Media Ratio & Dimension Preservation Boundary Tests", () => {
   });
 
   it("TEST 8: ElementMediaService fallback createMedia uses resolveMediaMetadata for non-1024 dimensions", async () => {
-    const { ElementMediaService } = await import("../../src/domain/element/ElementMediaService.js");
+    const { ElementMediaService } = await import("#elements/tools");
 
     let createdMediaRow = null;
     const mockDb = {

@@ -10,7 +10,7 @@
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
+import { WorkflowMediaRepository } from "#media/tools";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -193,7 +193,7 @@ describe("ElementMediaService.addReferenceMedia — uses attachReferenceMedia fo
      */
 
     it("ATTACH-WIRE-1: attach-existing path calls attachReferenceMedia, not linkMedia", async () => {
-        const { ElementMediaService } = await import("../../src/domain/element/ElementMediaService.js");
+        const { ElementMediaService } = await import("#elements/tools");
 
         const attachCalled = [];
         const linkCalled = [];
@@ -264,7 +264,7 @@ describe("ElementMediaService.addReferenceMedia — uses attachReferenceMedia fo
     });
 
     it("ATTACH-WIRE-2: attach-existing path with RPC unavailable fails with 503, not a silent link", async () => {
-        const { ElementMediaService } = await import("../../src/domain/element/ElementMediaService.js");
+        const { ElementMediaService } = await import("#elements/tools");
 
         const wfId = "wf-element-wire-2";
         const mediaId = "existing-media-2";

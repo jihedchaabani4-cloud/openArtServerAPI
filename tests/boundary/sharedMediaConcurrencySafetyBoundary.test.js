@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
-import { WorkflowMediaRepository } from "../../src/db/WorkflowMediaRepository.js";
+import { WorkflowMediaService } from "#generation/tools";
+import { WorkflowMediaRepository } from "#media/tools";
 
 /**
  * Concurrency Safety & Orphan Cleanup Boundary Tests

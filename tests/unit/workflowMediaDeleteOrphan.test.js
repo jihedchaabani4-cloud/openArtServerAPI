@@ -1,11 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { WorkflowMediaService, sanitizeStoragePath } from "../../src/platform/workflow/WorkflowMediaService.js";
-import { ElementService } from "../../src/domain/element/ElementService.js";
-import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
-import { ElementRepository } from "../../src/db/ElementRepository.js";
-import { CharacterService } from "../../src/domain/character/CharacterService.js";
-import { CharacterMediaService } from "../../src/domain/character/CharacterMediaService.js";
+import { WorkflowMediaService, sanitizeStoragePath } from "#generation/tools";
+import { ElementService } from "#elements/tools";
+import { ElementMediaService } from "#elements/tools";
+import { ElementRepository } from "#elements/tools";
+import { CharacterService } from "#characters/tools";
+import { CharacterMediaService } from "#characters/tools";
 
 /**
  * WM-T5 & B4a: Delete, orphan rules, and sidecar preservation.

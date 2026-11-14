@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { MediaWorkflowLifecycleService } from "../../src/platform/media/MediaLifecycleService.js";
-import { runReservationReaper } from "../../src/workers/reservationReaperWorker.js";
+import { MediaWorkflowLifecycleService } from "#media/tools";
+import { runReservationReaper } from "#billing/tools";
 
 describe("Ticket 05: Stale processing media reaper", () => {
   it("MediaWorkflowLifecycleService.sweepStalePlaceholders sweeps placeholders older than cutoff", async () => {

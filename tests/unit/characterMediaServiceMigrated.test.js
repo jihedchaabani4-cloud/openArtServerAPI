@@ -5,13 +5,13 @@ import assert from "node:assert/strict";
 import {
     CharacterMediaService,
     CHARACTER_MAX_DETAIL_MEDIA,
-} from "../../src/domain/character/CharacterMediaService.js";
-import { CrudServiceError } from "../../src/utils/crudOperationLog.js";
+} from "#characters/tools";
+import { CrudServiceError } from "#shared";
 import {
     CHARACTER_SHEET_UPLOAD_POLICY,
     CHARACTER_DETAIL_UPLOAD_POLICY,
-} from "../../src/platform/media-ingestion/UploadPolicy.js";
-import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
+} from "#media/tools";
+import { WorkflowMediaService } from "#generation/tools";
 
 describe("CharacterMediaService — Migrated to MediaUploadService & WorkflowMediaService (Ticket 06)", () => {
     let mockDb;

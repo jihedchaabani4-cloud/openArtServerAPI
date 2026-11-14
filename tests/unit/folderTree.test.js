@@ -10,7 +10,7 @@ import {
   wouldCreateCycle,
   wouldExceedDepth,
   depthForNewChild,
-} from "../../src/domain/folderTree.js";
+} from "#workspace/tools";
 
 describe("folderTree - pure tree logic (Task F-T1)", () => {
   // Setup standard dataset from section 7.4:

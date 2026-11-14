@@ -2,19 +2,19 @@ import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import http from "node:http";
-import imagesRouter from "../../routes/images.js";
-import videoRouter from "../../routes/video.js";
+import { imagesRouter } from "#generation/api";
+import { videoRouter } from "#generation/api";
 import { db, useCaseService } from "../../src/container.js";
-import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "../../src/queue/redis.js";
-import { supabase } from "../../lib/supabase.js";
-import { resetLimitersForTest } from "../../src/middleware/rateLimit.js";
-import { toMediaIdList } from "#platform/identity";
+import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared";
+import { supabase } from "#shared/db/supabase.js";
+import { resetLimitersForTest } from "#identity/tools";
+import { toMediaIdList } from "#identity/tools";
 import {
   resolveWorkflowReference,
   resolveWorkflowReferences,
   resolvePrimaryMediaUrl,
-} from "../../src/v2/resolvers/WorkflowReferenceResolver.js";
-import { executePromptBuilder } from "../../src/v2/nodes/promptBuilderNode.js";
+} from "#generation/tools";
+import { executePromptBuilder } from "#generation/tools";
 
 describe("Reference and Media Ownership Security & Boundary Tests (Task T2c)", () => {
   let server;

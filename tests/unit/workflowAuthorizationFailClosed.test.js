@@ -2,7 +2,7 @@ process.env.NODE_ENV = "test";
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { WorkflowAuthorizationService } from "../../src/platform/workflow/WorkflowAuthorizationService.js";
+import { WorkflowAuthorizationService } from "#generation/tools";
 
 /**
  * Chainable fake of the Supabase query builder, per table:

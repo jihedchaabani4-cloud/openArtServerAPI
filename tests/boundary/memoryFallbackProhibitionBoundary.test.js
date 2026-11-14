@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
-import { RunRepository } from "../../src/v2/runner/runRepository.js";
+import { RunRepository } from "#generation/tools";
 
 describe("RC1.4-D3(1) — Memory Fallbacks Prohibition Outside Tests", () => {
   let originalNodeEnv;

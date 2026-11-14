@@ -46,6 +46,8 @@ import {
 
 import {
   run,
+  normalizeError,
+  RuntimeExecutor,
   resolveProviderRoute,
   registerProviderResolver,
   getRunner,
@@ -102,7 +104,7 @@ export function getModelConfig(modelIdOrOptions = {}) {
         modelFamily: modelIdOrOptions,
       });
     }
-    return found;
+    return { id: found.id || found.key, ...found };
   }
   return getInternalModelConfig(modelIdOrOptions);
 }
@@ -301,6 +303,8 @@ export {
   calculateCost,
   estimatePrice,
   run,
+  normalizeError,
+  RuntimeExecutor,
   resolveProviderRoute,
   registerProviderResolver,
   getRunner,

@@ -1,17 +1,17 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import * as container from "../../src/container.js";
-import { WorkflowMediaService } from "../../src/platform/workflow/WorkflowMediaService.js";
-import { MediaUploadService } from "../../src/platform/media-ingestion/index.js";
-import { MediaService, MediaWorkflowLifecycleService } from "../../src/platform/media/index.js";
-import { WorkflowLifecycleService } from "../../src/platform/workflow/WorkflowService.js";
-import { WorkflowService as WorkflowServiceBase } from "../../src/platform/workflow/WorkflowServiceBase.js";
-import { ElementService } from "../../src/domain/element/ElementService.js";
-import { ElementMediaService } from "../../src/domain/element/ElementMediaService.js";
-import { CharacterService } from "../../src/domain/character/CharacterService.js";
-import { CharacterMediaService } from "../../src/domain/character/CharacterMediaService.js";
-import { TrashRepository } from "../../src/db/TrashRepository.js";
-import { TrashService } from "../../src/domain/trash/TrashService.js";
+import { WorkflowMediaService } from "#generation/tools";
+import { MediaUploadService } from "#media/tools";
+import { MediaService, MediaWorkflowLifecycleService } from "#media/tools";
+import { WorkflowLifecycleService } from "#generation/tools";
+import { WorkflowService as WorkflowServiceBase } from "#generation/tools";
+import { ElementService } from "#elements/tools";
+import { ElementMediaService } from "#elements/tools";
+import { CharacterService } from "#characters/tools";
+import { CharacterMediaService } from "#characters/tools";
+import { TrashRepository } from "#workspace/tools";
+import { TrashService } from "#workspace/tools";
 
 describe("Container Service Graph & Dependency Wiring Boundary", () => {
     it("asserts that every WorkflowMediaService reachable from the container holds the exact same mediaUploadService instance", () => {

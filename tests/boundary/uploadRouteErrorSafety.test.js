@@ -4,10 +4,10 @@ import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import express from "express";
-import { supabase } from "../../lib/supabase.js";
+import { supabase } from "#shared/db/supabase.js";
 import { assetUploadService, workflowService } from "../../src/container.js";
-import assetsRouter from "../../routes/assets.js";
-import mediaIngestRouter from "../../routes/mediaIngestRoutes.js";
+import { assetsRouter } from "#media/api";
+import { mediaIngestRouter } from "#media/api";
 
 describe("Upload routes — safe public error bodies", () => {
     let server;

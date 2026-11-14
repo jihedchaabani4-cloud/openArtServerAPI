@@ -2,10 +2,10 @@ import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import http from "node:http";
-import promptRouter from "../../routes/prompt.js";
-import { RATE_LIMIT_POLICIES } from "../../src/config/rateLimitPolicies.js";
+import { promptRouter } from "#generation/api";
+import { RATE_LIMIT_POLICIES } from "#identity/tools";
 import { promptService } from "../../src/container.js";
-import { supabase } from "../../lib/supabase.js";
+import { supabase } from "#shared/db/supabase.js";
 
 describe("Prompt Optimization Security & Boundary Tests (Task T1)", () => {
   let server;

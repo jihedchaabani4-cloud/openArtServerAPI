@@ -16,13 +16,6 @@ export function setDb(dbInstance) {
 }
 
 async function getDb() {
-  if (_db) return _db;
-  try {
-    const container = await import("#container.js");
-    _db = container.db;
-  } catch {
-    _db = {};
-  }
   return _db || {};
 }
 

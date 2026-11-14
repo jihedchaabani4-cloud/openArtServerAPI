@@ -7,6 +7,7 @@ import { authClient } from "../db/authClient.js";
 import { ProfileRepository } from "../db/ProfileRepository.js";
 import { setAuthCookies, clearAuthCookies } from "../cookies.js";
 import { createLogger } from "#shared";
+import { getWalletService } from "#billing/tools";
 import { IdentityValidationError, IdentityAuthenticationError } from "../errors.js";
 
 const authLogger = createLogger("auth_service");
@@ -76,9 +77,9 @@ export const AuthService = {
   async ensureUserAccount(userId, extra = {}) {
     let walletEnsure = Promise.resolve(null);
     try {
-      const container = await import("#container.js");
-      if (container.walletService?.ensureWallet) {
-        walletEnsure = container.walletService.ensureWallet(userId);
+      const walletService = getWalletService();
+      if (walletService?.ensureWallet) {
+        walletEnsure = walletService.ensureWallet(userId);
       }
     } catch {
       // Wallet service lazy fallback during migration

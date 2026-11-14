@@ -9,11 +9,12 @@ const {
   checkRuleR12,
   checkRuleR13,
   checkRuleR15,
+  checkRuleR16,
   findImportCycles,
   collect,
 } = require("../../scripts/arch-check.cjs");
 
-describe("Ticket 0.4 Architecture Rules R10-R15 and Cycle Detector", () => {
+describe("Ticket 0.4 Architecture Rules R10-R16 and Cycle Detector", () => {
   function makeFile(relPath, content) {
     return {
       rel: relPath,
@@ -73,6 +74,15 @@ describe("Ticket 0.4 Architecture Rules R10-R15 and Cycle Detector", () => {
       assert.equal(hits.length, 1);
     });
 
+    it("flags supabase import in legacy folders outside src/systems/", () => {
+      const file = makeFile(
+        "src/domain/project/ProjectService.js",
+        `import { supabase } from "#lib/supabase.js";\n`
+      );
+      const hits = checkRuleR12(file);
+      assert.equal(hits.length, 1);
+    });
+
     it("allows supabase import inside internal/db/", () => {
       const file = makeFile(
         "src/systems/billing/internal/db/walletRepo.js",
@@ -103,6 +113,35 @@ describe("Ticket 0.4 Architecture Rules R10-R15 and Cycle Detector", () => {
     });
   });
 
+  describe("Rule R16: Zero outbound legacy imports from src/systems/ or src/shared/", () => {
+    it("flags relative outbound imports to legacy src/domain/ or controllers/", () => {
+      const file = makeFile(
+        "src/systems/workspace/public/tools.js",
+        `import { ProjectService } from "../../../domain/project/ProjectService.js";\n`
+      );
+      const hits = checkRuleR16(file);
+      assert.equal(hits.length, 1);
+    });
+
+    it("flags legacy #alias imports from src/systems/", () => {
+      const file = makeFile(
+        "src/systems/identity/internal/services/AuthService.js",
+        `const container = await import("#container.js");\n`
+      );
+      const hits = checkRuleR16(file);
+      assert.equal(hits.length, 1);
+    });
+
+    it("allows #shared and #system/tools imports inside src/systems/", () => {
+      const file = makeFile(
+        "src/systems/workspace/internal/services/ProjectService.js",
+        `import { createLogger } from "#shared";\nimport { getWalletService } from "#billing/tools";\n`
+      );
+      const hits = checkRuleR16(file);
+      assert.equal(hits.length, 0);
+    });
+  });
+
   describe("Rule R14: Cycle detector algorithm", () => {
     it("detects a synthetic 2-file circular dependency", () => {
       const syntheticFiles = [
@@ -127,18 +166,18 @@ describe("Ticket 0.4 Architecture Rules R10-R15 and Cycle Detector", () => {
       const { files } = collect();
 
       // Pair 1: nodeExecutor -> workflowRunner (must not exist)
-      const nodeExec = files.find((f) => f.rel === "src/v2/runner/nodeExecutor.js");
+      const nodeExec = files.find((f) => f.rel === "src/systems/generation/internal/v2/runner/nodeExecutor.js");
       assert.ok(nodeExec);
       assert.ok(!nodeExec.text.includes("workflowRunner.js"));
 
       // Pair 2: promptBuilderProService -> ElementService (must not exist)
-      const promptBuilder = files.find((f) => f.rel === "src/domain/element/promptBuilderProService.js");
+      const promptBuilder = files.find((f) => f.rel === "src/systems/elements/internal/services/promptBuilderProService.js");
       assert.ok(promptBuilder);
       assert.ok(!promptBuilder.text.includes("elementService.js"));
       assert.ok(!promptBuilder.text.includes("ElementService.js"));
 
       // Pair 3: catalogPresentation -> models/index.js (must not exist)
-      const catalogPres = files.find((f) => f.rel === "src/models/catalogPresentation.js");
+      const catalogPres = files.find((f) => f.rel === "src/systems/models/internal/catalogPresentation.js");
       assert.ok(catalogPres);
       assert.ok(!catalogPres.text.includes("./index.js"));
     });

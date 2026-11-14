@@ -43,6 +43,7 @@ import {
 import { CharacterService, CharacterMediaService, configureCharacters } from "#characters/tools";
 import { ElementService, ElementMediaService, ElementAnalysisService, configureElements } from "#elements/tools";
 import { ProjectService, ProjectReadService, FolderService, TrashService, configureWorkspace } from "#workspace/tools";
+import { setDb as setIdentityDb } from "#identity/tools";
 
 import {
     GenerationService,
@@ -198,6 +199,7 @@ if (failedOpsService) {
 
 // ─── DB (new 7-table schema) ─────────────────────────────────────────────────
 import { db } from "./db/dbInstance.js";
+setIdentityDb(db);
 export { db };
 
 // ─── Workflow Architecture (feature 008) ─────────────────────────────────────

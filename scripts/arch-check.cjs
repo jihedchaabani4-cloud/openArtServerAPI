@@ -190,11 +190,11 @@ function checkRuleR11(f) {
 }
 
 function checkRuleR12(f) {
-  // R12: database & external SDK isolation inside src/systems/
+  // R12: database & external storage SDK isolation across ALL code directories
   // DB clients (supabase, prisma, pg, mongoose) and cloud storage SDKs (S3, R2)
-  // may only be imported inside src/systems/<name>/internal/db/ or dedicated storage adapter
-  if (!f.rel.startsWith('src/systems/')) return [];
-  if (f.rel.includes('/internal/db/') || f.rel.includes('/internal/storage/')) return [];
+  // may only be imported inside src/systems/<name>/internal/db/, dedicated storage adapter, or lib/supabase.js
+  if (f.rel === 'lib/supabase.js') return [];
+  if (f.rel.startsWith('src/systems/') && (f.rel.includes('/internal/db/') || f.rel.includes('/internal/storage/'))) return [];
 
   const hits = [];
   for (const s of specifiers(f)) {
@@ -239,6 +239,46 @@ function checkRuleR15(packageJsonPath = path.join(ROOT, 'package.json')) {
   } catch {
     return [];
   }
+}
+
+function checkRuleR16(f) {
+  // R16: Zero outbound legacy imports from src/systems/** or src/shared/**
+  // No file in src/systems/** or src/shared/** may import from legacy folders or legacy #aliases
+  if (!f.rel.startsWith('src/systems/') && !f.rel.startsWith('src/shared/')) return [];
+
+  const isInternalDb = f.rel.startsWith('src/systems/') && f.rel.includes('/internal/db/');
+  const hits = [];
+
+  for (const s of specifiers(f)) {
+    // 1. Check legacy #aliases
+    const aliasMatch = s.spec.match(/^#([a-zA-Z0-9_.-]+)(?:\/(.*))?$/);
+    if (aliasMatch) {
+      const ns = aliasMatch[1];
+      if (LEGACY_NAMESPACES.has(ns)) {
+        // Allow #lib/supabase.js ONLY inside src/systems/<name>/internal/db/
+        if (isInternalDb && s.spec === '#lib/supabase.js') continue;
+        hits.push({ line: s.line, text: s.text });
+        continue;
+      }
+    }
+
+    // 2. Check relative or root-relative paths escaping out of src/systems/ or src/shared/
+    let resolved = null;
+    if (s.spec.startsWith('.')) {
+      const abs = path.resolve(ROOT, path.dirname(f.rel), s.spec);
+      resolved = path.relative(ROOT, abs).split(path.sep).join('/');
+    } else if (/^(controllers|routes|middleware|lib|services|utils|config|src)\//.test(s.spec)) {
+      resolved = s.spec;
+    }
+
+    if (resolved) {
+      if (!resolved.startsWith('src/systems/') && !resolved.startsWith('src/shared/')) {
+        if (isInternalDb && resolved === 'lib/supabase.js') continue;
+        hits.push({ line: s.line, text: s.text });
+      }
+    }
+  }
+  return hits;
 }
 
 /**
@@ -433,6 +473,11 @@ const RULES = [
     desc: 'express and web frameworks isolated strictly to public/api.js',
     run: (f) => checkRuleR13(f),
   },
+  {
+    id: 'R16',
+    desc: 'zero outbound legacy imports from src/systems/** or src/shared/**',
+    run: (f) => checkRuleR16(f),
+  },
 ];
 
 function migrationViolations() {
@@ -506,7 +551,7 @@ function layerReport(files) {
 }
 
 function summary(violations, baseline, fresh) {
-  const allRuleIds = ['R1', 'R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11', 'R12', 'R13', 'R14', 'R15'];
+  const allRuleIds = ['R1', 'R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11', 'R12', 'R13', 'R14', 'R15', 'R16'];
   const ids = allRuleIds.sort((a, b) => {
     const numA = parseInt(a.replace(/\D/g, ''), 10);
     const numB = parseInt(b.replace(/\D/g, ''), 10);
@@ -604,6 +649,7 @@ if (require.main === module) {
     checkRuleR12,
     checkRuleR13,
     checkRuleR15,
+    checkRuleR16,
     findImportCycles,
     collect,
   };

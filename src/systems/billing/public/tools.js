@@ -351,29 +351,24 @@ export async function resolvePackageCredits(input = {}, ctx = {}) {
 
 // ── Factories & Service Builders ──────────────────────────────────────────────
 
-export function createWalletService({
-    client = null,
-    walletRepo = null,
-    transactionRepo = null,
-    txRepo = null,
-    usageEventRepo = null,
-    defaultInitialBalance = undefined,
-} = {}) {
-    const activeWalletRepo = walletRepo || (client ? new WalletRepository(client) : null);
-    const activeTxRepo = transactionRepo || txRepo || (client ? new TransactionRepository(client) : null);
-    const activeUsageRepo = usageEventRepo || (client ? new UsageEventRepository(client) : null);
+export function createWalletService(options = {}) {
+    const activeClient = options.supabase || options.client || getBillingSupabaseAdminClient();
+    const activeWalletRepo = options.walletRepo || (activeClient ? new WalletRepository(activeClient) : null);
+    const activeTxRepo = options.transactionRepo || options.txRepo || (activeClient ? new TransactionRepository(activeClient) : null);
+    const activeUsageRepo = options.usageEventRepo || (activeClient ? new UsageEventRepository(activeClient) : null);
 
     return new WalletService({
         walletRepo: activeWalletRepo,
         txRepo: activeTxRepo,
         usageEventRepo: activeUsageRepo,
-        defaultInitialBalance,
-        supabase: client,
+        defaultInitialBalance: options.defaultInitialBalance,
+        supabase: activeClient,
     });
 }
 
-export function createFailedOpsService({ client = null, failedOpsRepo = null } = {}) {
-    const activeRepo = failedOpsRepo || (client ? new FailedOpsRepository(client) : null);
+export function createFailedOpsService(options = {}) {
+    const activeClient = options.supabase || options.client || getBillingSupabaseAdminClient();
+    const activeRepo = options.failedOpsRepo || (activeClient ? new FailedOpsRepository(activeClient) : null);
     return new FailedOpsService({ failedOpsRepo: activeRepo });
 }
 

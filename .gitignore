@@ -14,3 +14,7 @@ docs/plan/scratch/
 graphify-out/
 .scratch/
 scratch/
+cookies.txt
+login.json
+edit_request.json
+*.cookie

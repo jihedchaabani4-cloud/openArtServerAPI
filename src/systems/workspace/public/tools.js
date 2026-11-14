@@ -91,10 +91,9 @@ export async function assertProjectAccess({ userId, projectId }) {
  * @param {string} [params.itemType='workflow'] - 'workflow' | 'element' | 'character'
  * @param {string} params.itemId
  * @param {boolean} [params.trash=true]
- * @param {Object} [params.req=null]
  * @returns {Promise<Object>}
  */
-export async function moveItemToTrash({ userId, itemType = "workflow", itemId, trash = true, req = null }) {
+export async function moveItemToTrash({ userId, itemType = "workflow", itemId, trash = true }) {
     if (!userId) {
         throw new WorkspaceValidationError("User ID is required to move item to trash");
     }
@@ -108,7 +107,6 @@ export async function moveItemToTrash({ userId, itemType = "workflow", itemId, t
             id: itemId,
             userId,
             trash,
-            req,
         });
     }
 

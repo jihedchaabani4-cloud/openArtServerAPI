@@ -15,7 +15,7 @@ import {
     BillingError,
 } from "./tools.js";
 import { requireAuth } from "../../../middleware/auth.js";
-import { requireAdmin } from "#platform/identity";
+import { requireAdmin } from "#identity/tools";
 import { walletRateLimit } from "../../../middleware/walletRateLimit.js";
 import {
     getCheckoutUrl,

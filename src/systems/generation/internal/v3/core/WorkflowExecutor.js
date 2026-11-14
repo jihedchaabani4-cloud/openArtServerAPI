@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { createLogger } from "#shared";
 import { GraphCompiler, getValueByPath } from "./GraphCompiler.js";
 import { GenerationValidationError } from "../../errors.js";
+import { getMockNodeExecutor, normalizeMockOutput } from "./testNodeExecutorRegistry.js";
 
 const v3ExecutorLogger = createLogger("v3-executor");
 
@@ -234,6 +235,28 @@ export class WorkflowExecutor {
           nodeType: step.type,
           attempt,
         };
+
+        const mockFn =
+          context?.nodeExecutors?.[step.type] ||
+          context?.nodeExecutors?.[step.id] ||
+          getMockNodeExecutor(step.type) ||
+          getMockNodeExecutor(step.id) ||
+          (step.type.startsWith("base.image_") &&
+            (getMockNodeExecutor("image-generation") ||
+              getMockNodeExecutor("ai/character-sheet") ||
+              getMockNodeExecutor(resolvedInputs?.model))) ||
+          (step.type.startsWith("base.video_") &&
+            (getMockNodeExecutor("video-generation") ||
+              getMockNodeExecutor(resolvedInputs?.model))) ||
+          (step.type.startsWith("base.llm_") && getMockNodeExecutor("llm")) ||
+          (step.type === "base.safety_check" &&
+            (getMockNodeExecutor("safety") || getMockNodeExecutor("safety_check")));
+
+        if (typeof mockFn === "function") {
+          const mockResult = await mockFn(resolvedInputs, nodeCtx);
+          return normalizeMockOutput(step.type, mockResult, resolvedInputs);
+        }
+
         const out = await def.execute(resolvedInputs, nodeCtx);
         return out || {};
       } catch (err) {

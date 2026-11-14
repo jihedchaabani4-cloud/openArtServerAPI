@@ -282,13 +282,36 @@ export function getValueByPath(obj, path) {
   if (Object.prototype.hasOwnProperty.call(obj, path) && obj[path] !== undefined) {
     return obj[path];
   }
+
+  // Try camelCase <-> snake_case aliases for direct top-level keys
+  const camelKey = path.replace(/_([a-z0-9])/g, (_, g) => g.toUpperCase());
+  if (camelKey !== path && Object.prototype.hasOwnProperty.call(obj, camelKey) && obj[camelKey] !== undefined) {
+    return obj[camelKey];
+  }
+  const snakeKey = path.replace(/[A-Z]/g, (l) => `_${l.toLowerCase()}`);
+  if (snakeKey !== path && Object.prototype.hasOwnProperty.call(obj, snakeKey) && obj[snakeKey] !== undefined) {
+    return obj[snakeKey];
+  }
+
   const parts = path.split(".");
   let current = obj;
   for (const part of parts) {
     if (current === null || current === undefined || typeof current !== "object") {
       return undefined;
     }
-    current = current[part];
+    if (current[part] !== undefined) {
+      current = current[part];
+    } else {
+      const partCamel = part.replace(/_([a-z0-9])/g, (_, g) => g.toUpperCase());
+      const partSnake = part.replace(/[A-Z]/g, (l) => `_${l.toLowerCase()}`);
+      if (current[partCamel] !== undefined) {
+        current = current[partCamel];
+      } else if (current[partSnake] !== undefined) {
+        current = current[partSnake];
+      } else {
+        return undefined;
+      }
+    }
   }
   return current;
 }

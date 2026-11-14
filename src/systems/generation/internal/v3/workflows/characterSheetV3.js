@@ -81,6 +81,7 @@ export const characterSheetV3 = Object.freeze({
       inputs: {
         character_id: { fromInput: "character_id" },
         media_id: { fromInput: "media_id" },
+        workflow_id: { fromInput: "workflow_id", default: null },
         sheet_url: { fromNode: "generate_sheet", output: "image_url" },
         panel_urls: { fromNode: "crop_grid", output: "panel_urls" },
         description: { fromNode: "llm_sheet_director", output: "text" },

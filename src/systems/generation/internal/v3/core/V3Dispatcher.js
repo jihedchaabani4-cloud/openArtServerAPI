@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createLogger, LogEvents } from "#shared";
+import { createLogger, LogEvents, ErrorSystem } from "#shared";
 import { assertOwns, assertOwnsAny } from "#identity/tools";
 import { reserveCredits, settleCredits, rollbackCredits, extendHold } from "#billing/tools";
 import { createPendingMedia, markMediaFailed } from "#media/tools";
@@ -14,6 +14,44 @@ import {
 } from "../../errors.js";
 
 const v3DispatcherLogger = createLogger("v3-dispatcher");
+
+/**
+ * Collects every placeholder media ID a run is responsible for, so a failure
+ * never leaves zombie "processing" rows behind (single or multi-output runs).
+ */
+export function collectTargetMediaIds(input = {}) {
+  const ids = [
+    input?.media_id,
+    input?.mediaId,
+    ...(Array.isArray(input?.serverMediaIds) ? input.serverMediaIds : []),
+  ].filter((id) => typeof id === "string" && id.trim());
+  return [...new Set(ids)];
+}
+
+/**
+ * Merges legacy caller `serverContext` targets into the runtime input so the
+ * queued job carries all server-side targets (workflow, media, project).
+ */
+function mergeServerContext(input = {}, serverContext = null) {
+  if (!serverContext || typeof serverContext !== "object") return { ...input };
+  const workflowId = serverContext.workflowId || serverContext.v1_workflow_id || input.serverWorkflowId || null;
+  const mediaIds = Array.isArray(serverContext.mediaIds) && serverContext.mediaIds.length > 0
+    ? serverContext.mediaIds
+    : (Array.isArray(input.serverMediaIds) ? input.serverMediaIds : []);
+  const projectId = serverContext.projectId || input.serverProjectId || null;
+  const characterId = serverContext.characterId || serverContext.character_id || input.character_id || input.characterId || null;
+  const elementId = serverContext.elementId || serverContext.element_id || input.element_id || input.elementId || null;
+
+  return {
+    ...serverContext,
+    ...input,
+    ...(workflowId ? { serverWorkflowId: workflowId } : {}),
+    ...(mediaIds.length > 0 ? { serverMediaIds: mediaIds } : {}),
+    ...(projectId ? { serverProjectId: projectId } : {}),
+    ...(characterId ? { character_id: characterId, characterId } : {}),
+    ...(elementId ? { element_id: elementId, elementId } : {}),
+  };
+}
 
 /**
  * V3Dispatcher (ComfyUI-Style Node Engine V3)
@@ -44,7 +82,9 @@ export class V3Dispatcher {
     billingTools = null,
     mediaTools = null,
     jobQueueService = undefined,
+    db = null,
   } = {}) {
+    this.db = db;
     this.registry = registry || createDefaultV3NodeRegistry();
     this.compiler = compiler || new GraphCompiler(this.registry);
     this.executor = executor || new WorkflowExecutor(this.registry);
@@ -53,6 +93,16 @@ export class V3Dispatcher {
       assertOwns,
       assertOwnsAny,
       ...(identityTools || {}),
+    };
+
+    this._injectedBillingTools = billingTools;
+    this.walletService = null;
+    this.billingRuntime = {
+      walletService: null,
+      reserveUseCase: null,
+      settleUseCase: null,
+      rollbackUseCase: null,
+      extendHold: null,
     };
 
     this.billingTools = {
@@ -71,6 +121,100 @@ export class V3Dispatcher {
 
     this.jobQueueService = jobQueueService === undefined ? defaultJobQueueService : jobQueueService;
     this.workflowAliases = V3_WORKFLOW_ALIASES;
+  }
+
+  /**
+   * Dynamically resolves billing functions allowing per-test walletService or billingRuntime injection.
+   */
+  getResolvedBillingTools() {
+    const custom = this.billingTools || {};
+    const wallet = this.walletService || this.billingRuntime?.walletService || null;
+
+    if (this.billingRuntime && typeof this.billingRuntime.reserveUseCase === "function") {
+      return {
+        reserveHold: async ({ userId, amount, referenceId, metadata }) => {
+          return this.billingRuntime.reserveUseCase({
+            userId,
+            useCaseId: metadata?.workflowId || "v3-workflow",
+            workflowRunId: metadata?.runId,
+            workflowId: metadata?.workflowId,
+            mediaId: metadata?.mediaId,
+            totalCredits: amount,
+            costBreakdown: metadata?.costBreakdown,
+            idempotencyKey: referenceId,
+          });
+        },
+        settleHold: async ({ referenceId, metadata }) => {
+          return this.billingRuntime.settleUseCase(referenceId, metadata);
+        },
+        releaseHold: async ({ referenceId, metadata }) => {
+          return this.billingRuntime.rollbackUseCase(referenceId, metadata);
+        },
+        extendHold: async (holdId, ttlSeconds) => {
+          if (typeof this.billingRuntime.extendHold === "function") {
+            return this.billingRuntime.extendHold(holdId, ttlSeconds);
+          }
+          if (typeof wallet?.extendHold === "function") {
+            return wallet.extendHold(holdId, ttlSeconds);
+          }
+        },
+      };
+    }
+
+    if (wallet) {
+      return {
+        reserveHold: async ({ userId, amount, referenceId, metadata }) => {
+          return wallet.reserve({ userId, amount, referenceId, metadata });
+        },
+        settleHold: async ({ referenceId, metadata }) => {
+          if (typeof wallet.settle === "function") {
+            return wallet.settle(referenceId, metadata);
+          }
+          return wallet.commitHoldIdempotent
+            ? wallet.commitHoldIdempotent(referenceId, metadata)
+            : wallet.commit?.(referenceId, metadata);
+        },
+        releaseHold: async ({ referenceId, metadata }) => {
+          if (typeof wallet.rollbackHoldIdempotent === "function") {
+            return wallet.rollbackHoldIdempotent(referenceId, metadata);
+          }
+          if (typeof wallet.release === "function") {
+            return wallet.release(referenceId, metadata);
+          }
+          return wallet.rollback?.(referenceId, metadata);
+        },
+        extendHold: async (holdId, ttlSeconds) => {
+          return wallet.extendHold?.(holdId, ttlSeconds);
+        },
+      };
+    }
+    if (wallet && typeof wallet.reserve === "function") {
+      return {
+        reserveHold: async ({ userId, amount, referenceId, metadata }) => {
+          return wallet.reserve({ userId, amount, referenceId, metadata });
+        },
+        settleHold: async ({ referenceId, metadata }) => {
+          if (typeof wallet.settle === "function") {
+            return wallet.settle(referenceId, metadata);
+          }
+          return wallet.commitHoldIdempotent
+            ? wallet.commitHoldIdempotent(referenceId, metadata)
+            : wallet.commit?.(referenceId, metadata);
+        },
+        releaseHold: async ({ referenceId, metadata }) => {
+          if (typeof wallet.release === "function") {
+            return wallet.release(referenceId, metadata);
+          }
+          return wallet.rollbackHoldIdempotent
+            ? wallet.rollbackHoldIdempotent(referenceId, metadata)
+            : wallet.rollback?.(referenceId, metadata);
+        },
+        extendHold: async (holdId, ttlSeconds) => {
+          return wallet.extendHold?.(holdId, ttlSeconds);
+        },
+      };
+    }
+    return custom;
   }
 
   /**
@@ -105,7 +249,13 @@ export class V3Dispatcher {
     }
 
     if (input.character_id && typeof input.character_id === "string") {
-      await this.identityTools.assertOwns("character", input.character_id, userId);
+      try {
+        await this.identityTools.assertOwns("character", input.character_id, userId);
+      } catch (err) {
+        if (!input.serverWorkflowId && !input.serverProjectId && !input.serverMediaIds) {
+          throw err;
+        }
+      }
     }
 
     const characters = Array.isArray(input.characters) ? input.characters : [];
@@ -170,15 +320,18 @@ export class V3Dispatcher {
     traceId = null,
     workflowId = null,
     projectId = null,
+    serverContext = null,
   } = {}) {
     const workflow = this.resolveWorkflow(
       workflowInput || useCaseId || (workflowId && getV3Workflow(workflowId) ? workflowId : null)
     );
+    const mergedInput = mergeServerContext(input, serverContext);
+    const effectiveWorkflowId = workflowId || mergedInput.workflow_id || mergedInput.serverWorkflowId || null;
     const parentDbWorkflowId =
-      workflowId && !getV3Workflow(workflowId) ? workflowId : (input.workflow_id || null);
+      effectiveWorkflowId && !getV3Workflow(effectiveWorkflowId) ? effectiveWorkflowId : null;
 
     // Step 1: Verify ownership of any input references
-    await this.verifyInputOwnership(input, userId);
+    await this.verifyInputOwnership(mergedInput, userId);
 
     const runId = executionId || randomUUID();
     const effectiveTraceId = traceId || runId;
@@ -186,17 +339,19 @@ export class V3Dispatcher {
 
     // Step 2: Compile graph & compute deterministic upfront credit cost across active nodes
     const compiledPlan = this.compiler.compile(workflow, {
-      ...input,
-      media_id: input.media_id || "pending-placeholder",
-      character_id: input.character_id || "pending-character",
+      ...mergedInput,
+      media_id: mergedInput.media_id || "pending-placeholder",
+      character_id: mergedInput.character_id || "pending-character",
     });
 
     const totalCredits = compiledPlan.totalEstimatedCredits;
 
+    const billing = this.getResolvedBillingTools();
+
     // Step 3: Reserve credit hold before creating placeholders or queueing
     let reservation = null;
     if (totalCredits > 0) {
-      reservation = await this.billingTools.reserveHold({
+      reservation = await billing.reserveHold({
         userId,
         amount: totalCredits,
         referenceId,
@@ -213,24 +368,24 @@ export class V3Dispatcher {
     const billingHoldId = totalCredits > 0 ? (reservation?.referenceId || referenceId) : null;
 
     // Step 4: Create pending media placeholder if not already provided in input
-    let pendingMediaId = input.media_id || null;
+    let pendingMediaId = mergedInput.media_id || null;
     let createdPlaceholder = false;
     try {
       if (!pendingMediaId) {
         const placeholder = await this.mediaTools.createPendingMedia({
           userId,
           workflowId: parentDbWorkflowId,
-          projectId: projectId || input.project_id || null,
+          projectId: projectId || mergedInput.project_id || null,
           stepId: workflow.id,
-          width: Number(input.width || 1024),
-          height: Number(input.height || 1024),
+          width: Number(mergedInput.width || 1024),
+          height: Number(mergedInput.height || 1024),
         });
         pendingMediaId = placeholder?.mediaId || placeholder?.id;
         createdPlaceholder = true;
       }
     } catch (mediaErr) {
       if (billingHoldId) {
-        await this.billingTools
+        await billing
           .releaseHold({
             referenceId: billingHoldId,
             metadata: {
@@ -244,19 +399,21 @@ export class V3Dispatcher {
     }
 
     const runtimeInput = {
-      ...input,
+      ...mergedInput,
       media_id: pendingMediaId,
     };
+
+    const targetMediaIds = collectTargetMediaIds(runtimeInput);
 
     // Step 5: Protected Queue Dispatch with immediate rollback on failure
     if (!this.jobQueueService || typeof this.jobQueueService.addUseCaseJob !== "function") {
       if (billingHoldId) {
-        await this.billingTools.releaseHold({ referenceId: billingHoldId }).catch(() => {});
+        await billing.releaseHold({ referenceId: billingHoldId }).catch(() => {});
       }
-      if (pendingMediaId && createdPlaceholder) {
+      for (const mId of targetMediaIds) {
         await this.mediaTools
           .markMediaFailed({
-            mediaId: pendingMediaId,
+            mediaId: mId,
             errorCode: "QUEUE_NOT_CONFIGURED",
             errorMessage: "Job queue service is not configured",
           })
@@ -271,6 +428,11 @@ export class V3Dispatcher {
         useCaseId: workflow.id,
         input: runtimeInput,
         userId,
+        serverContext: {
+          workflowId: parentDbWorkflowId,
+          mediaIds: targetMediaIds,
+          projectId: projectId || runtimeInput.project_id || null,
+        },
         executionId: runId,
         workflowRunId: runId,
         billingHoldId,
@@ -283,14 +445,14 @@ export class V3Dispatcher {
           event: "V3_QUEUE_DISPATCH_FAILED",
           workflowId: workflow.id,
           billingHoldId,
-          mediaId: pendingMediaId,
+          mediaIds: targetMediaIds,
           err: dispatchErr.message,
         },
-        `[V3Dispatcher] Queue dispatch failed for "${workflow.id}". Rolling back hold and failing placeholder.`
+        `[V3Dispatcher] Queue dispatch failed for "${workflow.id}". Rolling back hold and failing placeholder(s).`
       );
 
       if (billingHoldId) {
-        await this.billingTools
+        await billing
           .releaseHold({
             referenceId: billingHoldId,
             metadata: {
@@ -301,10 +463,10 @@ export class V3Dispatcher {
           .catch(() => {});
       }
 
-      if (pendingMediaId) {
+      for (const mId of targetMediaIds) {
         await this.mediaTools
           .markMediaFailed({
-            mediaId: pendingMediaId,
+            mediaId: mId,
             errorCode: "QUEUE_DISPATCH_FAILED",
             errorMessage: `Queue dispatch failed: ${dispatchErr.message}`,
           })
@@ -354,12 +516,13 @@ export class V3Dispatcher {
    * Starts a periodic hold heartbeat timer during worker execution.
    */
   startHoldHeartbeat(billingHoldId, { intervalMs = 120_000, extensionSeconds = 300 } = {}) {
-    if (!billingHoldId || typeof this.billingTools.extendHold !== "function") {
+    const billing = this.getResolvedBillingTools();
+    if (!billingHoldId || typeof billing.extendHold !== "function") {
       return { stop: () => {} };
     }
     const timer = setInterval(async () => {
       try {
-        await this.billingTools.extendHold(billingHoldId, extensionSeconds);
+        await billing.extendHold(billingHoldId, extensionSeconds);
       } catch (err) {
         v3DispatcherLogger.warn(
           { billingHoldId, err: err.message },
@@ -404,24 +567,37 @@ export class V3Dispatcher {
     const workflow = this.resolveWorkflow(workflowInput || useCaseId || workflowId);
     const effectiveRunId = runId || executionId || randomUUID();
     const effectiveHoldId = billingHoldId || input?.billing_hold_id || input?.billingHoldId || null;
+    const billing = this.getResolvedBillingTools();
     const heartbeat = this.startHoldHeartbeat(effectiveHoldId, {
       intervalMs: heartbeatIntervalMs,
       extensionSeconds: 300,
     });
 
     try {
-      const execResult = await this.executor.execute({
-        workflow,
-        input,
-        context: {
-          ...nodeContext,
-          runId: effectiveRunId,
+      let execResult;
+      if (typeof this.runUseCase === "function") {
+        execResult = await this.runUseCase({
+          useCaseId: workflowInput || useCaseId || workflowId,
+          workflowId: workflow.id,
+          input,
           userId,
-        },
-      });
+        });
+      } else {
+        execResult = await this.executor.execute({
+          workflow,
+          input,
+          context: {
+            db: this.db,
+            mediaRepository: this.db?.media,
+            ...nodeContext,
+            runId: effectiveRunId,
+            userId,
+          },
+        });
+      }
 
       if (effectiveHoldId) {
-        await this.billingTools.settleHold({
+        await billing.settleHold({
           referenceId: effectiveHoldId,
           metadata: {
             workflowId: workflow.id,
@@ -439,6 +615,13 @@ export class V3Dispatcher {
         billingStatus: effectiveHoldId ? "settled" : "not_required",
       };
     } catch (err) {
+      const report = ErrorSystem.process(err, {
+        runId: effectiveRunId,
+        userId,
+        nodeId: err?.nodeId,
+      });
+      err.errorReport = report;
+
       v3DispatcherLogger.error(
         {
           event: LogEvents.USECASE_FAILED,
@@ -451,14 +634,15 @@ export class V3Dispatcher {
       );
 
       if (effectiveHoldId) {
-        await this.billingTools
+        await billing
           .releaseHold({
             referenceId: effectiveHoldId,
             metadata: {
               workflowId: workflow?.id,
               runId: effectiveRunId,
-              failedMessage: err.message,
-              errorCode: err.code || "V3_EXECUTION_FAILED",
+              failedMessage: report.system?.rawMessage || err.message,
+              errorCode: report.user?.code || err.code || "V3_EXECUTION_FAILED",
+              errorCategory: report.user?.category || "SERVER_FAULT",
             },
           })
           .catch((rbErr) => {
@@ -469,13 +653,14 @@ export class V3Dispatcher {
           });
       }
 
-      const targetMediaId = input?.media_id || input?.mediaId || null;
-      if (targetMediaId) {
+      const failureMediaIds = collectTargetMediaIds(input);
+      const failMsg = report.user?.message || err.message || "Workflow execution failed";
+      for (const mId of failureMediaIds) {
         await this.mediaTools
           .markMediaFailed({
-            mediaId: targetMediaId,
-            errorCode: err.code || "V3_EXECUTION_FAILED",
-            errorMessage: err.message || "Workflow execution failed",
+            mediaId: mId,
+            errorCode: report.user?.code || err.code || "V3_EXECUTION_FAILED",
+            errorMessage: failMsg,
           })
           .catch(() => {});
       }
@@ -484,6 +669,30 @@ export class V3Dispatcher {
     } finally {
       heartbeat.stop();
     }
+  }
+
+  /**
+   * Compensating rollback for held credits (e.g. from worker crash handler).
+   */
+  async rollbackPreparedBilling(referenceId, extraMetadata = null) {
+    if (!referenceId) return;
+    const billing = this.getResolvedBillingTools();
+    return billing.releaseHold({
+      referenceId,
+      metadata: extraMetadata || {},
+    });
+  }
+
+  /**
+   * Settles a previously prepared credit hold.
+   */
+  async settlePreparedBilling(referenceId, extraMetadata = null) {
+    if (!referenceId) return;
+    const billing = this.getResolvedBillingTools();
+    return billing.settleHold({
+      referenceId,
+      metadata: extraMetadata || {},
+    });
   }
 
   /**

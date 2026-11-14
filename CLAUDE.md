@@ -92,7 +92,17 @@ src/systems/<system>/
 
 ---
 
-## 4. Mandatory Verification Commands (Run Before Finishing Any Task)
+## 4. Test Architecture (Boundary TDD — `tests/`)
+
+Tests mirror `src/` 1:1. Never create flat micro-ticket test files or `fs.readFileSync` source-inspection tests:
+- `tests/architecture/` — Tests for `scripts/arch-check.cjs` (`archRules.test.js`) and DI/route table audits (`containerAndRoutesAudit.test.js`).
+- `tests/shared/` — Tests for `#shared` (`sharedKernel.test.js`).
+- `tests/systems/{generation,models,billing,media,identity,characters,elements,workspace}/` — Consolidated behavioral & boundary tests importing exclusively from `#<system>/tools` and `#<system>/api`.
+- `tests/helpers/` — Shared test doubles (`inMemoryWalletService.js`).
+
+---
+
+## 5. Mandatory Verification Commands (Run Before Finishing Any Task)
 
 Every agent must run and pass the full quality gate before committing or completing a task:
 
@@ -100,6 +110,6 @@ Every agent must run and pass the full quality gate before committing or complet
 npm run arch              # Runs scripts/arch-check.cjs (Rules R1–R17 + Cycle Detector)
 npm run catalog           # Regenerates and verifies docs/agents/service-catalog.md
 node scripts/check-doc-paths.cjs  # Verifies all file paths referenced in markdown docs
-npm test                  # Runs the full hermetic test suite (1,467+ tests)
+npm test                  # Runs the full hermetic test suite (41 files, 1,331 tests)
 npm run gate              # Runs all of the above + secrets scan in one command
 ```

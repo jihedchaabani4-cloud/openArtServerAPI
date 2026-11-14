@@ -1,4 +1,4 @@
-import { getGenerationServices } from "../serviceAccessor.js";
+import { getGenerationServices } from "../services/serviceAccessor.js";
 import { createLogger } from "#shared";
 
 const controllerLogger = createLogger("controller");

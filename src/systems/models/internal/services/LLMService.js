@@ -7,8 +7,14 @@
  * Backed 100% by the central Models Management System
  * with Google Gemini 2.0 Flash as the default workhorse model.
  */
-import { run } from "../index.js";
+import { getModel } from "../registry/modelRegistry.js";
+import { run as runInternal } from "../execution/modelRunner.js";
 import { createLogger, LogEvents } from "#shared";
+
+function run(modelFamily, semanticParams = {}, options = {}) {
+  const model = getModel(modelFamily);
+  return runInternal(modelFamily, semanticParams, { ...options, model });
+}
 
 const logger = createLogger("llm");
 

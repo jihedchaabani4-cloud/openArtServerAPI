@@ -14,7 +14,7 @@ import {
   getFailedOpsService,
   getWalletRepository,
   getTransactionRepository,
-} from "../serviceAccessor.js";
+} from "../services/serviceAccessor.js";
 import { runReservationReaper } from "../services/ReservationReaperService.js";
 
 const logger = createLogger("wallet-worker");

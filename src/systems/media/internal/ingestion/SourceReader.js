@@ -8,7 +8,7 @@
 import { SourcePolicy } from "./SourcePolicy.js";
 import { MediaInspector } from "./MediaInspector.js";
 import { DEFAULT_UPLOAD_POLICY } from "./UploadPolicy.js";
-import { ValidationError, createPayloadTooLargeError } from "./MediaUploadErrors.js";
+import { ValidationError, createPayloadTooLargeError } from "../errors.js";
 
 const MB = 1024 * 1024;
 const MAGIC_HEADER_MIN_BYTES = 32;

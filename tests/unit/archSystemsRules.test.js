@@ -177,7 +177,7 @@ describe("Ticket 0.4 Architecture Rules R10-R16 and Cycle Detector", () => {
       assert.ok(!promptBuilder.text.includes("ElementService.js"));
 
       // Pair 3: catalogPresentation -> models/index.js (must not exist)
-      const catalogPres = files.find((f) => f.rel === "src/systems/models/internal/catalogPresentation.js");
+      const catalogPres = files.find((f) => f.rel === "src/systems/models/internal/services/catalogPresentation.js");
       assert.ok(catalogPres);
       assert.ok(!catalogPres.text.includes("./index.js"));
     });

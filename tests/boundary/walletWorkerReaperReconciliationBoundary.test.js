@@ -208,7 +208,7 @@ describe("Ticket 07: BullMQ Reservation Reaper Worker & Media Deletion Concurren
       "src/systems/billing/internal/workers/walletWorker.js",
       "src/systems/billing/internal/workers/walletQueue.js",
       "src/systems/billing/internal/services/FailedOpsService.js",
-      "src/systems/models/internal/pricing/PricingService.js",
+      "src/systems/models/internal/services/PricingService.js",
       "src/systems/billing/internal/db/UsageEventRepository.js",
     ];
 

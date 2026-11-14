@@ -1,4 +1,4 @@
-import { CredentialError } from "../errors/index.js";
+import { CredentialError } from "../errors.js";
 import { envConfig } from "#shared";
 
 // In-memory credential cache with 5-minute TTL (acceleration layer over resolution)

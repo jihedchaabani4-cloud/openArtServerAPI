@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { getCatalog, calculateCost } from "#models/tools";
 import { createLogger, envConfig } from "#shared";
-import { listCreditPackages } from "../../serviceAccessor.js";
+import { listCreditPackages } from "../../services/serviceAccessor.js";
 
 const logger = createLogger("payments_utils");
 

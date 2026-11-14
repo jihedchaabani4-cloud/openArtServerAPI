@@ -1,4 +1,4 @@
-import { OutputContractViolationError } from "../errors/index.js";
+import { OutputContractViolationError } from "../errors.js";
 
 /**
  * Output Contract Validator

@@ -7,7 +7,7 @@
  * path resolutions, and batch deletions.
  */
 import { StoragePathResolver, storagePathResolver } from "./StoragePathResolver.js";
-import { StorageError, StorageValidationError } from "./StorageErrors.js";
+import { StorageError, StorageValidationError } from "../errors.js";
 import { isStream } from "./streamUtils.js";
 import { createLogger } from "#shared";
 

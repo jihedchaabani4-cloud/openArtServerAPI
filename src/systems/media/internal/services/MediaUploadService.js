@@ -20,12 +20,12 @@
 
 import { randomUUID } from "node:crypto";
 import sharp from "sharp";
-import { SourceResolver } from "./SourceResolver.js";
-import { SourceReader } from "./SourceReader.js";
-import { SourcePolicy } from "./SourcePolicy.js";
-import { MediaInspector } from "./MediaInspector.js";
-import { DEFAULT_UPLOAD_POLICY } from "./UploadPolicy.js";
-import { ValidationError, UploadError } from "./MediaUploadErrors.js";
+import { SourceResolver } from "../ingestion/SourceResolver.js";
+import { SourceReader } from "../ingestion/SourceReader.js";
+import { SourcePolicy } from "../ingestion/SourcePolicy.js";
+import { MediaInspector } from "../ingestion/MediaInspector.js";
+import { DEFAULT_UPLOAD_POLICY } from "../ingestion/UploadPolicy.js";
+import { ValidationError, UploadError } from "../errors.js";
 import { crudOperationLog, CrudServiceError, calculateAspectRatio } from "#shared";
 
 const MIME_TO_EXT = Object.freeze({

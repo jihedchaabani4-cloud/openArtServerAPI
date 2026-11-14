@@ -10,7 +10,7 @@ import {
   PriorityConflictError,
   MissingOutputMapError,
   ConfigIntegrityError
-} from "../errors/index.js";
+} from "../errors.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

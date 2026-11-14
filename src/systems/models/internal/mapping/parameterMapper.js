@@ -1,4 +1,4 @@
-import { MissingOutputMapError } from "../errors/index.js";
+import { MissingOutputMapError } from "../errors.js";
 import { createLogger } from "#shared";
 
 const logger = createLogger("models");

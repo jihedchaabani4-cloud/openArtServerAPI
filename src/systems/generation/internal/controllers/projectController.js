@@ -1,4 +1,4 @@
-import { getGenerationServices } from "../serviceAccessor.js";
+import { getGenerationServices } from "../services/serviceAccessor.js";
 import { getModelConfig } from "#models/tools";
 import { createLogger } from "#shared";
 

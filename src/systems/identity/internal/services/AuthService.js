@@ -5,7 +5,7 @@
  */
 import { authClient } from "../db/authClient.js";
 import { ProfileRepository } from "../db/ProfileRepository.js";
-import { setAuthCookies, clearAuthCookies } from "../cookies.js";
+import { setAuthCookies, clearAuthCookies } from "./cookies.js";
 import { createLogger } from "#shared";
 import { getWalletService } from "#billing/tools";
 import { IdentityValidationError, IdentityAuthenticationError } from "../errors.js";

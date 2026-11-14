@@ -4,7 +4,7 @@
  * Feature: 026-backend-platform-layer-refactor
  */
 
-import { getGenerationServices } from "../serviceAccessor.js";
+import { getGenerationServices } from "../services/serviceAccessor.js";
 import { assertOwns } from "#identity/tools";
 import { safePublicRouteError } from "#shared";
 import { db } from "../db/dbMap.js";

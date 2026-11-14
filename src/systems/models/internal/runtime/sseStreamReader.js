@@ -1,6 +1,6 @@
 import fetch from "node-fetch";
 import { getDeepProperty } from "../mapping/parameterMapper.js";
-import { ProviderTransientError } from "../errors/index.js";
+import { ProviderTransientError } from "../errors.js";
 
 /**
  * Server-Sent Events (SSE) Stream Reader

@@ -292,4 +292,6 @@ Translate the semantic meaning and enhance it as a professional AI generation pr
     }
 }
 
+export const promptService = new PromptService();
 export default PromptService;
+

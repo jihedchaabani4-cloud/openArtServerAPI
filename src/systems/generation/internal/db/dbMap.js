@@ -11,7 +11,7 @@ import { characterRepository } from "#characters/tools";
 import { elementRepository } from "#elements/tools";
 import { workflowRepository } from "./WorkflowRepository.js";
 import { generationConfigRepository } from "./GenerationConfigRepository.js";
-import { getGenerationServices } from "../serviceAccessor.js";
+import { getGenerationServices } from "../services/serviceAccessor.js";
 
 const fallbackDb = {
     projects: projectRepository,

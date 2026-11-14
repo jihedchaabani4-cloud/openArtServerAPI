@@ -9,7 +9,7 @@
  * - If project_id is provided, media must belong to that project
  * - If session_id is provided, media's workflow must belong to that session
  */
-import { getGenerationServices } from "../serviceAccessor.js";
+import { getGenerationServices } from "./serviceAccessor.js";
 
 export async function assertMediaUsable({
     media_id,

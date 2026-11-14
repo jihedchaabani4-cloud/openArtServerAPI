@@ -5,8 +5,10 @@
  * injected Supabase client, keeping provider classes private to the storage system.
  */
 import { StorageService } from "./StorageService.js";
+import { IStorageProvider } from "./IStorageProvider.js";
+import { InMemoryStorageProvider } from "./providers/InMemoryStorageProvider.js";
 import { SupabaseStorageProvider } from "./providers/SupabaseStorageProvider.js";
-import { StorageError } from "./StorageErrors.js";
+import { StorageError } from "../errors.js";
 
 /**
  * Factory creating a StorageService wired with the Supabase storage provider.
@@ -30,4 +32,11 @@ export function createStorageService({
     return new StorageService({ bucketName, provider });
 }
 
+export {
+    IStorageProvider,
+    InMemoryStorageProvider,
+    SupabaseStorageProvider,
+};
+
 export default createStorageService;
+

@@ -1,6 +1,6 @@
 import { supabase, supabaseAdmin } from "./mediaClient.js";
 import { inferWorkflowMediaRole } from "./workflowMediaRole.js";
-import { formatWorkflowReferenceQuotaMessage } from "../ingestion/MediaUploadErrors.js";
+import { formatWorkflowReferenceQuotaMessage } from "../errors.js";
 import { envConfig } from "#shared";
 
 const memoryWorkflowMedia = [];

@@ -8,7 +8,7 @@
  */
 import { createLogger, LogEvents } from "#shared";
 import { markMediaFailed } from "#media/tools";
-import { getWalletService, getDefaultLifecycleService } from "../serviceAccessor.js";
+import { getWalletService, getDefaultLifecycleService } from "./serviceAccessor.js";
 
 const logger = createLogger("reservation-reaper");
 

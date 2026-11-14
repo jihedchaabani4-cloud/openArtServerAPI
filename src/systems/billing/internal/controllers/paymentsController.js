@@ -1,4 +1,4 @@
-import { getWalletService, getCreditPackage, resolvePackageCredits } from "../serviceAccessor.js";
+import { getWalletService, getCreditPackage, resolvePackageCredits } from "../services/serviceAccessor.js";
 import { getAuthUserById } from "#identity/tools";
 import { createLogger } from "#shared";
 import {

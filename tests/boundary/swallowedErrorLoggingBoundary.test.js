@@ -23,7 +23,7 @@ describe("Task D: Swallowed Error Logging Boundary Tests", () => {
 
   it("TEST 2: useCaseService.js logs structured error instead of empty catch on dispatch failure rollback", () => {
     const content = fs.readFileSync(
-      new URL("../../src/systems/generation/internal/engine/useCaseService.js", import.meta.url),
+      new URL("../../src/systems/generation/internal/services/useCaseService.js", import.meta.url),
       "utf8"
     );
     assert.doesNotMatch(

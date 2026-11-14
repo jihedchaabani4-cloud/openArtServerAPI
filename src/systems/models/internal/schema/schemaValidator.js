@@ -3,7 +3,7 @@ import {
   InvalidEnumValueError,
   ValidationError,
   UnsupportedCapabilityError,
-} from "../errors/index.js";
+} from "../errors.js";
 import { evaluateRules } from "./conditionalRules.js";
 
 /**

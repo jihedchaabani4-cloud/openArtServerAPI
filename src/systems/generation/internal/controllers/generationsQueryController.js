@@ -3,7 +3,7 @@
  * All business logic delegated to GenerationService.
  * Feature: 026-backend-platform-layer-refactor
  */
-import { getGenerationServices } from "../serviceAccessor.js";
+import { getGenerationServices } from "../services/serviceAccessor.js";
 
 export const getAssets = async (req, res) => {
     try {

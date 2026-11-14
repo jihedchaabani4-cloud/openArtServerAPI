@@ -6,7 +6,7 @@ import {
   BindingModelMismatchError,
   UnsupportedCapabilityError,
   NoEligibleBindingError,
-} from "../errors/index.js";
+} from "../errors.js";
 
 function normalizeId(id) {
   return typeof id === "string" ? id.replace(/-/g, "_") : id;

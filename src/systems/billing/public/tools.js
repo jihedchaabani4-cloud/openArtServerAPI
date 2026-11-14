@@ -15,26 +15,25 @@ import {
     WalletError,
 } from "../internal/errors.js";
 
-import {
-    WalletRepository,
-    TransactionRepository,
-    CreditPackageRepository,
-    FailedOpsRepository,
-    UsageEventRepository,
-    createBillingRepositories,
-    getBillingSupabaseAdminClient,
-} from "../internal/db/index.js";
+import { WalletRepository } from "../internal/db/WalletRepository.js";
+import { TransactionRepository } from "../internal/db/TransactionRepository.js";
+import { CreditPackageRepository } from "../internal/db/CreditPackageRepository.js";
+import { FailedOpsRepository } from "../internal/db/FailedOpsRepository.js";
+import { UsageEventRepository } from "../internal/db/UsageEventRepository.js";
+import { getBillingSupabaseAdminClient } from "../internal/db/billingClient.js";
 
+import { WalletService } from "../internal/services/WalletService.js";
 import {
-    WalletService,
     FailedOpsService,
-    reconcileExpiredHolds,
-    handleExpireStaleHolds,
-    runReservationReaper,
     FAILED_OPS_BACKOFF_BASE_MS,
     FAILED_OPS_BACKOFF_MULTIPLIER,
     FAILED_OPS_DEFAULT_MAX_RETRIES,
-} from "../internal/services/index.js";
+} from "../internal/services/FailedOpsService.js";
+import {
+    reconcileExpiredHolds,
+    handleExpireStaleHolds,
+    runReservationReaper,
+} from "../internal/services/ReservationReaperService.js";
 
 import {
     walletMaintenanceQueue,
@@ -50,6 +49,7 @@ import {
 } from "../internal/workers/walletWorker.js";
 
 import {
+    createBillingRepositories,
     configureBilling,
     getPricingService,
     getRedisConnection,
@@ -64,7 +64,7 @@ import {
     listCreditPackages,
     getCreditPackage,
     resolvePackageCredits,
-} from "../internal/serviceAccessor.js";
+} from "../internal/services/serviceAccessor.js";
 
 export {
     configureBilling,

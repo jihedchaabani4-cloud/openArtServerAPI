@@ -302,6 +302,28 @@ export class GenerationQueueDispatchError extends GenerationError {
     }
 }
 
+export class CompilationError extends Error {
+    constructor(rule, message, details = {}) {
+        super(message);
+        this.name = "CompilationError";
+        this.rule = rule;
+        this.details = details;
+    }
+
+    toJSON() {
+        return { rule: this.rule, message: this.message, details: this.details };
+    }
+}
+
+export function throwCompilationErrors(errors) {
+    if (errors.length > 0) {
+        const err = new Error(`Workflow compilation failed with ${errors.length} error(s).`);
+        err.name = "CompilationFailed";
+        err.errors = errors.map((e) => e.toJSON());
+        throw err;
+    }
+}
+
 export default {
     ERROR_CODES,
     GenerationError,
@@ -311,4 +333,7 @@ export default {
     GenerationNotFoundError,
     GenerationCompilationError,
     GenerationQueueDispatchError,
+    CompilationError,
+    throwCompilationErrors,
 };
+

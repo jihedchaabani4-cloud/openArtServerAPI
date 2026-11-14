@@ -5,7 +5,7 @@
  */
 import { authClient } from "../db/authClient.js";
 import { AuthService } from "./AuthService.js";
-import { setAuthCookies } from "../cookies.js";
+import { setAuthCookies } from "./cookies.js";
 import { envConfig } from "#shared";
 
 export const OAuthService = {

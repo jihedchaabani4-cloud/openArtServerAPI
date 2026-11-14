@@ -23,7 +23,7 @@
  */
 import { createLogger } from "#shared";
 import { getModel } from "../registry/modelRegistry.js";
-import { calculateRetailCredits } from "./pricingEngine.js";
+import { calculateRetailCredits } from "../pricing/pricingEngine.js";
 import { getModelsSupabaseAdminClient } from "../db/modelsClient.js";
 
 const pricingLogger = createLogger("pricing-service");

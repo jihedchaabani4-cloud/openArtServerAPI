@@ -8,9 +8,9 @@ import { circuitBreakerRegistry } from "./circuitBreaker.js";
 import { normalizeError } from "./errorNormalizer.js";
 import { defaultRuntimeExecutor } from "./runtimeExecutor.js";
 import { getCustomAdapter } from "../runtime/adapters/adapterLoader.js";
-import { resolveCredential } from "../credentials/credentialResolver.js";
+import { resolveCredential } from "../services/credentialResolver.js";
 import { idempotencyStore as defaultIdempotencyStore } from "./idempotencyStore.js";
-import { MissingUserIdError, ProviderTransientError, ConfigIntegrityError } from "../errors/index.js";
+import { MissingUserIdError, ProviderTransientError, ConfigIntegrityError } from "../errors.js";
 import { createLogger } from "#shared";
 
 const logger = createLogger("models");

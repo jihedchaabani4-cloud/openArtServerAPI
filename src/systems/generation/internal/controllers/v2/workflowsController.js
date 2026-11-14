@@ -4,7 +4,7 @@ import { createLogger, ErrorSystem, envConfig } from "#shared";
 const controllerLogger = createLogger("controller");
 import { compileWorkflow } from "../../v2/compiler/compileWorkflow.js";
 import { startWorkflowRun } from "../../v2/runner/workflowRunner.js";
-import { RunRepository } from "../../v2/runner/runRepository.js";
+import { RunRepository } from "../../db/RunRepository.js";
 import { postRunRequestSchema } from "../../v2/api/v2ApiSchemas.js";
 import { sanitizeClientError, DEFAULT_APOLOGY_MESSAGE } from "../../v2/runtime/errorPolicy.js";
 

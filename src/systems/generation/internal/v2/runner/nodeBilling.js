@@ -1,4 +1,4 @@
-import { RunRepository } from "./runRepository.js";
+import { RunRepository } from "../../db/RunRepository.js";
 import { calculateCost } from "#models/tools";
 import { createLogger } from "#shared";
 

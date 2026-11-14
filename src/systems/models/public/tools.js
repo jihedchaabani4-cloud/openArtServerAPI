@@ -17,44 +17,47 @@ import {
   getModelBindings,
   getProvider,
   reloadRegistry,
+} from "../internal/registry/modelRegistry.js";
+import {
   resolveExecutionPlan,
   resolveConfiguredBinding,
   resolveBindingForTest,
+} from "../internal/registry/bindingResolver.js";
+import {
   validateCanonicalInput,
   validateBindingConstraints,
-  getModelSchemaInternal,
-  getModelConfig as getInternalModelConfig,
-} from "../internal/registry/index.js";
-
+  getModelSchema as getModelSchemaInternal,
+} from "../internal/schema/schemaValidator.js";
+import { getModelConfig as getInternalModelConfig } from "../internal/services/catalogPresentation.js";
 import {
   calculateRetailCredits,
   calculateWholesaleCostUsd,
   calculateMargin,
+} from "../internal/pricing/pricingEngine.js";
+import {
   calculateCost,
   getCatalog,
-  estimatePrice,
-  PricingService,
-} from "../internal/pricing/index.js";
-
+} from "../internal/services/catalogQueries.js";
+import { PricingService } from "../internal/services/PricingService.js";
 import {
   llmService,
   LLMService,
   BillingContextMissingError,
   ALLOWED_INTERNAL_REASONS,
-  PromptService,
-} from "../internal/providers/index.js";
-
+} from "../internal/services/LLMService.js";
+import { PromptService, promptService } from "../internal/services/PromptService.js";
+import { run as runInternal } from "../internal/execution/modelRunner.js";
+import { normalizeError } from "../internal/execution/errorNormalizer.js";
+import { RuntimeExecutor } from "../internal/execution/runtimeExecutor.js";
 import {
-  run,
-  normalizeError,
-  RuntimeExecutor,
   resolveProviderRoute,
   registerProviderResolver,
   getRunner,
   registerProviderRunner,
   unregisterProviderRunner,
   executeProvider,
-} from "../internal/execution/index.js";
+} from "../internal/runtime/providerRuntimeRegistry.js";
+import { createLogger } from "#shared";
 
 import {
   ModelsError,
@@ -83,6 +86,43 @@ import {
   ConfigIntegrityError,
   NoEligibleBindingError,
 } from "../internal/errors.js";
+
+const modelsLogger = createLogger("models");
+
+// Eagerly initialize the registry on module load
+try {
+  initRegistry();
+} catch (err) {
+  modelsLogger.error({ error: err.message }, `Registry boot initialization error: ${err.message}`);
+}
+
+export function estimatePrice(modelFamily, rawInput = {}, options = {}) {
+  const cleanInput = validateInput(modelFamily, rawInput);
+  const { model, route, planIdentity } = resolveExecutionPlan(modelFamily, cleanInput, options);
+  validateBindingConstraints(route, cleanInput);
+  const amount = calculateRetailCredits(model, cleanInput, route);
+  return {
+    amount,
+    currency: "credits",
+    pricingVersion: "fixed_retail",
+    manifestVersion: model?.version || "1.0.0",
+    planIdentity: planIdentity?.id || null,
+  };
+}
+
+export async function run(modelFamily, semanticParams = {}, options = {}) {
+  const model = getModel(modelFamily);
+
+  modelsLogger.debug(
+    {
+      modelFamily,
+      event: "models.execution.started",
+    },
+    `Executing model ${modelFamily}`
+  );
+
+  return runInternal(modelFamily, semanticParams, { ...options, model });
+}
 
 // ── Inter-System Tools Functions (System 2 Interface) ──────────────────────────
 
@@ -301,8 +341,6 @@ export {
   validateBindingConstraints,
   getCatalog,
   calculateCost,
-  estimatePrice,
-  run,
   normalizeError,
   RuntimeExecutor,
   resolveProviderRoute,
@@ -321,6 +359,7 @@ export {
   BillingContextMissingError,
   ALLOWED_INTERNAL_REASONS,
   PromptService,
+  promptService,
   llmService,
 
   // Typed Errors
@@ -376,6 +415,7 @@ export default {
   PricingService,
   LLMService,
   PromptService,
+  promptService,
   llmService,
 
   // Errors

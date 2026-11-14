@@ -16,7 +16,7 @@
  */
 
 import "dotenv/config";
-import { supabaseAdmin, supabase } from "../lib/supabase.js";
+import { supabaseAdmin, supabase } from "#shared";
 
 async function fetchOpenApiSchema(url, key) {
   try {

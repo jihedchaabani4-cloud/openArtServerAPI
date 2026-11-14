@@ -9,17 +9,11 @@
  * entity existence validation, and sheet result attachment.
  */
 
-import { identityTools } from "#identity/tools";
-import {
-    CharacterRepository,
-    characterRepository,
-} from "../internal/db/CharacterRepository.js";
-import {
-    CharacterService,
-    CharacterMediaService,
-    CharacterGenerationService,
-    CHARACTER_MAX_DETAIL_MEDIA,
-} from "../internal/services/index.js";
+import * as identityTools from "#identity/tools";
+import { CharacterRepository, characterRepository } from "../internal/db/CharacterRepository.js";
+import { CharacterService } from "../internal/services/CharacterService.js";
+import { CharacterMediaService, CHARACTER_MAX_DETAIL_MEDIA } from "../internal/services/CharacterMediaService.js";
+import { CharacterGenerationService } from "../internal/services/CharacterGenerationService.js";
 import {
     CharactersError,
     CharactersValidationError,

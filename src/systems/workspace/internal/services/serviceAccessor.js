@@ -3,7 +3,8 @@
  */
 import { ProjectService } from "./ProjectService.js";
 import { FolderService } from "./FolderService.js";
-import { projectRepository, folderRepository } from "../db/index.js";
+import { projectRepository } from "../db/ProjectRepository.js";
+import { folderRepository } from "../db/FolderRepository.js";
 
 let _projectService = null;
 let _folderService = null;

@@ -1,5 +1,5 @@
 import { Client as WavespeedClient } from "wavespeed";
-import { ProviderRequestError, ProviderTransientError } from "../../errors/index.js";
+import { ProviderRequestError, ProviderTransientError } from "../../errors.js";
 import { envConfig } from "#shared";
 
 /**

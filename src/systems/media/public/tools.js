@@ -5,50 +5,57 @@
  * linking, URL resolution, asset upload, and storage management.
  */
 
-import { saveTypeRegistry, SAVE_TYPES, RETENTION_POLICIES } from "../internal/saveTypes.js";
+import { saveTypeRegistry, SAVE_TYPES, RETENTION_POLICIES } from "../internal/services/saveTypes.js";
+import { MediaRepository } from "../internal/db/MediaRepository.js";
+import { WorkflowMediaRepository } from "../internal/db/WorkflowMediaRepository.js";
 import {
-    MediaRepository,
-    WorkflowMediaRepository,
     createMediaInWorkflow,
     linkWorkflowMediaForCreatedRow,
+} from "../internal/db/workflowMediaLinker.js";
+import {
     markMediaStatus,
     markMediaFailed as internalMarkMediaFailed,
     createWorkflowWithMedia,
     createWorkflowWithMediaAtomic,
     appendMediaToWorkflow,
+} from "../internal/db/workflowMediaOps.js";
+import {
     WORKFLOW_MEDIA_ROLES,
     normalizeWorkflowMediaRole,
     inferWorkflowMediaRole,
+} from "../internal/db/workflowMediaRole.js";
+import {
     getMediaSupabaseClient,
     getMediaSupabaseAdminClient,
-} from "../internal/db/index.js";
+} from "../internal/db/mediaClient.js";
+import { StorageService } from "../internal/storage/StorageService.js";
+import { StoragePathResolver, storagePathResolver } from "../internal/storage/StoragePathResolver.js";
 import {
-    StorageService,
-    StoragePathResolver,
     createStorageService,
     IStorageProvider,
     InMemoryStorageProvider,
     SupabaseStorageProvider,
-    storagePathResolver,
-    StorageError,
-    StorageValidationError,
-    isStream,
-} from "../internal/storage/index.js";
+} from "../internal/storage/storageFactory.js";
+import { isStream } from "../internal/storage/streamUtils.js";
+import { MediaUploadService } from "../internal/services/MediaUploadService.js";
+import { AssetUploadService } from "../internal/services/AssetUploadService.js";
+import { MediaInspector } from "../internal/ingestion/MediaInspector.js";
 import {
-    MediaUploadService,
-    AssetUploadService,
-    MediaInspector,
-    SourceResolver,
-    SourceReader,
-    SourcePolicy,
     extractImageMetadata,
     extractVideoMetadata,
     extractMediaMetadata,
+} from "../internal/ingestion/MediaMetadataExtractor.js";
+import { SourceResolver } from "../internal/ingestion/SourceResolver.js";
+import { SourceReader } from "../internal/ingestion/SourceReader.js";
+import { SourcePolicy } from "../internal/ingestion/SourcePolicy.js";
+import {
     createSizeLimitedMemoryStorage,
     resetActiveUploadsForTest,
     resetInFlightBytesForTest,
     getActiveUploadsCountForTest,
     getInFlightBytesForTest,
+} from "../internal/ingestion/sizeLimitedStorage.js";
+import {
     DEFAULT_UPLOAD_POLICY,
     ELEMENT_REFERENCE_UPLOAD_POLICY,
     ELEMENT_SHEET_UPLOAD_POLICY,
@@ -56,26 +63,23 @@ import {
     CHARACTER_SHEET_UPLOAD_POLICY,
     CHARACTER_DETAIL_UPLOAD_POLICY,
     UPLOAD_POLICIES,
-    createPayloadTooLargeError,
-    ValidationError,
-    UploadError,
-    QuotaError,
-    WORKFLOW_REFERENCE_QUOTA_PREFIX,
-    WORKFLOW_REFERENCE_QUOTA_PATTERN,
-    formatWorkflowReferenceQuotaMessage,
-    isWorkflowReferenceQuotaError,
-} from "../internal/ingestion/index.js";
+} from "../internal/ingestion/UploadPolicy.js";
+import { MediaService } from "../internal/services/MediaService.js";
 import {
-    MediaService,
     MediaWorkflowLifecycleService,
-    V1StorageBridge,
-    resolveMediaMetadata,
-    calculateAspectRatio,
+    MEDIA_WORKFLOW_STATUS,
     failWorkflowPendingMedia,
     normalizeNodeMediaOutputs,
-    MEDIA_WORKFLOW_STATUS,
-} from "../internal/services/index.js";
-import { setMediaServices } from "../internal/services/serviceAccessor.js";
+} from "../internal/services/MediaLifecycleService.js";
+import { V1StorageBridge } from "../internal/services/v1StorageBridge.js";
+import {
+    resolveMediaMetadata,
+    calculateAspectRatio,
+} from "../internal/services/mediaMetadataResolver.js";
+import {
+    setMediaServices,
+    getMediaRepository as getAccessorMediaRepository,
+} from "../internal/services/serviceAccessor.js";
 import {
     MediaError,
     MediaValidationError,
@@ -83,10 +87,19 @@ import {
     MediaStorageError,
     MediaUploadError,
     MediaQuotaError,
+    StorageError,
+    StorageValidationError,
+    ValidationError,
+    UploadError,
+    QuotaError,
+    WORKFLOW_REFERENCE_QUOTA_PREFIX,
+    WORKFLOW_REFERENCE_QUOTA_PATTERN,
+    formatWorkflowReferenceQuotaMessage,
+    isWorkflowReferenceQuotaError,
+    createPayloadTooLargeError,
 } from "../internal/errors.js";
 
 // Singletons managed by the media system
-let _mediaRepo = null;
 let _workflowMediaRepo = null;
 let _storageService = null;
 let _mediaUploadService = null;
@@ -102,10 +115,7 @@ export function configureMedia(services = {}) {
 }
 
 export function getMediaRepository() {
-    if (!_mediaRepo) {
-        _mediaRepo = new MediaRepository();
-    }
-    return _mediaRepo;
+    return getAccessorMediaRepository();
 }
 
 export function getWorkflowMediaRepository() {

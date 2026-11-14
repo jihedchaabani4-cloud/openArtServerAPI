@@ -5,20 +5,37 @@
 import {
     BillingValidationError,
     BillingConfigurationError,
-} from "./errors.js";
+} from "../errors.js";
 
+import { WalletRepository } from "../db/WalletRepository.js";
+import { TransactionRepository } from "../db/TransactionRepository.js";
+import { CreditPackageRepository } from "../db/CreditPackageRepository.js";
+import { FailedOpsRepository } from "../db/FailedOpsRepository.js";
+import { UsageEventRepository } from "../db/UsageEventRepository.js";
 import {
-    WalletRepository,
-    TransactionRepository,
-    CreditPackageRepository,
-    FailedOpsRepository,
-    UsageEventRepository,
     getBillingSupabaseClient,
     getBillingSupabaseAdminClient,
-} from "./db/index.js";
+} from "../db/billingClient.js";
 
-import { WalletService } from "./services/WalletService.js";
-import { FailedOpsService } from "./services/FailedOpsService.js";
+import { WalletService } from "./WalletService.js";
+import { FailedOpsService } from "./FailedOpsService.js";
+
+export function createBillingRepositories(supabaseClient, { catalogClient = null } = {}) {
+    if (!supabaseClient) return null;
+    if (!catalogClient) {
+        throw new BillingConfigurationError("[BillingFactory] catalogClient is required for CreditPackageRepository");
+    }
+    const txRepo = new TransactionRepository(supabaseClient);
+
+    return {
+        walletRepo: new WalletRepository(supabaseClient),
+        transactionRepo: txRepo,
+        txRepo,
+        failedOpsRepo: new FailedOpsRepository(supabaseClient),
+        usageEventRepo: new UsageEventRepository(supabaseClient),
+        creditPackageRepo: new CreditPackageRepository(catalogClient),
+    };
+}
 
 let _defaultWalletService = null;
 let _defaultCreditPackageRepo = null;

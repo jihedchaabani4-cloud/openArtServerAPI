@@ -7,7 +7,8 @@
  * wallet operations that failed and need automatic retry with exponential backoff.
  */
 import { createLogger } from "#shared";
-import { FailedOpsRepository, getBillingSupabaseAdminClient } from "../db/index.js";
+import { FailedOpsRepository } from "../db/FailedOpsRepository.js";
+import { getBillingSupabaseAdminClient } from "../db/billingClient.js";
 
 const billingLogger = createLogger("billing");
 

@@ -8,7 +8,9 @@
  */
 import { createLogger, LogEvents, envConfig } from "#shared";
 import { WalletError, BillingConfigurationError } from "../errors.js";
-import { WalletRepository, TransactionRepository, getBillingSupabaseAdminClient } from "../db/index.js";
+import { WalletRepository } from "../db/WalletRepository.js";
+import { TransactionRepository } from "../db/TransactionRepository.js";
+import { getBillingSupabaseAdminClient } from "../db/billingClient.js";
 
 const walletLogger = createLogger("wallet");
 const billingLogger = createLogger("billing");

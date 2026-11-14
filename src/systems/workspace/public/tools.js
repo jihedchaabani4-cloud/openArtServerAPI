@@ -5,12 +5,15 @@
  * Enforces the Two-Gateway Rule (Rule 2) and isolates internal/ (Rule 1, R10).
  */
 
+import { ProjectRepository, projectRepository } from "../internal/db/ProjectRepository.js";
+import { FolderRepository, folderRepository } from "../internal/db/FolderRepository.js";
+import { TrashRepository, trashRepository } from "../internal/db/TrashRepository.js";
+import { ProjectService } from "../internal/services/ProjectService.js";
+import { ProjectReadService } from "../internal/services/ProjectReadService.js";
+import { FolderService } from "../internal/services/FolderService.js";
+import { TrashService } from "../internal/services/TrashService.js";
+import * as folderTree from "../internal/services/folderTree.js";
 import {
-    ProjectService,
-    ProjectReadService,
-    FolderService,
-    TrashService,
-    folderTree,
     indexById,
     indexChildren,
     getAncestorIds,
@@ -20,16 +23,7 @@ import {
     wouldCreateCycle,
     wouldExceedDepth,
     depthForNewChild,
-} from "../internal/services/index.js";
-
-import {
-    ProjectRepository,
-    projectRepository,
-    FolderRepository,
-    folderRepository,
-    TrashRepository,
-    trashRepository,
-} from "../internal/db/index.js";
+} from "../internal/services/folderTree.js";
 
 import {
     WorkspaceError,

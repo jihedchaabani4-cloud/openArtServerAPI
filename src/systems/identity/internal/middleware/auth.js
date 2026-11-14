@@ -1,6 +1,6 @@
 import { authClient } from "../db/authClient.js";
 import { AppError, setContext, createLogger, envConfig } from "#shared";
-import { safeCompareSecret } from "../security/secretComparison.js";
+import { safeCompareSecret } from "../services/secretComparison.js";
 
 const authLogger = createLogger("auth");
 

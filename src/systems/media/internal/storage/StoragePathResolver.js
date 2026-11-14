@@ -3,7 +3,7 @@
  * Canonical generator for storage paths across all platform domains.
  * Eliminates ad-hoc string concatenation and ensures consistent hierarchy in storage buckets.
  */
-import { StorageValidationError } from "./StorageErrors.js";
+import { StorageValidationError } from "../errors.js";
 
 export class StoragePathResolver {
     constructor({ defaultBucket = "generated_images" } = {}) {

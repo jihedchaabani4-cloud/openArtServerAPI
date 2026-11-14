@@ -16,8 +16,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { SourceResolver } from "./SourceResolver.js";
-import { DEFAULT_UPLOAD_POLICY } from "./UploadPolicy.js";
+import { SourceResolver } from "../ingestion/SourceResolver.js";
+import { DEFAULT_UPLOAD_POLICY } from "../ingestion/UploadPolicy.js";
 import { MediaUploadService } from "./MediaUploadService.js";
 import { crudOperationLog, CrudServiceError, calculateAspectRatio } from "#shared";
 

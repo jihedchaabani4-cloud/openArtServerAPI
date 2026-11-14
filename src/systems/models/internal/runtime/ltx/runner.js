@@ -1,5 +1,5 @@
 import fetch from "node-fetch";
-import { ProviderRequestError, ProviderTransientError } from "../../errors/index.js";
+import { ProviderRequestError, ProviderTransientError } from "../../errors.js";
 import { createLogger } from "#shared";
 
 const logger = createLogger("models");

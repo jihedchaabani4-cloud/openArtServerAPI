@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { parseBinding } from "../compiler/validateBindings.js";
-import { RunRepository } from "./runRepository.js";
-import { jobQueueService } from "../../engine/jobQueueService.js";
+import { RunRepository } from "../../db/RunRepository.js";
+import { jobQueueService } from "../../services/jobQueueService.js";
 import { getValueAtPath, executeNodeJob } from "./nodeExecutor.js";
 import { formatWorkflowError } from "../runtime/errorPolicy.js";
 import { createLogger, LogEvents } from "#shared";

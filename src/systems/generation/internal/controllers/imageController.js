@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { getGenerationServices } from "../serviceAccessor.js";
+import { getGenerationServices } from "../services/serviceAccessor.js";
 import { createLogger } from "#shared";
 import { resolveMediaMetadata } from "#media/tools";
 import { assertOwns, assertOwnsAny, toMediaIdList } from "#identity/tools";

@@ -9,21 +9,12 @@
  * and entity existence validation.
  */
 
-import { identityTools } from "#identity/tools";
-import {
-    ElementRepository,
-    elementRepository,
-} from "../internal/db/ElementRepository.js";
-import {
-    ElementService,
-    ElementMediaService,
-    ElementAnalysisService,
-    extractElementTokens,
-    stripElementTokens,
-    PromptBuilderProService,
-    promptBuilderProService,
-    getElementContextForPrompt,
-} from "../internal/services/index.js";
+import * as identityTools from "#identity/tools";
+import { ElementRepository, elementRepository } from "../internal/db/ElementRepository.js";
+import { ElementService, getElementContextForPrompt } from "../internal/services/ElementService.js";
+import { ElementMediaService } from "../internal/services/ElementMediaService.js";
+import { ElementAnalysisService } from "../internal/services/ElementAnalysisService.js";
+import promptBuilderProService, { extractElementTokens, stripElementTokens, PromptBuilderProService } from "../internal/services/promptBuilderProService.js";
 import {
     ElementsError,
     ElementsValidationError,

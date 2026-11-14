@@ -1,7 +1,7 @@
 import { resolveImageRoute } from "./image/resolver.js";
 import { resolveVideoRoute } from "./video/resolver.js";
 import { resolveUpscaleRoute } from "./upscale/resolver.js";
-import { UnsupportedCapabilityError } from "../../errors/index.js";
+import { UnsupportedCapabilityError } from "../../errors.js";
 
 /**
  * WaveSpeed Provider Execution Topology Resolver

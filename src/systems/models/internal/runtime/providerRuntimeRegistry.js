@@ -1,7 +1,7 @@
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { getProvider } from "../registry/modelRegistry.js";
-import { ConfigIntegrityError } from "../errors/index.js";
+import { ConfigIntegrityError } from "../errors.js";
 import { createLogger, envConfig } from "#shared";
 
 import { resolveWaveSpeedRoute } from "./wavespeed/resolver.js";

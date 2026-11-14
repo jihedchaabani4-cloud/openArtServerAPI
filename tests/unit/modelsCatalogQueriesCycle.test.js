@@ -4,7 +4,7 @@ import fs from "node:fs";
 
 describe("Ticket 0.3 Unit Test: catalogPresentation and models/index.js cycle break", () => {
   it("catalogPresentation.js does NOT import models/index.js", () => {
-    const fileUrl = new URL("../../src/systems/models/internal/catalogPresentation.js", import.meta.url);
+    const fileUrl = new URL("../../src/systems/models/internal/services/catalogPresentation.js", import.meta.url);
     const code = fs.readFileSync(fileUrl, "utf8");
 
     const hasIndexImport = /from\s+["'].*index(\.js)?["']/.test(code);

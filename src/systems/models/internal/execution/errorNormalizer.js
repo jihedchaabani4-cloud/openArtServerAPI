@@ -4,7 +4,7 @@ import {
   ProviderTransientError,
   UnsupportedCapabilityError,
   OutputContractViolationError,
-} from "../errors/index.js";
+} from "../errors.js";
 
 export const StandardErrorCodes = Object.freeze({
   RATE_LIMITED: "RATE_LIMITED",

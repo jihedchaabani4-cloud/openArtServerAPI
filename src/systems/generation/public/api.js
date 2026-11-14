@@ -21,7 +21,7 @@ import {
     getWorkflowRunStatus,
 } from "../internal/controllers/v2/workflowsController.js";
 
-import { promptService } from "../internal/prompt/index.js";
+import { promptService } from "#models/tools";
 import { requireAuth, rateLimit } from "#identity/tools";
 
 // ── Images Router ──────────────────────────────────────────────────

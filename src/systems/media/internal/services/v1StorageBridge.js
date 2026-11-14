@@ -2,7 +2,7 @@ import {
   createWorkflowWithMedia,
   createWorkflowWithMediaAtomic,
   appendMediaToWorkflow,
-} from "../db/index.js";
+} from "../db/workflowMediaOps.js";
 import { resolveMediaMetadata } from "./mediaMetadataResolver.js";
 import { createLogger } from "#shared";
 

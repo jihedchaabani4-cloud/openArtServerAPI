@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { ProviderRequestError, ProviderTransientError } from "../../errors/index.js";
+import { ProviderRequestError, ProviderTransientError } from "../../errors.js";
 import { envConfig } from "#shared";
 
 /**

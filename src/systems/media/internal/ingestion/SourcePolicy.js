@@ -5,7 +5,7 @@
 
 import dns from "node:dns/promises";
 import net from "node:net";
-import { ValidationError, createPayloadTooLargeError } from "./MediaUploadErrors.js";
+import { ValidationError, createPayloadTooLargeError } from "../errors.js";
 import {
     DEFAULT_UPLOAD_POLICY,
     ELEMENT_REFERENCE_UPLOAD_POLICY,

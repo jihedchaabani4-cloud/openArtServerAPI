@@ -1,4 +1,4 @@
-import { ValidationError } from "../errors/index.js";
+import { ValidationError } from "../errors.js";
 
 /**
  * Conditional Rules Engine

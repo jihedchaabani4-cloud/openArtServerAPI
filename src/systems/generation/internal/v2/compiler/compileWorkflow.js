@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CompilationError, throwCompilationErrors } from "./errors.js";
+import { CompilationError, throwCompilationErrors } from "../../errors.js";
 import { validateBindings, isBindingExpression } from "./validateBindings.js";
 import { resolveRetryPolicy } from "./resolveRetryPolicy.js";
 

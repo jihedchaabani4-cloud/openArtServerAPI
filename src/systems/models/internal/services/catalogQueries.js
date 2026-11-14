@@ -3,10 +3,10 @@
  * Pure query layer providing getCatalog and calculateCost without importing from the models index facade.
  */
 
-import { getRegistry } from "./registry/modelRegistry.js";
-import { getModelSchema as getModelSchemaInternal, validateBindingConstraints } from "./schema/schemaValidator.js";
-import { calculateRetailCredits } from "./pricing/pricingEngine.js";
-import { resolveExecutionPlan } from "./registry/bindingResolver.js";
+import { getRegistry } from "../registry/modelRegistry.js";
+import { getModelSchema as getModelSchemaInternal, validateBindingConstraints } from "../schema/schemaValidator.js";
+import { calculateRetailCredits } from "../pricing/pricingEngine.js";
+import { resolveExecutionPlan } from "../registry/bindingResolver.js";
 import { createLogger, LogEvents } from "#shared";
 
 const modelsLogger = createLogger("models");

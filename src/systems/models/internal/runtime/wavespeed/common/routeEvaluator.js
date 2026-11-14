@@ -1,4 +1,4 @@
-import { UnsupportedCapabilityError, ConfigIntegrityError } from "../../../errors/index.js";
+import { UnsupportedCapabilityError, ConfigIntegrityError } from "../../../errors.js";
 
 /**
  * WaveSpeed Route Evaluator

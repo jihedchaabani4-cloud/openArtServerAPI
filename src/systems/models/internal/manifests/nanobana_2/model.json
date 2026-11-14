@@ -1,0 +1,125 @@
+{
+  "id": "nanobana_2",
+  "domain": "image",
+  "displayName": "NanoBanana 2",
+  "description": "Fast, high-efficiency lightweight photorealistic image generation model with web and image search",
+  "status": "active",
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "images": true,
+    "resolution": true,
+    "aspect_ratio": true,
+    "enable_web_search": true,
+    "enable_image_search": true,
+    "output_format": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Textual prompt describing the image to generate or edit"
+    },
+    "images": {
+      "type": "array",
+      "required": false,
+      "max": 14,
+      "description": "Array of reference images for multi-reference generation or editing"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Primary source image URL being transformed or edited"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "0.5k",
+        "1k",
+        "2k",
+        "4k"
+      ],
+      "default": "1k",
+      "description": "Output image resolution tier"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "1:1",
+        "3:2",
+        "2:3",
+        "3:4",
+        "4:3",
+        "4:5",
+        "5:4",
+        "9:16",
+        "16:9",
+        "21:9",
+        "1:4",
+        "4:1",
+        "1:8",
+        "8:1"
+      ],
+      "default": "1:1",
+      "description": "Target aspect ratio"
+    },
+    "enable_web_search": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable real-time web search grounding"
+    },
+    "enable_image_search": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable visual web search grounding"
+    },
+    "output_format": {
+      "type": "string",
+      "values": [
+        "png",
+        "jpeg"
+      ],
+      "default": "png",
+      "description": "Output image container format"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "0.5k": 6,
+      "1k": 8,
+      "2k": 14,
+      "4k": 20,
+      "default": 8
+    }
+  },
+  "operations": {
+    "text_to_image": {
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "0.5k": 6,
+          "1k": 8,
+          "2k": 14,
+          "4k": 20,
+          "default": 8
+        }
+      }
+    },
+    "edit": {
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "0.5k": 8,
+          "1k": 12,
+          "2k": 18,
+          "4k": 26,
+          "default": 12
+        }
+      }
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/minimax.svg"
+}

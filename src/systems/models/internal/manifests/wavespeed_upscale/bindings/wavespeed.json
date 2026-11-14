@@ -1,0 +1,90 @@
+{
+  "modelId": "wavespeed_upscale",
+  "operation": "upscale",
+  "providerId": "wavespeed",
+  "providerModelId": "wavespeed-ai/image-upscaler",
+  "endpoint": "/api/v3/wavespeed-ai/image-upscaler",
+  "priority": 1,
+  "status": "active",
+  "parameters": {
+    "input_image": {
+      "providerField": "image",
+      "type": "string"
+    },
+    "image_url": {
+      "providerField": "image",
+      "type": "string"
+    },
+    "scale_factor": {
+      "providerField": "target_resolution",
+      "type": "string",
+      "values": [
+        "2",
+        "4",
+        "8"
+      ],
+      "valueMap": {
+        "2": "2k",
+        "4": "4k",
+        "8": "8k"
+      }
+    },
+    "target_resolution": {
+      "providerField": "target_resolution",
+      "type": "string"
+    },
+    "output_format": {
+      "providerField": "output_format",
+      "type": "string"
+    }
+  },
+  "parameterMap": {
+    "input_image": {
+      "providerField": "image"
+    },
+    "image_url": {
+      "providerField": "image"
+    },
+    "scale_factor": {
+      "providerField": "target_resolution",
+      "valueMap": {
+        "2": "2k",
+        "4": "4k",
+        "8": "8k"
+      }
+    },
+    "target_resolution": {
+      "providerField": "target_resolution"
+    },
+    "output_format": {
+      "providerField": "output_format"
+    }
+  },
+  "pricing": {
+    "base_cost_usd": 0.01,
+    "modifiers": {
+      "scale_factor": {
+        "2": 1,
+        "4": 1,
+        "8": 1
+      }
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "2": 2,
+      "4": 4,
+      "8": 8,
+      "default": 2
+    }
+  },
+  "outputMap": {
+    "images": "outputs"
+  },
+  "pollingConfig": {
+    "pollInterval": 2,
+    "timeout": 1200
+  },
+  "version": "1.0.0"
+}

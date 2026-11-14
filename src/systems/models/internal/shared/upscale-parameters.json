@@ -1,0 +1,23 @@
+{
+  "domain": "upscale",
+  "parameters": {
+    "image_url": {
+      "type": "string",
+      "required": true,
+      "description": "Source image URL to be upscaled"
+    },
+    "scale_factor": {
+      "type": "number",
+      "required": false,
+      "values": ["2", "4"],
+      "default": 2,
+      "description": "Upscaling multiplier"
+    },
+    "face_restore": {
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "Whether to enhance and restore facial details"
+    }
+  }
+}

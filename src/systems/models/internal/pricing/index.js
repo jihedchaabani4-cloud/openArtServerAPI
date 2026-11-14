@@ -10,17 +10,17 @@ import {
   calculateRetailCredits,
   calculateWholesaleCostUsd,
   calculateMargin,
-} from "../../../../models/pricing/pricingEngine.js";
+} from "./pricingEngine.js";
 import {
   calculateCost,
   getCatalog,
-} from "../../../../models/catalogQueries.js";
+} from "../catalogQueries.js";
 import {
   estimatePrice,
-} from "../../../../models/index.js";
+} from "../index.js";
 import {
   PricingService,
-} from "../../../../models/pricing/PricingService.js";
+} from "./PricingService.js";
 
 export {
   calculateRetailCredits,

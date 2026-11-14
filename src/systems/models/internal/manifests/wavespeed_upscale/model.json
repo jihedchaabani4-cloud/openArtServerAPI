@@ -1,0 +1,74 @@
+{
+  "id": "wavespeed_upscale",
+  "domain": "upscale",
+  "displayName": "WaveSpeed AI Upscaler",
+  "description": "High-fidelity AI image resolution upscaling to 4K or 8K with enhanced detail and clarity",
+  "status": "active",
+  "capabilities": {
+    "input_image": true,
+    "scale_factor": true,
+    "target_resolution": true,
+    "output_format": true
+  },
+  "canonicalInputs": {
+    "input_image": {
+      "type": "string",
+      "required": true,
+      "max": 1,
+      "description": "Source image URL to be upscaled"
+    },
+    "scale_factor": {
+      "type": "number",
+      "values": [
+        "2",
+        "4",
+        "8"
+      ],
+      "default": 2,
+      "description": "Upscaling multiplier (2x, 4x, or 8x)"
+    },
+    "target_resolution": {
+      "type": "string",
+      "values": [
+        "2k",
+        "4k",
+        "8k"
+      ],
+      "required": false,
+      "description": "Target output resolution"
+    },
+    "output_format": {
+      "type": "string",
+      "values": [
+        "jpeg",
+        "png",
+        "webp"
+      ],
+      "default": "jpeg"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "2": 2,
+      "4": 4,
+      "8": 8,
+      "default": 2
+    }
+  },
+  "operations": {
+    "upscale": {
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "2": 2,
+          "4": 4,
+          "8": 8,
+          "default": 2
+        }
+      }
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/replicate.svg"
+}

@@ -8,10 +8,13 @@
 import {
   WaveSpeedImageResolver,
   resolveImageRoute as resolveWaveSpeedImageRoute,
-} from "../../../../models/runtime/wavespeed/image/resolver.js";
+} from "../runtime/wavespeed/image/resolver.js";
 import {
   resolveWaveSpeedRoute,
-} from "../../../../models/runtime/wavespeed/resolver.js";
+} from "../runtime/wavespeed/resolver.js";
+import {
+   evaluateWaveSpeedRoutes,
+} from "../runtime/wavespeed/common/routeEvaluator.js";
 import {
   resolveProviderRoute,
   registerProviderResolver,
@@ -19,27 +22,28 @@ import {
   registerProviderRunner,
   unregisterProviderRunner,
   executeProvider,
-} from "../../../../models/runtime/providerRuntimeRegistry.js";
+} from "../runtime/providerRuntimeRegistry.js";
 import {
   resolveExecutionRoute,
-} from "../../../../models/runtime/routeResolver.js";
+} from "../runtime/routeResolver.js";
 import {
   resolveCredential,
-} from "../../../../models/credentials/credentialResolver.js";
+} from "../credentials/credentialResolver.js";
 import {
   LLMService,
   llmService,
   BillingContextMissingError,
   ALLOWED_INTERNAL_REASONS,
-} from "../../../../platform/ai/LLMService.js";
+} from "./LLMService.js";
 import {
   PromptService,
-} from "../../../../platform/ai/PromptService.js";
+} from "./PromptService.js";
 
 export {
   WaveSpeedImageResolver,
   resolveWaveSpeedImageRoute,
   resolveWaveSpeedRoute,
+  evaluateWaveSpeedRoutes,
   resolveProviderRoute,
   registerProviderResolver,
   getRunner,
@@ -59,6 +63,7 @@ export default {
   WaveSpeedImageResolver,
   resolveWaveSpeedImageRoute,
   resolveWaveSpeedRoute,
+  evaluateWaveSpeedRoutes,
   resolveProviderRoute,
   registerProviderResolver,
   getRunner,

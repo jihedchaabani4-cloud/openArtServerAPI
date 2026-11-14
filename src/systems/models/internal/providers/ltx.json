@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "2.0",
+  "id": "ltx",
+  "displayName": "LTX (Lightricks)",
+  "baseUrl": "https://api.ltx.io",
+  "authType": "bearer",
+  "authHeader": "Authorization",
+  "runtime": "sdk",
+  "defaultTimeoutMs": 30000,
+  "envKeys": ["LTX_API_KEY"]
+}

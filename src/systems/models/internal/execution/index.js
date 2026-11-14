@@ -7,32 +7,55 @@
 
 import {
   run,
-} from "../../../../models/execution/modelRunner.js";
+} from "./modelRunner.js";
 import {
   circuitBreakerRegistry,
-} from "../../../../models/execution/circuitBreaker.js";
+} from "./circuitBreaker.js";
 import {
   normalizeError,
-} from "../../../../models/execution/errorNormalizer.js";
+} from "./errorNormalizer.js";
 import {
+  RuntimeExecutor,
   defaultRuntimeExecutor,
-} from "../../../../models/execution/runtimeExecutor.js";
+} from "./runtimeExecutor.js";
 import {
   idempotencyStore,
-} from "../../../../models/execution/idempotencyStore.js";
+} from "./idempotencyStore.js";
+import {
+  resolveProviderRoute,
+  registerProviderResolver,
+  getRunner,
+  registerProviderRunner,
+  unregisterProviderRunner,
+  executeProvider,
+} from "../runtime/providerRuntimeRegistry.js";
 
 export {
   run,
   circuitBreakerRegistry,
   normalizeError,
+  RuntimeExecutor,
   defaultRuntimeExecutor,
   idempotencyStore,
+  resolveProviderRoute,
+  registerProviderResolver,
+  getRunner,
+  registerProviderRunner,
+  unregisterProviderRunner,
+  executeProvider,
 };
 
 export default {
   run,
   circuitBreakerRegistry,
   normalizeError,
+  RuntimeExecutor,
   defaultRuntimeExecutor,
   idempotencyStore,
+  resolveProviderRoute,
+  registerProviderResolver,
+  getRunner,
+  registerProviderRunner,
+  unregisterProviderRunner,
+  executeProvider,
 };

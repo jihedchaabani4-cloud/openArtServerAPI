@@ -1,0 +1,64 @@
+id: character-sheet-v1
+name: Character Sheet
+version: 1.0.0
+description: Pure prompt resolution in PromptBuilder, professional 3-view studio sheet engineering in LLM Vision, and fixed 16:9 character sheet generation.
+
+metadata:
+  category: character
+  tags: [character, sheet, concept-art]
+  author: system
+
+input_schema:
+  required: [prompt]
+  properties:
+    prompt:     { type: string }
+    characters: { type: array }
+    references: { type: array }
+
+nodes:
+  build_prompt:
+    type: prompt-builder
+    inputs:
+      prompt: "${input.prompt}"
+      characters: "${input.characters}"
+      references: "${input.references}"
+
+  llm_enrich:
+    type: llm
+    depends_on: [build_prompt]
+    inputs:
+      userPrompt: "${build_prompt.output.finalPrompt}"
+      context: "${build_prompt.output.context}"
+      images: "${build_prompt.output.context.references}"
+    config:
+      model: gemini-3.1-flash-lite
+      skills: [llm/system-safety, llm/translation, llm/character-description, llm/json-output]
+      jsonMode: true
+    persist:
+      target: character
+      field: description
+      value: "$outputs.json.description"
+
+  generate:
+    type: image-generation
+    depends_on: [llm_enrich, build_prompt]
+    inputs:
+      prompt:     "${llm_enrich.output.json.description}"
+      references: "${build_prompt.output.context.references}"
+    config:
+      model: gpt-image-2
+      ratio: "16:9"
+      width: 1344
+      height: 768
+      count: 1
+    persist:
+      target: media
+      step_id: character_sheet
+      status: completed
+      value: "$outputs.assets[0].url"
+
+outputs:
+  character_title: "${llm_enrich.output.json.title}"
+  character_description: "${llm_enrich.output.json.description}"
+  main_asset: "${generate.output.assets}"
+  model_used: "${generate.output.metadata.model}"

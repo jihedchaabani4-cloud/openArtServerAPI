@@ -117,7 +117,7 @@ export {
     BindingOperationMismatchError,
     ConfigIntegrityError,
     NoEligibleBindingError,
-} from "../../../models/errors/index.js";
+} from "./errors/index.js";
 
 export default {
     ModelsError,

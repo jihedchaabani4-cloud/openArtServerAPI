@@ -1,0 +1,107 @@
+{
+  "id": "nanobana_pro",
+  "domain": "image",
+  "displayName": "NanoBanana Pro",
+  "description": "State-of-the-art high-fidelity photorealistic image generation model",
+  "status": "active",
+  "aliases": [
+    "nanobana",
+    "nano-banana-pro",
+    "nano_banana_pro"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "images": true,
+    "aspect_ratio": true,
+    "resolution": true,
+    "output_format": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Textual prompt describing the image to generate or edit"
+    },
+    "images": {
+      "type": "array",
+      "required": false,
+      "max": 14,
+      "description": "Array of reference images for multi-reference generation or editing"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Primary source image URL being transformed or edited"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "1k",
+        "2k",
+        "4k"
+      ],
+      "default": "1k"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "1:1",
+        "3:2",
+        "2:3",
+        "3:4",
+        "4:3",
+        "4:5",
+        "5:4",
+        "9:16",
+        "16:9",
+        "21:9"
+      ],
+      "default": "1:1"
+    },
+    "output_format": {
+      "type": "string",
+      "values": [
+        "png",
+        "jpeg"
+      ],
+      "default": "png"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "1k": 10,
+      "2k": 16,
+      "4k": 25,
+      "default": 10
+    }
+  },
+  "operations": {
+    "text_to_image": {
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "1k": 10,
+          "2k": 16,
+          "4k": 25,
+          "default": 10
+        }
+      }
+    },
+    "edit": {
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "1k": 18,
+          "2k": 18,
+          "4k": 30,
+          "default": 18
+        }
+      }
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/minimax.svg"
+}

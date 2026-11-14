@@ -1,0 +1,76 @@
+prompt-builder:
+  skill_aware: true
+  inputs:
+    prompt: { type: string, required: true }
+    references: { type: array, default: [] }
+    characters: { type: array, default: [] }
+    style: { type: string }
+  outputs:
+    finalPrompt: { type: string }
+    context: { type: WorkflowContext }
+  retry:
+    max_attempts: 1
+    backoff: none
+
+
+image-generation:
+  skill_aware: false
+  inputs:
+    prompt: { type: string, required: true }
+    references: { type: array, default: [] }
+    parameters: { type: object, default: {} }
+    width: { type: number, default: 1024 }
+    height: { type: number, default: 1024 }
+    count: { type: number, default: 1 }
+    seed: { type: number }
+    model: { type: string }
+  outputs:
+    assets: { type: array }
+    metadata: { type: object }
+  retry:
+    max_attempts: 1
+    backoff: none
+
+
+video-generation:
+  skill_aware: false
+  inputs:
+    prompt: { type: string, required: true }
+    references: { type: array, default: [] }
+    parameters: { type: object, default: {} }
+    model: { type: string }
+    duration: { type: number }
+    aspect_ratio: { type: string }
+    resolution: { type: string }
+  outputs:
+    assets: { type: array }
+    metadata: { type: object }
+  retry:
+    max_attempts: 1
+    backoff: none
+
+
+
+
+llm:
+  skill_aware: true
+  inputs:
+    skills: { type: array, required: true }
+    userPrompt: { type: string, required: true }
+    images: { type: array, default: [] }
+    model: { type: string, default: "gemini-3.1-flash-lite" }
+    temperature: { type: number, default: 0.7 }
+    jsonMode: { type: boolean, default: false }
+    schema: { type: object }
+    parameters: { type: object, default: {} }
+    systemPromptOverride: { type: string }
+  outputs:
+    text: { type: string }
+    json: { type: object }
+    usage: { type: object }
+    model: { type: string }
+    provider: { type: string }
+    skillsUsed: { type: array }
+  retry:
+    max_attempts: 1
+    backoff: none

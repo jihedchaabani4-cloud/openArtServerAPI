@@ -10,7 +10,7 @@ import {
     createFailedOpsService,
     createBillingRepositories,
 } from "#platform/billing";
-import { PricingService } from "./models/pricing/PricingService.js";
+import { PricingService } from "#models/tools";
 import { createClient } from "@supabase/supabase-js";
 import { redisConnection } from "#queue/redis.js";
 import { createLogger } from "./infrastructure/logging/index.js";
@@ -39,7 +39,6 @@ import {
     createStorageService,
     configureMedia,
 } from "#media/tools";
-import { WorkflowLifecycleService } from "#platform/workflow/WorkflowService.js";
 import { CharacterService, CharacterMediaService, configureCharacters } from "#characters/tools";
 import { ElementService, ElementMediaService, ElementAnalysisService, configureElements } from "#elements/tools";
 import { ProjectService, ProjectReadService, FolderService, TrashService, configureWorkspace } from "#workspace/tools";
@@ -47,9 +46,12 @@ import { ProjectService, ProjectReadService, FolderService, TrashService, config
 import {
     GenerationService,
     GenerationRequestService,
+    WorkflowLifecycleService,
     promptService,
     UseCaseService,
     jobQueueService,
+    configureGeneration,
+    configureDefaultGateways,
 } from "#generation/tools";
 import { WorkflowStorageGateway } from "./infrastructure/storage/workflowStorageGateway.js";
 
@@ -204,12 +206,14 @@ export const workflowStorageGateway = new WorkflowStorageGateway({
     lifecycleService: _lifecycleService,
 });
 
-import { configureDefaultGateways } from "./v2/bootstrap.js";
-configureDefaultGateways(() => ({
+import { configureDefaultGateways as configureLegacyDefaultGateways } from "./v2/bootstrap.js";
+const _defaultGatewaysFactory = () => ({
     billing: workflowBillingGateway,
     storage: workflowStorageGateway,
     events: workflowEventRecorder,
-}));
+});
+configureDefaultGateways(_defaultGatewaysFactory);
+configureLegacyDefaultGateways(_defaultGatewaysFactory);
 
 // ─── UseCase & Job Queue Services ─────────────────────────────────────────────
 export { jobQueueService };
@@ -284,5 +288,15 @@ export const generationRequestService = new GenerationRequestService({ db, useCa
 configureCharacters({ characterService, characterMediaService, trashService });
 configureMedia({ db, assetUploadService, workflowService, storageService, mediaUploadService, mediaService });
 configureWorkspace({ trashService, projectService, folderService, projectReadService, generationService });
+configureGeneration({
+    generationService,
+    generationRequestService,
+    workflowService,
+    projectReadService,
+    characterService,
+    elementService,
+    trashService,
+    db,
+});
 
 

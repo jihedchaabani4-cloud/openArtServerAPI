@@ -1,0 +1,72 @@
+{
+  "domain": "image",
+  "parameters": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Textual prompt describing the image to generate"
+    },
+    "negative_prompt": {
+      "type": "string",
+      "required": false,
+      "description": "Negative prompt describing elements to avoid"
+    },
+    "resolution": {
+      "type": "string",
+      "required": false,
+      "values": ["1k", "2k", "4k"],
+      "default": "1k",
+      "description": "Image resolution tier"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "required": false,
+      "values": ["1:1", "16:9", "9:16", "4:3", "3:4", "21:9", "3:2", "2:3", "4:5", "5:4"],
+      "default": "1:1",
+      "description": "Aspect ratio of the generated image"
+    },
+    "quality": {
+      "type": "string",
+      "required": false,
+      "values": ["standard", "hd"],
+      "default": "standard",
+      "description": "Quality tier of generation"
+    },
+    "seed": {
+      "type": "number",
+      "required": false,
+      "description": "Random seed for reproducible outputs"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "description": "Main source image URL or base64 being transformed/edited"
+    },
+    "image_url": {
+      "type": "string",
+      "required": false,
+      "description": "Source image URL for image-to-image or editing operations (alias for input_image)"
+    },
+    "reference_images": {
+      "type": "array",
+      "required": false,
+      "description": "Array of reference images used as visual or character guidance"
+    },
+    "images": {
+      "type": "array",
+      "required": false,
+      "description": "Array of reference images used for multi-reference generation or editing"
+    },
+    "mask": {
+      "type": "string",
+      "required": false,
+      "description": "Mask image URL or base64 indicating the inpaint or edit region"
+    },
+    "strength": {
+      "type": "number",
+      "required": false,
+      "default": 0.75,
+      "description": "Transformation strength for image-to-image"
+    }
+  }
+}

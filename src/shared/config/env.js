@@ -36,6 +36,24 @@ export const envConfig = {
   get maxInFlightUploadBytes() {
     return Number(process.env.MAX_IN_FLIGHT_UPLOAD_BYTES) || 0;
   },
+  get creditToUsdRate() {
+    return process.env.CREDIT_TO_USD_RATE;
+  },
+  get geminiApiKey() {
+    return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || null;
+  },
+  get wavespeedApiKey() {
+    return process.env.WAVESPEED_API_KEY || null;
+  },
+  get assetListMaxLimit() {
+    return Number(process.env.ASSET_LIST_MAX_LIMIT || 200);
+  },
+  get enableV2WorkflowRunEndpoint() {
+    return process.env.ENABLE_V2_WORKFLOW_RUN_ENDPOINT === "true";
+  },
+  getEnvVar(key) {
+    return process.env[key];
+  },
 };
 
 

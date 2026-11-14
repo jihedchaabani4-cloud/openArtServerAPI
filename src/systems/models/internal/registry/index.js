@@ -9,26 +9,32 @@ import {
   initRegistry,
   getRegistry,
   getModel,
+  getModelBindings,
+  getProvider,
   reloadRegistry,
-} from "../../../../models/registry/modelRegistry.js";
+} from "./modelRegistry.js";
 import {
   resolveExecutionPlan,
   resolveConfiguredBinding,
-} from "../../../../models/registry/bindingResolver.js";
+  resolveBindingForTest,
+} from "./bindingResolver.js";
 import {
   validateCanonicalInput,
   validateBindingConstraints,
   getModelSchema as getModelSchemaInternal,
-} from "../../../../models/schema/schemaValidator.js";
-import { getModelConfig } from "../../../../models/catalogPresentation.js";
+} from "../schema/schemaValidator.js";
+import { getModelConfig } from "../catalogPresentation.js";
 
 export {
   initRegistry,
   getRegistry,
   getModel,
+  getModelBindings,
+  getProvider,
   reloadRegistry,
   resolveExecutionPlan,
   resolveConfiguredBinding,
+  resolveBindingForTest,
   validateCanonicalInput,
   validateBindingConstraints,
   getModelSchemaInternal,
@@ -39,9 +45,12 @@ export default {
   initRegistry,
   getRegistry,
   getModel,
+  getModelBindings,
+  getProvider,
   reloadRegistry,
   resolveExecutionPlan,
   resolveConfiguredBinding,
+  resolveBindingForTest,
   validateCanonicalInput,
   validateBindingConstraints,
   getModelSchemaInternal,

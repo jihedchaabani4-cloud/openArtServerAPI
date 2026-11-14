@@ -1,0 +1,14 @@
+id: llm/json-output
+version: 1.0.0
+applies_to: [llm]
+category: output
+priority: 70
+description: Forces LLM to return ONLY a valid JSON object.
+
+prompt_instruction: |
+  CRITICAL OUTPUT RULE:
+  You MUST return your response as a valid JSON object ONLY.
+  - No markdown code blocks (no ```json).
+  - No extra text, explanations, or preamble.
+  - No trailing commas.
+  - Just the raw JSON object starting with { and ending with }.

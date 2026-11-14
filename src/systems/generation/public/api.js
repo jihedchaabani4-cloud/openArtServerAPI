@@ -9,21 +9,20 @@
 import express from "express";
 import { Router } from "express";
 
-import * as imageController from "../../../../controllers/imageController.js";
-import * as videoController from "../../../../controllers/videoController.js";
-import * as generationsQuery from "../../../../controllers/generationsQueryController.js";
-import * as projectController from "../../../../controllers/projectController.js";
-import * as generationsMutation from "../../../../controllers/generationsMutationController.js";
-import * as workflowsController from "../../../../controllers/workflowsController.js";
+import * as imageController from "../internal/controllers/imageController.js";
+import * as videoController from "../internal/controllers/videoController.js";
+import * as generationsQuery from "../internal/controllers/generationsQueryController.js";
+import * as projectController from "../internal/controllers/projectController.js";
+import * as generationsMutation from "../internal/controllers/generationsMutationController.js";
+import * as workflowsController from "../internal/controllers/workflowsController.js";
 import {
     getHealth,
     submitWorkflowRun,
     getWorkflowRunStatus,
-} from "../../../../controllers/v2/workflowsController.js";
+} from "../internal/controllers/v2/workflowsController.js";
 
 import { promptService } from "../internal/prompt/index.js";
-import { requireAuth } from "../../../middleware/auth.js";
-import { rateLimit } from "../../../middleware/rateLimit.js";
+import { requireAuth, rateLimit } from "#identity/tools";
 
 // ── Images Router ──────────────────────────────────────────────────
 export const imagesRouter = express.Router();
@@ -89,5 +88,33 @@ generationRouter.use("/video", videoRouter);
 generationRouter.use("/prompt", promptRouter);
 generationRouter.use("/v2/workflows", v2WorkflowsRouter);
 generationRouter.use("/workflows", workflowsRouter);
+
+export {
+    imageController,
+    videoController,
+    generationsQuery,
+    projectController,
+    generationsMutation,
+    workflowsController,
+    getHealth,
+    submitWorkflowRun,
+    getWorkflowRunStatus,
+};
+export const { generateImage } = imageController;
+export const { generateVideo } = videoController;
+export const { getAssets, getUserLibrary, getLibraryWorkflowDetail } = generationsQuery;
+export const { getProjectData } = projectController;
+export const { deleteGeneration, deleteItem, updateGeneration, toggleLike: toggleItemLike } = generationsMutation;
+export const {
+    patchWorkflow,
+    deleteWorkflow,
+    bulkDeleteWorkflows,
+    toggleLike,
+    bulkToggleLike,
+    setPrimaryMedia,
+    getWorkflowByMedia,
+    detachMediaToNewWorkflow,
+    deleteMedia,
+} = workflowsController;
 
 export default generationRouter;

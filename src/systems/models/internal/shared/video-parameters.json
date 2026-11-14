@@ -1,0 +1,87 @@
+{
+  "domain": "video",
+  "parameters": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Textual prompt describing the video scene"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "description": "Main source image URL being transformed to video"
+    },
+    "image_url": {
+      "type": "string",
+      "required": false,
+      "description": "Source image URL for image-to-video generation (alias for input_image)"
+    },
+    "last_frame": {
+      "type": "string",
+      "required": false,
+      "description": "Last frame image URL for video continuation keyframe"
+    },
+    "reference_images": {
+      "type": "array",
+      "required": false,
+      "description": "Images used as visual guidance for characters or scenes in video"
+    },
+    "images": {
+      "type": "array",
+      "required": false,
+      "description": "Array of reference images for video reference/integration"
+    },
+    "reference_videos": {
+      "type": "array",
+      "required": false,
+      "description": "Videos used as motion or reference guidance"
+    },
+    "duration": {
+      "type": "number",
+      "required": false,
+      "values": ["5", "10"],
+      "default": "5",
+      "description": "Video duration in seconds"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "required": false,
+      "values": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
+      "default": "16:9",
+      "description": "Video aspect ratio"
+    },
+    "fps": {
+      "type": "number",
+      "required": false,
+      "values": ["24", "30"],
+      "default": "24",
+      "description": "Frames per second"
+    },
+    "camera_motion": {
+      "type": "string",
+      "required": false,
+      "values": ["static", "pan_left", "pan_right", "zoom_in", "zoom_out"],
+      "default": "static",
+      "description": "Camera motion effect"
+    },
+    "resolution": {
+      "type": "string",
+      "required": false,
+      "values": ["480p", "720p", "1080p", "4k"],
+      "default": "720p",
+      "description": "Video resolution tier"
+    },
+    "generate_audio": {
+      "type": "boolean",
+      "required": false,
+      "default": true,
+      "description": "Whether to generate native synchronized audio with the output video"
+    },
+    "enable_audio": {
+      "type": "boolean",
+      "required": false,
+      "default": true,
+      "description": "Alias for generate_audio"
+    }
+  }
+}

@@ -14,7 +14,12 @@ import {
   initRegistry,
   getRegistry,
   getModel,
+  getModelBindings,
+  getProvider,
   reloadRegistry,
+  resolveExecutionPlan,
+  resolveConfiguredBinding,
+  resolveBindingForTest,
   validateCanonicalInput,
   validateBindingConstraints,
   getModelSchemaInternal,
@@ -34,11 +39,19 @@ import {
 import {
   llmService,
   LLMService,
+  BillingContextMissingError,
+  ALLOWED_INTERNAL_REASONS,
   PromptService,
 } from "../internal/providers/index.js";
 
 import {
   run,
+  resolveProviderRoute,
+  registerProviderResolver,
+  getRunner,
+  registerProviderRunner,
+  unregisterProviderRunner,
+  executeProvider,
 } from "../internal/execution/index.js";
 
 import {
@@ -274,11 +287,26 @@ export function getRegistryStats() {
 export {
   // Registry & Inspection
   initRegistry,
+  getRegistry,
+  getModel,
+  getModelBindings,
+  getProvider,
   reloadRegistry,
+  resolveExecutionPlan,
+  resolveConfiguredBinding,
+  resolveBindingForTest,
+  validateCanonicalInput,
+  validateBindingConstraints,
   getCatalog,
   calculateCost,
   estimatePrice,
   run,
+  resolveProviderRoute,
+  registerProviderResolver,
+  getRunner,
+  registerProviderRunner,
+  unregisterProviderRunner,
+  executeProvider,
   calculateRetailCredits,
   calculateWholesaleCostUsd,
   calculateMargin,
@@ -286,6 +314,8 @@ export {
   // Services
   PricingService,
   LLMService,
+  BillingContextMissingError,
+  ALLOWED_INTERNAL_REASONS,
   PromptService,
   llmService,
 

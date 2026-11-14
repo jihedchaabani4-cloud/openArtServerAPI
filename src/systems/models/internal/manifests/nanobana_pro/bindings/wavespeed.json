@@ -1,0 +1,205 @@
+{
+  "modelId": "nanobana_pro",
+  "operation": "text_to_image",
+  "providerId": "wavespeed",
+  "providerModelId": "google/nano-banana-pro/text-to-image",
+  "endpoint": "/api/v3/google/nano-banana-pro/text-to-image",
+  "priority": 1,
+  "status": "active",
+  "parameters": {
+    "prompt": {
+      "providerField": "prompt",
+      "type": "string"
+    },
+    "aspect_ratio": {
+      "providerField": "aspect_ratio",
+      "type": "string"
+    },
+    "resolution": {
+      "providerField": "resolution",
+      "type": "string",
+      "values": [
+        "1k",
+        "2k",
+        "4k"
+      ]
+    },
+    "output_format": {
+      "providerField": "output_format",
+      "type": "string"
+    }
+  },
+  "parameterMap": {
+    "prompt": {
+      "providerField": "prompt"
+    },
+    "aspect_ratio": {
+      "providerField": "aspect_ratio"
+    },
+    "resolution": {
+      "providerField": "resolution"
+    },
+    "output_format": {
+      "providerField": "output_format"
+    }
+  },
+  "pricing": {
+    "base_cost_usd": 0.14,
+    "modifiers": {
+      "resolution": {
+        "1k": 1,
+        "2k": 1,
+        "4k": 1.714
+      }
+    }
+  },
+  "retailPricing": {
+    "table": {
+      "1k": 10,
+      "2k": 16,
+      "4k": 25,
+      "default": 10
+    }
+  },
+  "operations": [
+    {
+      "id": "edit",
+      "operation": "edit",
+      "priority": 1,
+      "when": {
+        "input_image": "present"
+      },
+      "requiredInputs": [
+        "prompt",
+        "input_image"
+      ],
+      "endpoint": "/api/v3/google/nano-banana-pro/edit",
+      "providerModelId": "google/nano-banana-pro/edit",
+      "parameters": {
+        "prompt": {
+          "providerField": "prompt",
+          "type": "string"
+        },
+        "input_image": {
+          "providerField": "images",
+          "type": "string",
+          "transform": "wrap_array"
+        },
+        "aspect_ratio": {
+          "providerField": "aspect_ratio",
+          "type": "string"
+        },
+        "resolution": {
+          "providerField": "resolution",
+          "type": "string"
+        },
+        "output_format": {
+          "providerField": "output_format",
+          "type": "string"
+        }
+      },
+      "parameterMap": {
+        "prompt": {
+          "providerField": "prompt"
+        },
+        "input_image": {
+          "providerField": "images",
+          "transform": "wrap_array"
+        },
+        "aspect_ratio": {
+          "providerField": "aspect_ratio"
+        },
+        "resolution": {
+          "providerField": "resolution"
+        },
+        "output_format": {
+          "providerField": "output_format"
+        }
+      },
+      "pricing": {
+        "base_cost_usd": 0.14,
+        "modifiers": {
+          "resolution": {
+            "1k": 1,
+            "2k": 1,
+            "4k": 1.714
+          }
+        }
+      },
+      "retailPricing": {
+        "table": {
+          "1k": 18,
+          "2k": 18,
+          "4k": 30
+        }
+      }
+    },
+    {
+      "id": "generation",
+      "operation": "text_to_image",
+      "priority": 2,
+      "when": {
+        "input_image": "absent"
+      },
+      "requiredInputs": [
+        "prompt"
+      ],
+      "endpoint": "/api/v3/google/nano-banana-pro/text-to-image",
+      "providerModelId": "google/nano-banana-pro/text-to-image"
+    }
+  ],
+  "routes": [
+    {
+      "id": "edit",
+      "operation": "edit",
+      "priority": 1,
+      "when": {
+        "input_image": "present"
+      },
+      "requiredInputs": [
+        "prompt",
+        "input_image"
+      ],
+      "endpoint": "/api/v3/google/nano-banana-pro/edit",
+      "providerModelId": "google/nano-banana-pro/edit",
+      "pricing": {
+        "base_cost_usd": 0.14,
+        "modifiers": {
+          "resolution": {
+            "1k": 1,
+            "2k": 1,
+            "4k": 1.714
+          }
+        }
+      },
+      "retailPricing": {
+        "table": {
+          "1k": 18,
+          "2k": 18,
+          "4k": 30
+        }
+      }
+    },
+    {
+      "id": "generation",
+      "operation": "text_to_image",
+      "priority": 2,
+      "when": {
+        "input_image": "absent"
+      },
+      "requiredInputs": [
+        "prompt"
+      ],
+      "endpoint": "/api/v3/google/nano-banana-pro/text-to-image",
+      "providerModelId": "google/nano-banana-pro/text-to-image"
+    }
+  ],
+  "outputMap": {
+    "images": "outputs"
+  },
+  "pollingConfig": {
+    "pollInterval": 2,
+    "timeout": 3600
+  },
+  "version": "1.0.0"
+}

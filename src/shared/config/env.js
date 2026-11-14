@@ -69,6 +69,36 @@ export const envConfig = {
   get walletRateLimitTimeoutMs() {
     return Number(process.env.WALLET_RATE_LIMIT_TIMEOUT_MS) || 1500;
   },
+  get supabaseUrl() {
+    return process.env.SUPABASE_URL || (this.isTest ? "https://placeholder-test-project.supabase.co" : undefined);
+  },
+  get rawSupabaseUrl() {
+    return process.env.SUPABASE_URL || "";
+  },
+  get supabaseKey() {
+    return process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || (this.isTest ? "placeholder-test-anon-key-not-for-prod" : undefined);
+  },
+  get supabaseServiceRoleKey() {
+    return process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || "";
+  },
+  get readinessTimeoutMs() {
+    return parseInt(process.env.READINESS_TIMEOUT_MS, 10) || 1500;
+  },
+  get readinessCacheTtlMs() {
+    return parseInt(process.env.READINESS_CACHE_TTL_MS, 10) || 1500;
+  },
+  get allowInMemoryRateLimit() {
+    return process.env.ALLOW_IN_MEMORY_RATE_LIMIT === "true";
+  },
+  get disableInProcessReaper() {
+    return process.env.DISABLE_IN_PROCESS_REAPER === "true";
+  },
+  get port() {
+    return process.env.PORT || 3001;
+  },
+  get trustProxy() {
+    return process.env.TRUST_PROXY;
+  },
   getEnvVar(key) {
     return process.env[key];
   },

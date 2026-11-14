@@ -30,10 +30,24 @@ import {
     FailedOpsService,
     reconcileExpiredHolds,
     handleExpireStaleHolds,
+    runReservationReaper,
     FAILED_OPS_BACKOFF_BASE_MS,
     FAILED_OPS_BACKOFF_MULTIPLIER,
     FAILED_OPS_DEFAULT_MAX_RETRIES,
 } from "../internal/services/index.js";
+
+import {
+    walletMaintenanceQueue,
+    WALLET_QUEUE_NAME,
+    scheduleWalletJobs,
+} from "../internal/workers/walletQueue.js";
+
+import {
+    walletWorker,
+    handleRetryFailedOps,
+    replayOperation,
+    handleReconcileWallets,
+} from "../internal/workers/walletWorker.js";
 
 import {
     configureBilling,
@@ -292,9 +306,19 @@ export {
     FailedOpsService,
     reconcileExpiredHolds,
     handleExpireStaleHolds,
+    runReservationReaper,
     FAILED_OPS_BACKOFF_BASE_MS,
     FAILED_OPS_BACKOFF_MULTIPLIER,
     FAILED_OPS_DEFAULT_MAX_RETRIES,
+
+    // Queue & Workers
+    walletMaintenanceQueue,
+    WALLET_QUEUE_NAME,
+    scheduleWalletJobs,
+    walletWorker,
+    handleRetryFailedOps,
+    replayOperation,
+    handleReconcileWallets,
 
     // Repositories
     WalletRepository,

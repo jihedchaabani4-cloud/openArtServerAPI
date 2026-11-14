@@ -2,7 +2,7 @@
  * Supabase Auth SDK Wrapper.
  * Strictly isolates Supabase Auth SDK calls inside internal/db/ per Rule 6 & Rule 12.
  */
-import { supabase, supabaseAdmin, createRequestBoundClient } from "#lib/supabase.js";
+import { supabase, supabaseAdmin, createRequestBoundClient } from "#shared/db/supabase.js";
 
 export const authClient = {
   /**

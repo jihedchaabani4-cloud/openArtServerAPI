@@ -2,18 +2,21 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-import { requestLogger } from "./src/infrastructure/logging/requestLogger.js";
-import { createLogger, LogErrorCodes } from "./src/infrastructure/logging/index.js";
+import {
+    requestLogger,
+    createLogger,
+    LogErrorCodes,
+    waitForRateLimitRedis,
+} from "#shared";
+import { requireAuth, rateLimit } from "#identity/tools";
+import { reconcileExpiredHolds } from "#billing/tools";
+import { bootstrapV2 } from "#generation/tools";
+import apiRouter from "./src/api/routes.js";
+import healthRouter from "./src/api/probes/health.js";
+import readyRouter from "./src/api/probes/ready.js";
+import { walletService, mediaWorkflowLifecycleService } from "./src/container.js";
 
 const systemLogger = createLogger("system");
-
-import apiRouter from "./src/api/routes.js";
-import { walletService, mediaWorkflowLifecycleService } from "./src/container.js";
-import { reconcileExpiredHolds } from "./src/workers/reservationReaperWorker.js";
-import { bootstrapV2 } from "./src/v2/bootstrap.js";
-import { requireAuth } from "./src/middleware/auth.js";
-import { rateLimit } from "./src/middleware/rateLimit.js";
-import { waitForRateLimitRedis } from "./src/queue/redis.js";
 
 bootstrapV2();
 
@@ -168,8 +171,6 @@ app.use((req, res, next) => {
 });
 
 // ── Routes ──────────────────────────────────────────────────
-import healthRouter from "./routes/health.js";
-import readyRouter from "./routes/ready.js";
 app.use("/health", healthRouter);
 app.use("/ready", readyRouter);
 app.use("/api", apiRouter);

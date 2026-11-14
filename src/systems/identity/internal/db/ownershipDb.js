@@ -2,7 +2,7 @@
  * ownershipDb.js
  * Isolates direct database calls for ownership resolution inside internal/db/ per Rule 12.
  */
-import { supabase } from "#lib/supabase.js";
+import { supabase } from "#shared/db/supabase.js";
 
 export async function findCollectionItemById(id) {
   try {

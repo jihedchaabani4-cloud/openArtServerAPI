@@ -11,6 +11,7 @@ const _services = {
     characterService: null,
     elementService: null,
     trashService: null,
+    useCaseService: null,
     db: null,
 };
 
@@ -22,9 +23,18 @@ export function setGenerationServices(services = {}) {
     if (services.characterService) _services.characterService = services.characterService;
     if (services.elementService) _services.elementService = services.elementService;
     if (services.trashService) _services.trashService = services.trashService;
+    if (services.useCaseService) _services.useCaseService = services.useCaseService;
     if (services.db) _services.db = services.db;
 }
 
 export function getGenerationServices() {
     return _services;
+}
+
+export function getUseCaseService() {
+    return _services.useCaseService;
+}
+
+export function getDefaultDb() {
+    return _services.db;
 }

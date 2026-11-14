@@ -1,5 +1,4 @@
 import "dotenv/config";
-import { PromptService } from "#platform/ai/PromptService.js";
 import {
     WalletService,
     FailedOpsService,
@@ -13,26 +12,31 @@ import {
     getTransactionRepository,
 } from "#billing/tools";
 import { PricingService } from "#models/tools";
-import { redisConnection } from "#queue/redis.js";
-import { createLogger } from "./infrastructure/logging/index.js";
+import { redisConnection, createLogger, envConfig } from "#shared";
 
 const systemLogger = createLogger("system");
 
 // ─── Repositories ───────────────────────────────────────────────────────────
-import { ProjectRepository }          from "#db/ProjectRepository.js";
-import { WorkflowRepository }         from "#db/WorkflowRepository.js";
-import { MediaRepository }            from "#db/MediaRepository.js";
-import { WorkflowMediaRepository }     from "#db/WorkflowMediaRepository.js";
-import { GenerationConfigRepository } from "#db/GenerationConfigRepository.js";
-import { CharacterRepository }        from "#db/CharacterRepository.js";
-import { ElementRepository }          from "#db/ElementRepository.js";
-import { FolderRepository }           from "#db/FolderRepository.js";
-import { TrashRepository }            from "#db/TrashRepository.js";
-
-// ─── Infrastructure ───────────────────────────────────────────────────────────
-import { WorkflowEventRecorder } from "./infrastructure/events/workflowEventRecorder.js";
-import { WorkflowBillingGateway } from "./infrastructure/billing/workflowBillingGateway.js";
+import { ProjectRepository, FolderRepository, TrashRepository, ProjectService, ProjectReadService, FolderService, TrashService, configureWorkspace } from "#workspace/tools";
 import {
+    WorkflowRepository,
+    GenerationConfigRepository,
+    GenerationService,
+    GenerationRequestService,
+    WorkflowLifecycleService,
+    PromptService,
+    promptService,
+    UseCaseService,
+    jobQueueService,
+    configureGeneration,
+    configureDefaultGateways,
+    WorkflowEventRecorder,
+    WorkflowBillingGateway,
+    WorkflowStorageGateway,
+} from "#generation/tools";
+import {
+    MediaRepository,
+    WorkflowMediaRepository,
     MediaService,
     MediaWorkflowLifecycleService,
     MediaUploadService,
@@ -40,36 +44,22 @@ import {
     getStorageService,
     configureMedia,
 } from "#media/tools";
-import { CharacterService, CharacterMediaService, configureCharacters } from "#characters/tools";
-import { ElementService, ElementMediaService, ElementAnalysisService, configureElements } from "#elements/tools";
-import { ProjectService, ProjectReadService, FolderService, TrashService, configureWorkspace } from "#workspace/tools";
+import { CharacterRepository, CharacterService, CharacterMediaService, configureCharacters } from "#characters/tools";
+import { ElementRepository, ElementService, ElementMediaService, ElementAnalysisService, configureElements } from "#elements/tools";
 import { setDb as setIdentityDb } from "#identity/tools";
-
-import {
-    GenerationService,
-    GenerationRequestService,
-    WorkflowLifecycleService,
-    promptService,
-    UseCaseService,
-    jobQueueService,
-    configureGeneration,
-    configureDefaultGateways,
-} from "#generation/tools";
-import { WorkflowStorageGateway } from "./infrastructure/storage/workflowStorageGateway.js";
-
-
 
 // ─── Services ────────────────────────────────────────────────────────────────
 export { promptService };
 export const storageService = getStorageService();
-const walletServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || null;
+const walletServiceKey = envConfig.supabaseServiceRoleKey || null;
 
 /**
  * Evaluates whether current runtime is in production mode.
  * Any environment other than explicit "development" or "test" is treated as production (fail-safe).
  */
 export function isProductionEnvironment() {
-    const env = (process.env.NODE_ENV || "").trim().toLowerCase();
+    const rawEnv = envConfig.getEnvVar("NODE_ENV") || "";
+    const env = rawEnv.trim().toLowerCase();
     return env !== "development" && env !== "test";
 }
 
@@ -78,8 +68,8 @@ export function isProductionEnvironment() {
  */
 export function assertWalletConfiguredForEnvironment() {
     const isProd = isProductionEnvironment();
-    const hasUrl = Boolean(process.env.SUPABASE_URL);
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
+    const hasUrl = Boolean(envConfig.rawSupabaseUrl);
+    const key = envConfig.supabaseServiceRoleKey;
     const hasKey = Boolean(key);
 
     if (isProd && (!hasUrl || !hasKey)) {
@@ -87,7 +77,7 @@ export function assertWalletConfiguredForEnvironment() {
             .filter(Boolean)
             .join(", ");
         throw new Error(
-            `Fatal: WalletService is required in production mode (NODE_ENV=${process.env.NODE_ENV || "unset"}). Missing: ${missing}`
+            `Fatal: WalletService is required in production mode (NODE_ENV=${envConfig.getEnvVar("NODE_ENV") || "unset"}). Missing: ${missing}`
         );
     }
 }
@@ -97,17 +87,18 @@ export function assertWalletConfiguredForEnvironment() {
  */
 export function assertSecurityConfiguredForEnvironment() {
     const isProd = isProductionEnvironment();
-    const secret = process.env.INTERNAL_SECRET;
+    const secret = envConfig.internalSecret;
 
     if (isProd) {
         if (!secret || typeof secret !== "string" || secret.trim().length < 32) {
             throw new Error(
-                `Fatal: INTERNAL_SECRET is required in production mode (NODE_ENV=${process.env.NODE_ENV || "unset"}) and must be at least 32 characters long.`
+                `Fatal: INTERNAL_SECRET is required in production mode (NODE_ENV=${envConfig.getEnvVar("NODE_ENV") || "unset"}) and must be at least 32 characters long.`
             );
         }
-        if (process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) {
+        const rawBypass = envConfig.getEnvVar("DEV_AUTH_BYPASS");
+        if (rawBypass === "true" || rawBypass === true) {
             throw new Error(
-                `Fatal: DEV_AUTH_BYPASS cannot be enabled in production mode (NODE_ENV=${process.env.NODE_ENV || "unset"}).`
+                `Fatal: DEV_AUTH_BYPASS cannot be enabled in production mode (NODE_ENV=${envConfig.getEnvVar("NODE_ENV") || "unset"}).`
             );
         }
     }
@@ -121,8 +112,8 @@ export function assertRateLimitConfiguredForEnvironment(logger = systemLogger) {
     const isProd = isProductionEnvironment();
     if (!isProd) return;
 
-    const store = (process.env.RATE_LIMIT_STORE || "").trim().toLowerCase();
-    const allowMemory = process.env.ALLOW_IN_MEMORY_RATE_LIMIT === "true";
+    const store = (envConfig.getEnvVar("RATE_LIMIT_STORE") || "").trim().toLowerCase();
+    const allowMemory = envConfig.allowInMemoryRateLimit;
 
     if (store === "redis") {
         return;
@@ -137,7 +128,7 @@ export function assertRateLimitConfiguredForEnvironment(logger = systemLogger) {
     }
 
     throw new Error(
-        `Fatal: RATE_LIMIT_STORE must be set to 'redis' in production mode (NODE_ENV=${process.env.NODE_ENV || "unset"}), or set ALLOW_IN_MEMORY_RATE_LIMIT=true for single-instance staging.`
+        `Fatal: RATE_LIMIT_STORE must be set to 'redis' in production mode (NODE_ENV=${envConfig.getEnvVar("NODE_ENV") || "unset"}), or set ALLOW_IN_MEMORY_RATE_LIMIT=true for single-instance staging.`
     );
 }
 
@@ -145,7 +136,7 @@ assertWalletConfiguredForEnvironment();
 assertSecurityConfiguredForEnvironment();
 assertRateLimitConfiguredForEnvironment();
 
-const _hasBillingConfig = Boolean(process.env.SUPABASE_URL && walletServiceKey);
+const _hasBillingConfig = Boolean(envConfig.rawSupabaseUrl && walletServiceKey);
 export const usageEventRepo = _hasBillingConfig
     ? getUsageEventRepository()
     : null;
@@ -198,9 +189,20 @@ if (failedOpsService) {
 }
 
 // ─── DB (new 7-table schema) ─────────────────────────────────────────────────
-import { db } from "./db/dbInstance.js";
+const configRepo = new GenerationConfigRepository();
+export const db = {
+    projects:          new ProjectRepository(),
+    workflows:         new WorkflowRepository(),
+    media:             new MediaRepository(),
+    workflowMedia:     new WorkflowMediaRepository(),
+    configs:           configRepo,
+    generationConfigs: configRepo,
+    characters:        new CharacterRepository(),
+    elements:          new ElementRepository(),
+    folders:           new FolderRepository(),
+    trash:             new TrashRepository(),
+};
 setIdentityDb(db);
-export { db };
 
 // ─── Workflow Architecture (feature 008) ─────────────────────────────────────
 export const workflowEventRecorder = new WorkflowEventRecorder();
@@ -208,19 +210,19 @@ export const workflowBillingGateway = new WorkflowBillingGateway({ walletService
 
 const _lifecycleService = new MediaWorkflowLifecycleService({ db });
 export const mediaWorkflowLifecycleService = _lifecycleService;
+configureBilling({ lifecycleService: _lifecycleService });
+
 export const workflowStorageGateway = new WorkflowStorageGateway({
     v1Db: db,
     lifecycleService: _lifecycleService,
 });
 
-import { configureDefaultGateways as configureLegacyDefaultGateways } from "./v2/bootstrap.js";
 const _defaultGatewaysFactory = () => ({
     billing: workflowBillingGateway,
     storage: workflowStorageGateway,
     events: workflowEventRecorder,
 });
 configureDefaultGateways(_defaultGatewaysFactory);
-configureLegacyDefaultGateways(_defaultGatewaysFactory);
 
 // ─── UseCase & Job Queue Services ─────────────────────────────────────────────
 export { jobQueueService };
@@ -275,7 +277,6 @@ export const elementService = new ElementService({
 });
 configureElements({ elementService, elementMediaService });
 
-
 workflowService.setEntitySyncHandlers({
     syncCharacter: (targetWorkflowId, updates, userId) => characterService.updateCharacter({ characterId: targetWorkflowId, updates, userId }),
     syncElement: (targetWorkflowId, name) => elementService.updateElement(targetWorkflowId, { name }),
@@ -303,7 +304,6 @@ configureGeneration({
     characterService,
     elementService,
     trashService,
+    useCaseService,
     db,
 });
-
-

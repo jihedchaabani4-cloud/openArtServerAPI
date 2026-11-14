@@ -130,12 +130,21 @@ function checkRuleR10(f, exceptions = loadExceptions()) {
       const subpath = aliasMatch[2] || '';
       if (isKnownSystem(aliasSys)) {
         targetSys = aliasSys;
-        // Two-Gateway Rule: only /api or /tools (or /api.js, /tools.js) allowed externally
-        const isPublic = subpath === 'api' || subpath === 'tools' || subpath === 'api.js' || subpath === 'tools.js' ||
-                         // Backward compatibility during migration for index
-                         subpath === '' || subpath === 'index' || subpath === 'index.js';
-        if (!isPublic && fromSys !== targetSys) {
-          isDeep = true;
+        if (aliasSys === 'shared') {
+          const isInternalDb = (f.rel.startsWith('src/systems/') && f.rel.includes('/internal/db/')) || f.rel === 'lib/supabase.js';
+          const isAllowedShared = subpath === '' || subpath === 'index' || subpath === 'index.js' ||
+                                  (isInternalDb && subpath === 'db/supabase.js');
+          if (!isAllowedShared && fromSys !== targetSys) {
+            isDeep = true;
+          }
+        } else {
+          // Two-Gateway Rule: only /api or /tools (or /api.js, /tools.js) allowed externally
+          const isPublic = subpath === 'api' || subpath === 'tools' || subpath === 'api.js' || subpath === 'tools.js' ||
+                           // Backward compatibility during migration for index
+                           subpath === '' || subpath === 'index' || subpath === 'index.js';
+          if (!isPublic && fromSys !== targetSys) {
+            isDeep = true;
+          }
         }
       }
     } else {
@@ -192,8 +201,8 @@ function checkRuleR11(f) {
 function checkRuleR12(f) {
   // R12: database & external storage SDK isolation across ALL code directories
   // DB clients (supabase, prisma, pg, mongoose) and cloud storage SDKs (S3, R2)
-  // may only be imported inside src/systems/<name>/internal/db/, dedicated storage adapter, or lib/supabase.js
-  if (f.rel === 'lib/supabase.js') return [];
+  // may only be imported inside src/systems/<name>/internal/db/, dedicated storage adapter, or src/shared/db/supabase.js
+  if (f.rel === 'lib/supabase.js' || f.rel === 'src/shared/db/supabase.js') return [];
   if (f.rel.startsWith('src/systems/') && (f.rel.includes('/internal/db/') || f.rel.includes('/internal/storage/'))) return [];
 
   const hits = [];

@@ -8,6 +8,7 @@
  */
 import { createLogger, LogEvents } from "#shared";
 import { markMediaFailed } from "#media/tools";
+import { getWalletService, getDefaultLifecycleService } from "../serviceAccessor.js";
 
 const logger = createLogger("reservation-reaper");
 
@@ -22,22 +23,25 @@ const logger = createLogger("reservation-reaper");
  * @returns {Promise<Array<Object>>} List of reaped hold records
  */
 export async function reconcileExpiredHolds({
-  walletService = null,
-  lifecycleService = null,
+  walletService: injectedWallet = null,
+  lifecycleService: injectedLifecycle = undefined,
   logger: customLogger = null,
 } = {}) {
   const activeLogger = customLogger || logger;
-  if (!walletService || typeof walletService.reapExpiredHolds !== "function") {
+  const activeWallet = injectedWallet || getWalletService();
+  const activeLifecycle = injectedLifecycle === undefined ? getDefaultLifecycleService() : injectedLifecycle;
+
+  if (!activeWallet || typeof activeWallet.reapExpiredHolds !== "function") {
     return [];
   }
 
-  const expiredHolds = await walletService.reapExpiredHolds();
+  const expiredHolds = await activeWallet.reapExpiredHolds();
   const holdsList = Array.isArray(expiredHolds) ? expiredHolds : [];
 
   for (const hold of holdsList) {
-    if (lifecycleService && (hold.workflowId || hold.mediaId)) {
+    if (activeLifecycle && (hold.workflowId || hold.mediaId)) {
       try {
-        await lifecycleService.failForExpiredHold({
+        await activeLifecycle.failForExpiredHold({
           holdId: hold.holdId,
           workflowId: hold.workflowId,
           mediaId: hold.mediaId,
@@ -49,7 +53,7 @@ export async function reconcileExpiredHolds({
           `Failed to mark media failed for expired hold ${hold.holdId}: ${err.message}`
         );
       }
-    } else if (hold.mediaId) {
+    } else if (hold.mediaId && injectedLifecycle === undefined) {
       try {
         await markMediaFailed({
           mediaId: hold.mediaId,
@@ -78,21 +82,22 @@ export async function reconcileExpiredHolds({
  * @returns {Promise<number>} Number of released reservations
  */
 export async function handleExpireStaleHolds({
-  walletService = null,
-  lifecycleService = null,
+  walletService: injectedWallet = null,
+  lifecycleService: injectedLifecycle = undefined,
 } = {}) {
   const start = Date.now();
+  const activeLifecycle = injectedLifecycle === undefined ? getDefaultLifecycleService() : injectedLifecycle;
 
   try {
     const holdsList = await reconcileExpiredHolds({
-      walletService,
-      lifecycleService,
+      walletService: injectedWallet,
+      lifecycleService: activeLifecycle,
       logger,
     });
     const reapedCount = holdsList.length;
 
-    if (lifecycleService && typeof lifecycleService.sweepStalePlaceholders === "function") {
-      await lifecycleService.sweepStalePlaceholders().catch((err) => {
+    if (activeLifecycle && typeof activeLifecycle.sweepStalePlaceholders === "function") {
+      await activeLifecycle.sweepStalePlaceholders().catch((err) => {
         logger.warn({ err: err.message }, "Failed to sweep stale placeholders in reservation reaper");
       });
     }
@@ -119,7 +124,10 @@ export async function handleExpireStaleHolds({
   }
 }
 
+export const runReservationReaper = handleExpireStaleHolds;
+
 export default {
   reconcileExpiredHolds,
   handleExpireStaleHolds,
+  runReservationReaper,
 };

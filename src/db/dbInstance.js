@@ -6,15 +6,11 @@
  * breaking circular import dependencies.
  */
 
-import { ProjectRepository }          from "#db/ProjectRepository.js";
-import { WorkflowRepository }         from "#db/WorkflowRepository.js";
-import { MediaRepository }            from "#db/MediaRepository.js";
-import { WorkflowMediaRepository }     from "#db/WorkflowMediaRepository.js";
-import { GenerationConfigRepository } from "#db/GenerationConfigRepository.js";
-import { CharacterRepository }        from "#db/CharacterRepository.js";
-import { ElementRepository }          from "#db/ElementRepository.js";
-import { FolderRepository }           from "#db/FolderRepository.js";
-import { TrashRepository }            from "#db/TrashRepository.js";
+import { ProjectRepository, FolderRepository, TrashRepository } from "#workspace/tools";
+import { WorkflowRepository, GenerationConfigRepository } from "#generation/tools";
+import { MediaRepository, WorkflowMediaRepository } from "#media/tools";
+import { CharacterRepository } from "#characters/tools";
+import { ElementRepository } from "#elements/tools";
 
 const configRepo = new GenerationConfigRepository();
 

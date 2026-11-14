@@ -17,10 +17,8 @@ import {
     getBillingSupabaseAdminClient,
 } from "./db/index.js";
 
-import {
-    WalletService,
-    FailedOpsService,
-} from "./services/index.js";
+import { WalletService } from "./services/WalletService.js";
+import { FailedOpsService } from "./services/FailedOpsService.js";
 
 let _defaultWalletService = null;
 let _defaultCreditPackageRepo = null;
@@ -29,6 +27,7 @@ let _defaultFailedOpsService = null;
 let _defaultWalletRepo = null;
 let _defaultPricingService = null;
 let _defaultRedisConnection = null;
+let _defaultLifecycleService = null;
 
 export function configureBilling(params = {}) {
     if ("walletService" in params) _defaultWalletService = params.walletService;
@@ -37,6 +36,11 @@ export function configureBilling(params = {}) {
     if ("failedOpsService" in params) _defaultFailedOpsService = params.failedOpsService;
     if ("pricingService" in params) _defaultPricingService = params.pricingService;
     if ("redisConnection" in params) _defaultRedisConnection = params.redisConnection;
+    if ("lifecycleService" in params) _defaultLifecycleService = params.lifecycleService;
+}
+
+export function getDefaultLifecycleService() {
+    return _defaultLifecycleService;
 }
 
 export function getPricingService() {

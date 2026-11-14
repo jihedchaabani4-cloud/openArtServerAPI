@@ -2,7 +2,7 @@
  * ProfileRepository
  * Owns exclusive DB access for the `profiles` table per Rule 5 & Rule 12.
  */
-import { supabase } from "#lib/supabase.js";
+import { supabase } from "#shared/db/supabase.js";
 
 export const ProfileRepository = {
   /**

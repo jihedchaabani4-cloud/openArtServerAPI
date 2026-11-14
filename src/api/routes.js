@@ -62,8 +62,8 @@ import {
 } from '#workspace/api';
 
 // System-wide Infrastructure Probes
-import healthRouter from '../../routes/health.js';
-import readyRouter from '../../routes/ready.js';
+import healthRouter from './probes/health.js';
+import readyRouter from './probes/ready.js';
 
 const router = express.Router();
 

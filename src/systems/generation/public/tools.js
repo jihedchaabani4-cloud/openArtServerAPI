@@ -111,14 +111,24 @@ import {
 } from "../internal/prompt/index.js";
 
 import {
+    ERROR_CODES,
     GenerationError,
+    Errors,
+    parseProviderError,
     GenerationValidationError,
     GenerationNotFoundError,
     GenerationCompilationError,
     GenerationQueueDispatchError,
 } from "../internal/errors.js";
 
+import { WorkflowBillingGateway } from "../internal/gateways/workflowBillingGateway.js";
+import { WorkflowStorageGateway } from "../internal/gateways/workflowStorageGateway.js";
+import { WorkflowEventRecorder } from "../internal/gateways/workflowEventRecorder.js";
+import { useCaseWorker, handleUseCaseWorkerFailure } from "../internal/workers/useCaseWorker.js";
+import { worker, startReaper } from "../internal/workers/worker.js";
 import { setGenerationServices } from "../internal/serviceAccessor.js";
+
+export const v2WorkflowWorker = worker;
 
 export function configureGeneration(services = {}) {
     setGenerationServices(services);
@@ -285,11 +295,21 @@ export {
     buildStoryboardLayoutProcessor,
     resolveCharactersProcessor,
     resolveReferencesProcessor,
+    ERROR_CODES,
     GenerationError,
+    Errors,
+    parseProviderError,
     GenerationValidationError,
     GenerationNotFoundError,
     GenerationCompilationError,
     GenerationQueueDispatchError,
+    WorkflowBillingGateway,
+    WorkflowStorageGateway,
+    WorkflowEventRecorder,
+    useCaseWorker,
+    handleUseCaseWorkerFailure,
+    worker,
+    startReaper,
 };
 
 export default {
@@ -311,4 +331,15 @@ export default {
     PromptService,
     LLMService,
     llmService,
+    WorkflowBillingGateway,
+    WorkflowStorageGateway,
+    WorkflowEventRecorder,
+    useCaseWorker,
+    handleUseCaseWorkerFailure,
+    worker,
+    v2WorkflowWorker,
+    startReaper,
+    ERROR_CODES,
+    Errors,
+    parseProviderError,
 };

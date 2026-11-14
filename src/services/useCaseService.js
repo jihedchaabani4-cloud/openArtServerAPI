@@ -162,6 +162,22 @@ export class UseCaseService {
         );
       }); // best-effort — never block the error propagation
 
+      // Mark all pending media records as failed so zero zombies remain
+      const failMessage = `Queue dispatch failed: ${dispatchErr.message}`;
+      if (effectiveServerWorkflowId && this.db?.media) {
+        await failWorkflowPendingMedia(this.db, effectiveServerWorkflowId, failMessage).catch(() => {});
+      }
+      if (Array.isArray(effectiveServerMediaIds) && this.db?.media) {
+        for (const mId of effectiveServerMediaIds) {
+          if (mId) {
+            await this.db.media.updateMedia(mId, {
+              status: "failed",
+              error_message: failMessage,
+            }).catch(() => {});
+          }
+        }
+      }
+
       // Re-throw as a clean service-level error (Controller will return HTTP 503)
       const err = new Error("Generation service temporarily unavailable. Please try again.");
       err.statusCode = 503;
@@ -337,8 +353,25 @@ export class UseCaseService {
 
       // ── Failure cleanup: mark any processing/pending media as failed ──────────
       const targetWorkflowId = input?.serverWorkflowId || input?.workflow_id || null;
+      const failureMsg = report.user?.message || err.message || "Generation failed";
       if (targetWorkflowId && this.db?.media) {
-        await failWorkflowPendingMedia(this.db, targetWorkflowId, report.user?.message || err.message);
+        await failWorkflowPendingMedia(this.db, targetWorkflowId, failureMsg).catch(() => {});
+      }
+
+      // Standalone media cleanup (when workflowId is null or direct media passed)
+      const directMediaIds = [
+        ...(Array.isArray(input?.serverMediaIds) ? input.serverMediaIds : []),
+        ...(Array.isArray(input?.serverContext?.mediaIds) ? input.serverContext.mediaIds : []),
+        ...(input?.mediaId ? [input.mediaId] : []),
+        ...(input?.media_id ? [input.media_id] : []),
+      ].filter(Boolean);
+      if (directMediaIds.length > 0 && this.db?.media) {
+        for (const mId of new Set(directMediaIds)) {
+          await this.db.media.updateMedia(mId, {
+            status: "failed",
+            error_message: failureMsg,
+          }).catch(() => {});
+        }
       }
 
       useCaseLogger.error({

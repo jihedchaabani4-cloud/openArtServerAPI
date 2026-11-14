@@ -101,11 +101,11 @@ describe("RC1.4-D3(1) — Memory Fallbacks Prohibition Outside Tests", () => {
     assert.equal(fetched.run_id, "test-mem-run-1");
   });
 
-  it("TEST 5: lib/supabase.js with missing env and NODE_ENV=production -> throws at load", () => {
+  it("TEST 5: src/shared/db/supabase.js with missing env and NODE_ENV=production -> throws at load", () => {
     assert.throws(
       () => {
         execSync(
-          'node --input-type=module -e "process.env.DOTENV_CONFIG_PATH=\'nonexistent\'; process.env.NODE_ENV=\'production\'; delete process.env.SUPABASE_URL; delete process.env.SUPABASE_SERVICE_ROLE_KEY; delete process.env.SUPABASE_KEY; import(\'./lib/supabase.js\');"',
+          'node --input-type=module -e "process.env.DOTENV_CONFIG_PATH=\'nonexistent\'; process.env.NODE_ENV=\'production\'; delete process.env.SUPABASE_URL; delete process.env.SUPABASE_SERVICE_ROLE_KEY; delete process.env.SUPABASE_KEY; import(\'./src/shared/db/supabase.js\');"',
           { stdio: "pipe" }
         );
       },
@@ -116,9 +116,9 @@ describe("RC1.4-D3(1) — Memory Fallbacks Prohibition Outside Tests", () => {
     );
   });
 
-  it("TEST 6: lib/supabase.js with missing env and NODE_ENV=test -> loads successfully with test fake", () => {
+  it("TEST 6: src/shared/db/supabase.js with missing env and NODE_ENV=test -> loads successfully with test fake", () => {
     const output = execSync(
-      'node --input-type=module -e "process.env.DOTENV_CONFIG_PATH=\'nonexistent\'; process.env.NODE_ENV=\'test\'; delete process.env.SUPABASE_URL; delete process.env.SUPABASE_SERVICE_ROLE_KEY; delete process.env.SUPABASE_KEY; import(\'./lib/supabase.js\').then(m => { if (m.supabase && m.supabaseAdmin) console.log(\'TEST_FAKE_LOADED_OK\'); });"',
+      'node --input-type=module -e "process.env.DOTENV_CONFIG_PATH=\'nonexistent\'; process.env.NODE_ENV=\'test\'; delete process.env.SUPABASE_URL; delete process.env.SUPABASE_SERVICE_ROLE_KEY; delete process.env.SUPABASE_KEY; import(\'./src/shared/db/supabase.js\').then(m => { if (m.supabase && m.supabaseAdmin) console.log(\'TEST_FAKE_LOADED_OK\'); });"',
       { stdio: "pipe" }
     ).toString();
 

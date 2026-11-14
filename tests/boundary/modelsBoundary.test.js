@@ -1042,11 +1042,9 @@ describe("Sealed Models Subsystem Architecture", () => {
     });
 
     // TEST 10 — No provider leakage
-    it("TEST 10: No provider leakage across application layers (src/v2, src/use-cases, controllers)", () => {
+    it("TEST 10: No provider leakage across application layers (src/systems/generation)", () => {
       const dirsToScan = [
-        path.join(apiRoot, "src", "v2"),
-        path.join(apiRoot, "src", "use-cases"),
-        path.join(apiRoot, "controllers"),
+        path.join(apiRoot, "src", "systems", "generation"),
       ];
 
       function scanDir(dir) {
@@ -1082,9 +1080,9 @@ describe("Sealed Models Subsystem Architecture", () => {
     // TEST 11 — No generic operation taxonomy
     it("TEST 11: Models Core does not contain inferOperation or hardcoded provider operation decisions", () => {
       const coreFiles = [
-        path.join(apiRoot, "src", "models", "index.js"),
-        path.join(apiRoot, "src", "models", "execution", "modelRunner.js"),
-        path.join(apiRoot, "src", "models", "schema", "schemaValidator.js"),
+        path.join(apiRoot, "src", "systems", "models", "public", "tools.js"),
+        path.join(apiRoot, "src", "systems", "models", "internal", "execution", "modelRunner.js"),
+        path.join(apiRoot, "src", "systems", "models", "internal", "schema", "schemaValidator.js"),
       ];
 
       for (const file of coreFiles) {
@@ -1105,9 +1103,9 @@ describe("Sealed Models Subsystem Architecture", () => {
     // TEST 12 — No model-specific provider branches
     it("TEST 12: Generic runners and core contain no model-specific or provider-specific branches", () => {
       const genericFiles = [
-        path.join(apiRoot, "src", "models", "execution", "modelRunner.js"),
-        path.join(apiRoot, "src", "models", "execution", "runtimeExecutor.js"),
-        path.join(apiRoot, "src", "models", "runtime", "routeResolver.js"),
+        path.join(apiRoot, "src", "systems", "models", "internal", "execution", "modelRunner.js"),
+        path.join(apiRoot, "src", "systems", "models", "internal", "execution", "runtimeExecutor.js"),
+        path.join(apiRoot, "src", "systems", "models", "internal", "runtime", "routeResolver.js"),
       ];
 
       const forbiddenBranchPatterns = [
@@ -1463,7 +1461,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // TEST 13 — WaveSpeed runner purity
     it("TEST 13: WaveSpeed runner contains zero model-specific or routing-specific conditionals", () => {
-      const runnerPath = path.join(apiRoot, "src", "models", "runtime", "wavespeed", "runner.js");
+      const runnerPath = path.join(apiRoot, "src", "systems", "models", "internal", "runtime", "wavespeed", "runner.js");
       const runnerCode = fs.readFileSync(runnerPath, "utf8");
 
       const forbiddenRoutingPatterns = [
@@ -1486,11 +1484,11 @@ describe("Sealed Models Subsystem Architecture", () => {
     // TEST 14 — Generic core purity
     it("TEST 14: Generic Models Core contains zero provider-specific or model-specific branching", () => {
       const coreFiles = [
-        path.join(apiRoot, "src", "models", "index.js"),
-        path.join(apiRoot, "src", "models", "execution", "modelRunner.js"),
-        path.join(apiRoot, "src", "models", "registry", "bindingResolver.js"),
-        path.join(apiRoot, "src", "models", "pricing", "pricingEngine.js"),
-        path.join(apiRoot, "src", "models", "schema", "schemaValidator.js"),
+        path.join(apiRoot, "src", "systems", "models", "public", "tools.js"),
+        path.join(apiRoot, "src", "systems", "models", "internal", "execution", "modelRunner.js"),
+        path.join(apiRoot, "src", "systems", "models", "internal", "registry", "bindingResolver.js"),
+        path.join(apiRoot, "src", "systems", "models", "internal", "pricing", "pricingEngine.js"),
+        path.join(apiRoot, "src", "systems", "models", "internal", "schema", "schemaValidator.js"),
       ];
 
       for (const file of coreFiles) {
@@ -1574,7 +1572,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // TEST 16 — Wallet isolation
     it("TEST 16: WaveSpeed provider execution layer has zero imports or dependencies on wallet systems", () => {
-      const wavespeedDir = path.join(apiRoot, "src", "models", "runtime", "wavespeed");
+      const wavespeedDir = path.join(apiRoot, "src", "systems", "models", "internal", "runtime", "wavespeed");
 
       function walkDir(dir) {
         let results = [];
@@ -1634,7 +1632,7 @@ describe("Sealed Models Subsystem Architecture", () => {
     // TEST 18 — No WaveSpeed LLM
     it("TEST 18: No WaveSpeed LLM infrastructure exists (excluded by architecture; LLM is Google Studio only)", async () => {
       // 18a: No llm directory in wavespeed runtime
-      const wavespeedLlmDir = path.join(apiRoot, "src", "models", "runtime", "wavespeed", "llm");
+      const wavespeedLlmDir = path.join(apiRoot, "src", "systems", "models", "internal", "runtime", "wavespeed", "llm");
       assert.strictEqual(fs.existsSync(wavespeedLlmDir), false, "WaveSpeed runtime must NOT contain llm directory");
 
       // 18b: No WaveSpeed LLM bindings in manifests

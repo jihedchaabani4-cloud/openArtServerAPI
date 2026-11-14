@@ -28,6 +28,8 @@ export {
     getCreditPackageRepository,
     getFailedOpsService,
     getWalletRepository,
+    getTransactionRepository,
+    getUsageEventRepository,
 
     // DTO Tools
     getCreditBalance,

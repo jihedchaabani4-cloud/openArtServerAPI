@@ -6,7 +6,8 @@ import { Router } from "express";
 import { AuthService, mapSessionUser } from "../internal/services/AuthService.js";
 import { OAuthService } from "../internal/services/OAuthService.js";
 import { clearAuthCookies } from "../internal/cookies.js";
-import { rateLimit } from "../../../middleware/rateLimit.js";
+import { rateLimit } from "../internal/middleware/rateLimit.js";
+import { getCreditBalance } from "#billing/tools";
 import { createLogger } from "#shared";
 
 const authLogger = createLogger("auth_api");
@@ -122,12 +123,10 @@ export async function getWalletBalance(req, res) {
 
     let balance = 0;
     try {
-      const container = await import("#container.js");
-      if (container.walletService?.getBalance) {
-        balance = await container.walletService.getBalance(user.id);
-      }
+      const result = await getCreditBalance({ userId: user.id });
+      balance = result?.balance ?? 0;
     } catch {
-      // Fallback during modularization
+      // Fallback if wallet service is not configured
     }
 
     return res.status(200).json({ balance });

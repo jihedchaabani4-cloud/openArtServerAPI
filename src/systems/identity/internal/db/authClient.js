@@ -2,7 +2,7 @@
  * Supabase Auth SDK Wrapper.
  * Strictly isolates Supabase Auth SDK calls inside internal/db/ per Rule 6 & Rule 12.
  */
-import { supabase, createRequestBoundClient } from "#lib/supabase.js";
+import { supabase, supabaseAdmin, createRequestBoundClient } from "#lib/supabase.js";
 
 export const authClient = {
   /**
@@ -46,6 +46,14 @@ export const authClient = {
    */
   async getUser(accessToken) {
     return supabase.auth.getUser(accessToken);
+  },
+
+  /**
+   * Retrieve user record by ID using admin SDK (service role).
+   */
+  async getUserById(userId) {
+    const client = supabaseAdmin || supabase;
+    return client.auth.admin.getUserById(userId);
   },
 
   /**

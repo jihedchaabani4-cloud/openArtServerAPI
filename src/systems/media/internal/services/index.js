@@ -9,3 +9,9 @@ export {
     resolveMediaMetadata,
     calculateAspectRatio,
 } from "./mediaMetadataResolver.js";
+export {
+    createWorkflowWithMedia,
+    createWorkflowWithMediaAtomic,
+    appendMediaToWorkflow,
+} from "../db/index.js";
+export { V1StorageBridge } from "./v1StorageBridge.js";

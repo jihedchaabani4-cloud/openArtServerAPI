@@ -35,64 +35,41 @@ import {
     FAILED_OPS_DEFAULT_MAX_RETRIES,
 } from "../internal/services/index.js";
 
-// System-managed singletons
-let _defaultWalletService = null;
-let _defaultCreditPackageRepo = null;
-let _defaultPackageFetcher = null;
-let _defaultFailedOpsService = null;
-let _defaultWalletRepo = null;
+import {
+    configureBilling,
+    getPricingService,
+    getRedisConnection,
+    getDefaultWalletService,
+    getWalletService,
+    getBillingService,
+    getCreditPackageRepository,
+    getFailedOpsService,
+    getWalletRepository,
+    getTransactionRepository,
+    getUsageEventRepository,
+    listCreditPackages,
+    getCreditPackage,
+    resolvePackageCredits,
+} from "../internal/serviceAccessor.js";
 
-export function configureBilling(params = {}) {
-    if ("walletService" in params) _defaultWalletService = params.walletService;
-    if ("creditPackageRepo" in params) _defaultCreditPackageRepo = params.creditPackageRepo;
-    if ("packageFetcher" in params) _defaultPackageFetcher = params.packageFetcher;
-    if ("failedOpsService" in params) _defaultFailedOpsService = params.failedOpsService;
-}
-
-export function getWalletService() {
-    if (!_defaultWalletService) {
-        const client = getBillingSupabaseAdminClient();
-        _defaultWalletService = new WalletService({
-            walletRepo: new WalletRepository(client),
-            txRepo: new TransactionRepository(client),
-            usageEventRepo: new UsageEventRepository(client),
-            supabase: client,
-        });
-    }
-    return _defaultWalletService;
-}
-
-export function getBillingService() {
-    return _defaultWalletService || getWalletService();
-}
-
-export function getCreditPackageRepository() {
-    if (!_defaultCreditPackageRepo) {
-        const client = getBillingSupabaseAdminClient();
-        _defaultCreditPackageRepo = new CreditPackageRepository(client);
-    }
-    return _defaultCreditPackageRepo;
-}
-
-export function getFailedOpsService() {
-    if (!_defaultFailedOpsService) {
-        const client = getBillingSupabaseAdminClient();
-        const repo = new FailedOpsRepository(client);
-        _defaultFailedOpsService = new FailedOpsService({ failedOpsRepo: repo });
-    }
-    return _defaultFailedOpsService;
-}
-
-export function getWalletRepository() {
-    if (!_defaultWalletRepo) {
-        const client = getBillingSupabaseAdminClient();
-        _defaultWalletRepo = new WalletRepository(client);
-    }
-    return _defaultWalletRepo;
-}
+export {
+    configureBilling,
+    getPricingService,
+    getRedisConnection,
+    getWalletService,
+    getBillingService,
+    getCreditPackageRepository,
+    getFailedOpsService,
+    getWalletRepository,
+    getTransactionRepository,
+    getUsageEventRepository,
+    listCreditPackages,
+    getCreditPackage,
+    resolvePackageCredits,
+};
 
 function _resolveWalletService(ctx = {}) {
-    const service = ctx?.walletService || _defaultWalletService;
+    const service = ctx?.walletService || getDefaultWalletService();
     if (!service) {
         throw new BillingConfigurationError("WalletService is not configured in Billing system");
     }
@@ -282,71 +259,6 @@ export async function listTransactions(input = {}, ctx = {}) {
 
     const service = _resolveWalletService(ctx);
     return service.getTransactions(userId, limit, before, beforeId);
-}
-
-/**
- * Lists available credit packages.
- *
- * @param {object} [options]
- * @param {{ packageFetcher?: Function, creditPackageRepo?: any }} [ctx]
- * @returns {Promise<Array>}
- */
-export async function listCreditPackages(options = {}, ctx = {}) {
-    if (typeof ctx?.packageFetcher === "function") {
-        return ctx.packageFetcher(options);
-    }
-    if (typeof _defaultPackageFetcher === "function") {
-        return _defaultPackageFetcher(options);
-    }
-    const repo = ctx?.creditPackageRepo || _defaultCreditPackageRepo || getCreditPackageRepository();
-    if (repo && typeof repo.listActivePackages === "function") {
-        return repo.listActivePackages();
-    }
-    return [];
-}
-
-/**
- * Retrieves a specific active credit package by ID.
- *
- * @param {string} packageId
- * @param {{ creditPackageRepo?: any }} [ctx]
- * @returns {Promise<object|null>}
- */
-export async function getCreditPackage(packageId, ctx = {}) {
-    if (!packageId || typeof packageId !== "string") {
-        throw new BillingValidationError("packageId is required");
-    }
-    const repo = ctx?.creditPackageRepo || _defaultCreditPackageRepo || getCreditPackageRepository();
-    if (!repo) {
-        throw new BillingConfigurationError("CreditPackageRepository is not configured in Billing system");
-    }
-    return repo.findActiveById(packageId);
-}
-
-/**
- * Resolves credit quantity granted by a package variant or fallback ID.
- *
- * @param {{ variantId?: string|number, packageId?: string }} input
- * @param {{ creditPackageRepo?: any }} [ctx]
- * @returns {Promise<number|null>}
- */
-export async function resolvePackageCredits(input = {}, ctx = {}) {
-    const { variantId, packageId } = input || {};
-    const repo = ctx?.creditPackageRepo || _defaultCreditPackageRepo || getCreditPackageRepository();
-    if (!repo) {
-        throw new BillingConfigurationError("CreditPackageRepository is not configured in Billing system");
-    }
-
-    if (variantId) {
-        const credits = await repo.findCreditsByVariantId(variantId);
-        if (credits != null) return credits;
-    }
-
-    if (packageId) {
-        return repo.findCreditsById(packageId);
-    }
-
-    return null;
 }
 
 // ── Factories & Service Builders ──────────────────────────────────────────────

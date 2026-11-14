@@ -4,13 +4,10 @@
  * @owns Media generation placeholder lifecycle and stale-placeholder recovery transitions.
  */
 
-let _V1StorageBridge = null;
+import { V1StorageBridge } from "./v1StorageBridge.js";
+
 async function getV1StorageBridge() {
-  if (!_V1StorageBridge) {
-    const mod = await import("../../../../v2/services/v1StorageBridge.js");
-    _V1StorageBridge = mod.V1StorageBridge;
-  }
-  return _V1StorageBridge;
+  return V1StorageBridge;
 }
 import { resolveMediaMetadata } from "./mediaMetadataResolver.js";
 import { createLogger } from "#shared";

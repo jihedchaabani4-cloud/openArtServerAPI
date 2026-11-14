@@ -20,11 +20,16 @@ export {
   isInternalSecretAllowedRequest,
   isInternalSecretAllowedRoute,
   USER_ID_REGEX,
-} from "../../../middleware/auth.js";
+} from "../internal/middleware/auth.js";
 
-export { requireAdmin } from "../../../middleware/requireAdmin.js";
-export { rateLimit } from "../../../middleware/rateLimit.js";
-export { safeCompareSecret } from "../../../platform/security/secretComparison.js";
+export { requireAdmin } from "../internal/middleware/requireAdmin.js";
+export {
+  rateLimit,
+  resetLimitersForTest,
+  setLimiterForTest,
+} from "../internal/middleware/rateLimit.js";
+export { walletRateLimit } from "../internal/middleware/walletRateLimit.js";
+export { safeCompareSecret } from "../internal/security/secretComparison.js";
 
 
 export {
@@ -94,6 +99,22 @@ export const identityTools = {
   },
 
   /**
+   * Retrieves auth user DTO by ID via admin SDK.
+   *
+   * @param {string} userId
+   * @returns {Promise<{ id: string, email: string|null }|null>}
+   */
+  async getAuthUserById(userId) {
+    if (!userId) return null;
+    const { data, error } = await authClient.getUserById(userId);
+    if (error || !data?.user) return null;
+    return {
+      id: data.user.id,
+      email: data.user.email || null,
+    };
+  },
+
+  /**
    * Asserts that a user owns the given resource.
    */
   assertOwns: (resourceType, id, userId) => OwnershipService.assertOwns(resourceType, id, userId),
@@ -121,6 +142,7 @@ export const {
   setDb,
   verifySession,
   getUserProfile,
+  getAuthUserById,
 } = identityTools;
 
 export default identityTools;

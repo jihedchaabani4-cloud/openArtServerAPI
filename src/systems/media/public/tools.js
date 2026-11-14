@@ -68,6 +68,7 @@ import {
 import {
     MediaService,
     MediaWorkflowLifecycleService,
+    V1StorageBridge,
     resolveMediaMetadata,
     calculateAspectRatio,
     failWorkflowPendingMedia,
@@ -466,6 +467,7 @@ export {
     // Services
     MediaService,
     MediaWorkflowLifecycleService,
+    V1StorageBridge,
     MEDIA_WORKFLOW_STATUS,
     resolveMediaMetadata,
     calculateAspectRatio,

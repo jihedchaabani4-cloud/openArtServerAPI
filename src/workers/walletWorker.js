@@ -1,10 +1,14 @@
 import "dotenv/config";
 import "../container.js";
 import { Worker } from "bullmq";
-import { createClient } from "@supabase/supabase-js";
 import { workerRedisConnection, redisConnection, RECONCILIATION_CACHE_KEY } from "../queue/redis.js";
 import { walletMaintenanceQueue, WALLET_QUEUE_NAME, scheduleWalletJobs } from "../queue/walletQueue.js";
-import { WalletService, FailedOpsService } from "#platform/billing";
+import {
+  getWalletService,
+  getFailedOpsService,
+  getWalletRepository,
+  getTransactionRepository,
+} from "#platform/billing";
 import { runReservationReaper } from "./reservationReaperWorker.js";
 import { createLogger, LogEvents } from "../infrastructure/logging/index.js";
 
@@ -42,9 +46,8 @@ if (!supabaseUrl || !supabaseServiceKey) {
   }
 }
 
-const supabase = supabaseUrl && supabaseServiceKey ? createClient(supabaseUrl, supabaseServiceKey) : null;
-const walletService = supabaseUrl && supabaseServiceKey ? new WalletService(supabaseUrl, supabaseServiceKey) : null;
-const failedOpsService = supabaseUrl && supabaseServiceKey ? new FailedOpsService(supabaseUrl, supabaseServiceKey) : null;
+const walletService = supabaseUrl && supabaseServiceKey ? getWalletService() : null;
+const failedOpsService = supabaseUrl && supabaseServiceKey ? getFailedOpsService() : null;
 
 // ── Job Handlers ─────────────────────────────────────────────────────────────
 
@@ -237,28 +240,41 @@ export async function replayOperation(op, { walletService: injectedWallet = null
  */
 export async function handleReconcileWallets({ supabaseClient = null } = {}) {
   const start = Date.now();
-  const client = supabaseClient || supabase;
 
-  if (!client) {
-    throw new Error("[reconcile-wallets] Database client is not wired");
-  }
-
-  const { data: wallets, error: walletsError } = await client
-    .from("wallets")
-    .select("id, user_id, balance");
-
-  if (walletsError) {
-    throw new Error(`[reconcile-wallets] Failed to fetch wallets: ${walletsError.message}`);
+  let wallets = [];
+  if (supabaseClient) {
+    const { data, error: walletsError } = await supabaseClient
+      .from("wallets")
+      .select("id, user_id, balance");
+    if (walletsError) {
+      throw new Error(`[reconcile-wallets] Failed to fetch wallets: ${walletsError.message}`);
+    }
+    wallets = data || [];
+  } else {
+    const walletRepo = getWalletRepository();
+    wallets = await walletRepo.listAll();
   }
 
   const mismatches = [];
+  const txRepo = !supabaseClient ? getTransactionRepository() : null;
 
-  for (const wallet of wallets || []) {
-    const { data: txData, error: txError } = await client
-      .from("transactions")
-      .select("type, amount, status")
-      .eq("wallet_id", wallet.id)
-      .eq("status", "COMPLETED");
+  for (const wallet of wallets) {
+    let txData;
+    let txError;
+
+    if (supabaseClient) {
+      const res = await supabaseClient
+        .from("transactions")
+        .select("type, amount, status")
+        .eq("wallet_id", wallet.id)
+        .eq("status", "COMPLETED");
+      txData = res.data;
+      txError = res.error;
+    } else {
+      const res = await txRepo.findCompletedByWalletId(wallet.id);
+      txData = res.data;
+      txError = res.error;
+    }
 
     if (txError) {
       logger.warn(

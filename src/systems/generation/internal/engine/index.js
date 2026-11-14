@@ -29,6 +29,7 @@ export { WorkflowAuthorizationService } from "../workflow/WorkflowAuthorizationS
 export { WorkflowMediaService, sanitizeStoragePath } from "../workflow/WorkflowMediaService.js";
 export { assertMediaUsable } from "../workflow/mediaGuards.js";
 export {
+    BaseRepository,
     WorkflowRepository,
     workflowRepository,
     GenerationConfigRepository,

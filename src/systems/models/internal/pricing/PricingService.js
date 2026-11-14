@@ -24,6 +24,7 @@
 import { createLogger } from "#shared";
 import { getModel } from "../registry/modelRegistry.js";
 import { calculateRetailCredits } from "./pricingEngine.js";
+import { getModelsSupabaseAdminClient } from "../db/modelsClient.js";
 
 const pricingLogger = createLogger("pricing-service");
 
@@ -32,12 +33,17 @@ export class PricingService {
   CACHE_TTL_SECONDS = 300;
 
   /**
-   * @param {import('@supabase/supabase-js').SupabaseClient} supabase
-   * @param {import('ioredis').Redis} redis — existing ioredis connection (redisConnection from queue/redis.js)
+   * @param {import('@supabase/supabase-js').SupabaseClient|object} [supabaseOrOptions]
+   * @param {import('ioredis').Redis} [redis]
    */
-  constructor(supabase, redis) {
-    this.supabase = supabase;
-    this.redis = redis;
+  constructor(supabaseOrOptions = null, redis = null) {
+    if (supabaseOrOptions && typeof supabaseOrOptions.from !== "function" && ("redis" in supabaseOrOptions || "supabase" in supabaseOrOptions)) {
+      this.supabase = supabaseOrOptions.supabase || getModelsSupabaseAdminClient();
+      this.redis = supabaseOrOptions.redis || redis;
+    } else {
+      this.supabase = supabaseOrOptions || getModelsSupabaseAdminClient();
+      this.redis = redis;
+    }
   }
 
   /**

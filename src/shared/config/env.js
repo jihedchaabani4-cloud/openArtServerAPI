@@ -51,6 +51,24 @@ export const envConfig = {
   get enableV2WorkflowRunEndpoint() {
     return process.env.ENABLE_V2_WORKFLOW_RUN_ENDPOINT === "true";
   },
+  get lemonWebhookSecret() {
+    return process.env.LEMON_WEBHOOK_SECRET || "";
+  },
+  get internalAuthEnabled() {
+    return process.env.INTERNAL_AUTH_ENABLED === "true";
+  },
+  get internalSecret() {
+    return process.env.INTERNAL_SECRET || "";
+  },
+  get rateLimitStore() {
+    return process.env.RATE_LIMIT_STORE || "memory";
+  },
+  get rateLimitTimeoutMs() {
+    return Number(process.env.RATE_LIMIT_TIMEOUT_MS) || 1500;
+  },
+  get walletRateLimitTimeoutMs() {
+    return Number(process.env.WALLET_RATE_LIMIT_TIMEOUT_MS) || 1500;
+  },
   getEnvVar(key) {
     return process.env[key];
   },

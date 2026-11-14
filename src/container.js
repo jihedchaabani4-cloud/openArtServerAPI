@@ -1,6 +1,5 @@
 import "dotenv/config";
 import { PromptService } from "#platform/ai/PromptService.js";
-import { supabase, supabaseAdmin } from "#lib/supabase.js";
 import {
     WalletService,
     FailedOpsService,
@@ -8,10 +7,12 @@ import {
     configureBilling,
     createWalletService,
     createFailedOpsService,
-    createBillingRepositories,
-} from "#platform/billing";
+    getUsageEventRepository,
+    getCreditPackageRepository,
+    getWalletRepository,
+    getTransactionRepository,
+} from "#billing/tools";
 import { PricingService } from "#models/tools";
-import { createClient } from "@supabase/supabase-js";
 import { redisConnection } from "#queue/redis.js";
 import { createLogger } from "./infrastructure/logging/index.js";
 
@@ -36,7 +37,7 @@ import {
     MediaWorkflowLifecycleService,
     MediaUploadService,
     AssetUploadService,
-    createStorageService,
+    getStorageService,
     configureMedia,
 } from "#media/tools";
 import { CharacterService, CharacterMediaService, configureCharacters } from "#characters/tools";
@@ -59,7 +60,7 @@ import { WorkflowStorageGateway } from "./infrastructure/storage/workflowStorage
 
 // ─── Services ────────────────────────────────────────────────────────────────
 export { promptService };
-export const storageService = createStorageService({ client: supabaseAdmin });
+export const storageService = getStorageService();
 const walletServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || null;
 
 /**
@@ -143,20 +144,25 @@ assertWalletConfiguredForEnvironment();
 assertSecurityConfiguredForEnvironment();
 assertRateLimitConfiguredForEnvironment();
 
-const _supabaseForBilling = process.env.SUPABASE_URL && walletServiceKey
-    ? createClient(process.env.SUPABASE_URL, walletServiceKey)
+const _hasBillingConfig = Boolean(process.env.SUPABASE_URL && walletServiceKey);
+export const usageEventRepo = _hasBillingConfig
+    ? getUsageEventRepository()
     : null;
-export const usageEventRepo = _supabaseForBilling
-    ? new UsageEventRepository(_supabaseForBilling)
+export const creditPackageRepo = _hasBillingConfig
+    ? getCreditPackageRepository()
+    : null;
+export const billingRepos = _hasBillingConfig
+    ? {
+        walletRepo: getWalletRepository(),
+        txRepo: getTransactionRepository(),
+        transactionRepo: getTransactionRepository(),
+        usageEventRepo,
+        creditPackageRepo,
+    }
     : null;
 
-export const billingRepos = _supabaseForBilling
-    ? createBillingRepositories(_supabaseForBilling, { catalogClient: supabase })
-    : null;
-export const creditPackageRepo = billingRepos?.creditPackageRepo || null;
-
-export const walletService  = _supabaseForBilling
-    ? createWalletService({ client: _supabaseForBilling, usageEventRepo })
+export const walletService = _hasBillingConfig
+    ? createWalletService({ usageEventRepo })
     : null;
 
 if (walletService) {
@@ -167,22 +173,21 @@ if (walletService) {
 }
 
 // ─── Pricing Service (DB-backed + Redis cache) ────────────────────────────────
-const _supabaseForPricing = process.env.SUPABASE_URL && walletServiceKey
-    ? createClient(process.env.SUPABASE_URL, walletServiceKey)
-    : null;
-export const pricingService = _supabaseForPricing
-    ? new PricingService(_supabaseForPricing, redisConnection)
+export const pricingService = _hasBillingConfig
+    ? new PricingService({ redis: redisConnection })
     : null;
 
 if (pricingService) {
+    configureBilling({ pricingService, redisConnection });
     systemLogger.debug("PricingService initialized");
 } else {
+    configureBilling({ redisConnection });
     systemLogger.warn("PricingService disabled: missing Supabase config");
 }
 
 // ─── Failed Operations Service ────────────────────────────────────────────────
-export const failedOpsService = _supabaseForBilling
-    ? createFailedOpsService({ client: _supabaseForBilling })
+export const failedOpsService = _hasBillingConfig
+    ? createFailedOpsService()
     : null;
 
 if (failedOpsService) {

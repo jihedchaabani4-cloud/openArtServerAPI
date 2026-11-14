@@ -302,6 +302,21 @@ export class GenerationQueueDispatchError extends GenerationError {
     }
 }
 
+export class GenerationUpstreamError extends GenerationError {
+    constructor(message = "Upstream provider error", { code = "GENERATION_UPSTREAM_ERROR", category = "UPSTREAM_FAULT", statusCode = 502, retryable = true, context = {} } = {}) {
+        super(code, message, {
+            type: "OPERATIONAL",
+            category,
+            statusCode,
+            retryable,
+            billingAction: "REFUND_HOLD",
+            context,
+        });
+        this.name = "GenerationUpstreamError";
+        this.errorCode = code;
+    }
+}
+
 export class CompilationError extends Error {
     constructor(rule, message, details = {}) {
         super(message);
@@ -333,7 +348,9 @@ export default {
     GenerationNotFoundError,
     GenerationCompilationError,
     GenerationQueueDispatchError,
+    GenerationUpstreamError,
     CompilationError,
     throwCompilationErrors,
 };
+
 

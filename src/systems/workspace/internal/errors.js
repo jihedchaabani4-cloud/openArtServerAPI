@@ -106,13 +106,8 @@ export class WorkspaceUnauthorizedError extends WorkspaceError {
     }
 }
 
-export class FolderError extends AppError {
-    constructor(message, statusCode = 400, errorCode = "FOLDER_ERROR") {
-        super(errorCode, message, { statusCode });
-        this.name = "FolderError";
-        this.errorCode = errorCode;
-    }
-}
+import { FolderError } from "./services/FolderService.js";
+export { FolderError };
 
 export default {
     WorkspaceError,

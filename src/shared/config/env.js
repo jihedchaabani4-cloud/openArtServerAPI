@@ -10,7 +10,25 @@ export const envConfig = {
   get initialWalletBalance() {
     return Number(process.env.INITIAL_WALLET_BALANCE || process.env.DEFAULT_WALLET_BALANCE || 0);
   },
+  get devAuthBypass() {
+    return (process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) && !this.isProduction;
+  },
+  get folderMaxDepth() {
+    return Number(process.env.FOLDER_MAX_DEPTH || 3);
+  },
+  get folderMaxPerProject() {
+    return Number(process.env.FOLDER_MAX_PER_PROJECT || 50);
+  },
+  get elementMaxMedia() {
+    const raw = process.env.ELEMENT_MAX_MEDIA || process.env.ELEMENT_MAX_REFERENCE_MEDIA;
+    if (raw !== undefined && raw !== null && raw !== "") {
+      const parsed = parseInt(raw, 10);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+    return 6;
+  },
 };
+
 
 export const redisConfig = {
   url: process.env.REDIS_URL || process.env.REDIS_DEV_URL || "",

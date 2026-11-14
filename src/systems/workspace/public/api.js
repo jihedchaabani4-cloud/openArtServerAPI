@@ -6,11 +6,10 @@
  */
 
 import express from "express";
-import * as projectsController from "../../../../controllers/projectsController.js";
-import * as foldersController from "../../../../controllers/foldersController.js";
-import * as trashController from "../../../../controllers/trashController.js";
-import { requireAuth } from "../../../middleware/auth.js";
-import { rateLimit } from "../../../middleware/rateLimit.js";
+import * as projectsController from "../internal/controllers/projectsController.js";
+import * as foldersController from "../internal/controllers/foldersController.js";
+import * as trashController from "../internal/controllers/trashController.js";
+import { requireAuth, rateLimit } from "#identity/tools";
 
 // ── Projects Router ─────────────────────────────────────────────────
 export const projectsRouter = express.Router();
@@ -42,5 +41,10 @@ export const workspaceRouter = express.Router();
 workspaceRouter.use("/projects", projectsRouter);
 workspaceRouter.use("/folders", foldersRouter);
 workspaceRouter.use("/trash", trashRouter);
+
+export const { getAll, create, update, remove, listAssets } = projectsController;
+export const { createProjectFolder, updateFolder, deleteFolder } = foldersController;
+export const { restoreWorkflow, restoreAllWorkflows } = trashController;
+export { projectsController, foldersController, trashController };
 
 export default workspaceRouter;

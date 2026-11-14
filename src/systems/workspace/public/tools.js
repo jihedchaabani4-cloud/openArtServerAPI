@@ -40,14 +40,18 @@ import {
     FolderError,
 } from "../internal/errors.js";
 
+import { setWorkspaceServices } from "../internal/services/serviceAccessor.js";
+
 // System-managed singletons (configured by container at bootstrap)
 let _defaultTrashService = null;
 let _defaultProjectService = null;
 
-export function configureWorkspace({ trashService = null, projectService = null } = {}) {
-    if (trashService) _defaultTrashService = trashService;
-    if (projectService) _defaultProjectService = projectService;
+export function configureWorkspace(services = {}) {
+    if (services.trashService) _defaultTrashService = services.trashService;
+    if (services.projectService) _defaultProjectService = services.projectService;
+    setWorkspaceServices(services);
 }
+
 
 /**
  * Asserts that the specified project exists and is owned by the given user.

@@ -21,6 +21,7 @@ import {
     extractElementTokens,
     stripElementTokens,
     PromptBuilderProService,
+    promptBuilderProService,
     getElementContextForPrompt,
 } from "../internal/services/index.js";
 import {
@@ -30,8 +31,15 @@ import {
     ElementsConflictError,
     ElementsUnauthorizedError,
 } from "../internal/errors.js";
+import { setElementServices } from "../internal/services/serviceAccessor.js";
+
+export function configureElements(services = {}) {
+    setElementServices(services);
+}
+
 
 // ── Inter-System Tools Functions ──────────────────────────────────────────────
+
 
 /**
  * Retrieves formatted element prompt context (traits, guidelines, reference media URLs).
@@ -128,6 +136,7 @@ export {
     extractElementTokens,
     stripElementTokens,
     PromptBuilderProService,
+    promptBuilderProService,
     getElementContextForPrompt,
     ElementsError,
     ElementsValidationError,
@@ -147,6 +156,7 @@ export default {
     extractElementTokens,
     stripElementTokens,
     PromptBuilderProService,
+    promptBuilderProService,
     getElementContextForPrompt,
     ElementsError,
     ElementsValidationError,

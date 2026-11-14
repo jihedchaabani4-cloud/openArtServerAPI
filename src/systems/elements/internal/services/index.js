@@ -8,14 +8,14 @@
 import {
     ElementService,
     getElementContextForPrompt,
-} from "../../../../domain/element/ElementService.js";
-import { ElementMediaService } from "../../../../domain/element/ElementMediaService.js";
-import { ElementAnalysisService } from "../../../../domain/element/ElementAnalysisService.js";
-import {
+} from "./ElementService.js";
+import { ElementMediaService } from "./ElementMediaService.js";
+import { ElementAnalysisService } from "./ElementAnalysisService.js";
+import promptBuilderProService, {
     extractElementTokens,
     stripElementTokens,
     PromptBuilderProService,
-} from "../../../../domain/element/promptBuilderProService.js";
+} from "./promptBuilderProService.js";
 
 export {
     ElementService,
@@ -24,6 +24,7 @@ export {
     extractElementTokens,
     stripElementTokens,
     PromptBuilderProService,
+    promptBuilderProService,
     getElementContextForPrompt,
 };
 
@@ -34,5 +35,6 @@ export default {
     extractElementTokens,
     stripElementTokens,
     PromptBuilderProService,
+    promptBuilderProService,
     getElementContextForPrompt,
 };

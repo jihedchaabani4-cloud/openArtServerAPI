@@ -20,12 +20,11 @@ import {
     updateElement,
     analyzeElement,
     buildPrompt,
-} from "../../../../controllers/elementController.js";
-import { requireAuth } from "../../../../src/middleware/auth.js";
-import { rateLimit } from "../../../../src/middleware/rateLimit.js";
-import { createUploadMiddleware } from "../../../../src/middleware/uploadMiddleware.js";
-import { preUploadElementCapacityGuard } from "../../../../src/middleware/elementUploadGuard.js";
-import { ELEMENT_REFERENCE_UPLOAD_POLICY } from "../../../../src/platform/media-ingestion/UploadPolicy.js";
+} from "../internal/controllers/elementController.js";
+import { requireAuth, rateLimit } from "#identity/tools";
+import { createUploadMiddleware } from "#media/api";
+import { preUploadElementCapacityGuard, createPreUploadElementCapacityGuard } from "../internal/middleware/elementUploadGuard.js";
+import { ELEMENT_REFERENCE_UPLOAD_POLICY } from "#media/tools";
 
 const upload = createUploadMiddleware(ELEMENT_REFERENCE_UPLOAD_POLICY);
 
@@ -57,6 +56,20 @@ router.patch("/:id", updateElement);
 
 // ─── DELETE /api/v2/elements/:id ─────────────────────────────────────────────
 router.delete("/:id", deleteElement);
+
+export {
+    createElement,
+    listProjectElements,
+    getElementById,
+    deleteElement,
+    addImageToElement,
+    removeImageFromElement,
+    updateElement,
+    analyzeElement,
+    buildPrompt,
+    preUploadElementCapacityGuard,
+    createPreUploadElementCapacityGuard,
+};
 
 export const elementRoutes = router;
 export default router;

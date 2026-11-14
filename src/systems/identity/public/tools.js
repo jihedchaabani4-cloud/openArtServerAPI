@@ -23,7 +23,9 @@ export {
 } from "../../../middleware/auth.js";
 
 export { requireAdmin } from "../../../middleware/requireAdmin.js";
+export { rateLimit } from "../../../middleware/rateLimit.js";
 export { safeCompareSecret } from "../../../platform/security/secretComparison.js";
+
 
 export {
   IdentityError,

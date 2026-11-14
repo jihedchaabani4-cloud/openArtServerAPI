@@ -74,6 +74,34 @@ export function createLogger(moduleName = "system") {
   };
 }
 
+const dbLogger = createLogger("database");
+
+export function crudOperationLog({
+    traceId = null,
+    operation,
+    durationMs = null,
+    status = "ok",
+    errorCode = null,
+    message = null,
+    ...extra
+} = {}) {
+    const payload = {
+        traceId,
+        operation,
+        status,
+        ...(durationMs != null ? { durationMs } : {}),
+        ...(errorCode ? { errorCode } : {}),
+        ...(message ? { message } : {}),
+        ...extra,
+    };
+    if (status === "error") {
+        dbLogger.error(payload, `CRUD ${operation} failed: ${message || errorCode || "error"}`);
+    } else {
+        dbLogger.debug(payload, `CRUD ${operation} (${durationMs != null ? durationMs + "ms" : "ok"})`);
+    }
+    return payload;
+}
+
 export {
   runWithContext,
   setContext,
@@ -85,3 +113,4 @@ export {
 };
 
 export default createLogger;
+

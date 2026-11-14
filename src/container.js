@@ -36,8 +36,9 @@ import { MediaService, MediaWorkflowLifecycleService } from "#platform/media/ind
 import { WorkflowLifecycleService } from "#platform/workflow/WorkflowService.js";
 import { MediaUploadService } from "#platform/media-ingestion/index.js";
 import { CharacterService, CharacterMediaService } from "#characters/tools";
-import { ElementService, ElementMediaService, ElementAnalysisService } from "#elements/tools";
+import { ElementService, ElementMediaService, ElementAnalysisService, configureElements } from "#elements/tools";
 import { ProjectService, ProjectReadService, FolderService, TrashService, configureWorkspace } from "#workspace/tools";
+
 import {
     GenerationService,
     GenerationRequestService,
@@ -257,6 +258,8 @@ export const elementService = new ElementService({
     mediaService: elementMediaService,
     analysisService: new ElementAnalysisService(),
 });
+configureElements({ elementService, elementMediaService });
+
 
 workflowService.setEntitySyncHandlers({
     syncCharacter: (targetWorkflowId, updates, userId) => characterService.updateCharacter({ characterId: targetWorkflowId, updates, userId }),
@@ -272,7 +275,8 @@ export const trashService = new TrashService({
 
 export const projectReadService = new ProjectReadService({ db, folderService });
 export const projectService = new ProjectService({ projectRepo: db.projects });
-configureWorkspace({ trashService, projectService });
 export const generationService = new GenerationService({ db });
 export const generationRequestService = new GenerationRequestService({ db, useCaseService, folderService });
+configureWorkspace({ trashService, projectService, folderService, projectReadService, generationService });
+
 

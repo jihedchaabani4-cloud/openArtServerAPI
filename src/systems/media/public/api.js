@@ -9,7 +9,9 @@ import { createLogger } from "#shared";
 import { safePublicRouteError, AppError } from "#shared";
 import { requireAuth } from "../../../middleware/auth.js";
 import { createUploadMiddleware } from "../../../middleware/uploadMiddleware.js";
+export { createUploadMiddleware };
 import { DEFAULT_UPLOAD_POLICY } from "../internal/ingestion/UploadPolicy.js";
+
 import {
     assetUploadService,
     workflowService,

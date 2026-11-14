@@ -4,11 +4,11 @@
  * Encapsulates domain logic for Projects, Folders, and Trash.
  */
 
-export { ProjectService } from "../../../../domain/project/ProjectService.js";
-export { ProjectReadService } from "../../../../domain/project/ProjectReadService.js";
-export { FolderService, FolderError } from "../../../../domain/folder/FolderService.js";
-export { TrashService } from "../../../../domain/trash/TrashService.js";
-export * as folderTree from "../../../../domain/folderTree.js";
+export { ProjectService } from "./ProjectService.js";
+export { ProjectReadService } from "./ProjectReadService.js";
+export { FolderService, FolderError } from "./FolderService.js";
+export { TrashService } from "./TrashService.js";
+export * as folderTree from "./folderTree.js";
 export {
     indexById,
     indexChildren,
@@ -19,4 +19,4 @@ export {
     wouldCreateCycle,
     wouldExceedDepth,
     depthForNewChild,
-} from "../../../../domain/folderTree.js";
+} from "./folderTree.js";

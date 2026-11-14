@@ -290,6 +290,52 @@ function checkRuleR16(f) {
   return hits;
 }
 
+const ALLOWED_SRC_ENTRIES = new Set(['api', 'shared', 'systems', 'container.js']);
+const FORBIDDEN_ROOT_DIRS = [
+  'controllers',
+  'routes',
+  'lib',
+  'middleware',
+  'services',
+  'utils',
+  'config',
+  'models',
+  'workers',
+  'queue',
+  'domain',
+  'platform',
+  'infrastructure',
+];
+
+function checkRuleR17(rootDir = ROOT) {
+  // R17: Canonical directory boundary lock — only api, shared, systems, and container.js allowed under src/, and no legacy code folders at root
+  const violations = [];
+  for (const dirName of FORBIDDEN_ROOT_DIRS) {
+    const p = path.join(rootDir, dirName);
+    if (fs.existsSync(p)) {
+      violations.push({
+        key: `R17|${dirName}`,
+        detail: `${dirName}:1  Forbidden legacy root directory "${dirName}/" exists outside src/{api,shared,systems}`,
+      });
+    }
+  }
+
+  const srcDir = path.join(rootDir, 'src');
+  if (fs.existsSync(srcDir)) {
+    for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+      if (!ALLOWED_SRC_ENTRIES.has(entry.name)) {
+        const relPath = `src/${entry.name}`;
+        violations.push({
+          key: `R17|${relPath}`,
+          detail: `${relPath}:1  Forbidden entry "${relPath}" inside src/ (only src/api, src/shared, src/systems, and src/container.js are allowed)`,
+        });
+      }
+    }
+  }
+
+  return violations;
+}
+
 /**
  * Finds static import cycles across codebase files.
  */
@@ -543,6 +589,16 @@ function collect() {
     });
   }
 
+  // R17: Canonical directory boundary lock
+  const dirViolations = checkRuleR17();
+  for (const dv of dirViolations) {
+    violations.push({
+      rule: 'R17',
+      key: dv.key,
+      detail: dv.detail,
+    });
+  }
+
   return { files, violations, note: mig.note };
 }
 
@@ -560,7 +616,7 @@ function layerReport(files) {
 }
 
 function summary(violations, baseline, fresh) {
-  const allRuleIds = ['R1', 'R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11', 'R12', 'R13', 'R14', 'R15', 'R16'];
+  const allRuleIds = ['R1', 'R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11', 'R12', 'R13', 'R14', 'R15', 'R16', 'R17'];
   const ids = allRuleIds.sort((a, b) => {
     const numA = parseInt(a.replace(/\D/g, ''), 10);
     const numB = parseInt(b.replace(/\D/g, ''), 10);
@@ -570,6 +626,7 @@ function summary(violations, baseline, fresh) {
   desc.R6 = 'migrations with SECURITY DEFINER must REVOKE FROM PUBLIC, anon, authenticated';
   desc.R14 = 'zero static circular dependencies across codebase modules';
   desc.R15 = 'package.json #imports must map systems directly to public/api.js or public/tools.js';
+  desc.R17 = 'canonical directory boundary lock (only src/{api,shared,systems,container.js}, no legacy root folders)';
 
   const now = {}; const base = {}; const neu = {};
   for (const v of violations) now[v.rule] = (now[v.rule] || 0) + 1;
@@ -659,6 +716,7 @@ if (require.main === module) {
     checkRuleR13,
     checkRuleR15,
     checkRuleR16,
+    checkRuleR17,
     findImportCycles,
     collect,
   };

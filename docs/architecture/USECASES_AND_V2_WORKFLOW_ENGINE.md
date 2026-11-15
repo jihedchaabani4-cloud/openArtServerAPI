@@ -1,5 +1,10 @@
 # الدليل المعماري والتشغيلي الشامل: UseCases، `runUseCase`، محرك Workflows V2، والعُقد (Nodes)
 
+> [!IMPORTANT]
+> **DEPRECATION & RETIREMENT NOTICE (Sprint V3-Cleanup-4)**:
+> The legacy V2 DAG workflow engine (`src/systems/generation/internal/v2/`) and use-case directory structure (`src/systems/generation/internal/use-cases/`) have been completely retired and superseded by the ComfyUI-style V3 Node Engine (`src/systems/generation/internal/v3/`).
+> For 100% backward compatibility with existing controllers, tests, and external systems, `#generation/tools` provides transparent shims via `src/systems/generation/internal/compat/legacyWorkflowCompat.js` and `V3Dispatcher`. All new workflows and generation pipelines must be authored using V3 declarative blueprints and node registries.
+
 هذه الوثيقة هي المرجع الهندسي الشامل (End-to-End Reference) لكل ما يخص **الـ UseCases**، دورة حياة **`runUseCase`**، **المترجم (Compiler)**، **منفّذ الـ DAG (`workflowRunner` & `nodeExecutor`)**، **العُقد الأربع (`Nodes`)**، **المهارات (`Skills`)**، **المعالجات (`Processors`)**، **الفوترة (`Billing`)**، **الطوابير والـ Workers (`BullMQ`)**، و**سياسات الأخطاء والتعويض (`Error Policy & Compensation`)** داخل النظام الأول (**System 1: Generation & Workflows**).
 
 ---
@@ -13,7 +18,7 @@
    - تتولى: التحقق من المدخلات، ترجمة الـ Workflow، حساب التكلفة المسبقة (`Upfront Billing Plan`)، حجز الرصيد (`Credit Hold`)، دفع المهمة إلى طابور Redis (`v2-workflow-jobs`)، ومراقبة التنفيذ في الخلفية مع تسوية الحجز (`Settle`) عند النجاح أو استرجاعه (`Rollback`) وتنظيف الـ Media Placeholders عند الفشل.
 2. **طبقة محرك سير العمل (`V2 Workflow Engine & Nodes Layer`)**:
    - تمثل **محرك التنفيذ البياني (DAG Execution Engine)**.
-   - تقرأ تعريفات YAML من `src/systems/generation/internal/v2/registry/`، وتحولها عبر `compileWorkflow.js` إلى مخطط تنفيذ غير حلقي (`ExecutionGraph`)، ثم تنفذ العُقد (`Nodes`) بالترتيب الاعتمادي عبر `workflowRunner.js` و`nodeExecutor.js`.
+   - تقرأ تعريفات YAML من `src/systems/generation/internal/v2/registry/`، وتحولها عبر `compileWorkflow.js` إلى مخطط تنفيذ غير حلقي (`ExecutionGraph`)، ثم تنفذ العُقد (`Nodes`) بالترتيب الاعتمادي عبر `workflowRunner.js` و`nodeExecutor.js`. <!-- no-check -->
 
 ```mermaid
 flowchart TD
@@ -58,28 +63,28 @@ flowchart TD
 
 | الملف | الدور والمسؤولية | أبرز الصادرات (`Exports`) |
 |---|---|---|
-| `src/systems/generation/internal/services/useCaseService.js` | الخدمة المركزية لإدارة دورة حياة الـ UseCase بالكامل (تحضير، حجز رصيد، إرسال للطابور، نبضات تمديد الحجز، تنفيذ، تسوية أو استرجاع، وتنظيف الـ Media العالقة). | `UseCaseService` |
+| `src/systems/generation/internal/services/useCaseService.js` | الخدمة المركزية لإدارة دورة حياة الـ UseCase بالكامل (تحضير، حجز رصيد، إرسال للطابور، نبضات تمديد الحجز، تنفيذ، تسوية أو استرجاع، وتنظيف الـ Media العالقة). | `UseCaseService` | <!-- no-check -->
 | `src/systems/generation/internal/services/GenerationRequestService.js` | المنسق الموحد لطلبات توليد الصور والفيديو: يتحقق من المجلد، يطهر المدخلات من المفاتيح السرية ويفحصها عبر `validateInput`، ينشئ سجل `workflow` وسجلات `media` بحالة `processing`، ثم يستدعي `useCaseService.prepareAndEnqueue`. | `GenerationRequestService` |
 | `src/systems/characters/internal/services/CharacterGenerationService.js` | منسق توليد الشخصيات (في النظام السابع/السادس `characters`): ينشئ `placeholderMedia` لدور `sheet` ويدفع UseCase `character-sheet-v1` عبر `useCaseService.prepareAndEnqueue`. | `CharacterGenerationService` |
 | `src/systems/generation/internal/services/jobQueueService.js` | خدمة طابور BullMQ (`v2-workflow-jobs`) المسؤولة عن إرسال مهام `run-usecase` و`node-execute` مع آلية إعادة محاولة الإرسال (3 محاولات بـ Exponential Backoff 300ms/600ms). | `JobQueueService`, `jobQueueService`, `getUseCaseQueue`, `USECASE_QUEUE_NAME`, `QueueDispatchError` |
-| `src/systems/generation/internal/use-cases/useCaseRunner.js` | المنفذ الفعلي لـ `runUseCase`: يحمّل تعريف الـ UseCase، يترجم الـ Workflow المرتبط به، ويشغّل `startWorkflowRun` بتمرير المعرفات الموثقة من السيرفر (`serverWorkflowId`, `serverMediaIds`). | `run` (المصدر كـ `runUseCase`), `getRegistries` |
-| `src/systems/generation/internal/use-cases/useCaseRegistry.js` | السجل في الذاكرة (`Map`) لحفظ واسترجاع تعريفات الـ UseCases بعد تجميدها (`Object.freeze`). | `registerUseCase`, `getUseCase`, `listUseCases`, `clearUseCaseRegistry` |
-| `src/systems/generation/internal/use-cases/useCaseSchema.js` | مدقق صحة تعريف الـ UseCase (`useCaseId`, `label`, `workflowRef`, `billing.strategy`, `inputSchema`). | `validateUseCaseDefinition` |
-| `src/systems/generation/internal/use-cases/registerUseCases.js` | يسجل الـ UseCases الثلاثة المعتمدة عند إقلاع السيرفر أو الـ Worker. | `registerAllUseCases` |
-| `src/systems/generation/internal/use-cases/workflowBillingPlan.js` | يحسب التكلفة المسبقة (`Upfront Billing Plan`) عبر استخراج العُقد القابلة للفوترة (`image-generation`, `video-generation`, `llm`) واستدعاء `calculateCost` من `#models/tools`. | `calculateWorkflowBillingPlan`, `getBillableNodes` |
-| `src/systems/generation/internal/use-cases/definitions/imageGeneration.js` | تعريف UseCase توليد الصور (`image-generation-v1`). | `imageGenerationUseCase` |
-| `src/systems/generation/internal/use-cases/definitions/videoGeneration.js` | تعريف UseCase توليد الفيديو (`video-generation-v1`). | `videoGenerationUseCase` |
-| `src/systems/generation/internal/use-cases/definitions/characterSheet.js` | تعريف UseCase توليد صحيفة الشخصية (`character-sheet-v1`). | `characterSheetUseCase` |
+| `src/systems/generation/internal/use-cases/useCaseRunner.js` | المنفذ الفعلي لـ `runUseCase`: يحمّل تعريف الـ UseCase، يترجم الـ Workflow المرتبط به، ويشغّل `startWorkflowRun` بتمرير المعرفات الموثقة من السيرفر (`serverWorkflowId`, `serverMediaIds`). | `run` (المصدر كـ `runUseCase`), `getRegistries` | <!-- no-check -->
+| `src/systems/generation/internal/use-cases/useCaseRegistry.js` | السجل في الذاكرة (`Map`) لحفظ واسترجاع تعريفات الـ UseCases بعد تجميدها (`Object.freeze`). | `registerUseCase`, `getUseCase`, `listUseCases`, `clearUseCaseRegistry` | <!-- no-check -->
+| `src/systems/generation/internal/use-cases/useCaseSchema.js` | مدقق صحة تعريف الـ UseCase (`useCaseId`, `label`, `workflowRef`, `billing.strategy`, `inputSchema`). | `validateUseCaseDefinition` | <!-- no-check -->
+| `src/systems/generation/internal/use-cases/registerUseCases.js` | يسجل الـ UseCases الثلاثة المعتمدة عند إقلاع السيرفر أو الـ Worker. | `registerAllUseCases` | <!-- no-check -->
+| `src/systems/generation/internal/use-cases/workflowBillingPlan.js` | يحسب التكلفة المسبقة (`Upfront Billing Plan`) عبر استخراج العُقد القابلة للفوترة (`image-generation`, `video-generation`, `llm`) واستدعاء `calculateCost` من `#models/tools`. | `calculateWorkflowBillingPlan`, `getBillableNodes` | <!-- no-check -->
+| `src/systems/generation/internal/use-cases/definitions/imageGeneration.js` | تعريف UseCase توليد الصور (`image-generation-v1`). | `imageGenerationUseCase` | <!-- no-check -->
+| `src/systems/generation/internal/use-cases/definitions/videoGeneration.js` | تعريف UseCase توليد الفيديو (`video-generation-v1`). | `videoGenerationUseCase` | <!-- no-check -->
+| `src/systems/generation/internal/use-cases/definitions/characterSheet.js` | تعريف UseCase توليد صحيفة الشخصية (`character-sheet-v1`). | `characterSheetUseCase` | <!-- no-check -->
 
 ### 2.3 ملفات المترجم (`internal/v2/compiler/`) والسجلات (`internal/v2/registry/`)
 
 | الملف | الدور والمسؤولية | أبرز الصادرات / المحتوى |
 |---|---|---|
-| `src/systems/generation/internal/v2/compiler/compileWorkflow.js` | يحول تعريف الـ Workflow (من YAML) إلى مخطط تنفيذ (`ExecutionGraph`)، يتحقق من عدم وجود حلقات مغلقة (`CYCLIC_DEPENDENCY`)، يبني مجموعات التوازي (`parallel_groups` عبر خوارزمية Kahn)، ويفصل المدخلات الثابتة (`resolved_inputs`) عن التعبيرات الديناميكية (`bindings`). | `compileWorkflow`, `compileWorkflowById`, `getDefaultRegistryRoot` |
-| `src/systems/generation/internal/v2/compiler/validateBindings.js` | يتحقق من صحة تعبيرات الربط `${input.field}` و`${nodeId.output.path}`، ويمنع استخدام الحقل المفرد `character`، ويتأكد من وجود `depends_on` لكل عقدة تقرأ من مخرجات عقدة سابقة. | `validateBindings`, `parseBinding`, `isBindingExpression` |
-| `src/systems/generation/internal/v2/compiler/resolveRetryPolicy.js` | يحدد سياسة إعادة المحاولة لكل عقدة (`max_attempts`, `backoff`). | `resolveRetryPolicy` |
-| `src/systems/generation/internal/v2/registry/registryLoader.js` | يقرأ ويحلل ملفات YAML (`nodes.yaml`, `processors.yaml`, `skills/**/*.yaml`, `workflows/*.yaml`) ويتحقق من ترابطها. | `loadRegistries`, `getRegistryRoot` |
-| `src/systems/generation/internal/v2/registry/skillLoader.js` | يحمّل ملفات مهارات الـ LLM (`skills/llm/*.yaml`) ويدمج حقول `prompt_instruction` بفاصل `---`. | `loadSkills` |
+| `src/systems/generation/internal/v2/compiler/compileWorkflow.js` | يحول تعريف الـ Workflow (من YAML) إلى مخطط تنفيذ (`ExecutionGraph`)، يتحقق من عدم وجود حلقات مغلقة (`CYCLIC_DEPENDENCY`)، يبني مجموعات التوازي (`parallel_groups` عبر خوارزمية Kahn)، ويفصل المدخلات الثابتة (`resolved_inputs`) عن التعبيرات الديناميكية (`bindings`). | `compileWorkflow`, `compileWorkflowById`, `getDefaultRegistryRoot` | <!-- no-check -->
+| `src/systems/generation/internal/v2/compiler/validateBindings.js` | يتحقق من صحة تعبيرات الربط `${input.field}` و`${nodeId.output.path}`، ويمنع استخدام الحقل المفرد `character`، ويتأكد من وجود `depends_on` لكل عقدة تقرأ من مخرجات عقدة سابقة. | `validateBindings`, `parseBinding`, `isBindingExpression` | <!-- no-check -->
+| `src/systems/generation/internal/v2/compiler/resolveRetryPolicy.js` | يحدد سياسة إعادة المحاولة لكل عقدة (`max_attempts`, `backoff`). | `resolveRetryPolicy` | <!-- no-check -->
+| `src/systems/generation/internal/v2/registry/registryLoader.js` | يقرأ ويحلل ملفات YAML (`nodes.yaml`, `processors.yaml`, `skills/**/*.yaml`, `workflows/*.yaml`) ويتحقق من ترابطها. | `loadRegistries`, `getRegistryRoot` | <!-- no-check -->
+| `src/systems/generation/internal/v2/registry/skillLoader.js` | يحمّل ملفات مهارات الـ LLM (`skills/llm/*.yaml`) ويدمج حقول `prompt_instruction` بفاصل `---`. | `loadSkills` | <!-- no-check -->
 | `src/systems/generation/internal/v2/registry/nodes.yaml` | السجل التصريحي للعُقد الأربع (`prompt-builder`, `image-generation`, `video-generation`, `llm`) ومدخلاتها ومخرجاتها الافتراضية. | YAML |
 | `src/systems/generation/internal/v2/registry/processors.yaml` | السجل التصريحي لـ 17 معالجاً (`Processors`) مع خاصية `network: true|false`. | YAML |
 | `src/systems/generation/internal/v2/registry/workflows/image-generation-v1.yaml` | مخطط سير عمل توليد الصور: `llm_translate` ← `build_prompt` ← `generate`. | YAML |
@@ -95,20 +100,20 @@ flowchart TD
 
 | الملف | الدور والمسؤولية | أبرز الصادرات (`Exports`) |
 |---|---|---|
-| `src/systems/generation/internal/v2/runner/workflowRunner.js` | يدير دورة حياة تشغيل الـ Workflow في قاعدة البيانات (`startWorkflowRun`) وآلة الحالة للـ DAG (`executeOrchestration`). | `startWorkflowRun`, `executeOrchestration`, `initializeGateways`, `getGateways` |
-| `src/systems/generation/internal/v2/runner/nodeExecutor.js` | ينفذ عقدة مفردة (`executeNodeJob`)، يحل التعبيرات الديناميكية (`resolveInputsForNode`)، ويحفظ النتائج في جداول `media` أو `characters` (`executeNodePersistence`). | `executeNodeJob`, `resolveInputsForNode`, `executeNodePersistence`, `getValueAtPath` |
-| `src/systems/generation/internal/v2/runner/nodeBilling.js` | يدير `PersistedBillingAccumulator` (الذي يكتب تكلفة كل عقدة فوراً في `v2_workflow_runs.metadata.billingAccumulator`)، وحساب التكلفة الفعلي للعقدة (`estimateNodeBillingAmount`). | `PersistedBillingAccumulator`, `beginRunBillingAccumulator`, `getRunBillingAccumulator`, `estimateNodeBillingAmount`, `reserveNodeBilling`, `settleNodeBilling`, `rollbackNodeBilling` |
-| `src/systems/generation/internal/v2/nodes/index.js` | موزع تنفيذ العُقد (`Node Dispatcher`) الذي يربط اسم نوع العقدة بدالة التنفيذ الخاصة بها. | `executeNode`, `registerNodeExecutor`, `registry` |
-| `src/systems/generation/internal/v2/nodes/llmNode.js` | منفذ عقدة `llm` (تركيب الـ Skills، استدعاء `llmService.generate`، إعادة المحاولة مرة واحدة عند فشل تحليل JSON، وتطبيق سياسة Fail-Closed للأمان). | `executeLLM`, `executeLLMNode` |
-| `src/systems/generation/internal/v2/nodes/promptBuilderNode.js` | منفذ عقدة `prompt-builder` (حل المراجع من الداتابيز، ترقيم الصور `@image1..N`، استبدال الوسوم `<type:id>` بـ `@Name` أو `@imageN`، وبناء قسم `[Reference Guide]`). | `executePromptBuilder` |
-| `src/systems/generation/internal/v2/nodes/imageGenerationNode.js` | منفذ عقدة `image-generation` (Pure Pass-Through: يحل `input_image` و`images` من معرفات Workflows إلى روابط CDN، ثم يستدعي `models.run`). | `executeImageGeneration` |
-| `src/systems/generation/internal/v2/nodes/videoGenerationNode.js` | منفذ عقدة `video-generation` (Pure Pass-Through: يحل `input_image`, `last_frame`, `input_video`, `images` إلى روابط CDN، ثم يستدعي `models.run`). | `executeVideoGeneration` |
-| `src/systems/generation/internal/v2/nodes/safety/NodeSafetyService.js` | خدمة التحقق السريع (Fail-fast) من مدخلات جميع العُقد قبل أي اتصال بمزود خارجي أو فوترة. | `NodeSafetyService` |
-| `src/systems/generation/internal/v2/resolvers/WorkflowReferenceResolver.js` | يحل معرفات الـ Workflows (`CHARACTER_SHEET`, `ELEMENT_SHEET`, `GENERATION`, `UPLOAD`) مع التحقق من الملكية (`assertOwns`) إلى كيانات كاملة مع صورها وسماتها (`visualTraits`)، أو يستخرج الرابط الأساسي (`resolvePrimaryMediaUrl`). | `resolveWorkflowReferences`, `resolveWorkflowReference`, `resolveAsCharacter`, `resolveAsElement`, `resolveAsMedia`, `resolvePrimaryMediaUrl` |
-| `src/systems/generation/internal/v2/runtime/useCaseBillingRuntime.js` | يغلف عمليات الحجز المسبق (`reserveUseCase`) والتسوية (`settleUseCase`) والاسترجاع (`rollbackUseCase`) على مستوى الـ UseCase، ويضغط تفاصيل التكلفة (`buildCompactCostBreakdown`) لتبقى أقل من 4KB في جدول المعاملات. | `UseCaseBillingRuntime`, `useCaseBillingRuntime`, `buildCompactCostBreakdown` |
-| `src/systems/generation/internal/v2/runtime/nodeEnvelope.js` | يغلف مخرجات أو أخطاء كل عقدة في غلاف قياسي موحد (`__nodeEnvelope`). | `nodeSuccess`, `nodeFailure`, `fromNodeResult` |
-| `src/systems/generation/internal/v2/runtime/errorPolicy.js` | نظام تصنيف الأخطاء المركزي (`USER_FAULT`, `BILLING_FAULT`, `UPSTREAM_FAULT`, `SERVER_FAULT`) وتطهير الأخطاء المرسلة للعميل (`sanitizeClientError`). | `ErrorSystem`, `ERROR_CATEGORIES`, `RUNTIME_ERROR_CODES`, `formatWorkflowError`, `sanitizeClientError`, `processSystemError` |
-| `src/systems/generation/internal/v2/runtime/runtimeConstants.js` | ثوابت حالات التشغيل (`RUN_STATUS`, `NODE_STATUS`, `BILLING_STATUS`). | `RUN_STATUS`, `NODE_STATUS`, `BILLING_STATUS` |
+| `src/systems/generation/internal/v2/runner/workflowRunner.js` | يدير دورة حياة تشغيل الـ Workflow في قاعدة البيانات (`startWorkflowRun`) وآلة الحالة للـ DAG (`executeOrchestration`). | `startWorkflowRun`, `executeOrchestration`, `initializeGateways`, `getGateways` | <!-- no-check -->
+| `src/systems/generation/internal/v2/runner/nodeExecutor.js` | ينفذ عقدة مفردة (`executeNodeJob`)، يحل التعبيرات الديناميكية (`resolveInputsForNode`)، ويحفظ النتائج في جداول `media` أو `characters` (`executeNodePersistence`). | `executeNodeJob`, `resolveInputsForNode`, `executeNodePersistence`, `getValueAtPath` | <!-- no-check -->
+| `src/systems/generation/internal/v2/runner/nodeBilling.js` | يدير `PersistedBillingAccumulator` (الذي يكتب تكلفة كل عقدة فوراً في `v2_workflow_runs.metadata.billingAccumulator`)، وحساب التكلفة الفعلي للعقدة (`estimateNodeBillingAmount`). | `PersistedBillingAccumulator`, `beginRunBillingAccumulator`, `getRunBillingAccumulator`, `estimateNodeBillingAmount`, `reserveNodeBilling`, `settleNodeBilling`, `rollbackNodeBilling` | <!-- no-check -->
+| `src/systems/generation/internal/v2/nodes/index.js` | موزع تنفيذ العُقد (`Node Dispatcher`) الذي يربط اسم نوع العقدة بدالة التنفيذ الخاصة بها. | `executeNode`, `registerNodeExecutor`, `registry` | <!-- no-check -->
+| `src/systems/generation/internal/v2/nodes/llmNode.js` | منفذ عقدة `llm` (تركيب الـ Skills، استدعاء `llmService.generate`، إعادة المحاولة مرة واحدة عند فشل تحليل JSON، وتطبيق سياسة Fail-Closed للأمان). | `executeLLM`, `executeLLMNode` | <!-- no-check -->
+| `src/systems/generation/internal/v2/nodes/promptBuilderNode.js` | منفذ عقدة `prompt-builder` (حل المراجع من الداتابيز، ترقيم الصور `@image1..N`، استبدال الوسوم `<type:id>` بـ `@Name` أو `@imageN`، وبناء قسم `[Reference Guide]`). | `executePromptBuilder` | <!-- no-check -->
+| `src/systems/generation/internal/v2/nodes/imageGenerationNode.js` | منفذ عقدة `image-generation` (Pure Pass-Through: يحل `input_image` و`images` من معرفات Workflows إلى روابط CDN، ثم يستدعي `models.run`). | `executeImageGeneration` | <!-- no-check -->
+| `src/systems/generation/internal/v2/nodes/videoGenerationNode.js` | منفذ عقدة `video-generation` (Pure Pass-Through: يحل `input_image`, `last_frame`, `input_video`, `images` إلى روابط CDN، ثم يستدعي `models.run`). | `executeVideoGeneration` | <!-- no-check -->
+| `src/systems/generation/internal/v2/nodes/safety/NodeSafetyService.js` | خدمة التحقق السريع (Fail-fast) من مدخلات جميع العُقد قبل أي اتصال بمزود خارجي أو فوترة. | `NodeSafetyService` | <!-- no-check -->
+| `src/systems/generation/internal/v2/resolvers/WorkflowReferenceResolver.js` | يحل معرفات الـ Workflows (`CHARACTER_SHEET`, `ELEMENT_SHEET`, `GENERATION`, `UPLOAD`) مع التحقق من الملكية (`assertOwns`) إلى كيانات كاملة مع صورها وسماتها (`visualTraits`)، أو يستخرج الرابط الأساسي (`resolvePrimaryMediaUrl`). | `resolveWorkflowReferences`, `resolveWorkflowReference`, `resolveAsCharacter`, `resolveAsElement`, `resolveAsMedia`, `resolvePrimaryMediaUrl` | <!-- no-check -->
+| `src/systems/generation/internal/v2/runtime/useCaseBillingRuntime.js` | يغلف عمليات الحجز المسبق (`reserveUseCase`) والتسوية (`settleUseCase`) والاسترجاع (`rollbackUseCase`) على مستوى الـ UseCase، ويضغط تفاصيل التكلفة (`buildCompactCostBreakdown`) لتبقى أقل من 4KB في جدول المعاملات. | `UseCaseBillingRuntime`, `useCaseBillingRuntime`, `buildCompactCostBreakdown` | <!-- no-check -->
+| `src/systems/generation/internal/v2/runtime/nodeEnvelope.js` | يغلف مخرجات أو أخطاء كل عقدة في غلاف قياسي موحد (`__nodeEnvelope`). | `nodeSuccess`, `nodeFailure`, `fromNodeResult` | <!-- no-check -->
+| `src/systems/generation/internal/v2/runtime/errorPolicy.js` | نظام تصنيف الأخطاء المركزي (`USER_FAULT`, `BILLING_FAULT`, `UPSTREAM_FAULT`, `SERVER_FAULT`) وتطهير الأخطاء المرسلة للعميل (`sanitizeClientError`). | `ErrorSystem`, `ERROR_CATEGORIES`, `RUNTIME_ERROR_CODES`, `formatWorkflowError`, `sanitizeClientError`, `processSystemError` | <!-- no-check -->
+| `src/systems/generation/internal/v2/runtime/runtimeConstants.js` | ثوابت حالات التشغيل (`RUN_STATUS`, `NODE_STATUS`, `BILLING_STATUS`). | `RUN_STATUS`, `NODE_STATUS`, `BILLING_STATUS` | <!-- no-check -->
 | `src/systems/generation/internal/db/RunRepository.js` | مستودع قاعدة البيانات لجدولي `v2_workflow_runs` و`v2_workflow_run_nodes` (مع دعم وضع الذاكرة في `NODE_ENV=test` فقط). | `RunRepository` |
 | `src/systems/generation/internal/workers/useCaseWorker.js` | عامل الخلفية (`BullMQ Worker` بتوازي `concurrency: 10`) الذي يستمع لطابور `v2-workflow-jobs` ويعالج مهام `run-usecase` و`node-execute`، ويحتوي على معالج الطوارئ عند انهيار العامل (`handleUseCaseWorkerFailure`). | `useCaseWorker`, `handleUseCaseWorkerFailure` |
 | `src/systems/generation/internal/workers/worker.js` | نقطة تشغيل الـ Worker مع حلقة `startReaper` التي تشغّل `runReservationReaper()` عند الإقلاع وكل 5 دقائق لتحرير الحجوزات اليتيمة المنتهية. | `worker`, `useCaseWorker`, `startReaper`, `handleUseCaseWorkerFailure` |
@@ -118,7 +123,7 @@ flowchart TD
 ## 3. طبقة الـ UseCases: التعريف، التسجيل، والتحضير (`UseCase Layer`)
 
 ### 3.1 ما هو الـ UseCase؟
-الـ UseCase هو كائن توصيفي ثابت (Immutable Metadata Object) يُسجَّل في `useCaseRegistry.js` ويُفحص عبر `useCaseSchema.js`. يجب أن يحتوي كل UseCase على الحقول الخمسة الإلزامية التالية:
+الـ UseCase هو كائن توصيفي ثابت (Immutable Metadata Object) يُسجَّل في `useCaseRegistry.js` ويُفحص عبر `useCaseSchema.js`. يجب أن يحتوي كل UseCase على الحقول الخمسة الإلزامية التالية: <!-- no-check -->
 - `useCaseId`: المعرف الفريد (مثل `"image-generation-v1"`).
 - `label`: الاسم المقروء.
 - `workflowRef`: معرف ملف الـ Workflow YAML في `src/systems/generation/internal/v2/registry/workflows/`.
@@ -129,9 +134,9 @@ flowchart TD
 
 | `useCaseId` | ملف التعريف | `workflowRef` | المدخلات الإلزامية (`required: true`) | المدخلات الاختيارية (`required: false`) |
 |---|---|---|---|---|
-| **`image-generation-v1`** | `definitions/imageGeneration.js` | `image-generation-v1` | `prompt` (`string`), `model` (`string`) | `references` (`array`), `parameters` (`object`) |
-| **`video-generation-v1`** | `definitions/videoGeneration.js` | `video-generation-v1` | `prompt` (`string`), `model` (`string`) | `references` (`array`), `parameters` (`object`) |
-| **`character-sheet-v1`** | `definitions/characterSheet.js` | `character-sheet-v1` | `prompt` (`string`) | `references` (`array`), `characters` (`array`) |
+| **`image-generation-v1`** | `definitions/imageGeneration.js` | `image-generation-v1` | `prompt` (`string`), `model` (`string`) | `references` (`array`), `parameters` (`object`) | <!-- no-check -->
+| **`video-generation-v1`** | `definitions/videoGeneration.js` | `video-generation-v1` | `prompt` (`string`), `model` (`string`) | `references` (`array`), `parameters` (`object`) | <!-- no-check -->
+| **`character-sheet-v1`** | `definitions/characterSheet.js` | `character-sheet-v1` | `prompt` (`string`) | `references` (`array`), `characters` (`array`) | <!-- no-check -->
 
 ---
 
@@ -196,7 +201,7 @@ flowchart TD
    - يشغّل مؤقتاً دورياً كل **120 ثانية** (`intervalMs: 120_000`) يستدعي `walletService.extendHold(billingHoldId, 300)` لتمديد صلاحية الحجز بمقدار **300 ثانية (5 دقائق)** طالما أن المهمة قيد التنفيذ (مهم جداً لمهام الفيديو الطويلة).
    - يتوقف المؤقت تلقائياً في بلوك `finally { heartbeat.stop(); }`.
 3. **استدعاء `this.runUseCase({ useCaseId, input, userId })`**:
-   - يفوض التنفيذ الفعلي إلى `run` في `src/systems/generation/internal/use-cases/useCaseRunner.js`.
+   - يفوض التنفيذ الفعلي إلى `run` في `src/systems/generation/internal/use-cases/useCaseRunner.js`. <!-- no-check -->
 4. **عند نجاح `runUseCase` (`result.status === "completed"`)**:
    - يستدعي `this.settlePreparedBilling(guard.billingHoldId, { node_breakdown, totalCost })` لتحويل الحجز المالي (`held`) إلى خصم نهائي (`settled`/`committed`).
 5. **عند حدوث أي خطأ في `executeQueuedUseCase` (`catch (err)`)**:
@@ -210,15 +215,15 @@ flowchart TD
 
 ## 6. كيف يعمل `runUseCase` ومحرك الـ DAG (`useCaseRunner` → `workflowRunner` → `nodeExecutor`)
 
-### 6.1 دالة `run` (`runUseCase`) في `useCaseRunner.js`
-1. تجلب تعريف الـ UseCase من `useCaseRegistry.js`.
+### 6.1 دالة `run` (`runUseCase`) في `useCaseRunner.js` <!-- no-check -->
+1. تجلب تعريف الـ UseCase من `useCaseRegistry.js`. <!-- no-check -->
 2. تحمّل السجلات (`getRegistries()` — تُخزَّن مؤقتاً في الذاكرة في بيئة الإنتاج `isProduction` وتُقرأ مباشرة في التطوير/الاختبار).
 3. تترجم الـ Workflow المرتبط (`compileWorkflowById(useCase.workflowRef, finalRegistries)`).
 4. تستخرج المعرفات الموثقة من السيرفر حصراً (`serverWorkflowId`, `serverMediaIds`, `serverProjectId`) وتستدعي:
    `startWorkflowRun(plan, runtimeInput, null, serverContext)`
 5. إذا لم تكن حالة `runResult.status === "completed"`، ترمي خطأ يحمل `code`, `category`, `userMessage`, `nodeId`, و`billingBreakdown`.
 
-### 6.2 بدء تشغيل الـ Workflow (`startWorkflowRun` في `workflowRunner.js`)
+### 6.2 بدء تشغيل الـ Workflow (`startWorkflowRun` في `workflowRunner.js`) <!-- no-check -->
 1. تنشئ معرف تشغيل `finalRunId` وتبدأ تراكم الفوترة في الذاكرة والداتابيز عبر `beginRunBillingAccumulator(finalRunId)`.
 2. تنشئ سجلاً في جدول **`v2_workflow_runs`** عبر `runRepo.createRun(...)` بحالة `status: "pending"`، ويُحفظ بداخله:
    - `input`: مدخلات التشغيل.
@@ -228,7 +233,7 @@ flowchart TD
 3. تنشئ سجلاً لكل عقدة في جدول **`v2_workflow_run_nodes`** عبر `runRepo.createNodeRun(...)` بحالة `status: "pending"` و`attempt: 1`.
 4. تسجل حدث `workflow.start` في `eventRecorder`، ثم تستدعي `executeOrchestration(finalRunId)`.
 
-### 6.3 آلة الحالة وتنسيق الـ DAG (`executeOrchestration` في `workflowRunner.js`)
+### 6.3 آلة الحالة وتنسيق الـ DAG (`executeOrchestration` في `workflowRunner.js`) <!-- no-check -->
 تعمل `executeOrchestration(runId)` بشكل تكراري (Recursive State Machine) في كل خطوة:
 
 1. **الانتقال إلى `running`**:
@@ -248,7 +253,7 @@ flowchart TD
 
 ---
 
-## 7. معالجة وتنفيذ العقدة المفردة (`executeNodeJob` في `nodeExecutor.js`)
+## 7. معالجة وتنفيذ العقدة المفردة (`executeNodeJob` في `nodeExecutor.js`) <!-- no-check -->
 
 عند استدعاء `executeNodeJob(runId, nodeId)`، يتم تنفيذ الخطوات الدقيقة التالية:
 
@@ -264,7 +269,7 @@ flowchart TD
 - أما إذا كان الـ Run يعمل مباشرة بدون UseCase Hold (مثل تشغيل Workflow V2 مباشر)، فيحجز رصيد العقدة منفرداً عبر `reserveNodeBilling` ويسويه عبر `settleNodeBilling`.
 
 ### الخطوة 3: استدعاء منفذ العقدة (`executeNode`)
-يستدعي `executeNode(nodeConfig.type, resolvedInputs, ctx)` من `src/systems/generation/internal/v2/nodes/index.js`.
+يستدعي `executeNode(nodeConfig.type, resolvedInputs, ctx)` من `src/systems/generation/internal/v2/nodes/index.js`. <!-- no-check -->
 
 ### الخطوة 4: الحفظ التصريحي للمخرجات (`executeNodePersistence`)
 إذا كان تعريف العقدة في ملف الـ Workflow YAML يحتوي على بلوك `persist:`:
@@ -292,9 +297,9 @@ flowchart TD
 
 ## 8. تشريح العُقد الأربع (The 4 V2 Nodes in Detail)
 
-يحتوي النظام على **4 أنواع عُقد (Node Types)** مسجلة في `src/systems/generation/internal/v2/nodes/index.js` و`nodes.yaml`:
+يحتوي النظام على **4 أنواع عُقد (Node Types)** مسجلة في `src/systems/generation/internal/v2/nodes/index.js` و`nodes.yaml`: <!-- no-check -->
 
-### 8.1 عقدة الذكاء اللغوي والأمان: `llm` (`llmNode.js`)
+### 8.1 عقدة الذكاء اللغوي والأمان: `llm` (`llmNode.js`) <!-- no-check -->
 - **الخصائص**: `skill_aware: true` | `provider_backed: true` | الموديل الافتراضي: `"gemini-3.1-flash-lite"`.
 - **المدخلات**:
   - `userPrompt` (إلزامي، بحد أقصى `7000` حرف يُفحص عبر `NodeSafetyService.assertLLMInputs`).
@@ -351,7 +356,7 @@ flowchart TD
 
 ---
 
-### 8.3 عقدة توليد الصور: `image-generation` (`imageGenerationNode.js`)
+### 8.3 عقدة توليد الصور: `image-generation` (`imageGenerationNode.js`) <!-- no-check -->
 - **الخصائص**: `skill_aware: false` | `provider_backed: true` | **Pure Pass-Through**.
 - **المدخلات**: `{ model, prompt, parameters }`.
 - **خطوات المعالجة الداخلية (Internal Treatment)**:
@@ -368,7 +373,7 @@ flowchart TD
 
 ---
 
-### 8.4 عقدة توليد الفيديو: `video-generation` (`videoGenerationNode.js`)
+### 8.4 عقدة توليد الفيديو: `video-generation` (`videoGenerationNode.js`) <!-- no-check -->
 - **الخصائص**: `skill_aware: false` | `provider_backed: true` | **Pure Pass-Through**.
 - **المدخلات**: `{ model, prompt, parameters }`.
 - **خطوات المعالجة الداخلية (Internal Treatment)**:
@@ -430,19 +435,19 @@ flowchart TD
 
 | ملف المعالج | `network` | الوظيفة |
 |---|---|---|
-| `resolveCharacters.js` | `false` | تحميل بيانات وصور الشخصيات داخل `context.characters`. |
-| `resolveReferences.js` | `false` | تحميل وتصنيف الصور المرجعية حسب الدور (`role`). |
-| `applyCharacterTemplate.js` | `false` | حقن وصف الشخصية داخل قالب الـ Prompt. |
-| `applyPoseTemplate.js` | `false` | حقن تعليمات الوضعيات والزوايا (`views`). |
-| `applyCameraStyle.js` | `false` | حقن إعدادات العدسة وزاوية الكاميرا والإضاءة. |
-| `buildStoryboardLayout.js` | `false` | إضافة تعليمات تقسيم اللوحات (`Storyboard Grid Layout`). |
-| `applySheetLayout.js` | `false` | إضافة تعليمات تخطيط صحيفة الشخصية (`3-panel studio turnaround`). |
-| `applyComposition.js` | `false` | إضافة قواعد التكوين البصري للبوسترات والمشاهد. |
-| `applyTypographyArea.js` | `false` | حجز المساحات الآمنة للنصوص والعناوين في التصميمات. |
-| `generateNegativePrompt.js` | `false` | توليد قيود الـ Negative Prompt لمنع التشوهات والنصوص العشوائية. |
-| `enhancePrompt.js` | `true` | إثراء وتحسين الـ Prompt عبر LLM. |
-| `moderationSafety.js` | `true` | فحص أمان المحتوى عبر LLM. |
-| `optimizeVisualPrompt.js` | `true` | ترجمة النصوص متعددة اللغات وتكثيف الوصف البصري عبر LLM. |
+| `resolveCharacters.js` | `false` | تحميل بيانات وصور الشخصيات داخل `context.characters`. | <!-- no-check -->
+| `resolveReferences.js` | `false` | تحميل وتصنيف الصور المرجعية حسب الدور (`role`). | <!-- no-check -->
+| `applyCharacterTemplate.js` | `false` | حقن وصف الشخصية داخل قالب الـ Prompt. | <!-- no-check -->
+| `applyPoseTemplate.js` | `false` | حقن تعليمات الوضعيات والزوايا (`views`). | <!-- no-check -->
+| `applyCameraStyle.js` | `false` | حقن إعدادات العدسة وزاوية الكاميرا والإضاءة. | <!-- no-check -->
+| `buildStoryboardLayout.js` | `false` | إضافة تعليمات تقسيم اللوحات (`Storyboard Grid Layout`). | <!-- no-check -->
+| `applySheetLayout.js` | `false` | إضافة تعليمات تخطيط صحيفة الشخصية (`3-panel studio turnaround`). | <!-- no-check -->
+| `applyComposition.js` | `false` | إضافة قواعد التكوين البصري للبوسترات والمشاهد. | <!-- no-check -->
+| `applyTypographyArea.js` | `false` | حجز المساحات الآمنة للنصوص والعناوين في التصميمات. | <!-- no-check -->
+| `generateNegativePrompt.js` | `false` | توليد قيود الـ Negative Prompt لمنع التشوهات والنصوص العشوائية. | <!-- no-check -->
+| `enhancePrompt.js` | `true` | إثراء وتحسين الـ Prompt عبر LLM. | <!-- no-check -->
+| `moderationSafety.js` | `true` | فحص أمان المحتوى عبر LLM. | <!-- no-check -->
+| `optimizeVisualPrompt.js` | `true` | ترجمة النصوص متعددة اللغات وتكثيف الوصف البصري عبر LLM. | <!-- no-check -->
 
 ---
 

@@ -1,5 +1,5 @@
 import { NODE_STATUS } from "./runtimeConstants.js";
-import { toRuntimeError } from "./errorPolicy.js";
+import { toRuntimeError } from "../errors/errorPolicy.js";
 
 function baseMetadata(metadata = {}) {
   return {

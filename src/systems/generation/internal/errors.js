@@ -101,6 +101,7 @@ export class GenerationError extends AppError {
             context: options.context || {},
         });
         this.name = this.constructor.name;
+        this.code = code;
         this.errorCode = code;
     }
 

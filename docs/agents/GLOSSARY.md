@@ -30,14 +30,14 @@ The single HTTP entry point mounting all 8 `#<system>/api` routers plus health/r
 ## 2. Domain & Operational Concepts
 
 ### Two-Phase Credit Hold
-The mandatory financial safety protocol for billable AI operations managed between `src/systems/generation/internal/services/useCaseService.js` and `#billing/tools`:
+The mandatory financial safety protocol for billable AI operations managed between `src/systems/generation/internal/v3/core/V3Dispatcher.js` and `#billing/tools`:
 1. **Reserve**: Upfront credit hold (`reserveCredits`) before queueing the BullMQ job.
 2. **Protected Dispatch**: Enqueue the job via `jobQueueService.js`; if enqueueing throws, immediately release the hold (`rollbackCredits`) and mark the placeholder media as `failed` (`markMediaFailed`).
 3. **Settle / Rollback**: Worker (`useCaseWorker.js`) finalizes the hold on completion (`settleCredits`) or refunds on failure (`rollbackCredits`), backed by `ReservationReaperService.js` for stale holds.
 
 ### Workflow & Workflow Run
 - **Workflow (`workflows` table)**: A persistent creative unit in a project owning generated or uploaded media via `workflow_media`.
-- **Workflow Run (`workflow_runs` & `node_runs` tables)**: An execution instance of a compiled V2 DAG workflow orchestrated by `workflowRunner.js` and `nodeExecutor.js`.
+- **Workflow Run (`workflow_runs` & `node_runs` tables)**: An execution instance of a compiled V3 workflow orchestrated by `WorkflowExecutor.js`.
 
 ### Media & Save Types
 Assets stored and tracked by `src/systems/media/` (`media` and `workflow_media` tables) with declarative retention, quota, and storage bucket policies defined in `src/systems/media/internal/services/saveTypes.js`.

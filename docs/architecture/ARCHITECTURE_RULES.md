@@ -56,7 +56,7 @@
 
 Every billable generation flow in `src/systems/generation/` must obey the **5-Step Pre-Queue Launch & 3-Step Worker Settlement Protocol**:
 
-### Phase 1: Synchronous Launch (`useCaseService.js`)
+### Phase 1: Synchronous Launch (`V3Dispatcher.js`)
 1. **Verify Ownership & Inputs:** Validate input schema and verify user ownership of any referenced characters, elements, or media via `#identity/tools` (`assertOwns`).
 2. **Calculate Deterministic Cost:** Query `#models/tools` (`calculateOperationCost`) for the exact credit cost.
 3. **Reserve Credits (Hold):** Call `#billing/tools` (`reserveCredits`) with an idempotency key to lock the user's credits before touching the queue.

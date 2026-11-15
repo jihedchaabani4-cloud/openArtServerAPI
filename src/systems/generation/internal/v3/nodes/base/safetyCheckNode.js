@@ -69,7 +69,9 @@ export const SafetyCheckNode = {
         (err.message?.includes("API key not valid") ||
           err.message?.includes("API_KEY_INVALID") ||
           err.code === "API_KEY_INVALID" ||
-          err.message?.includes("placeholder-gemini-test-key"))
+          err.message?.includes("placeholder-gemini-test-key") ||
+          err.message?.includes("circuit breaker OPEN") ||
+          err.message?.includes("temporarily unavailable"))
       ) {
         return {
           safe_prompt: prompt,

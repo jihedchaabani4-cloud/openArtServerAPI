@@ -1,10 +1,10 @@
 /**
- * Prompt Builder Node (V2 — Clean & Production-Ready)
+ * Prompt Builder Node (V2 ÔÇö Clean & Production-Ready)
  * LLM calls: 0 | DB calls: via WorkflowReferenceResolver
  *
  * Contract:
- *   IN  → prompt: string, references: [{ workflow_id }], style?: string
- *   OUT → { finalPrompt: string, context: WorkflowContext }
+ *   IN  ÔåÆ prompt: string, references: [{ workflow_id }], style?: string
+ *   OUT ÔåÆ { finalPrompt: string, context: WorkflowContext }
  *
  * What it does (in order):
  *   1. Validate & sanitize inputs via NodeSafetyService
@@ -17,23 +17,23 @@
  *   8. Return finalPrompt + full context (imageUrls, referenceGuide, entities)
  */
 
-import { NodeSafetyService } from "./safety/NodeSafetyService.js";
+import { NodeSafetyService } from "./NodeSafetyService.js";
 import { resolveWorkflowReferences } from "../resolvers/WorkflowReferenceResolver.js";
 import { createLogger } from "#shared";
 
 const nodeLogger = createLogger("node");
 
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 // NOTE: Inline tags like <character:uuid> in the prompt are POSITIONAL MARKERS only.
-// They tell the formatter WHERE to place an entity — they are NOT resolution requests.
+// They tell the formatter WHERE to place an entity ÔÇö they are NOT resolution requests.
 // Resolution always comes exclusively from references[] sent by the frontend.
-// If a tag's ID is not found in the resolved entityMap → it is removed from the prompt.
-// ─────────────────────────────────────────────────────────────────────────────
+// If a tag's ID is not found in the resolved entityMap ÔåÆ it is removed from the prompt.
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 2. Image Registry — global ordered URL list, assigns sequential @imageN numbers
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// 2. Image Registry ÔÇö global ordered URL list, assigns sequential @imageN numbers
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 function makeImageRegistry() {
   const urls = [];
   return {
@@ -48,11 +48,11 @@ function makeImageRegistry() {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 3. Entity Image Tagger — assigns @imageN tags per entity
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// 3. Entity Image Tagger ÔÇö assigns @imageN tags per entity
 //    Characters: separates sheetImages (turnaround) from detailImages (closeups)
 //    Elements & Media: flat imageUrls
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 function tagEntityImages(entities = [], registry, idToIndexMap) {
   for (const entity of entities) {
     const sheetTags  = [];
@@ -88,21 +88,21 @@ function tagEntityImages(entities = [], registry, idToIndexMap) {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 4. Prompt Formatter — replaces inline <type:id> tags with @Name or @imageN
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// 4. Prompt Formatter ÔÇö replaces inline <type:id> tags with @Name or @imageN
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 function formatPrompt(rawPrompt = "", entityMap, idToIndexMap) {
   if (typeof rawPrompt !== "string") return "";
   return rawPrompt
-    // 1. Unwrap display-only tags: <Trait:X> → X
+    // 1. Unwrap display-only tags: <Trait:X> ÔåÆ X
     .replace(/<(?:Trait|Tag|Feature|Attribute):\s*([^>]+)>/gi, "$1")
     // 2. Replace entity/media tags with @Name or @imageN
-    //    If ID is not in entityMap (not declared in references[]) → remove silently
+    //    If ID is not in entityMap (not declared in references[]) ÔåÆ remove silently
     .replace(/<(?:character|element|MediaAsset|media|ref|reference):\s*([^>]+)>/gi, (_, rawId) => {
       const id = rawId.trim();
       const entity = entityMap.get(id);
 
-      if (!entity) return ""; // Not in references[] → remove from prompt
+      if (!entity) return ""; // Not in references[] ÔåÆ remove from prompt
 
       if (entity.entityType === "character" || entity.entityType === "element") {
         return `@${entity.name}`;
@@ -111,7 +111,7 @@ function formatPrompt(rawPrompt = "", entityMap, idToIndexMap) {
       const n = idToIndexMap.get(id);
       return n !== undefined ? `@image${n}` : "";
     })
-    // 3. Strip remaining unrecognised tags — only <Word...> patterns, NOT math operators like <5 or >3
+    // 3. Strip remaining unrecognised tags ÔÇö only <Word...> patterns, NOT math operators like <5 or >3
     .replace(/<\w[^>]*>/g, "")
     // 4. Cleanup trailing, leading, or duplicated commas & spaces left by stripped tags
     .replace(/\s+,/g, ",")
@@ -124,16 +124,16 @@ function formatPrompt(rawPrompt = "", entityMap, idToIndexMap) {
     .trim();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 5. Reference Guide Card Builder — structured card per entity for the model
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// 5. Reference Guide Card Builder ÔÇö structured card per entity for the model
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 function buildGuideLine(entity) {
   const { name, entityType, description, visualTraits = [], referenceTags = [], sheetTags = [], detailTags = [] } = entity;
 
   if (referenceTags.length === 0 && !description) return null;
 
   if (entityType === "media") {
-    return `${name} (image reference) — ${referenceTags[0] || "@image1"}`;
+    return `${name} (image reference) ÔÇö ${referenceTags[0] || "@image1"}`;
   }
 
   const label = `@${name} (${entityType})`;
@@ -158,17 +158,17 @@ function buildGuideLine(entity) {
   return lines.join("\n");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 // MAIN EXECUTION
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 export async function executePromptBuilder(resolvedInputs, ctx = {}) {
   const { nodeId = "prompt-builder", runId = "run-1", userId = "usr-1" } = ctx;
 
-  // ── Step 1: Validate inputs ───────────────────────────────────────────────
+  // ÔöÇÔöÇ Step 1: Validate inputs ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
   const safe = NodeSafetyService.assertPromptBuilderInputs(resolvedInputs, nodeId);
   let rawPrompt = safe.prompt || "";
 
-  // ── Normalize in-memory entities if provided ──────────────────────────────
+  // ÔöÇÔöÇ Normalize in-memory entities if provided ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
   const inputCharacters = (Array.isArray(safe.characters) ? safe.characters : []).map((c, index) => {
     if (typeof c === "string") {
@@ -225,7 +225,7 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
     };
   });
 
-  // ── Step 2: Resolve references[] from DB / URLs ───────────────────────────
+  // ÔöÇÔöÇ Step 2: Resolve references[] from DB / URLs ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
   const refIds = inputReferences
     .map(r => r.url || r.workflowId || r.id)
     .filter(id => typeof id === "string" && id.trim())
@@ -238,7 +238,7 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
     nodeLogger.warn({ err }, `resolveWorkflowReferences error: ${err.message}`);
   }
 
-  // ── Step 3: Build entity map + deduplicated list ──────────────────────────
+  // ÔöÇÔöÇ Step 3: Build entity map + deduplicated list ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
   const entityMap = new Map();
   const seenKeys = new Set();
   const uniqueEntities = [];
@@ -267,16 +267,16 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
   const elements = uniqueEntities.filter(e => e.entityType === "element");
   const medias = uniqueEntities.filter(e => e.entityType === "media");
 
-  // ── Step 4: Assign @imageN to all entities in natural reference order ─────
+  // ÔöÇÔöÇ Step 4: Assign @imageN to all entities in natural reference order ÔöÇÔöÇÔöÇÔöÇÔöÇ
   const registry = makeImageRegistry();
   const idToIndexMap = new Map();
 
   tagEntityImages(uniqueEntities, registry, idToIndexMap);
 
-  // ── Step 5: Format prompt — replace inline tags with @Name / @imageN ─────
+  // ÔöÇÔöÇ Step 5: Format prompt ÔÇö replace inline tags with @Name / @imageN ÔöÇÔöÇÔöÇÔöÇÔöÇ
   let formattedPrompt = formatPrompt(rawPrompt, entityMap, idToIndexMap);
 
-  // ── Step 6: Prepend unmentioned @Tags & append style ─────────────────────
+  // ÔöÇÔöÇ Step 6: Prepend unmentioned @Tags & append style ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
   let layoutName = null;
   const promptParts = [];
 
@@ -303,7 +303,7 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
     promptParts.push(safe.style);
   }
 
-  // ── Step 7: Build [Reference Guide] block ────────────────────────────────
+  // ÔöÇÔöÇ Step 7: Build [Reference Guide] block ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
   const guideLines = uniqueEntities
     .map(buildGuideLine)
     .filter(Boolean);
@@ -315,7 +315,7 @@ export async function executePromptBuilder(resolvedInputs, ctx = {}) {
   const finalPromptText = (promptParts.join(", ").trim() + guideBlock).trim();
   const output = finalPromptText || "High quality creative image";
 
-  // ── Step 8: Assemble context ─────────────────────────────────────────────
+  // ÔöÇÔöÇ Step 8: Assemble context ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
   const finalContext = {
     userPrompt: formattedPrompt,
     prompt: finalPromptText,

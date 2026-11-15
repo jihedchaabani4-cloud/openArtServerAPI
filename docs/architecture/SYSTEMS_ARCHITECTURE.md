@@ -34,22 +34,22 @@ Every Business System inside `src/systems/<system>/` is a strict black box. It o
 
 ### System 1: Generation & Workflows (`src/systems/generation/`)
 - **Import Aliases:** `#generation/api`, `#generation/tools`
-- **Role:** Central execution brain for all AI generation (images, videos, character sheets, element analysis), composable V2 DAG workflows, and the V3 ComfyUI-Style Node Engine (`src/systems/generation/internal/v3/`).
+- **Role:** Central execution brain for all AI generation (images, videos, character sheets, element analysis) powered by the ComfyUI-Style V3 Node Engine (`src/systems/generation/internal/v3/`). Legacy V2 DAG engine and use-case directories have been fully retired and unified under clean internal modules and backward-compatibility shims.
 - **Directory Structure & Internal Services:**
   - `public/api.js`: Mounts `/api/images/*`, `/api/video/*`, `/api/prompt/*`, `/api/workflows/*`, and `/api/v2/workflows/*`.
-  - `public/tools.js`: Exposes `triggerWorkflowRun`, `getWorkflowRun`, `registerAllUseCases`, `UseCaseService`, V3 engine primitives (`NodeRegistry`, `GraphCompiler`, `WorkflowExecutor`, `V3Dispatcher`, `V3_WORKFLOWS`), and generation orchestration helpers.
+  - `public/tools.js`: Exposes `triggerWorkflowRun`, `getWorkflowRun`, `registerAllUseCases`, `UseCaseService` (alias to `V3Dispatcher`), V3 engine primitives (`NodeRegistry`, `GraphCompiler`, `WorkflowExecutor`, `V3Dispatcher`, `V3_WORKFLOWS`, all 15 nodes), and backward-compatibility shims (`compileWorkflow`, `startWorkflowRun`, `executeNodeJob`, `runUseCase`).
   - `internal/controllers/`: `imageController.js`, `videoController.js`, `workflowsController.js`, `v2/workflowsController.js`, `generationsQueryController.js`, `generationsMutationController.js`, `projectController.js`.
   - `internal/services/`:
-    - `useCaseService.js`: Executes the mandatory 5-step Pre-Queue Launch Protocol (Auth/Idempotency -> Context & Cost -> Two-Phase Credit Hold -> Pending Media Placeholder -> Protected Queue Dispatch with automatic rollback on failure).
     - `GenerationService.js` & `GenerationRequestService.js`: Request preparation and parameter normalization.
     - `WorkflowService.js`, `WorkflowServiceBase.js`, `WorkflowMediaService.js`, `WorkflowAuthorizationService.js`, `mediaGuards.js`: Workflow state transitions and media attachment coordination.
     - `jobQueueService.js`: BullMQ producer for `v2-workflow-jobs`.
+    - `NodeSafetyService.js` & `promptBuilderNode.js`: Centralized input validation and prompt compilation utilities.
   - `internal/v3/`:
     - ComfyUI-Style Node Engine Core (`NodeRegistry.js`, `GraphCompiler.js`, `WorkflowExecutor.js`, `V3Dispatcher.js`), Base Nodes (`loadMediaNode.js`, `resolveRefsNode.js`, `safetyCheckNode.js`, `llmTextNode.js`, `llmVisionNode.js`, `promptAssembleNode.js`, `imageGenerateNode.js`, `imageUpscaleNode.js`, `imageRemoveBgNode.js`, `videoGenerateNode.js`, `videoUpscaleNode.js`, `saveMediaNode.js`), Custom Nodes (`cropCharacterGridNode.js`, `extractVideoFrameNode.js`, `saveCharacterSheetNode.js`), and Declarative V3 Workflows (`imageGenerationV3.js`, `videoGenerationV3.js`, `characterSheetV3.js`, `productVideo4kV3.js`).
-  - `internal/v2/` & `internal/use-cases/`:
-    - V2 DAG Compiler (`compileWorkflow.js`), Runner (`workflowRunner.js`, `nodeExecutor.js`, `nodeBilling.js`), Processors & Skills (`applyCameraStyle.js`, `applyCharacterTemplate.js`, `enhancePrompt.js`, `generateNegativePrompt.js`, `moderationSafety.js`, `optimizeVisualPrompt.js`), and Declarative Use-Case Definitions (`imageGeneration.js`, `videoGeneration.js`, `characterSheet.js`).
+  - `internal/billing/`, `internal/errors/`, `internal/runtime/`, `internal/resolvers/`, & `internal/compat/`:
+    - Shared runtime components: `nodeBilling.js`, `useCaseBillingRuntime.js`, `errorPolicy.js`, `nodeEnvelope.js`, `runtimeConstants.js`, `WorkflowReferenceResolver.js`, and `legacyWorkflowCompat.js` (provides 100% backward-compatible execution for legacy callers and tests without maintaining legacy V2 codebases).
   - `internal/gateways/`: `workflowBillingGateway.js` (calls `#billing/tools`), `workflowStorageGateway.js` (calls `#media/tools`), `workflowEventRecorder.js`.
-  - `internal/workers/`: `useCaseWorker.js` and `worker.js` (BullMQ consumers executing DAG runs and settling holds/media).
+  - `internal/workers/`: `useCaseWorker.js` and `worker.js` (BullMQ consumers executing V3 runs and settling holds/media).
   - `internal/db/`: `generationClient.js`, `BaseRepository.js`, `WorkflowRepository.js`, `GenerationConfigRepository.js`, `RunRepository.js`, `dbMap.js`.
 - **Owned Database Tables:** `workflows`, `workflow_runs`, `node_runs`, `generation_configs`.
 

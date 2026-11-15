@@ -2,23 +2,57 @@
  * System 1: Generation & Workflows — Public Tools Gateway (#generation/tools)
  *
  * Exposes inter-system programmatic interfaces for triggering workflow runs,
- * compiling execution plans, and querying prompt intelligence.
+ * compiling execution plans, ComfyUI-style V3 node engine, and querying prompt intelligence.
  */
 
-import { compileWorkflow, compileWorkflowById } from "../internal/v2/compiler/compileWorkflow.js";
-import { loadRegistries } from "../internal/v2/registry/registryLoader.js";
 import {
+    compileWorkflow,
+    compileWorkflowById,
+    loadRegistries,
     startWorkflowRun,
     executeOrchestration,
     initializeGateways,
     getGateways,
-} from "../internal/v2/runner/workflowRunner.js";
-import {
     executeNodeJob,
     resolveInputsForNode,
     executeNodePersistence,
     getValueAtPath,
-} from "../internal/v2/runner/nodeExecutor.js";
+    bootstrapV2,
+    configureDefaultGateways,
+    executeNode,
+    registerNodeExecutor,
+    registry,
+    executePromptBuilder,
+    executeImageGeneration,
+    executeVideoGeneration,
+    executeLLM,
+    executeLLMNode,
+    registerAllUseCases,
+    registerUseCase,
+    getUseCase,
+    listUseCases,
+    clearUseCaseRegistry,
+    imageGenerationUseCase,
+    videoGenerationUseCase,
+    characterSheetUseCase,
+    calculateWorkflowBillingPlan,
+    runUseCase,
+    getUseCaseRegistries,
+    enhancePrompt as enhancePromptProcessor,
+    generateNegativePrompt as generateNegativePromptProcessor,
+    moderationSafety as moderationSafetyProcessor,
+    optimizeVisualPrompt as optimizeVisualPromptProcessor,
+    applyCameraStyle as applyCameraStyleProcessor,
+    applyCharacterTemplate as applyCharacterTemplateProcessor,
+    applyComposition as applyCompositionProcessor,
+    applyPoseTemplate as applyPoseTemplateProcessor,
+    applySheetLayout as applySheetLayoutProcessor,
+    applyTypographyArea as applyTypographyAreaProcessor,
+    buildStoryboardLayout as buildStoryboardLayoutProcessor,
+    resolveCharacters as resolveCharactersProcessor,
+    resolveReferences as resolveReferencesProcessor,
+} from "../internal/compat/legacyWorkflowCompat.js";
+
 import {
     reserveNodeBilling,
     settleNodeBilling,
@@ -32,12 +66,12 @@ import {
     activeAccumulators,
     getNodeBillingReference,
     PROVIDER_BACKED_NODE_TYPES,
-} from "../internal/v2/runner/nodeBilling.js";
+} from "../internal/billing/nodeBilling.js";
+
 import { RunRepository } from "../internal/db/RunRepository.js";
-import { NodeSafetyService } from "../internal/v2/nodes/safety/NodeSafetyService.js";
-import { bootstrapV2, configureDefaultGateways } from "../internal/v2/bootstrap.js";
+import { NodeSafetyService } from "../internal/services/NodeSafetyService.js";
 import { V1StorageBridge } from "#media/tools";
-import { UseCaseBillingRuntime, buildCompactCostBreakdown } from "../internal/v2/runtime/useCaseBillingRuntime.js";
+import { UseCaseBillingRuntime, buildCompactCostBreakdown } from "../internal/billing/useCaseBillingRuntime.js";
 import {
     formatWorkflowError,
     sanitizeClientError,
@@ -46,7 +80,8 @@ import {
     RUNTIME_ERROR_CODES,
     ERROR_CATEGORIES,
     ERROR_POLICY,
-} from "../internal/v2/runtime/errorPolicy.js";
+} from "../internal/errors/errorPolicy.js";
+
 import {
     resolveWorkflowReferences,
     resolveWorkflowReference,
@@ -54,18 +89,8 @@ import {
     resolveAsElement,
     resolveAsMedia,
     resolvePrimaryMediaUrl,
-} from "../internal/v2/resolvers/WorkflowReferenceResolver.js";
-import {
-    executeNode,
-    registerNodeExecutor,
-    registry,
-} from "../internal/v2/nodes/index.js";
-import { executePromptBuilder } from "../internal/v2/nodes/promptBuilderNode.js";
-import { executeImageGeneration } from "../internal/v2/nodes/imageGenerationNode.js";
-import { executeVideoGeneration } from "../internal/v2/nodes/videoGenerationNode.js";
-import { executeLLM, executeLLMNode } from "../internal/v2/nodes/llmNode.js";
+} from "../internal/resolvers/WorkflowReferenceResolver.js";
 
-import { UseCaseService } from "../internal/services/useCaseService.js";
 import {
     jobQueueService,
     getUseCaseQueue,
@@ -73,18 +98,7 @@ import {
     QueueDispatchError,
     JobQueueService,
 } from "../internal/services/jobQueueService.js";
-import { registerAllUseCases } from "../internal/use-cases/registerUseCases.js";
-import {
-    registerUseCase,
-    getUseCase,
-    listUseCases,
-    clearUseCaseRegistry,
-} from "../internal/use-cases/useCaseRegistry.js";
-import { imageGenerationUseCase } from "../internal/use-cases/definitions/imageGeneration.js";
-import { videoGenerationUseCase } from "../internal/use-cases/definitions/videoGeneration.js";
-import { characterSheetUseCase } from "../internal/use-cases/definitions/characterSheet.js";
-import { calculateWorkflowBillingPlan } from "../internal/use-cases/workflowBillingPlan.js";
-import { run as runUseCase, getRegistries as getUseCaseRegistries } from "../internal/use-cases/useCaseRunner.js";
+
 import { GenerationService } from "../internal/services/GenerationService.js";
 import { GenerationRequestService } from "../internal/services/GenerationRequestService.js";
 import { WorkflowLifecycleService, WorkflowService } from "../internal/services/WorkflowService.js";
@@ -98,19 +112,6 @@ import { db as generationDb } from "../internal/db/dbMap.js";
 
 import { PromptService, promptService, LLMService, llmService } from "#models/tools";
 import { PromptBuilderProService } from "#elements/tools";
-import * as enhancePromptProcessor from "../internal/v2/processors/enhancePrompt.js";
-import * as generateNegativePromptProcessor from "../internal/v2/processors/generateNegativePrompt.js";
-import * as moderationSafetyProcessor from "../internal/v2/processors/moderationSafety.js";
-import * as optimizeVisualPromptProcessor from "../internal/v2/processors/optimizeVisualPrompt.js";
-import * as applyCameraStyleProcessor from "../internal/v2/processors/applyCameraStyle.js";
-import * as applyCharacterTemplateProcessor from "../internal/v2/processors/applyCharacterTemplate.js";
-import * as applyCompositionProcessor from "../internal/v2/processors/applyComposition.js";
-import * as applyPoseTemplateProcessor from "../internal/v2/processors/applyPoseTemplate.js";
-import * as applySheetLayoutProcessor from "../internal/v2/processors/applySheetLayout.js";
-import * as applyTypographyAreaProcessor from "../internal/v2/processors/applyTypographyArea.js";
-import * as buildStoryboardLayoutProcessor from "../internal/v2/processors/buildStoryboardLayout.js";
-import * as resolveCharactersProcessor from "../internal/v2/processors/resolveCharacters.js";
-import * as resolveReferencesProcessor from "../internal/v2/processors/resolveReferences.js";
 
 import {
     ERROR_CODES,
@@ -167,6 +168,7 @@ import { worker, startReaper } from "../internal/workers/worker.js";
 import { setGenerationServices } from "../internal/services/serviceAccessor.js";
 
 export const v2WorkflowWorker = worker;
+export const UseCaseService = V3Dispatcher;
 
 export function configureGeneration(services = {}) {
     setGenerationServices(services);
@@ -289,7 +291,6 @@ export {
     executeVideoGeneration,
     executeLLM,
     executeLLMNode,
-    UseCaseService,
     jobQueueService,
     JobQueueService,
     getUseCaseQueue,

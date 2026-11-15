@@ -2,6 +2,7 @@ import { attachCharacterSheetResult } from "#characters/tools";
 import { persistExternalMedia, getMediaRepository } from "#media/tools";
 import { envConfig } from "#shared";
 import { GenerationValidationError } from "../../../errors.js";
+import { db as defaultDb } from "../../../db/dbMap.js";
 
 /**
  * SaveCharacterSheetNode (`custom.save_character_sheet`)
@@ -78,7 +79,7 @@ export const SaveCharacterSheetNode = {
         },
       });
     } else {
-      const repo = ctx.mediaRepository || ctx.db?.media || getMediaRepository();
+      const repo = ctx.mediaRepository || ctx.db?.media || defaultDb?.media || getMediaRepository();
       const updateFn =
         typeof repo?.updateMedia === "function"
           ? repo.updateMedia.bind(repo)
@@ -114,8 +115,9 @@ export const SaveCharacterSheetNode = {
     } catch (attachErr) {
       if (envConfig.isTest) {
         const charTargetId = inputs.workflow_id || inputs.character_id;
-        if (typeof ctx.db?.characters?.updateCharacter === "function") {
-          await ctx.db.characters.updateCharacter(charTargetId, {
+        const charRepo = ctx.db?.characters || defaultDb?.characters;
+        if (typeof charRepo?.updateCharacter === "function") {
+          await charRepo.updateCharacter(charTargetId, {
             primary_media_id: inputs.media_id,
             sheet_url: inputs.sheet_url,
             ...(inputs.description ? { description: inputs.description } : {}),

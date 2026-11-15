@@ -19,14 +19,23 @@ export class RunRepository {
     }
   }
 
-  _isMemoryMode() {
+  _isMemoryMode(runId = null) {
     if (!envConfig.isTest) {
       if (RunRepository.useMemoryFallback) {
         throw new Error("In-memory fallback is prohibited outside NODE_ENV=test");
       }
       return false;
     }
-    return Boolean(RunRepository.useMemoryFallback || !this.getClient());
+    if (RunRepository.clientOverride) {
+      return false;
+    }
+    if (RunRepository.useMemoryFallback || !this.getClient()) {
+      return true;
+    }
+    if (runId && typeof runId === "string" && !runId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+      return true;
+    }
+    return false;
   }
 
   getClient() {
@@ -75,7 +84,7 @@ export class RunRepository {
 
     const client = this.getClient();
 
-    if (this._isMemoryMode()) {
+    if (this._isMemoryMode(run?.run_id)) {
       const data = {
         run_id: run.run_id || randomUUID(),
         workflow_id: run.workflow_id,
@@ -150,7 +159,7 @@ export class RunRepository {
    */
   async getRun(runId) {
     const client = this.getClient();
-    if (this._isMemoryMode()) {
+    if (this._isMemoryMode(runId)) {
       const run = memoryRuns.get(runId) || null;
       return this._normalizeRunRow(run);
     }
@@ -173,7 +182,7 @@ export class RunRepository {
    */
   async updateRun(runId, patch) {
     const client = this.getClient();
-    if (this._isMemoryMode()) {
+    if (this._isMemoryMode(runId)) {
       const current = memoryRuns.get(runId);
       if (!current) throw new Error(`Run ${runId} not found in memory`);
       const updated = {
@@ -207,7 +216,7 @@ export class RunRepository {
    */
   async createNodeRun(nodeRun) {
     const client = this.getClient();
-    if (this._isMemoryMode()) {
+    if (this._isMemoryMode(nodeRun?.run_id)) {
       const data = {
         run_id: nodeRun.run_id,
         node_id: nodeRun.node_id,
@@ -251,7 +260,7 @@ export class RunRepository {
    */
   async getNodeRun(runId, nodeId) {
     const client = this.getClient();
-    if (this._isMemoryMode()) {
+    if (this._isMemoryMode(runId)) {
       return memoryNodeRuns.get(`${runId}:${nodeId}`) || null;
     }
 
@@ -275,7 +284,7 @@ export class RunRepository {
    */
   async updateNodeRun(runId, nodeId, patch) {
     const client = this.getClient();
-    if (this._isMemoryMode()) {
+    if (this._isMemoryMode(runId)) {
       const key = `${runId}:${nodeId}`;
       const current = memoryNodeRuns.get(key);
       if (!current) throw new Error(`Node run ${key} not found in memory`);
@@ -306,7 +315,7 @@ export class RunRepository {
    */
   async listNodeRuns(runId) {
     const client = this.getClient();
-    if (this._isMemoryMode()) {
+    if (this._isMemoryMode(runId)) {
       const results = [];
       for (const [key, value] of memoryNodeRuns.entries()) {
         if (key.startsWith(`${runId}:`)) {

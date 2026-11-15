@@ -45,8 +45,7 @@ export const useCaseWorker = envConfig.isTest
         if (nodeId) {
           workerLogger.debug({ runId, nodeId }, `Executing node "${nodeId}" for run ${runId}`);
           try {
-            const { executeNodeJob } = await import("../v2/runner/nodeExecutor.js");
-            const { executeOrchestration } = await import("../v2/runner/workflowRunner.js");
+            const { executeNodeJob, executeOrchestration } = await import("../compat/legacyWorkflowCompat.js");
             await executeNodeJob(runId, nodeId);
             await executeOrchestration(runId);
           } catch (e) {
@@ -57,7 +56,7 @@ export const useCaseWorker = envConfig.isTest
           // ── Case 3: Workflow Orchestration Job ─────────────────────────────────
           workerLogger.debug({ runId }, `Orchestrating run ${runId}`);
           try {
-            const { executeOrchestration } = await import("../v2/runner/workflowRunner.js");
+            const { executeOrchestration } = await import("../compat/legacyWorkflowCompat.js");
             await executeOrchestration(runId);
           } catch (e) {
             workerLogger.warn({ runId, err: e.message }, "Orchestration execution failed or V2 runner unmounted");

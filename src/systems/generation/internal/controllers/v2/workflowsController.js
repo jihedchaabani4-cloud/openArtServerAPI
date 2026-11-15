@@ -1,12 +1,10 @@
-import { loadRegistries } from "../../v2/registry/registryLoader.js";
+import { loadRegistries, compileWorkflow, startWorkflowRun } from "../../compat/legacyWorkflowCompat.js";
 import { createLogger, ErrorSystem, envConfig } from "#shared";
+import { RunRepository } from "../../db/RunRepository.js";
+import { postRunRequestSchema } from "../../schemas/v2ApiSchemas.js";
+import { sanitizeClientError, DEFAULT_APOLOGY_MESSAGE } from "../../errors/errorPolicy.js";
 
 const controllerLogger = createLogger("controller");
-import { compileWorkflow } from "../../v2/compiler/compileWorkflow.js";
-import { startWorkflowRun } from "../../v2/runner/workflowRunner.js";
-import { RunRepository } from "../../db/RunRepository.js";
-import { postRunRequestSchema } from "../../v2/api/v2ApiSchemas.js";
-import { sanitizeClientError, DEFAULT_APOLOGY_MESSAGE } from "../../v2/runtime/errorPolicy.js";
 
 const runRepo = new RunRepository();
 let cachedRegistries = null;

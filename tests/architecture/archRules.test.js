@@ -436,10 +436,10 @@ describe("Ticket 0.4 Architecture Rules R10-R16 and Cycle Detector", () => {
     it("verifies the 3 Partie 00 circular pairs are resolved", () => {
       const { files } = collect();
 
-      // Pair 1: nodeExecutor -> workflowRunner (must not exist)
-      const nodeExec = files.find((f) => f.rel === "src/systems/generation/internal/v2/runner/nodeExecutor.js");
-      assert.ok(nodeExec);
-      assert.ok(!nodeExec.text.includes("workflowRunner.js"));
+      // Pair 1: WorkflowExecutor -> circular dependency check (must not import runners)
+      const workflowExec = files.find((f) => f.rel === "src/systems/generation/internal/v3/core/WorkflowExecutor.js");
+      assert.ok(workflowExec);
+      assert.ok(!workflowExec.text.includes("workflowRunner.js"));
 
       // Pair 2: promptBuilderProService -> ElementService (must not exist)
       const promptBuilder = files.find((f) => f.rel === "src/systems/elements/internal/services/promptBuilderProService.js");

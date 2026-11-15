@@ -1,6 +1,7 @@
 import { persistExternalMedia, getMediaRepository } from "#media/tools";
 import { envConfig } from "#shared";
 import { GenerationValidationError } from "../../../errors.js";
+import { db as defaultDb } from "../../../db/dbMap.js";
 
 /**
  * SaveMediaNode (`base.save_media`)
@@ -76,7 +77,7 @@ export const SaveMediaNode = {
       return { saved_media: saved };
     }
 
-    const repo = ctx.mediaRepository || ctx.db?.media || getMediaRepository();
+    const repo = ctx.mediaRepository || ctx.db?.media || defaultDb?.media || getMediaRepository();
     const updateFn =
       typeof repo?.updateMedia === "function"
         ? repo.updateMedia.bind(repo)

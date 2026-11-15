@@ -99,7 +99,12 @@ export class WorkflowExecutor {
    * @returns {Promise<{ workflowId: string, status: string, nodeOutputs: Object, terminalOutputs: Object, cacheHits: string[], wavesExecuted: number }>}
    */
   async execute({ workflow, input = {}, context = {}, signatureCache = null } = {}) {
-    const plan = this.compiler.compile(workflow, input);
+    const normalizedInput = {
+      ...input,
+      media_id: input.media_id || (Array.isArray(input.serverMediaIds) ? input.serverMediaIds[0] : input.media_id),
+      workflow_id: input.workflow_id || input.serverWorkflowId || input.workflow_id,
+    };
+    const plan = this.compiler.compile(workflow, normalizedInput);
     const nodesMap = new Map(workflow.nodes.map((n) => [n.id, n]));
     const activeCache = signatureCache instanceof Map ? signatureCache : this.cache;
 
@@ -112,7 +117,7 @@ export class WorkflowExecutor {
         wave.map(async (nodeId) => {
           const step = nodesMap.get(nodeId);
           const def = this.registry.get(step.type);
-          const resolvedInputs = this.resolveNodeInputs(step, def, input, nodeOutputs);
+          const resolvedInputs = this.resolveNodeInputs(step, def, normalizedInput, nodeOutputs);
 
           // Check SHA-256 signature cache for non-terminal nodes
           const isOutputNode = Boolean(def.OUTPUT_NODE);

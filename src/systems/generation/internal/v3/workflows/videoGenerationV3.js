@@ -9,9 +9,22 @@
  */
 export const videoGenerationV3 = Object.freeze({
   id: "video-generation-v3",
+  aliases: Object.freeze(["video-generation-v1", "videoGeneration"]),
   name: "Video Generation V3",
   version: "3.0.0",
   category: "video",
+  mediaType: "video",
+  mediaRole: "output",
+  saveType: "video_output",
+  requiredInputs: Object.freeze(["prompt"]),
+  contract: Object.freeze({
+    id: "video-generation-v3",
+    aliases: Object.freeze(["video-generation-v1", "videoGeneration"]),
+    mediaType: "video",
+    mediaRole: "output",
+    saveType: "video_output",
+    requiredInputs: Object.freeze(["prompt"]),
+  }),
   description:
     "Declarative 4-node V3 video generation pipeline: reference & tag resolution, single-call LLM safety check + translation, video generation, and explicit media persistence.",
 
@@ -58,6 +71,8 @@ export const videoGenerationV3 = Object.freeze({
         asset_url: { fromNode: "generate_video", output: "video_url" },
         final_prompt: { fromNode: "llm_process", output: "final_prompt" },
         metadata: { fromNode: "generate_video", output: "metadata" },
+        media_role: "output",
+        save_type: "video_output",
       },
     },
   ],

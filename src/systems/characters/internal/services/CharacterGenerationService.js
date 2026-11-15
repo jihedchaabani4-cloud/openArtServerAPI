@@ -68,7 +68,7 @@ export class CharacterGenerationService {
             const charName = name?.trim() || prompt?.slice(0, 40) || "Untitled Character";
             const charPrompt = prompt?.trim() || charName;
 
-            // 1. Create placeholder media record so UI shows loading state immediately
+            // 1. Create placeholder media record and link to character/workflow upfront so when base.save_media completes the media row, the character sheet is ready automatically
             try {
                 placeholderMedia = await this.db.media.createMedia({
                     project_id: projectId,
@@ -84,10 +84,30 @@ export class CharacterGenerationService {
                     role: "sheet",
                     stepId: "image_generation",
                     workflowType: "CHARACTER",
+                    is_primary: true,
                     operation: "enqueueSheetGeneration:linkWorkflowMedia",
                 });
                 if (!linkResult) {
                     throw new Error(`Failed to link placeholder media ${placeholderMedia?.id} to workflow ${resolvedWorkflowId}`);
+                }
+                const targetCharId = characterId || resolvedWorkflowId;
+                if (placeholderMedia?.id && targetCharId && this.db?.characters) {
+                    const charPatch = {
+                        primary_media_id: placeholderMedia.id,
+                        updated_at: new Date().toISOString(),
+                    };
+                    if (typeof this.db.characters.updateCharacterFields === "function") {
+                        await this.db.characters.updateCharacterFields(targetCharId, charPatch).catch(() => null);
+                    } else if (typeof this.db.characters.updateCharacter === "function") {
+                        await this.db.characters.updateCharacter(targetCharId, charPatch).catch(() => null);
+                    }
+                }
+                if (placeholderMedia?.id && resolvedWorkflowId && this.db?.workflows) {
+                    if (typeof this.db.workflows.updatePrimaryMedia === "function") {
+                        await this.db.workflows.updatePrimaryMedia(resolvedWorkflowId, placeholderMedia.id).catch(() => null);
+                    } else if (typeof this.db.workflows.updateFields === "function") {
+                        await this.db.workflows.updateFields(resolvedWorkflowId, { primary_media_id: placeholderMedia.id }).catch(() => null);
+                    }
                 }
             } catch (mediaErr) {
                 if (placeholderMedia?.id && this.db?.media) {

@@ -5,15 +5,28 @@
  *   1) [resolve_refs]   (`base.resolve_references`)
  *   2) [llm_enrich]     (`base.llm` with skills: ["system-safety", "translation", "character-description"])
  *   3) [generate_sheet] (`base.image_generate`)
- *   4) [save_sheet]     (`custom.save_character_sheet`)
+ *   4) [save_media]     (`base.save_media`)
  */
 export const characterSheetV3 = Object.freeze({
   id: "character-sheet-v3",
+  aliases: Object.freeze(["character-sheet-v1", "characterSheet"]),
   name: "Character Turnaround Sheet V3",
   version: "3.0.0",
   category: "character",
+  mediaType: "image",
+  mediaRole: "sheet",
+  saveType: "character_sheet",
+  requiredInputs: Object.freeze(["prompt"]),
+  contract: Object.freeze({
+    id: "character-sheet-v3",
+    aliases: Object.freeze(["character-sheet-v1", "characterSheet"]),
+    mediaType: "image",
+    mediaRole: "sheet",
+    saveType: "character_sheet",
+    requiredInputs: Object.freeze(["prompt"]),
+  }),
   description:
-    "Declarative 4-node V3 character turnaround sheet pipeline: reference resolution, single-call LLM safety check + translation + 3-view character description, sheet generation, and character persistence.",
+    "Declarative 4-node V3 character turnaround sheet pipeline: reference resolution, single-call LLM safety check + translation + 3-view character description, sheet generation, and explicit media persistence.",
 
   nodes: [
     {
@@ -52,15 +65,16 @@ export const characterSheetV3 = Object.freeze({
       },
     },
     {
-      id: "save_sheet",
-      type: "custom.save_character_sheet",
+      id: "save_media",
+      type: "base.save_media",
       inputs: {
-        character_id: { fromInput: "character_id" },
         media_id: { fromInput: "media_id" },
-        workflow_id: { fromInput: "workflow_id", default: null },
-        sheet_url: { fromNode: "generate_sheet", output: "image_url" },
-        description: { fromNode: "llm_enrich", output: "character_description" },
+        asset_url: { fromNode: "generate_sheet", output: "image_url" },
+        final_prompt: { fromNode: "llm_enrich", output: "final_prompt" },
+        character_description: { fromNode: "llm_enrich", output: "character_description" },
         metadata: { fromNode: "generate_sheet", output: "metadata" },
+        media_role: "sheet",
+        save_type: "character_sheet",
       },
     },
   ],

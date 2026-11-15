@@ -9,9 +9,22 @@
  */
 export const imageGenerationV3 = Object.freeze({
   id: "image-generation-v3",
+  aliases: Object.freeze(["image-generation-v1", "imageGeneration"]),
   name: "Image Generation V3",
   version: "3.0.0",
   category: "image",
+  mediaType: "image",
+  mediaRole: "output",
+  saveType: "workflow_output",
+  requiredInputs: Object.freeze(["prompt"]),
+  contract: Object.freeze({
+    id: "image-generation-v3",
+    aliases: Object.freeze(["image-generation-v1", "imageGeneration"]),
+    mediaType: "image",
+    mediaRole: "output",
+    saveType: "workflow_output",
+    requiredInputs: Object.freeze(["prompt"]),
+  }),
   description:
     "Declarative 4-node V3 image generation pipeline: reference & tag resolution, single-call LLM safety check + translation, image generation, and explicit media persistence.",
 
@@ -58,6 +71,8 @@ export const imageGenerationV3 = Object.freeze({
         asset_url: { fromNode: "generate_image", output: "image_url" },
         final_prompt: { fromNode: "llm_process", output: "final_prompt" },
         metadata: { fromNode: "generate_image", output: "metadata" },
+        media_role: "output",
+        save_type: "workflow_output",
       },
     },
   ],

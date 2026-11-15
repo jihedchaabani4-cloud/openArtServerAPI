@@ -10,24 +10,22 @@ import {
   ImageGenerateNode,
   VideoGenerateNode,
   SaveMediaNode,
-  SaveCharacterSheetNode,
 } from "../../src/systems/generation/internal/v3/nodes/index.js";
 
-describe("V3 Base & Custom Nodes Suite", () => {
-  it("registers the 5 pure base.* nodes and 1 custom.* node into a frozen registry", () => {
+describe("V3 Base Nodes Suite", () => {
+  it("registers the 5 pure base.* nodes and 0 custom.* nodes into a frozen registry", () => {
     const reg = createDefaultV3NodeRegistry();
     assert.equal(reg.isFrozen(), true);
     assert.equal(V3_BASE_NODES.length, 5);
-    assert.equal(V3_CUSTOM_NODES.length, 1);
-    assert.equal(reg.list().length, 6);
+    assert.equal(V3_CUSTOM_NODES.length, 0);
+    assert.equal(reg.list().length, 5);
     assert.equal(reg.has("base.resolve_references"), true);
     assert.equal(reg.has("base.llm"), true);
     assert.equal(reg.has("base.image_generate"), true);
     assert.equal(reg.has("base.video_generate"), true);
     assert.equal(reg.has("base.save_media"), true);
-    assert.equal(reg.has("custom.save_character_sheet"), true);
+    assert.equal(reg.has("custom.save_character_sheet"), false);
     assert.equal(reg.get("base.save_media").OUTPUT_NODE, true);
-    assert.equal(reg.get("custom.save_character_sheet").OUTPUT_NODE, true);
   });
 
   it("base.resolve_references verifies ownership, resolves media/characters/elements, replaces inline tags, and builds [Reference Guide]", async () => {
@@ -227,9 +225,21 @@ describe("V3 Base & Custom Nodes Suite", () => {
     );
   });
 
-  it("base.save_media and custom.save_character_sheet persist terminal outputs cleanly", async () => {
-    const dbRecords = new Map([["media-out-1", { id: "media-out-1", status: "processing", url: null }]]);
+  it("base.save_media persists terminal outputs and character_description cleanly via #media/tools", async () => {
+    const dbRecords = new Map([
+      ["media-out-1", { id: "media-out-1", status: "processing", url: null }],
+      [
+        "media-77",
+        {
+          id: "media-77",
+          status: "processing",
+          url: null,
+          generation_config: { prompt: "Original character concept" },
+        },
+      ],
+    ]);
     const realShapeRepo = {
+      findById: async (id) => dbRecords.get(id) || null,
       updateFields: async (id, fields) => {
         const existing = dbRecords.get(id) || { id };
         const updated = { ...existing, ...fields };
@@ -253,24 +263,48 @@ describe("V3 Base & Custom Nodes Suite", () => {
     assert.equal(saved.saved_media.status, "completed");
     assert.equal(dbRecords.get("media-out-1").url, "https://cdn.example.com/final.png");
 
-    const savedSheet = await SaveCharacterSheetNode.execute(
+    const savedSheet = await SaveMediaNode.execute(
       {
-        character_id: "char-77",
         media_id: "media-77",
-        sheet_url: "https://cdn.example.com/sheet.png",
-        description: "3-view turnaround sheet",
+        asset_url: "https://cdn.example.com/sheet.png",
+        final_prompt: "3-view turnaround sheet prompt",
+        character_description: "3-view turnaround sheet description",
+        metadata: { width: 1344, height: 768, model: "gpt-image-2" },
       },
       {
         mediaRepository: realShapeRepo,
-        attachCharacterSheetResult: async ({ characterId, mediaId, sheetUrl }) => ({
-          id: characterId,
-          primary_media_id: mediaId,
-          sheet_url: sheetUrl,
-        }),
       }
     );
-    assert.equal(savedSheet.saved_character_sheet.characterId, "char-77");
-    assert.equal(savedSheet.saved_character_sheet.sheetUrl, "https://cdn.example.com/sheet.png");
+    assert.equal(savedSheet.saved_media.id, "media-77");
+    assert.equal(savedSheet.saved_media.url, "https://cdn.example.com/sheet.png");
     assert.equal(dbRecords.get("media-77").status, "completed");
+    assert.equal(
+      dbRecords.get("media-77").generation_config.character_description,
+      "3-view turnaround sheet description"
+    );
+
+    // Rejects with HOLD_EXPIRED (409, retryable: false) when media record is already "failed"
+    dbRecords.set("media-expired-99", {
+      id: "media-expired-99",
+      status: "failed",
+      url: null,
+    });
+    await assert.rejects(
+      () =>
+        SaveMediaNode.execute(
+          {
+            media_id: "media-expired-99",
+            asset_url: "https://cdn.example.com/late.png",
+          },
+          { mediaRepository: realShapeRepo }
+        ),
+      (err) => {
+        assert.equal(err.code, "HOLD_EXPIRED");
+        assert.equal(err.category, "HOLD_EXPIRED");
+        assert.equal(err.statusCode, 409);
+        assert.equal(err.retryable, false);
+        return true;
+      }
+    );
   });
 });

@@ -1,5 +1,10 @@
 import { executeLLM, calculateCost } from "#models/tools";
-import { GenerationValidationError, GenerationUpstreamError } from "../../../errors.js";
+import {
+  GenerationError,
+  GenerationValidationError,
+  GenerationUpstreamError,
+  GenerationSafetyError,
+} from "../../../errors.js";
 import { extractNodeCostAmount } from "./mediaNodeHelpers.js";
 
 /**
@@ -215,30 +220,39 @@ export const LlmNode = {
         userId: ctx.userId || null,
       });
     } catch (err) {
-      if (err.code === "CONTENT_SAFETY_VIOLATION" || err.code === "BILLING_CONTEXT_MISSING") {
+      if (err.code === "BILLING_CONTEXT_MISSING") {
         throw err;
       }
       if (
+        err.code === "CONTENT_SAFETY_VIOLATION" ||
         err.code === "PROVIDER_CONTENT_POLICY_ERROR" ||
+        err.is_safe === false ||
         /safety violation|content policy|nsfw/i.test(err.message || "")
       ) {
-        const violationErr = new GenerationValidationError(
+        if (err instanceof GenerationError && err.code === "CONTENT_SAFETY_VIOLATION") {
+          err.retryable = false;
+          err.statusCode = 422;
+          throw err;
+        }
+        throw new GenerationSafetyError(
           err.message || "Prompt violates content safety policy",
           { field: "prompt" }
         );
-        violationErr.code = "CONTENT_SAFETY_VIOLATION";
-        violationErr.category = "USER_FAULT";
-        violationErr.statusCode = 422;
-        violationErr.is_safe = false;
-        throw violationErr;
       }
       if (requiresSafety) {
+        const isTransient =
+          err?.retryable === true ||
+          err?.category === "RATE_LIMIT" ||
+          err?.statusCode === 429 ||
+          err?.statusCode === 502 ||
+          err?.statusCode === 503;
         const failErr = new GenerationUpstreamError(
           `Safety verification failed (fail-closed): ${err.message}`,
           {
             code: "SAFETY_CHECK_FAILED",
-            category: "UPSTREAM_FAULT",
-            retryable: false,
+            category: err?.category === "RATE_LIMIT" ? "RATE_LIMIT" : "UPSTREAM_FAULT",
+            statusCode: err?.statusCode === 429 ? 429 : 502,
+            retryable: isTransient,
             context: { cause: err.message },
           }
         );
@@ -246,7 +260,15 @@ export const LlmNode = {
         failErr.is_safe = false;
         throw failErr;
       }
+      const category =
+        err?.category === "RATE_LIMIT" || err?.statusCode === 429 || /rate limit|quota|429/i.test(err?.message || "")
+          ? "RATE_LIMIT"
+          : "UPSTREAM_FAULT";
       throw new GenerationUpstreamError(`LLM execution failed: ${err.message}`, {
+        code: category === "RATE_LIMIT" ? "RATE_LIMIT_EXCEEDED" : (err?.code || "GENERATION_UPSTREAM_ERROR"),
+        category,
+        statusCode: category === "RATE_LIMIT" ? 429 : 502,
+        retryable: true,
         context: { model: inputs.model, cause: err.message },
       });
     }
@@ -271,15 +293,10 @@ export const LlmNode = {
 
       if (parsed.is_safe !== true) {
         const reason = parsed.safety_reason || "Prompt violates content safety policy";
-        const violationErr = new GenerationValidationError(reason, {
+        throw new GenerationSafetyError(reason, {
           field: "prompt",
           context: { is_safe: false, safety_reason: reason },
         });
-        violationErr.code = "CONTENT_SAFETY_VIOLATION";
-        violationErr.category = "USER_FAULT";
-        violationErr.statusCode = 422;
-        violationErr.is_safe = false;
-        throw violationErr;
       }
     }
 

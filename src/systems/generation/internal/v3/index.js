@@ -1,6 +1,6 @@
 import { NodeRegistry } from "./core/NodeRegistry.js";
 import { GraphCompiler } from "./core/GraphCompiler.js";
-import { WorkflowExecutor, computeNodeSignature } from "./core/WorkflowExecutor.js";
+import { WorkflowExecutor, computeNodeSignature, isErrorRetryable } from "./core/WorkflowExecutor.js";
 import { V3Dispatcher } from "./core/V3Dispatcher.js";
 import {
   ALL_V3_NODES,
@@ -14,11 +14,13 @@ import {
   ImageGenerateNode,
   VideoGenerateNode,
   SaveMediaNode,
-  SaveCharacterSheetNode,
 } from "./nodes/index.js";
 import {
   V3_WORKFLOWS,
+  V3_WORKFLOW_ALIASES,
+  resolveV3WorkflowId,
   getV3Workflow,
+  getWorkflowContract,
   imageGenerationV3,
   videoGenerationV3,
   characterSheetV3,
@@ -29,6 +31,7 @@ export {
   GraphCompiler,
   WorkflowExecutor,
   computeNodeSignature,
+  isErrorRetryable,
   V3Dispatcher,
   ALL_V3_NODES,
   V3_BASE_NODES,
@@ -41,9 +44,11 @@ export {
   ImageGenerateNode,
   VideoGenerateNode,
   SaveMediaNode,
-  SaveCharacterSheetNode,
   V3_WORKFLOWS,
+  V3_WORKFLOW_ALIASES,
+  resolveV3WorkflowId,
   getV3Workflow,
+  getWorkflowContract,
   imageGenerationV3,
   videoGenerationV3,
   characterSheetV3,

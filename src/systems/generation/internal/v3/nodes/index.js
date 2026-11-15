@@ -4,7 +4,6 @@ import { LlmNode, LLM_SKILLS_REGISTRY, buildUnifiedLlmInstruction } from "./base
 import { ImageGenerateNode } from "./base/imageGenerateNode.js";
 import { VideoGenerateNode } from "./base/videoGenerateNode.js";
 import { SaveMediaNode } from "./base/saveMediaNode.js";
-import { SaveCharacterSheetNode } from "./custom/saveCharacterSheetNode.js";
 
 export const V3_BASE_NODES = Object.freeze([
   ResolveRefsNode,
@@ -14,14 +13,12 @@ export const V3_BASE_NODES = Object.freeze([
   SaveMediaNode,
 ]);
 
-export const V3_CUSTOM_NODES = Object.freeze([
-  SaveCharacterSheetNode,
-]);
+export const V3_CUSTOM_NODES = Object.freeze([]);
 
-export const ALL_V3_NODES = Object.freeze([...V3_BASE_NODES, ...V3_CUSTOM_NODES]);
+export const ALL_V3_NODES = Object.freeze([...V3_BASE_NODES]);
 
 /**
- * Creates a fresh, frozen `NodeRegistry` populated with all standard `base.*` and `custom.*` V3 nodes.
+ * Creates a fresh, frozen `NodeRegistry` populated with all 5 standard `base.*` V3 nodes.
  *
  * @param {Array<Object>} [extraNodes=[]]
  * @returns {NodeRegistry}
@@ -42,5 +39,4 @@ export {
   ImageGenerateNode,
   VideoGenerateNode,
   SaveMediaNode,
-  SaveCharacterSheetNode,
 };

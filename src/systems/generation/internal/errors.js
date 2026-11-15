@@ -318,6 +318,184 @@ export class GenerationUpstreamError extends GenerationError {
     }
 }
 
+export class GenerationSafetyError extends GenerationValidationError {
+    constructor(message = "Prompt violates content safety policy", { field = "prompt", context = {} } = {}) {
+        super(message, {
+            field,
+            context: { is_safe: false, safety_reason: message, ...context },
+        });
+        this.name = "GenerationSafetyError";
+        this.code = "CONTENT_SAFETY_VIOLATION";
+        this.errorCode = "CONTENT_SAFETY_VIOLATION";
+        this.category = "USER_FAULT";
+        this.safetyCategory = "CONTENT_SAFETY_VIOLATION";
+        this.statusCode = 422;
+        this.status = 422;
+        this.retryable = false;
+        this.is_safe = false;
+        this.safeMessage = message;
+        this.userMessage = message;
+    }
+}
+
+export class GenerationHoldExpiredError extends GenerationError {
+    constructor(message = "Cannot complete media because its credit hold has expired", { mediaId = null, context = {} } = {}) {
+        super("HOLD_EXPIRED", message, {
+            type: "OPERATIONAL",
+            category: "HOLD_EXPIRED",
+            statusCode: 409,
+            retryable: false,
+            billingAction: "NONE",
+            context: { mediaId, ...context },
+        });
+        this.name = "GenerationHoldExpiredError";
+        this.code = "HOLD_EXPIRED";
+        this.errorCode = "HOLD_EXPIRED";
+        this.category = "HOLD_EXPIRED";
+        this.statusCode = 409;
+        this.status = 409;
+        this.retryable = false;
+        this.isInternal = false;
+        this.mediaId = mediaId;
+    }
+}
+
+const INTERNAL_LEAK_REGEX =
+    /\b(wavespeed|ltx|google|gemini|vertex|openai|anthropic|replicate|fal\.ai|supabase|postgrest|pg_|postgres|redis|bullmq|ioredis)\b/gi;
+const URL_LEAK_REGEX = /https?:\/\/[^\s"'<>]+/gi;
+const SQL_LEAK_REGEX = /\b(SELECT\s+.+\s+FROM|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|relation\s+"[^"]+"\s+does\s+not\s+exist|syntax\s+error\s+at\s+or\s+near)\b/gi;
+const STACK_TRACE_REGEX = /\n\s*at\s+[^\n]+/g;
+
+function scrubSensitiveText(text, fallback = "Generation failed. Please try again.") {
+    if (!text || typeof text !== "string") return fallback;
+    let cleaned = text.replace(STACK_TRACE_REGEX, "").trim();
+    if (SQL_LEAK_REGEX.test(cleaned)) {
+        SQL_LEAK_REGEX.lastIndex = 0;
+        return fallback;
+    }
+    cleaned = cleaned.replace(URL_LEAK_REGEX, "[redacted-url]");
+    cleaned = cleaned.replace(INTERNAL_LEAK_REGEX, "provider");
+    cleaned = cleaned.replace(/\s{2,}/g, " ").trim();
+    return cleaned || fallback;
+}
+
+/**
+ * Classifies and sanitizes any error into one of the 4 canonical V3 error categories:
+ *   1. USER_FAULT (400/403/404 — input or ownership errors; never retried)
+ *   2. CONTENT_SAFETY_VIOLATION (422 — LLM or provider safety rejection; never retried)
+ *   3. UPSTREAM_FAULT / RATE_LIMIT (502/503/429 — transient provider failures; retryable)
+ *   4. HOLD_EXPIRED / SERVER_FAULT (409/500 — expired hold or internal fault; never retried)
+ *
+ * Ensures no stack trace, SQL detail, internal URL, or internal provider name leaks to client/DB.
+ */
+export function sanitizeClientError(err) {
+    const rawCode = String(err?.code || err?.errorCode || "").trim();
+    const rawMsg = typeof err?.message === "string" ? err.message : String(err || "");
+    const rawCategory = String(err?.category || "").toUpperCase();
+    const rawStatus = Number(err?.statusCode || err?.status || 0);
+
+    // 1. CONTENT_SAFETY_VIOLATION (422)
+    if (
+        rawCode === "CONTENT_SAFETY_VIOLATION" ||
+        rawCode === "PROMPT_VIOLATION" ||
+        rawCode === "PROVIDER_CONTENT_POLICY_ERROR" ||
+        rawCategory === "CONTENT_SAFETY_VIOLATION" ||
+        err?.is_safe === false ||
+        /content safety|content policy|safety violation|nsfw/i.test(rawMsg)
+    ) {
+        const cleanReason = scrubSensitiveText(
+            err?.userMessage || err?.safeMessage || rawMsg,
+            "Your prompt violates our content safety policy."
+        );
+        return {
+            code: rawCode === "SAFETY_CHECK_FAILED" ? "SAFETY_CHECK_FAILED" : "CONTENT_SAFETY_VIOLATION",
+            category: "CONTENT_SAFETY_VIOLATION",
+            statusCode: 422,
+            retryable: false,
+            message: cleanReason,
+            userMessage: cleanReason,
+        };
+    }
+
+    // 2. HOLD_EXPIRED (409)
+    if (rawCode === "HOLD_EXPIRED" || rawCategory === "HOLD_EXPIRED" || rawStatus === 409) {
+        const msg = "Generation session expired before completion. Your credits have been refunded.";
+        return {
+            code: "HOLD_EXPIRED",
+            category: "HOLD_EXPIRED",
+            statusCode: 409,
+            retryable: false,
+            message: msg,
+            userMessage: msg,
+        };
+    }
+
+    // 3. USER_FAULT (400 / 403 / 404)
+    if (
+        rawCategory === "USER_FAULT" ||
+        rawStatus === 400 ||
+        rawStatus === 403 ||
+        rawStatus === 404 ||
+        rawCode === "GENERATION_VALIDATION_ERROR" ||
+        rawCode === "GENERATION_NOT_FOUND" ||
+        rawCode === "USE_CASE_NOT_FOUND" ||
+        rawCode === "FORBIDDEN" ||
+        rawCode === "OWNERSHIP_VERIFICATION_FAILED" ||
+        rawCode === "TARGET_VERIFICATION_FAILED"
+    ) {
+        const statusCode = rawStatus === 403 || rawStatus === 404 ? rawStatus : 400;
+        const cleanMsg = scrubSensitiveText(
+            err?.userMessage || err?.safeMessage || rawMsg,
+            "Invalid request parameters."
+        );
+        return {
+            code: rawCode || "GENERATION_VALIDATION_ERROR",
+            category: "USER_FAULT",
+            statusCode,
+            retryable: false,
+            message: cleanMsg,
+            userMessage: cleanMsg,
+        };
+    }
+
+    // 4. UPSTREAM_FAULT / RATE_LIMIT (429 / 502 / 503)
+    if (
+        rawCategory === "UPSTREAM_FAULT" ||
+        rawCategory === "RATE_LIMIT" ||
+        rawStatus === 429 ||
+        rawStatus === 502 ||
+        rawStatus === 503 ||
+        /rate limit|quota|timeout|timed out|upstream/i.test(rawCode) ||
+        /rate limit|quota|timed out/i.test(rawMsg)
+    ) {
+        const isRateLimit = rawCategory === "RATE_LIMIT" || rawStatus === 429 || /rate limit|quota/i.test(rawCode);
+        const category = isRateLimit ? "RATE_LIMIT" : "UPSTREAM_FAULT";
+        const statusCode = isRateLimit ? 429 : rawStatus === 503 ? 503 : 502;
+        const userMessage = isRateLimit
+            ? "Generation service is currently busy. Please try again in a moment."
+            : "Generation failed due to a temporary service issue. Your credits have been refunded.";
+        return {
+            code: rawCode || (isRateLimit ? "RATE_LIMIT_EXCEEDED" : "GENERATION_UPSTREAM_ERROR"),
+            category,
+            statusCode,
+            retryable: err?.retryable !== undefined ? Boolean(err.retryable) : true,
+            message: userMessage,
+            userMessage,
+        };
+    }
+
+    // 5. SERVER_FAULT (500 — default fail-closed internal category)
+    const fallbackMessage = "Generation failed due to an unexpected internal error. Your credits have been refunded.";
+    return {
+        code: rawCode || "SERVER_ERROR",
+        category: "SERVER_FAULT",
+        statusCode: 500,
+        retryable: false,
+        message: fallbackMessage,
+        userMessage: fallbackMessage,
+    };
+}
+
 export class CompilationError extends Error {
     constructor(rule, message, details = {}) {
         super(message);
@@ -350,8 +528,9 @@ export default {
     GenerationCompilationError,
     GenerationQueueDispatchError,
     GenerationUpstreamError,
+    GenerationSafetyError,
+    GenerationHoldExpiredError,
+    sanitizeClientError,
     CompilationError,
     throwCompilationErrors,
 };
-
-

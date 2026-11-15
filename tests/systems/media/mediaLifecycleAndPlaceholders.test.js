@@ -7,7 +7,6 @@ import {
   WorkflowExecutor,
   GraphCompiler,
   SaveMediaNode,
-  SaveCharacterSheetNode,
   createDefaultV3NodeRegistry,
 } from "#generation/tools";
 import { db } from "../../../src/container.js";
@@ -103,31 +102,28 @@ describe("Media Persistence Failure Boundary Tests (V3 Nodes & Executor)", () =>
     );
   });
 
-  it("TEST 3: SaveCharacterSheetNode throws when target character update fails", async () => {
-    db.media.updateMedia = async (id, patch) => ({ id, ...patch });
-
+  it("TEST 3: SaveMediaNode throws when external persistence fails", async () => {
     await assert.rejects(
       async () => {
-        await SaveCharacterSheetNode.execute(
+        await SaveMediaNode.execute(
           {
-            character_id: "char-123",
             media_id: "media-char-123",
-            sheet_url: "https://storage.example.com/sheet.png",
-            description: "Updated character personality description",
+            asset_url: "https://storage.example.com/sheet.png",
+            character_description: "Updated character personality description",
           },
           {
             db,
-            attachCharacterSheetResult: async () => {
-              throw new Error("Character row locked by another transaction");
+            persistExternalMedia: async () => {
+              throw new Error("Storage upload failed during external media persistence");
             },
           }
         );
       },
       (err) => {
-        assert.match(err.message, /Character row locked by another transaction/i);
+        assert.match(err.message, /Storage upload failed/i);
         return true;
       },
-      "Expected SaveCharacterSheetNode to throw when character persistence fails"
+      "Expected SaveMediaNode to throw when persistence fails"
     );
   });
 

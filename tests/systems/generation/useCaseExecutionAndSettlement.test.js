@@ -5,7 +5,6 @@ import {
   WorkflowExecutor,
   GraphCompiler,
   SaveMediaNode,
-  SaveCharacterSheetNode,
   ImageGenerateNode,
   createDefaultV3NodeRegistry,
   imageGenerationV3,
@@ -36,6 +35,7 @@ function createDefaultMockNodeContext(overrides = {}) {
         safety_reason: null,
         sanitized_prompt: prompt,
         description: "Cyberpunk character with cybernetic arm.",
+        character_description: "Cyberpunk character with cybernetic arm.",
       }),
       content: prompt || "Processed prompt text",
       json: {
@@ -43,6 +43,7 @@ function createDefaultMockNodeContext(overrides = {}) {
         safety_reason: null,
         sanitized_prompt: prompt,
         description: "Cyberpunk character with cybernetic arm.",
+        character_description: "Cyberpunk character with cybernetic arm.",
       },
       model: "gemini-3.1-flash-lite",
       durationMs: 5,
@@ -59,23 +60,6 @@ function createDefaultMockNodeContext(overrides = {}) {
         assets: [{ url: "https://mock-storage.example.com/e2e-image.png", width: 1024, height: 1024 }],
         metadata: { model: modelId, provider: "wavespeed", width: 1024, height: 1024 },
       };
-    },
-    cropCharacterSheet: async () => ({
-      panelUrls: [
-        "https://mock-storage.example.com/front.png",
-        "https://mock-storage.example.com/side.png",
-        "https://mock-storage.example.com/back.png",
-      ],
-    }),
-    attachCharacterSheetResult: async ({ characterId, mediaId, sheetUrl }) => {
-      if (db.characters?.updateCharacter) {
-        await db.characters.updateCharacter(characterId, {
-          description: "Cyberpunk character with cybernetic arm.",
-          sheet_url: sheetUrl,
-          primary_media_id: mediaId,
-        });
-      }
-      return { characterId, mediaId, sheetUrl };
     },
     ...overrides,
   };
@@ -371,13 +355,15 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
 
     assert.equal(result.status, "completed");
     assert.equal(settledRef, "hold-char-e2e", "Character sheet hold must be settled once");
-    assert.equal(characterUpdateCalls.length, 1, "Character record must be updated");
-    assert.equal(characterUpdateCalls[0].id, "char-e2e-123");
-    assert.equal(characterUpdateCalls[0].patch.description, "Cyberpunk character with cybernetic arm.");
+    assert.equal(characterUpdateCalls.length, 0, "V3 save_media node must not touch characters table directly");
     assert.equal(mediaUpdateCalls.length, 1, "Placeholder media must be updated to completed");
     assert.equal(mediaUpdateCalls[0].id, "media-char-e2e");
     assert.equal(mediaUpdateCalls[0].patch.status, "completed");
     assert.equal(mediaUpdateCalls[0].patch.url, "https://mock-storage.example.com/e2e-image.png");
+    assert.equal(
+      mediaUpdateCalls[0].patch.generation_config?.character_description,
+      "Cyberpunk character with cybernetic arm."
+    );
   });
 });
 }

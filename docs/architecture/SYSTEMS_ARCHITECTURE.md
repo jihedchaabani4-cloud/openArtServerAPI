@@ -37,7 +37,7 @@ Every Business System inside `src/systems/<system>/` is a strict black box. It o
 - **Role:** Central execution brain for all AI generation (images, videos, character sheets, element analysis) powered 100% by the ComfyUI-Style V3 Node Engine (`src/systems/generation/internal/v3/`).
 - **Directory Structure & Internal Services:**
   - `public/api.js`: Mounts `/api/images/*`, `/api/video/*`, `/api/prompt/*`, `/api/workflows/*`, and `/api/v2/workflows/*`.
-  - `public/tools.js`: Exposes `triggerWorkflowRun`, `getWorkflowRun`, `UseCaseService` (alias to `V3Dispatcher`), and V3 engine primitives (`NodeRegistry`, `GraphCompiler`, `WorkflowExecutor`, `V3Dispatcher`, `V3_WORKFLOWS`, and the 6 V3 nodes: 5 base + 1 custom).
+  - `public/tools.js`: Exposes `triggerWorkflowRun`, `getWorkflowRun`, `UseCaseService` (alias to `V3Dispatcher`), and V3 engine primitives (`NodeRegistry`, `GraphCompiler`, `WorkflowExecutor`, `V3Dispatcher`, `V3_WORKFLOWS`, and the 5 V3 base nodes).
   - `internal/controllers/`: `imageController.js`, `videoController.js`, `workflowsController.js`, `generationsQueryController.js`, `generationsMutationController.js`, `projectController.js`.
   - `internal/services/`:
     - `GenerationService.js` & `GenerationRequestService.js`: Request preparation and parameter normalization.
@@ -45,7 +45,7 @@ Every Business System inside `src/systems/<system>/` is a strict black box. It o
     - `jobQueueService.js`: BullMQ producer for `v2-workflow-jobs`.
     - `NodeSafetyService.js`: Centralized input validation and safety guardrails.
   - `internal/v3/`:
-    - ComfyUI-Style Node Engine Core (`NodeRegistry.js`, `GraphCompiler.js`, `WorkflowExecutor.js`, `V3Dispatcher.js`), 5 Base Nodes (`resolveRefsNode.js` [`base.resolve_references`], `llmNode.js` [`base.llm`], `imageGenerateNode.js` [`base.image_generate`], `videoGenerateNode.js` [`base.video_generate`], `saveMediaNode.js` [`base.save_media`]), 1 Custom Node (`saveCharacterSheetNode.js` [`custom.save_character_sheet`]), and 3 Declarative V3 Workflows (`imageGenerationV3.js`, `videoGenerationV3.js`, `characterSheetV3.js`).
+    - ComfyUI-Style Node Engine Core (`NodeRegistry.js`, `GraphCompiler.js`, `WorkflowExecutor.js`, `V3Dispatcher.js`), 5 Base Nodes (`resolveRefsNode.js` [`base.resolve_references`], `llmNode.js` [`base.llm`], `imageGenerateNode.js` [`base.image_generate`], `videoGenerateNode.js` [`base.video_generate`], `saveMediaNode.js` [`base.save_media`]), 0 Custom Nodes, and 3 Declarative V3 Workflows (`imageGenerationV3.js`, `videoGenerationV3.js`, `characterSheetV3.js`).
   - `internal/resolvers/`: `WorkflowReferenceResolver.js` for resolving referenced workflows, characters, and elements.
   - `internal/gateways/`: `workflowBillingGateway.js` (calls `#billing/tools`), `workflowStorageGateway.js` (calls `#media/tools`), `workflowEventRecorder.js`.
   - `internal/workers/`: `useCaseWorker.js` and `worker.js` (BullMQ consumers executing V3 runs via `V3Dispatcher` and settling holds/media).

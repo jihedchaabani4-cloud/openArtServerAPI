@@ -2,7 +2,7 @@ import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
 import { InMemoryWalletService } from "../../helpers/inMemoryWalletService.js";
 import { WalletService, runReservationReaper, reconcileExpiredHolds, handleExpireStaleHolds } from "#billing/tools";
-import { executeNodePersistence, UseCaseService, WorkflowMediaService } from "#generation/tools";
+import { SaveMediaNode, UseCaseService, WorkflowMediaService } from "#generation/tools";
 import { db, mediaWorkflowLifecycleService } from "../../../src/container.js";
 import { MediaWorkflowLifecycleService, WorkflowMediaRepository } from "#media/tools";
 
@@ -10,6 +10,7 @@ import { MediaWorkflowLifecycleService, WorkflowMediaRepository } from "#media/t
 {
 describe("Reservation Reaper Race & Hold Heartbeat Boundary Tests (Task T10 / BUG-03)", () => {
   let originalFindByWorkflow;
+  let originalFindById;
   let originalUpdateMedia;
   let originalUpdateFields;
   let updatedCalls = [];
@@ -18,6 +19,7 @@ describe("Reservation Reaper Race & Hold Heartbeat Boundary Tests (Task T10 / BU
   beforeEach(() => {
     updatedCalls = [];
     originalFindByWorkflow = db.media?.findByWorkflow;
+    originalFindById = db.media?.findById;
     originalUpdateMedia = db.media?.updateMedia;
     originalUpdateFields = db.media?.updateFields;
   });
@@ -25,6 +27,7 @@ describe("Reservation Reaper Race & Hold Heartbeat Boundary Tests (Task T10 / BU
   afterEach(() => {
     if (db.media) {
       db.media.findByWorkflow = originalFindByWorkflow;
+      db.media.findById = originalFindById;
       db.media.updateMedia = originalUpdateMedia;
       db.media.updateFields = originalUpdateFields;
     }
@@ -61,7 +64,7 @@ describe("Reservation Reaper Race & Hold Heartbeat Boundary Tests (Task T10 / BU
     );
   });
 
-  it("TEST 2: executeNodePersistence must NEVER overwrite a terminal 'failed' placeholder (prevent free media resurrection)", async () => {
+  it("TEST 2: SaveMediaNode must NEVER overwrite a terminal 'failed' placeholder (prevent free media resurrection)", async () => {
     const workflowId = "wf-race-test-2";
     const targetStepId = "video_generation";
 
@@ -77,29 +80,21 @@ describe("Reservation Reaper Race & Hold Heartbeat Boundary Tests (Task T10 / BU
     ];
 
     db.media.findByWorkflow = async (wfId) => mediaList.filter((m) => m.workflow_id === wfId);
+    db.media.findById = async (id) => mediaList.find((m) => m.id === id) || null;
     db.media.updateMedia = async (id, patch) => {
       updatedCalls.push({ id, ...patch });
       return { id, ...patch };
     };
 
-    const nodeConfig = {
-      id: "generate_video",
-      type: "video-generation",
-      persist: {
-        target: "media",
-        step_id: targetStepId,
-        status: "completed",
-        value: "$outputs.assets[0].url",
-      },
-    };
-
-    const output = { assets: [{ url: "https://storage.example.com/free-video.mp4" }] };
-    const run = { input: { workflow_id: workflowId } };
-
-    // BUG-03 DEFECT: Previously nodeExecutor picked existingList[0] and updated status: 'completed'!
     await assert.rejects(
       async () => {
-        await executeNodePersistence({ nodeConfig, output, run });
+        await SaveMediaNode.execute(
+          {
+            media_id: "media-reaped-1",
+            asset_url: "https://storage.example.com/free-video.mp4",
+          },
+          { db, mediaRepository: db.media }
+        );
       },
       (err) => {
         assert.ok(
@@ -108,7 +103,7 @@ describe("Reservation Reaper Race & Hold Heartbeat Boundary Tests (Task T10 / BU
         );
         return true;
       },
-      "executeNodePersistence must refuse to overwrite a 'failed' placeholder"
+      "SaveMediaNode must refuse to overwrite a 'failed' placeholder"
     );
 
     // Verify media record was NEVER updated to completed

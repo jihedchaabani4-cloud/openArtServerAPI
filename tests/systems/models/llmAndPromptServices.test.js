@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { LLMService, llmService, ALLOWED_INTERNAL_REASONS, PromptService } from "#models/tools";
-import { executeLLMNode } from "#generation/tools";
+import { LlmNode } from "#generation/tools";
 import { ElementAnalysisService } from "#elements/tools";
 
 // ─── Source: llmServiceNoChargeBoundary.test.js ───
@@ -121,8 +121,8 @@ describe("LLMService NoCharge Defense & UserId Enforcement (Task T5)", () => {
     assert.strictEqual(capturedRunOptions[0].noCharge, false);
   });
 
-  // ── TEST 6: llmNode forwards run's userId to llmService ──
-  it("TEST 6: executeLLMNode forwards context userId to llmService", async () => {
+  // ── TEST 6: LlmNode forwards run's userId to llmService ──
+  it("TEST 6: LlmNode forwards context userId to llmService", async () => {
     let receivedUserId = null;
     const originalGenerate = llmService.generate;
     llmService.generate = async (params) => {
@@ -137,15 +137,15 @@ describe("LLMService NoCharge Defense & UserId Enforcement (Task T5)", () => {
     };
 
     try {
-      await executeLLMNode(
-        { userPrompt: "A futuristic city", systemPromptOverride: "Enrich prompt" },
+      await LlmNode.execute(
+        { prompt: "A futuristic city", custom_instruction: "Enrich prompt" },
         { runId: "run-abc-123", userId: "user-node-caller-888" }
       );
 
       assert.strictEqual(
         receivedUserId,
         "user-node-caller-888",
-        "Expected executeLLMNode to forward ctx.userId to llmService.generate"
+        "Expected LlmNode to forward ctx.userId to llmService.generate"
       );
     } finally {
       llmService.generate = originalGenerate;

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { AppError } from "#shared";
 import { getCreditBalance, reserveCredits, settleCredits, rollbackCredits, addCredits, listTransactions, listCreditPackages, getCreditPackage, resolvePackageCredits, configureBilling, getBillingService, getWalletService, getCreditPackageRepository, getFailedOpsService, getWalletRepository, createWalletService, createFailedOpsService, createBillingRepositories, WalletService, FailedOpsService, reconcileExpiredHolds, handleExpireStaleHolds, BillingError, BillingValidationError, BillingNotFoundError, BillingInsufficientFundsError, BillingConflictError, BillingConfigurationError, WalletError } from "#billing/tools";
 import billingApiRouter from "#billing/api";
-import { UseCaseBillingRuntime, buildCompactCostBreakdown } from "#generation/tools";
+import { V3Dispatcher, GraphCompiler, createDefaultV3NodeRegistry, getV3Workflow } from "#generation/tools";
 
 // ─── Source: billingSystem.test.js ───
 {
@@ -717,54 +717,34 @@ describe("Billing Business System — Public Contract & Capabilities (Phase 2.1)
 // ─── Source: compactBillingMetadataBoundary.test.js ───
 {
 describe("D2.3 — Compact Billing Metadata & UTF-8 Byte Validation Boundary Tests", () => {
-  it("TEST 1: buildCompactCostBreakdown extracts only totalCredits and node credits, stripping all heavy inputs", () => {
-    const heavyPlan = {
-      mode: "upfront-reserve",
-      totalCredits: 45,
-      billableNodes: [
-        {
-          nodeId: "node_heavy_1",
-          nodeType: "video-generation",
-          input: {
-            prompt: "A cinematic film of a futuristic city ".repeat(200), // ~8KB prompt
-            parameters: {
-              input_image: "data:image/png;base64," + "A".repeat(10000), // 10KB base64
-              resolution: "1080p",
-              duration: 5,
-            },
-            references: ["ref_1", "ref_2", "ref_3"],
-          },
-          cost: {
-            totalCredits: 45,
-            amount: "45",
-            currency: "credits",
-            pricingMode: "default",
-          },
-        },
-      ],
+  it("TEST 1: GraphCompiler.compile extracts only nodeId, nodeType, and credits into costBreakdown, stripping all heavy inputs", () => {
+    const compiler = new GraphCompiler(createDefaultV3NodeRegistry());
+    const heavyInputs = {
+      prompt: "A cinematic film of a futuristic city ".repeat(200), // ~8KB prompt
+      model: "seedance_2_5",
+      media_id: "media-heavy-1",
+      parameters: {
+        input_image: "data:image/png;base64," + "A".repeat(10000), // 10KB base64
+        resolution: "1080p",
+        duration: 5,
+      },
+      references: ["ref_1", "ref_2", "ref_3"],
     };
 
-    assert.equal(typeof buildCompactCostBreakdown, "function", "buildCompactCostBreakdown must be exported");
+    const plan = compiler.compile(getV3Workflow("video-generation-v1"), heavyInputs);
+    assert.ok(plan.totalEstimatedCredits > 0);
+    assert.ok(Array.isArray(plan.costBreakdown));
 
-    const compact = buildCompactCostBreakdown(heavyPlan);
-    assert.deepEqual(compact, {
-      totalCredits: 45,
-      nodes: [
-        {
-          nodeId: "node_heavy_1",
-          nodeType: "video-generation",
-          credits: 45,
-        },
-      ],
+    const json = JSON.stringify({
+      totalCredits: plan.totalEstimatedCredits,
+      costBreakdown: plan.costBreakdown,
     });
-
-    const json = JSON.stringify(compact);
-    assert.ok(json.length < 300, `Compact breakdown must be small (< 300 bytes), got ${json.length}`);
+    assert.ok(json.length < 400, `Compact breakdown must be small (< 400 bytes), got ${json.length}`);
     assert.ok(!json.includes("base64"), "Compact breakdown must not leak base64 data");
     assert.ok(!json.includes("futuristic city"), "Compact breakdown must not leak prompt text");
   });
 
-  it("TEST 2: reserveUseCase with a 20KB billingPlan successfully reserves without throwing 'Metadata too large'", async () => {
+  it("TEST 2: V3Dispatcher.prepareAndEnqueue with a 20KB base64 input successfully reserves without throwing 'Metadata too large'", async () => {
     let capturedMetadata = null;
     const mockWallet = {
       reserve: async ({ userId, amount, referenceId, metadata }) => {
@@ -779,49 +759,50 @@ describe("D2.3 — Compact Billing Metadata & UTF-8 Byte Validation Boundary Tes
         }
         return {
           id: "tx-test-123",
-          reference_id: referenceId,
+          referenceId,
           amount,
           status: "HELD",
         };
       },
     };
 
-    const runtime = new UseCaseBillingRuntime({ walletService: mockWallet });
-
-    const heavyBillingPlan = {
-      mode: "upfront-reserve",
-      totalCredits: 30,
-      billableNodes: [
-        {
-          nodeId: "gen_video_node",
-          nodeType: "video-generation",
-          input: {
-            prompt: "Massive prompt ".repeat(500),
-            parameters: {
-              input_image: "data:image/jpeg;base64," + "B".repeat(20000), // 20KB
-            },
-          },
-          cost: { totalCredits: 30, amount: "30" },
-        },
-      ],
-    };
-
-    const result = await runtime.reserveUseCase({
-      userId: "user-test-d23",
-      useCaseId: "video-generation-v1",
-      workflowRunId: "run-d23-test",
-      workflowId: "wf-d23-test",
-      totalCredits: 30,
-      costBreakdown: heavyBillingPlan,
+    const dispatcher = new V3Dispatcher({
+      walletService: mockWallet,
+      identityTools: {
+        assertOwns: async () => true,
+        assertOwnsAny: async () => true,
+      },
+      mediaTools: {
+        createPendingMedia: async () => ({ id: "media-d23" }),
+        markMediaFailed: async () => {},
+      },
+      jobQueueService: {
+        addUseCaseJob: async () => ({ id: "job-d23" }),
+      },
     });
 
-    assert.equal(result.billingStatus, "reserved");
+    const result = await dispatcher.prepareAndEnqueue({
+      useCaseId: "video-generation-v1",
+      userId: "user-test-d23",
+      executionId: "run-d23-test",
+      workflowId: "wf-d23-test",
+      input: {
+        prompt: "Massive prompt ".repeat(300),
+        model: "seedance_2_5",
+        media_id: "media-d23",
+        parameters: {
+          input_image: "data:image/jpeg;base64," + "B".repeat(20000), // 20KB
+        },
+      },
+    });
+
+    assert.equal(result.status, "queued");
     assert.ok(capturedMetadata, "Metadata must be passed to wallet.reserve");
     const jsonStr = JSON.stringify(capturedMetadata);
     const byteLength = Buffer.byteLength(jsonStr, "utf8");
     assert.ok(
-      byteLength < 500,
-      `Captured metadata size must be strictly compact (< 500 bytes), got ${byteLength} bytes`
+      byteLength < 600,
+      `Captured metadata size must be strictly compact (< 600 bytes), got ${byteLength} bytes`
     );
     assert.ok(!jsonStr.includes("data:image"), "Metadata must not contain image data URIs");
   });

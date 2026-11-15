@@ -1,6 +1,5 @@
 import { persistExternalMedia, getMediaRepository } from "#media/tools";
-import { envConfig } from "#shared";
-import { GenerationValidationError } from "../../../errors.js";
+import { GenerationError, GenerationValidationError } from "../../../errors.js";
 import { db as defaultDb } from "../../../db/dbMap.js";
 
 /**
@@ -90,26 +89,45 @@ export const SaveMediaNode = {
     }
 
     const meta = inputs.metadata && typeof inputs.metadata === "object" ? inputs.metadata : {};
-    let updated = null;
-    try {
-      updated = await updateFn(inputs.media_id, {
-        url: inputs.asset_url,
-        status: "completed",
-        error_message: null,
-        ...(meta.width ? { width: meta.width } : {}),
-        ...(meta.height ? { height: meta.height } : {}),
-      });
-    } catch (updateErr) {
-      if (envConfig.isTest) {
-        updated = {
-          id: inputs.media_id,
-          url: inputs.asset_url,
-          status: "completed",
-        };
-      } else {
-        throw updateErr;
-      }
+    let existingMedia = null;
+    if (typeof repo?.findById === "function") {
+      existingMedia = await repo.findById(inputs.media_id).catch(() => null);
     }
+
+    if (existingMedia?.status === "failed") {
+      throw new GenerationError({
+        code: "HOLD_EXPIRED",
+        message: `Cannot complete media "${inputs.media_id}" because its placeholder is already in terminal "failed" status (hold expired or reaped)`,
+        statusCode: 409,
+        isInternal: false,
+      });
+    }
+
+    let mergedConfig = undefined;
+    if (existingMedia?.generation_config && typeof existingMedia.generation_config === "object") {
+      const baseConfig = { ...existingMedia.generation_config };
+      if (inputs.final_prompt && baseConfig.prompt && inputs.final_prompt !== baseConfig.prompt) {
+        baseConfig.prompt_optimized = inputs.final_prompt;
+      } else {
+        delete baseConfig.prompt_optimized;
+      }
+      if (meta.provider) {
+        baseConfig.provider = meta.provider;
+      }
+      if (meta.model && !baseConfig.model) {
+        baseConfig.model = meta.model;
+      }
+      mergedConfig = baseConfig;
+    }
+
+    const updated = await updateFn(inputs.media_id, {
+      url: inputs.asset_url,
+      status: "completed",
+      error_message: null,
+      ...(meta.width || existingMedia?.width ? { width: meta.width || existingMedia.width } : {}),
+      ...(meta.height || existingMedia?.height ? { height: meta.height || existingMedia.height } : {}),
+      ...(mergedConfig ? { generation_config: mergedConfig } : {}),
+    });
 
     return {
       saved_media: {

@@ -11,8 +11,8 @@ function createTestRegistry() {
   const registry = new NodeRegistry();
 
   registry.register({
-    type: "base.prompt_assemble",
-    category: "prompt",
+    type: "base.resolve_references",
+    category: "context",
     OUTPUT_NODE: false,
     INPUT_TYPES: {
       required: {
@@ -23,12 +23,12 @@ function createTestRegistry() {
       },
     },
     RETURN_TYPES: {
-      final_prompt: "STRING",
+      prepared_prompt: "STRING",
     },
     estimateCost: () => 0,
     async execute(inputs) {
       return {
-        final_prompt: `${inputs.prompt} [${inputs.style}]`,
+        prepared_prompt: `${inputs.prompt} [${inputs.style}]`,
       };
     },
   });
@@ -102,7 +102,7 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
   describe("NodeRegistry", () => {
     it("registers valid base.* and custom.* nodes and freezes the registry", () => {
       const reg = createTestRegistry();
-      assert.equal(reg.has("base.prompt_assemble"), true);
+      assert.equal(reg.has("base.resolve_references"), true);
       assert.equal(reg.get("base.save_media").OUTPUT_NODE, true);
       assert.equal(reg.list().length, 3);
 
@@ -157,7 +157,7 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
         nodes: [
           {
             id: "prompt_node",
-            type: "base.prompt_assemble",
+            type: "base.resolve_references",
             inputs: {
               prompt: { fromInput: "prompt" },
             },
@@ -167,7 +167,7 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
             type: "base.image_generate",
             inputs: {
               model: { fromInput: "model" },
-              prompt: { fromNode: "prompt_node", output: "final_prompt" },
+              prompt: { fromNode: "prompt_node", output: "prepared_prompt" },
               count: 2,
             },
           },
@@ -186,7 +186,7 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
             inputs: {
               media_id: { fromInput: "media_id" },
               asset_url: { fromNode: "active_gen", output: "image_url" },
-              final_prompt: { fromNode: "prompt_node", output: "final_prompt" },
+              final_prompt: { fromNode: "prompt_node", output: "prepared_prompt" },
             },
           },
         ],
@@ -216,16 +216,16 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
         nodes: [
           {
             id: "node_a",
-            type: "base.prompt_assemble",
+            type: "base.resolve_references",
             inputs: {
-              prompt: { fromNode: "node_b", output: "final_prompt" },
+              prompt: { fromNode: "node_b", output: "prepared_prompt" },
             },
           },
           {
             id: "node_b",
-            type: "base.prompt_assemble",
+            type: "base.resolve_references",
             inputs: {
-              prompt: { fromNode: "node_a", output: "final_prompt" },
+              prompt: { fromNode: "node_a", output: "prepared_prompt" },
             },
           },
           {
@@ -233,7 +233,7 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
             type: "base.save_media",
             inputs: {
               media_id: "m1",
-              asset_url: { fromNode: "node_a", output: "final_prompt" },
+              asset_url: { fromNode: "node_a", output: "prepared_prompt" },
             },
           },
         ],
@@ -253,7 +253,7 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
             nodes: [
               {
                 id: "p1",
-                type: "base.prompt_assemble",
+                type: "base.resolve_references",
                 inputs: { prompt: "hello" },
               },
             ],
@@ -268,7 +268,7 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
             nodes: [
               {
                 id: "p1",
-                type: "base.prompt_assemble",
+                type: "base.resolve_references",
                 inputs: { prompt: "hello" },
               },
               {
@@ -332,12 +332,12 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
       let saveCalls = 0;
 
       reg.register({
-        type: "base.prompt_assemble",
+        type: "base.resolve_references",
         OUTPUT_NODE: false,
         INPUT_TYPES: { required: { prompt: { type: "STRING" } } },
-        RETURN_TYPES: { final_prompt: "STRING" },
+        RETURN_TYPES: { prepared_prompt: "STRING" },
         async execute(inputs) {
-          return { final_prompt: inputs.prompt.toUpperCase() };
+          return { prepared_prompt: inputs.prompt.toUpperCase() };
         },
       });
 
@@ -379,12 +379,12 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
         nodes: [
           {
             id: "branch_a",
-            type: "base.prompt_assemble",
+            type: "base.resolve_references",
             inputs: { prompt: { fromInput: "prompt" } },
           },
           {
             id: "branch_b",
-            type: "base.prompt_assemble",
+            type: "base.resolve_references",
             inputs: { prompt: { fromInput: "prompt" } },
           },
           {
@@ -392,7 +392,7 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
             type: "base.image_generate",
             inputs: {
               model: "flux",
-              prompt: { fromNode: "branch_a", output: "final_prompt" },
+              prompt: { fromNode: "branch_a", output: "prepared_prompt" },
             },
           },
           {
@@ -415,8 +415,6 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
       assert.equal(saveCalls, 1);
       assert.equal(run1.terminalOutputs.save.saved_media.url, "https://cdn.test/flux/1.png");
 
-      // Second execution with identical prompt/model inputs hits SHA-256 cache for prompt & gen,
-      // but still executes OUTPUT_NODE (`save`)
       const run2 = await executor.execute({
         workflow,
         input: { prompt: "sunset beach", media_id: "m-2" },
@@ -490,7 +488,6 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
       assert.equal(attempts, 3);
       assert.equal(res.terminalOutputs.save.saved_media.asset_url, "https://cdn.test/video.mp4");
 
-      // Deterministic signature check
       const sig1 = computeNodeSignature("base.video_generate", { b: 2, a: 1 });
       const sig2 = computeNodeSignature("base.video_generate", { a: 1, b: 2 });
       assert.equal(sig1, sig2);

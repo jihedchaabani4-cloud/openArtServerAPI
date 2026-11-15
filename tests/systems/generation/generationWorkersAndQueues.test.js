@@ -18,14 +18,12 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency & Boot Asser
     originalRollback = useCaseService.rollbackPreparedBilling;
     originalFindByWorkflow = db?.media?.findByWorkflow;
     originalUpdateMedia = db?.media?.updateMedia;
-    originalWalletService = useCaseService.billingRuntime?.walletService;
+    originalWalletService = useCaseService.walletService;
   });
 
   afterEach(() => {
     useCaseService.rollbackPreparedBilling = originalRollback;
-    if (useCaseService.billingRuntime) {
-      useCaseService.billingRuntime.walletService = originalWalletService;
-    }
+    useCaseService.walletService = originalWalletService;
     if (db?.media) {
       db.media.findByWorkflow = originalFindByWorkflow;
       db.media.updateMedia = originalUpdateMedia;
@@ -48,9 +46,7 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency & Boot Asser
       metadata: { workflowId }
     });
 
-    if (useCaseService.billingRuntime) {
-      useCaseService.billingRuntime.walletService = mockWallet;
-    }
+    useCaseService.walletService = mockWallet;
 
     const balanceAfterHold = await mockWallet.getBalance(testUserId);
     assert.equal(balanceAfterHold, initialBalance - holdAmount, "Balance should be debited by hold amount");

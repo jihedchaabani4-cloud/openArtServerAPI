@@ -1,8 +1,10 @@
 export const envConfig = {
   get env() { return process.env.NODE_ENV || "development"; },
   get isProduction() { return (process.env.NODE_ENV || "development") === "production"; },
+  get isStaging() { return (process.env.NODE_ENV || "development") === "staging"; },
   get isTest() { return (process.env.NODE_ENV || "development") === "test"; },
   get isDevelopment() { return !this.isProduction && !this.isTest; },
+  get appName() { return process.env.APP_NAME || "Labveil"; },
   get level() { return process.env.LOG_LEVEL || (this.isProduction ? "info" : "debug"); },
   get prettyPrint() { return this.isDevelopment || process.env.LOG_PRETTY === "true"; },
   get frontendUrl() { return process.env.FRONTEND_URL || ""; },
@@ -10,8 +12,11 @@ export const envConfig = {
   get initialWalletBalance() {
     return Number(process.env.INITIAL_WALLET_BALANCE || process.env.DEFAULT_WALLET_BALANCE || 0);
   },
+  get rawDevAuthBypass() {
+    return process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true;
+  },
   get devAuthBypass() {
-    return (process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true) && !this.isProduction;
+    return this.rawDevAuthBypass && !this.isProduction;
   },
   get folderMaxDepth() {
     return Number(process.env.FOLDER_MAX_DEPTH || 3);

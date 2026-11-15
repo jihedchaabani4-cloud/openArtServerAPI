@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach, after, before } from "node:test";
 import assert from "node:assert/strict";
-import { executeLLMNode, llmService, loadRegistries, NodeSafetyService } from "#generation/tools";
+import { LlmNode, characterSheetV3, getV3Workflow, llmService, NodeSafetyService } from "#generation/tools";
 import express from "express";
 import http from "node:http";
 import { promptRouter } from "#generation/api";
@@ -22,7 +22,7 @@ describe("Content Moderation Fail-Closed & Prompt Unification Boundary Tests (Ta
     llmService.generate = originalGenerate;
   });
 
-  it("TEST 1: executeLLMNode must fail-closed (throw SAFETY_CHECK_FAILED) when LLM throws an upstream error", async () => {
+  it("TEST 1: LlmNode (system-safety) must fail-closed (throw SAFETY_CHECK_FAILED) when LLM throws an upstream error", async () => {
     // Upstream provider timeout / 504 / network crash
     llmService.generate = async () => {
       const err = new Error("Upstream Gemini API gateway timeout (504)");
@@ -30,16 +30,14 @@ describe("Content Moderation Fail-Closed & Prompt Unification Boundary Tests (Ta
       throw err;
     };
 
-    // FAIL-OPEN BUG: Previously this caught the error and returned { is_safe: true, text: userPrompt }
     await assert.rejects(
       async () => {
-        await executeLLMNode(
+        await LlmNode.execute(
           {
-            userPrompt: "A dangerous unmoderated prompt",
-            skills: ["llm/system-safety", "llm/translate"],
-            jsonMode: true,
+            prompt: "A dangerous unmoderated prompt",
+            skills: ["system-safety", "translate"],
           },
-          { runId: "run-t9-1", nodeId: "llm_translate", userId: "usr-1" }
+          { runId: "run-t9-1", nodeId: "llm_process", userId: "usr-1" }
         );
       },
       (err) => {
@@ -50,11 +48,11 @@ describe("Content Moderation Fail-Closed & Prompt Unification Boundary Tests (Ta
         assert.strictEqual(err.is_safe, false, "Error must indicate is_safe is false");
         return true;
       },
-      "executeLLMNode must throw and never return { is_safe: true } when LLM service fails"
+      "LlmNode must throw and never return { is_safe: true } when LLM service fails"
     );
   });
 
-  it("TEST 2: executeLLMNode must throw CONTENT_SAFETY_VIOLATION when LLM flags prompt as unsafe", async () => {
+  it("TEST 2: LlmNode (system-safety) must throw CONTENT_SAFETY_VIOLATION when LLM flags prompt as unsafe", async () => {
     llmService.generate = async () => {
       return {
         raw: JSON.stringify({
@@ -75,13 +73,12 @@ describe("Content Moderation Fail-Closed & Prompt Unification Boundary Tests (Ta
 
     await assert.rejects(
       async () => {
-        await executeLLMNode(
+        await LlmNode.execute(
           {
-            userPrompt: "generate explicit nudity",
-            skills: ["llm/system-safety"],
-            jsonMode: true,
+            prompt: "generate explicit nudity",
+            skills: ["system-safety", "translate"],
           },
-          { runId: "run-t9-2", nodeId: "llm_translate", userId: "usr-1" }
+          { runId: "run-t9-2", nodeId: "llm_process", userId: "usr-1" }
         );
       },
       (err) => {
@@ -92,7 +89,7 @@ describe("Content Moderation Fail-Closed & Prompt Unification Boundary Tests (Ta
     );
   });
 
-  it("TEST 3: executeLLMNode must throw CONTENT_SAFETY_VIOLATION when provider rejects prompt on safety policy", async () => {
+  it("TEST 3: LlmNode (system-safety) must throw CONTENT_SAFETY_VIOLATION when provider rejects prompt on safety policy", async () => {
     llmService.generate = async () => {
       const err = new Error("Safety Violation: Content blocked due to NSFW policy violation");
       err.code = "PROVIDER_CONTENT_POLICY_ERROR";
@@ -101,13 +98,12 @@ describe("Content Moderation Fail-Closed & Prompt Unification Boundary Tests (Ta
 
     await assert.rejects(
       async () => {
-        await executeLLMNode(
+        await LlmNode.execute(
           {
-            userPrompt: "blocked prompt",
-            skills: ["llm/system-safety"],
-            jsonMode: true,
+            prompt: "blocked prompt",
+            skills: ["system-safety", "translate"],
           },
-          { runId: "run-t9-3", nodeId: "llm_translate", userId: "usr-1" }
+          { runId: "run-t9-3", nodeId: "llm_process", userId: "usr-1" }
         );
       },
       (err) => {
@@ -129,16 +125,14 @@ describe("Content Moderation Fail-Closed & Prompt Unification Boundary Tests (Ta
       };
     };
 
-    // FAIL-OPEN BUG: Previously normalizeStructuredJSON(null, userPrompt) returned { is_safe: true, prompt: userPrompt }
     await assert.rejects(
       async () => {
-        await executeLLMNode(
+        await LlmNode.execute(
           {
-            userPrompt: "A prompt that triggers bad JSON",
-            skills: ["llm/system-safety", "llm/json-output"],
-            jsonMode: true,
+            prompt: "A prompt that triggers bad JSON",
+            skills: ["system-safety", "translate"],
           },
-          { runId: "run-t9-4", nodeId: "llm_translate", userId: "usr-1" }
+          { runId: "run-t9-4", nodeId: "llm_process", userId: "usr-1" }
         );
       },
       (err) => {
@@ -168,16 +162,14 @@ describe("Content Moderation Fail-Closed & Prompt Unification Boundary Tests (Ta
       };
     };
 
-    // FAIL-OPEN BUG: Previously `isSafe = parsed.is_safe !== false` defaulted to true when missing!
     await assert.rejects(
       async () => {
-        await executeLLMNode(
+        await LlmNode.execute(
           {
-            userPrompt: "Some prompt",
-            skills: ["llm/system-safety", "llm/translate"],
-            jsonMode: true,
+            prompt: "Some prompt",
+            skills: ["system-safety", "translate"],
           },
-          { runId: "run-t9-5", nodeId: "llm_translate", userId: "usr-1" }
+          { runId: "run-t9-5", nodeId: "llm_process", userId: "usr-1" }
         );
       },
       (err) => {
@@ -191,17 +183,15 @@ describe("Content Moderation Fail-Closed & Prompt Unification Boundary Tests (Ta
     );
   });
 
-  it("TEST 6: character-sheet-v1 workflow registers llm/system-safety skill on llm_enrich node", async () => {
-    const registries = loadRegistries();
-    const workflow = registries.workflows["character-sheet-v1"];
+  it("TEST 6: character-sheet-v1 V3 workflow includes base.llm node with system-safety skill before image generation", async () => {
+    const workflow = getV3Workflow("character-sheet-v1") || characterSheetV3;
     assert.ok(workflow, "character-sheet-v1 must be loadable");
-    const llmEnrichNode = workflow.nodes?.llm_enrich;
-    assert.ok(llmEnrichNode, "llm_enrich node must exist in character-sheet-v1");
-    const skills = llmEnrichNode.config?.skills || [];
-    assert.ok(
-      skills.includes("llm/system-safety"),
-      `character-sheet-v1 llm_enrich must include "llm/system-safety", but had: ${JSON.stringify(skills)}`
-    );
+    const llmNode = Array.isArray(workflow.nodes)
+      ? workflow.nodes.find((n) => n.id === "llm_enrich")
+      : workflow.nodes?.llm_enrich;
+    assert.ok(llmNode, "llm_enrich node must exist in character-sheet-v3");
+    assert.strictEqual(llmNode.type, "base.llm");
+    assert.ok(llmNode.inputs.skills.includes("system-safety"));
   });
 });
 }

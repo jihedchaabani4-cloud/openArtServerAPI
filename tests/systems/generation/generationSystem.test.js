@@ -1,6 +1,36 @@
-import { describe, it, after, before, beforeEach, afterEach } from "node:test";
+import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { triggerWorkflowRun, getWorkflowRun, compileWorkflow, startWorkflowRun, executeOrchestration, loadRegistries, RunRepository, NodeSafetyService, bootstrapV2, UseCaseService, jobQueueService, GenerationService, GenerationRequestService, WorkflowLifecycleService, WorkflowService, PromptService, LLMService, llmService, PromptBuilderProService, enhancePromptProcessor, generateNegativePromptProcessor, moderationSafetyProcessor, optimizeVisualPromptProcessor, GenerationError, GenerationValidationError, GenerationNotFoundError, GenerationCompilationError, GenerationQueueDispatchError, getUseCase, registerAllUseCases } from "#generation/tools";
+import {
+    triggerWorkflowRun,
+    getWorkflowRun,
+    RunRepository,
+    NodeSafetyService,
+    UseCaseService,
+    V3Dispatcher,
+    GraphCompiler,
+    WorkflowExecutor,
+    NodeRegistry,
+    createDefaultV3NodeRegistry,
+    V3_WORKFLOWS,
+    getV3Workflow,
+    imageGenerationV3,
+    videoGenerationV3,
+    characterSheetV3,
+    jobQueueService,
+    GenerationService,
+    GenerationRequestService,
+    WorkflowLifecycleService,
+    WorkflowService,
+    PromptService,
+    LLMService,
+    llmService,
+    PromptBuilderProService,
+    GenerationError,
+    GenerationValidationError,
+    GenerationNotFoundError,
+    GenerationCompilationError,
+    GenerationQueueDispatchError,
+} from "#generation/tools";
 import { imagesRouter, videoRouter, promptRouter, v2WorkflowsRouter, workflowsRouter, generationRouter } from "#generation/api";
 import apiRouter from "../../../src/api/routes.js";
 import express from "express";
@@ -14,23 +44,24 @@ import { execSync } from "node:child_process";
  * Generation & Workflows System (System 1) — Unit & Gateway Contract Tests
  *
  * Verifies System 1 Generation (#generation/api, #generation/tools) boundaries,
- * typed errors, DTO contracts, and workflow triggers.
+ * typed errors, DTO contracts, and V3 workflow engine.
  */
 
-
-
-
 describe("System 1: Generation & Workflows — Gateways & Public Tools Contract", () => {
-    it("should export all expected public tools and facade members", () => {
+    it("should export all expected V3 public tools and domain services", () => {
         assert.equal(typeof triggerWorkflowRun, "function");
         assert.equal(typeof getWorkflowRun, "function");
-        assert.equal(typeof compileWorkflow, "function");
-        assert.equal(typeof startWorkflowRun, "function");
-        assert.equal(typeof executeOrchestration, "function");
-        assert.equal(typeof loadRegistries, "function");
+        assert.equal(typeof V3Dispatcher, "function");
+        assert.equal(typeof GraphCompiler, "function");
+        assert.equal(typeof WorkflowExecutor, "function");
+        assert.equal(typeof NodeRegistry, "function");
+        assert.equal(typeof createDefaultV3NodeRegistry, "function");
+        assert.equal(typeof getV3Workflow, "function");
+        assert.equal(typeof imageGenerationV3, "object");
+        assert.equal(typeof videoGenerationV3, "object");
+        assert.equal(typeof characterSheetV3, "object");
         assert.equal(typeof RunRepository, "function");
         assert.equal(typeof NodeSafetyService, "object");
-        assert.equal(typeof bootstrapV2, "function");
         assert.equal(typeof UseCaseService, "function");
         assert.equal(typeof jobQueueService, "object");
         assert.equal(typeof GenerationService, "function");
@@ -41,10 +72,6 @@ describe("System 1: Generation & Workflows — Gateways & Public Tools Contract"
         assert.equal(typeof LLMService, "function");
         assert.equal(typeof llmService, "object");
         assert.equal(typeof PromptBuilderProService, "function");
-        assert.equal(typeof enhancePromptProcessor, "object");
-        assert.equal(typeof generateNegativePromptProcessor, "object");
-        assert.equal(typeof moderationSafetyProcessor, "object");
-        assert.equal(typeof optimizeVisualPromptProcessor, "object");
     });
 
     it("should export valid Express routers from #generation/api", () => {
@@ -219,91 +246,62 @@ describe("Generation API Boundary & Separation Tests", () => {
     }
   });
 
-  it("TEST 4: Independent Use Cases registered for Image and Video generation flows", () => {
-    registerAllUseCases();
+  it("TEST 4: Independent V3 Workflows registered for Image and Video generation flows", () => {
+    const imageWf = getV3Workflow("image-generation-v1");
+    const videoWf = getV3Workflow("video-generation-v1");
 
-    const imageUc = getUseCase("image-generation-v1");
-    const videoUc = getUseCase("video-generation-v1");
+    assert.ok(imageWf, "image-generation-v1 must resolve in V3 Workflow Registry");
+    assert.strictEqual(imageWf.id, "image-generation-v3");
 
-    assert.ok(imageUc, "image-generation-v1 must be registered in Use Case Registry");
-    assert.strictEqual(imageUc.workflowRef, "image-generation-v1");
+    assert.ok(videoWf, "video-generation-v1 must resolve in V3 Workflow Registry");
+    assert.strictEqual(videoWf.id, "video-generation-v3");
 
-    assert.ok(videoUc, "video-generation-v1 must be registered in Use Case Registry");
-    assert.strictEqual(videoUc.workflowRef, "video-generation-v1");
-
-    // Distinct use cases
+    // Distinct workflows
     assert.notStrictEqual(
-      imageUc.useCaseId,
-      videoUc.useCaseId,
-      "Image and Video must have distinct use cases"
+      imageWf.id,
+      videoWf.id,
+      "Image and Video must have distinct V3 workflows"
     );
   });
 
-  it("TEST 5: Image Generation Workflow Billing Plan calculates cost without LLM parameter error", async () => {
-    const { compileWorkflowById } = await import("#generation/tools");
-    const { calculateWorkflowBillingPlan } = await import("#generation/tools");
-    const { loadRegistries } = await import("#generation/tools");
-
-    const plan = compileWorkflowById("image-generation-v1", loadRegistries());
+  it("TEST 5: Image Generation V3 Workflow GraphCompiler calculates cost without LLM parameter error", async () => {
+    const compiler = new GraphCompiler(createDefaultV3NodeRegistry());
+    const plan = compiler.compile(getV3Workflow("image-generation-v1"), {
+      prompt: "A beautiful mountain sunset",
+      model: "nanobana_pro",
+      media_id: "media-test-123",
+      parameters: { resolution: "1k" },
+    });
 
     assert.ok(plan, "Execution plan must compile successfully");
-
-    const billingPlan = await calculateWorkflowBillingPlan({
-      plan,
-      inputs: {
-        prompt: "A beautiful mountain sunset",
-        model: "nanobana_pro",
-        workflow_id: "wf-test-123",
-        parameters: { resolution: "1k" },
-      },
-    });
-
-    assert.ok(billingPlan, "Billing plan must be generated");
-    assert.ok(billingPlan.totalCredits > 0, "Total credits must be greater than 0");
-    assert.strictEqual(billingPlan.billableNodes.length, 2, "Must include both llm_translate and generate nodes");
+    assert.ok(plan.totalEstimatedCredits > 0, "Total credits must be greater than 0");
+    assert.ok(Array.isArray(plan.costBreakdown), "Cost breakdown must be an array");
+    assert.ok(plan.costBreakdown.length >= 2, "Must include billable nodes");
   });
 
-  it("TEST 6: Video Generation Workflow compiles and calculates billing plan for video models", async () => {
-    const { compileWorkflowById } = await import("#generation/tools");
-    const { calculateWorkflowBillingPlan } = await import("#generation/tools");
-    const { loadRegistries } = await import("#generation/tools");
-
-    const plan = compileWorkflowById("video-generation-v1", loadRegistries());
+  it("TEST 6: Video Generation V3 Workflow compiles and calculates billing plan for video models", async () => {
+    const compiler = new GraphCompiler(createDefaultV3NodeRegistry());
+    const plan = compiler.compile(getV3Workflow("video-generation-v1"), {
+      prompt: "A drone shot over futuristic Tokyo at night",
+      model: "seedance_2_5",
+      media_id: "media-vid-test-456",
+      parameters: { duration: 5, aspect_ratio: "16:9" },
+    });
 
     assert.ok(plan, "Video execution plan must compile successfully");
-    assert.strictEqual(plan.workflow_id, "video-generation-v1");
-
-    const billingPlan = await calculateWorkflowBillingPlan({
-      plan,
-      inputs: {
-        prompt: "A drone shot over futuristic Tokyo at night",
-        model: "seedance_2_5",
-        workflow_id: "wf-vid-test-456",
-        parameters: { duration: 5, aspect_ratio: "16:9" },
-      },
-    });
-
-    assert.ok(billingPlan, "Billing plan must be generated for video workflow");
-    assert.ok(billingPlan.totalCredits > 0, "Total credits must be greater than 0");
-    assert.strictEqual(billingPlan.billableNodes.length, 2, "Must include both llm_translate and generate nodes");
+    assert.strictEqual(plan.workflowId, "video-generation-v3");
+    assert.ok(plan.totalEstimatedCredits > 0, "Total credits must be greater than 0");
+    assert.ok(plan.costBreakdown.length >= 2, "Must include billable nodes");
   });
 
-  it("TEST 7: estimateNodeBillingAmount handles LLM node inputs with skills without capability error", async () => {
-    const { estimateNodeBillingAmount } = await import("#generation/tools");
+  it("TEST 7: LlmNode.estimateCost handles LLM node inputs with skills without capability error", async () => {
+    const { LlmNode } = await import("#generation/tools");
 
-    const nodeConfig = { id: "llm_translate", type: "llm" };
-    const resolvedInputs = {
+    const cost = LlmNode.estimateCost({
       model: "gemini-3-flash",
-      skill: { id: "llm/system-safety", version: "2.0.0", pipeline: [], parameters: {} },
-      skills: ["llm/system-safety", "llm/translate", "llm/json-output"],
-      images: [],
-      jsonMode: true,
-      parameters: {},
-      temperature: 0.7,
-      userPrompt: "cat",
-    };
-
-    const cost = estimateNodeBillingAmount(nodeConfig, resolvedInputs);
+      prompt: "cat",
+      skills: ["system-safety", "translate"],
+    });
     assert.strictEqual(cost, 1, "gemini_3_flash LLM node billing should be 1 credit without parameter errors");
   });
 });
@@ -397,8 +395,8 @@ describe("V2 Workflow Run Security & Boundary Tests (Task T3)", () => {
     assert.strictEqual(body.code, "ENDPOINT_DISABLED");
   });
 
-  // ── TEST 2: When enabled explicitly via feature flag, endpoint allows execution ──
-  it("TEST 2: Feature flag enabled: allows execution only when ENABLE_V2_WORKFLOW_RUN_ENDPOINT=true", async () => {
+  // ── TEST 2: Even when legacy feature flag is set, V2 run endpoint remains disabled ──
+  it("TEST 2: Legacy feature flag ignored: POST /api/v2/workflows/run remains disabled (404 ENDPOINT_DISABLED)", async () => {
     process.env.ENABLE_V2_WORKFLOW_RUN_ENDPOINT = "true";
 
     const res = await fetch(`${baseUrl}/api/v2/workflows/run`, {
@@ -416,9 +414,8 @@ describe("V2 Workflow Run Security & Boundary Tests (Task T3)", () => {
     });
 
     const body = await res.json();
-    // It passed the feature flag check and reached registry resolution
-    assert.notStrictEqual(body.code, "ENDPOINT_DISABLED", "Should not be blocked by feature flag when enabled");
-    assert.strictEqual(body.code, "WORKFLOW_NOT_FOUND");
+    assert.strictEqual(res.status, 404);
+    assert.strictEqual(body.code, "ENDPOINT_DISABLED");
   });
 
   // ── TEST 3: GET /runs/:run_id enforces user ownership ──

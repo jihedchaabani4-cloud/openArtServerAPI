@@ -1,10 +1,11 @@
 /**
  * VideoGenerationV3 Workflow Blueprint (`video-generation-v3`)
  *
- * ComfyUI-Style DAG:
- *   [safety_check] ──┐
- *                    ├──> [llm_translate] ──> [prompt_assemble] ──> [video_generate] ──> [save_media]
- *   [resolve_refs] ──┘
+ * ComfyUI-Style Linear 4-Node DAG:
+ *   1) [resolve_refs]   (`base.resolve_references`)
+ *   2) [llm_process]    (`base.llm` with skills: ["system-safety", "translate"])
+ *   3) [generate_video] (`base.video_generate`)
+ *   4) [save_media]     (`base.save_media`)
  */
 export const videoGenerationV3 = Object.freeze({
   id: "video-generation-v3",
@@ -12,42 +13,27 @@ export const videoGenerationV3 = Object.freeze({
   version: "3.0.0",
   category: "video",
   description:
-    "Declarative V3 video generation pipeline with fail-closed safety check, parallel reference resolution, LLM translation, prompt assembly, video generation, and explicit media persistence.",
+    "Declarative 4-node V3 video generation pipeline: reference & tag resolution, single-call LLM safety check + translation, video generation, and explicit media persistence.",
 
   nodes: [
-    {
-      id: "safety_check",
-      type: "base.safety_check",
-      inputs: {
-        prompt: { fromInput: "prompt" },
-      },
-    },
     {
       id: "resolve_refs",
       type: "base.resolve_references",
       inputs: {
+        prompt: { fromInput: "prompt" },
+        style: { fromInput: "style", default: "" },
         references: { fromInput: "references", default: [] },
         characters: { fromInput: "characters", default: [] },
         elements: { fromInput: "elements", default: [] },
       },
     },
     {
-      id: "llm_translate",
-      type: "base.llm_text",
+      id: "llm_process",
+      type: "base.llm",
       inputs: {
-        prompt: { fromNode: "safety_check", output: "safe_prompt" },
-        system_instruction:
-          "Translate the user prompt into clear, faithful cinematic English for video generation.",
-        json_mode: false,
-      },
-    },
-    {
-      id: "prompt_assemble",
-      type: "base.prompt_assemble",
-      inputs: {
-        prompt: { fromNode: "llm_translate", output: "text" },
-        entities: { fromNode: "resolve_refs", output: "entities" },
-        style: { fromInput: "style", default: "" },
+        prompt: { fromNode: "resolve_refs", output: "prepared_prompt" },
+        reference_guide: { fromNode: "resolve_refs", output: "reference_guide" },
+        skills: ["system-safety", "translate"],
       },
     },
     {
@@ -55,7 +41,7 @@ export const videoGenerationV3 = Object.freeze({
       type: "base.video_generate",
       inputs: {
         model: { fromInput: "model", default: "ltx_2_3_fast" },
-        prompt: { fromNode: "prompt_assemble", output: "final_prompt" },
+        prompt: { fromNode: "llm_process", output: "final_prompt" },
         start_image_url: { fromInput: "start_image_url" },
         end_image_url: { fromInput: "end_image_url" },
         input_video_url: { fromInput: "input_video_url" },
@@ -70,7 +56,7 @@ export const videoGenerationV3 = Object.freeze({
       inputs: {
         media_id: { fromInput: "media_id" },
         asset_url: { fromNode: "generate_video", output: "video_url" },
-        final_prompt: { fromNode: "prompt_assemble", output: "final_prompt" },
+        final_prompt: { fromNode: "llm_process", output: "final_prompt" },
         metadata: { fromNode: "generate_video", output: "metadata" },
       },
     },

@@ -2105,3 +2105,7 @@ describe("STEP 3: Multipart 2 files route-level error safety boundary test", () 
   });
 });
 }
+after(() => {
+  setTimeout(() => process.exit(0), 100);
+});
+

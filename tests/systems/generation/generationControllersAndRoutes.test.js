@@ -8,7 +8,6 @@ import { AppError, redisConnection, workerRedisConnection, rateLimitRedisConnect
 import { randomUUID } from "node:crypto";
 import * as characterController from "#characters/api";
 import { InMemoryWalletService } from "../../helpers/inMemoryWalletService.js";
-import { UseCaseBillingRuntime, bootstrapV2 } from "#generation/tools";
 import express from "express";
 import http from "node:http";
 import { supabase } from "#shared/db/supabase.js";
@@ -539,8 +538,6 @@ describe("generationsMutation mounted-handler error masking boundary", () => {
  */
 
 
-bootstrapV2();
-
 after(async () => {
   try {
     await redisConnection?.quit().catch(() => redisConnection?.disconnect());
@@ -587,7 +584,6 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
   let origDbProjects;
   let origDbCharacters;
   let origWalletService;
-  let origBillingRuntime;
   let origJobQueueService;
 
   beforeEach(() => {
@@ -599,7 +595,6 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
     origDbProjects = db.projects;
     origDbCharacters = db.characters;
     origWalletService = useCaseService.walletService;
-    origBillingRuntime = useCaseService.billingRuntime;
     origJobQueueService = useCaseService.jobQueueService;
 
     db.media = {
@@ -659,7 +654,6 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
     db.projects = origDbProjects;
     db.characters = origDbCharacters;
     useCaseService.walletService = origWalletService;
-    useCaseService.billingRuntime = origBillingRuntime;
     useCaseService.jobQueueService = origJobQueueService;
   });
 
@@ -696,9 +690,7 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
         throw err;
       };
 
-      const billingRuntime = new UseCaseBillingRuntime({ walletService: wallet });
       useCaseService.walletService = wallet;
-      useCaseService.billingRuntime = billingRuntime;
 
       const req = {
         user: { id: "user-ctrl-test" },
@@ -732,10 +724,8 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
     it("TEST 2 (Image path b): enqueue dispatch fails (QUEUE_DISPATCH_FAILED) -> all placeholders failed, hold released exactly once, clean 503, no stuck processing rows", async () => {
       const wallet = new TrackingWalletService();
       await wallet.setBalance("user-ctrl-test", 100);
-      const billingRuntime = new UseCaseBillingRuntime({ walletService: wallet });
 
       useCaseService.walletService = wallet;
-      useCaseService.billingRuntime = billingRuntime;
       useCaseService.jobQueueService = {
         addUseCaseJob: async () => {
           throw new Error("Redis cluster failover in progress");
@@ -783,9 +773,7 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
         throw err;
       };
 
-      const billingRuntime = new UseCaseBillingRuntime({ walletService: wallet });
       useCaseService.walletService = wallet;
-      useCaseService.billingRuntime = billingRuntime;
 
       const req = {
         user: { id: "user-ctrl-test" },
@@ -815,10 +803,8 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
     it("TEST 4 (Video path b): enqueue dispatch fails (QUEUE_DISPATCH_FAILED) -> all placeholders failed, hold released exactly once, clean 503, no stuck processing rows", async () => {
       const wallet = new TrackingWalletService();
       await wallet.setBalance("user-ctrl-test", 100);
-      const billingRuntime = new UseCaseBillingRuntime({ walletService: wallet });
 
       useCaseService.walletService = wallet;
-      useCaseService.billingRuntime = billingRuntime;
       useCaseService.jobQueueService = {
         addUseCaseJob: async () => {
           throw new Error("Redis OOM or unreachable for video job");
@@ -865,9 +851,7 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
         throw err;
       };
 
-      const billingRuntime = new UseCaseBillingRuntime({ walletService: wallet });
       useCaseService.walletService = wallet;
-      useCaseService.billingRuntime = billingRuntime;
 
       const req = {
         user: { id: "user-ctrl-test" },
@@ -897,10 +881,8 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
     it("TEST 6 (generate-sheet path b): enqueue dispatch fails (QUEUE_DISPATCH_FAILED) -> placeholder failed, hold released exactly once, clean 503, no stuck processing rows", async () => {
       const wallet = new TrackingWalletService();
       await wallet.setBalance("user-ctrl-test", 100);
-      const billingRuntime = new UseCaseBillingRuntime({ walletService: wallet });
 
       useCaseService.walletService = wallet;
-      useCaseService.billingRuntime = billingRuntime;
       useCaseService.jobQueueService = {
         addUseCaseJob: async () => {
           throw new Error("Redis down during character sheet enqueue");
@@ -947,9 +929,7 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
         throw err;
       };
 
-      const billingRuntime = new UseCaseBillingRuntime({ walletService: wallet });
       useCaseService.walletService = wallet;
-      useCaseService.billingRuntime = billingRuntime;
 
       const req = {
         user: { id: "user-ctrl-test" },
@@ -977,10 +957,8 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
     it("TEST 8 (createCharacter path b): enqueue dispatch fails (QUEUE_DISPATCH_FAILED) -> placeholder failed, hold released exactly once, clean 503, no stuck processing rows", async () => {
       const wallet = new TrackingWalletService();
       await wallet.setBalance("user-ctrl-test", 100);
-      const billingRuntime = new UseCaseBillingRuntime({ walletService: wallet });
 
       useCaseService.walletService = wallet;
-      useCaseService.billingRuntime = billingRuntime;
       useCaseService.jobQueueService = {
         addUseCaseJob: async () => {
           throw new Error("Redis queue down during character create");

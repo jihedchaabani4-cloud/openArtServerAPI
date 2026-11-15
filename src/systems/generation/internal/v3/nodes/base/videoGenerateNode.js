@@ -1,29 +1,13 @@
-import { calculateCost, executeGeneration, getModelConfig } from "#models/tools";
+import { calculateCost } from "#models/tools";
 import {
-  GenerationUpstreamError,
   GenerationValidationError,
   GenerationCompilationError,
 } from "../../../errors.js";
-
-function extractAmount(costRes, model) {
-  const raw =
-    typeof costRes === "number"
-      ? costRes
-      : costRes && typeof costRes === "object"
-        ? Number(costRes.amount ?? costRes.totalCredits ?? costRes.credits)
-        : NaN;
-
-  if (typeof raw !== "number" || Number.isNaN(raw) || !Number.isFinite(raw) || raw < 0) {
-    const err = new GenerationCompilationError(
-      `[Billing] Pricing failure for model "${model}" in base.video_generate: invalid cost (${raw})`
-    );
-    err.code = "PRICING_CONFIG_ERROR";
-    err.category = "SERVER_FAULT";
-    err.statusCode = 500;
-    throw err;
-  }
-  return raw;
-}
+import {
+  extractNodeCostAmount,
+  invokeModelGeneration,
+  extractVideoOutput,
+} from "./mediaNodeHelpers.js";
 
 /**
  * VideoGenerateNode (`base.video_generate`)
@@ -73,7 +57,7 @@ export const VideoGenerateNode = {
       ...(plannedInputs.aspect_ratio ? { aspect_ratio: plannedInputs.aspect_ratio } : {}),
       ...(plannedInputs.start_image_url ? { input_image: plannedInputs.start_image_url } : {}),
     });
-    return extractAmount(res, plannedInputs.model);
+    return extractNodeCostAmount(res, plannedInputs.model, "base.video_generate");
   },
 
   async execute(inputs, ctx = {}) {
@@ -94,46 +78,20 @@ export const VideoGenerateNode = {
       ...(inputs.aspect_ratio ? { aspect_ratio: inputs.aspect_ratio } : {}),
     };
 
-    let res;
-    if (typeof ctx.executeProvider === "function") {
-      res = await ctx.executeProvider(inputs.model, params);
-    } else if (typeof ctx.executeGeneration === "function") {
-      res = await ctx.executeGeneration({
-        modelId: inputs.model,
-        prompt: inputs.prompt,
-        params,
-        userId: ctx.userId || null,
-      });
-    } else {
-      getModelConfig(inputs.model);
-      res = await executeGeneration({
-        modelId: inputs.model,
-        prompt: inputs.prompt,
-        params,
-        userId: ctx.userId || "system",
-        idempotencyKey: ctx.runId && ctx.nodeId ? `node:${ctx.runId}:${ctx.nodeId}` : undefined,
-      });
-    }
+    const res = await invokeModelGeneration({
+      model: inputs.model,
+      prompt: inputs.prompt,
+      params,
+      ctx,
+    });
 
-    const url =
-      res?.assets?.[0]?.url ||
-      res?.videos?.[0]?.url ||
-      (typeof res?.videos?.[0] === "string" ? res.videos[0] : null) ||
-      (typeof res?.data?.videos?.[0] === "string" ? res.data.videos[0] : res?.data?.videos?.[0]?.url) ||
-      res?.url ||
-      res?.videoUrl ||
-      null;
-
-    if (!url) {
-      throw new GenerationUpstreamError("Provider returned no video URL", {
-        context: { model: inputs.model },
-      });
-    }
+    const { url } = extractVideoOutput(res, inputs.model, "Provider returned no video URL");
 
     return {
       video_url: url,
       metadata: {
         model: inputs.model,
+        ...(res?._internal?.provider ? { provider: res._internal.provider } : {}),
         ...(res?.metadata || {}),
       },
     };

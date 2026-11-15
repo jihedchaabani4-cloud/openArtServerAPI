@@ -1,6 +1,6 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { GenerationRequestService, V1StorageBridge, RunRepository, executeNodePersistence, registerNodeExecutor, registry, bootstrapV2 } from "#generation/tools";
+import { GenerationRequestService, V1StorageBridge, RunRepository } from "#generation/tools";
 import { AppError, redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared";
 import express from "express";
 import http from "node:http";
@@ -536,8 +536,6 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
  */
 
 
-bootstrapV2();
-
 after(async () => {
   try {
     await redisConnection.quit().catch(() => redisConnection.disconnect());
@@ -716,20 +714,17 @@ describe("F2.2-a — RunRepository Target Columns & Fallback Invariants (Supabas
     assert.strictEqual(run.v1_workflow_id, null, "Must NOT fall back to run.input.workflow_id");
     assert.deepStrictEqual(run.target_media_ids, [], "Must NOT fall back to run.input.media_id");
 
-    // Assert executeNodePersistence rejects immediately and fails closed
+    // Assert V3Dispatcher.executeQueuedV3Run rejects immediately and fails closed when server targets are missing
     await assert.rejects(
       async () => {
-        await executeNodePersistence({
-          nodeConfig: {
-            persist: {
-              target: "media",
-              field: "url",
-              value: "https://example.com/asset.png",
-            },
+        await useCaseService.executeQueuedV3Run({
+          useCaseId: "character-sheet-v1",
+          input: {
+            characterId: "spoofed-char-id",
+            workflow_id: "spoofed-wf-input",
+            media_id: "spoofed-media-input",
           },
-          output: { url: "https://example.com/asset.png" },
-          run,
-          resolvedInputs: {},
+          userId: "user-123",
         });
       },
       (err) => {
@@ -749,9 +744,6 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
   let origFindWorkflow;
   let origProjectsFindById;
   let origWalletService;
-  let origImageGenExecutor;
-  let origVideoGenExecutor;
-  let origLLMExecutor;
 
   beforeEach(() => {
     origPrepareAndEnqueue = useCaseService.prepareAndEnqueue;
@@ -762,35 +754,11 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
     origFindWorkflow = db.workflows?.findById;
     origProjectsFindById = db.projects?.findById;
     origWalletService = useCaseService.walletService;
-
-    origImageGenExecutor = registry["image-generation"];
-    origVideoGenExecutor = registry["video-generation"];
-    origLLMExecutor = registry["llm"];
-
-    // Zero real provider calls
-    registerNodeExecutor("llm", async () => ({
-      text: "Processed character prompt",
-      json: { title: "Cyber Warrior", description: "Cybernetic samurai warrior." },
-    }));
-
-    registerNodeExecutor("image-generation", async () => ({
-      assets: [{ url: "https://storage.openart.ai/character-sheets/turnaround-char-999.png", width: 1344, height: 768 }],
-    }));
-
-    registerNodeExecutor("video-generation", async () => ({
-      assets: [{ url: "https://storage.openart.ai/videos/turnaround-char-999.mp4", width: 1280, height: 720 }],
-    }));
   });
 
   afterEach(() => {
     useCaseService.prepareAndEnqueue = origPrepareAndEnqueue;
     useCaseService.walletService = origWalletService;
-    if (useCaseService.billingRuntime) {
-      useCaseService.billingRuntime.walletService = origWalletService;
-    }
-    if (origImageGenExecutor) registerNodeExecutor("image-generation", origImageGenExecutor);
-    if (origVideoGenExecutor) registerNodeExecutor("video-generation", origVideoGenExecutor);
-    if (origLLMExecutor) registerNodeExecutor("llm", origLLMExecutor);
 
     if (db.workflows) {
       db.workflows.createWorkflow = origCreateWorkflow;
@@ -1001,16 +969,7 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
     assert.strictEqual(capturedPrepare.input.serverProjectId, "proj-vid-1", "serverProjectId must be set");
   });
 
-  it("TEST 8: End-to-end integration: Character generation sheet completes target placeholder media", async () => {
-    // Register mock AI generation node executor for character sheet workflow
-    registerNodeExecutor("ai/character-sheet", async ({ inputs }) => {
-      return {
-        url: "https://storage.openart.ai/character-sheets/turnaround-char-999.png",
-        width: 1344,
-        height: 768,
-      };
-    });
-
+  it("TEST 8: End-to-end integration: Character generation sheet completes target placeholder media via V3Dispatcher", async () => {
     let mediaRecord = {
       id: "media-e2e-char-1",
       workflow_id: "char-wf-e2e-999",
@@ -1045,6 +1004,7 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
     db.characters = {
       upsert: async () => ({ id: "char-wf-e2e-999" }),
       updateCharacter: async () => {},
+      findByCharacterId: async (id) => ({ id, user_id: "11111111-1111-4111-8111-111111111111" }),
     };
 
     let enqueuedJobData = null;
@@ -1068,12 +1028,6 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
 
     useCaseService.jobQueueService = mockQueue;
     useCaseService.walletService = mockWallet;
-    if (useCaseService.billingRuntime) {
-      useCaseService.billingRuntime.walletService = mockWallet;
-    }
-
-    // Use in-memory fallback for runRepository in this test
-    RunRepository.useMemoryFallback = true;
 
     // 1. CharacterGenerationService creates placeholder & enqueues
     const charGenService = new CharacterGenerationService({
@@ -1094,12 +1048,29 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
     assert.strictEqual(enqueuedJobData.input.media_id, "media-e2e-char-1");
     assert.deepStrictEqual(enqueuedJobData.input.serverMediaIds, ["media-e2e-char-1"]);
 
-    // 2. Worker executes queued job end-to-end
+    // 2. Worker executes queued job end-to-end with mocked V3 node context
     const result = await useCaseService.executeQueuedUseCase({
       useCaseId: enqueuedJobData.useCaseId,
       input: enqueuedJobData.input,
       userId: enqueuedJobData.userId,
       billingHoldId: enqueuedJobData.billingHoldId,
+      nodeContext: {
+        executeLLM: async ({ prompt }) => ({
+          content: prompt,
+          json: { is_safe: true, sanitized_prompt: prompt, prompt, description: prompt },
+        }),
+        executeGeneration: async () => ({
+          assets: [{ url: "https://storage.openart.ai/character-sheets/turnaround-char-999.png", width: 1344, height: 768 }],
+        }),
+        cropCharacterSheet: async () => ({
+          panelUrls: [
+            "https://storage.openart.ai/character-sheets/front.png",
+            "https://storage.openart.ai/character-sheets/side.png",
+            "https://storage.openart.ai/character-sheets/back.png",
+          ],
+        }),
+        attachCharacterSheetResult: async () => ({ id: "char-wf-e2e-999", status: "completed" }),
+      },
     });
 
     assert.strictEqual(result.status, "completed");

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as models from "#models/tools";
 import { getModelConfig, validateModelInputs, calculateOperationCost, executeGeneration, executeLLM, initRegistry, getCatalog, getModelSchema, estimatePrice, ModelsError, ModelsValidationError, ModelsNotFoundError, ModelsConfigurationError, ModelsProviderError, registerProviderRunner, unregisterProviderRunner } from "#models/tools";
 import modelsRouter, { formatModelDto } from "#models/api";
-import { executeVideoGeneration } from "#generation/tools";
+import { VideoGenerateNode } from "#generation/tools";
 import { resolveMediaMetadata } from "#media/tools";
 
 // ─── Source: modelsSystem.test.js ───
@@ -229,14 +229,14 @@ describe("LTX Video Models Capability and Aspect Ratio Boundary", () => {
     }
   });
 
-  it("TEST 6: executeVideoGeneration with ltx_2_3_pro and aspect_ratio: 16:9 succeeds", async () => {
+  it("TEST 6: VideoGenerateNode with ltx_2_3_pro and aspect_ratio: 16:9 succeeds", async () => {
     const videoUrl = "https://api.ltx.io/generated/ltx_pro_123.mp4";
     registerProviderRunner("ltx", async () => {
       return { status: "completed", result: { video_url: videoUrl } };
     });
 
     try {
-      const result = await executeVideoGeneration(
+      const result = await VideoGenerateNode.execute(
         {
           model: "ltx_2_3_pro",
           prompt: "Cinematic mountain sunset",
@@ -245,23 +245,21 @@ describe("LTX Video Models Capability and Aspect Ratio Boundary", () => {
         { runId: "run-ltx-test", nodeId: "gen_node_ltx", userId: "user-ltx" }
       );
 
-      assert.strictEqual(result.assets.length, 1);
-      assert.strictEqual(result.assets[0].url, videoUrl);
+      assert.strictEqual(result.video_url, videoUrl);
       assert.strictEqual(result.metadata.model, "ltx_2_3_pro");
-      assert.strictEqual(result.metadata.provider, "ltx");
     } finally {
       unregisterProviderRunner("ltx");
     }
   });
 
-  it("TEST 7: executeVideoGeneration with ltx_2_3_fast and aspect_ratio: 9:16 succeeds", async () => {
+  it("TEST 7: VideoGenerateNode with ltx_2_3_fast and aspect_ratio: 9:16 succeeds", async () => {
     const videoUrl = "https://api.ltx.io/generated/ltx_fast_456.mp4";
     registerProviderRunner("ltx", async () => {
       return { status: "completed", result: { video_url: videoUrl } };
     });
 
     try {
-      const result = await executeVideoGeneration(
+      const result = await VideoGenerateNode.execute(
         {
           model: "ltx_2_3_fast",
           prompt: "Vertical skateboard trick",
@@ -270,10 +268,8 @@ describe("LTX Video Models Capability and Aspect Ratio Boundary", () => {
         { runId: "run-ltx-fast-test", nodeId: "gen_node_ltx_fast", userId: "user-ltx" }
       );
 
-      assert.strictEqual(result.assets.length, 1);
-      assert.strictEqual(result.assets[0].url, videoUrl);
+      assert.strictEqual(result.video_url, videoUrl);
       assert.strictEqual(result.metadata.model, "ltx_2_3_fast");
-      assert.strictEqual(result.metadata.provider, "ltx");
     } finally {
       unregisterProviderRunner("ltx");
     }

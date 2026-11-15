@@ -24,45 +24,15 @@ export const useCaseWorker = envConfig.isTest
       USECASE_QUEUE_NAME,
       wrapWorkerJob("usecase-worker", async (job) => {
         const dispatcher = getV3Dispatcher() || getUseCaseService();
+        const { useCaseId, input, userId, billingHoldId } = job.data;
+        workerLogger.debug({ useCaseId, userId }, `Processing V3 workflow/useCase "${useCaseId}" for user ${userId}`);
 
-        // ── Case 1: Full UseCase / V3 Workflow Execution Job ─────────────────────
-        if (job.name === "run-usecase") {
-          const { useCaseId, input, userId, billingHoldId } = job.data;
-          workerLogger.debug({ useCaseId, userId }, `Processing workflow/useCase "${useCaseId}" for user ${userId}`);
-
-          await dispatcher.executeQueuedUseCase({
-            useCaseId,
-            input,
-            userId,
-            billingHoldId,
-          });
-          return;
-        }
-
-        const { runId, nodeId } = job.data;
-
-        // ── Case 2: Individual Node Execution Job ───────────────────────────────
-        if (nodeId) {
-          workerLogger.debug({ runId, nodeId }, `Executing node "${nodeId}" for run ${runId}`);
-          try {
-            const { executeNodeJob, executeOrchestration } = await import("../compat/legacyWorkflowCompat.js");
-            await executeNodeJob(runId, nodeId);
-            await executeOrchestration(runId);
-          } catch (e) {
-            workerLogger.warn({ runId, nodeId, err: e.message }, "Node job execution failed or V2 runner unmounted");
-            throw e;
-          }
-        } else {
-          // ── Case 3: Workflow Orchestration Job ─────────────────────────────────
-          workerLogger.debug({ runId }, `Orchestrating run ${runId}`);
-          try {
-            const { executeOrchestration } = await import("../compat/legacyWorkflowCompat.js");
-            await executeOrchestration(runId);
-          } catch (e) {
-            workerLogger.warn({ runId, err: e.message }, "Orchestration execution failed or V2 runner unmounted");
-            throw e;
-          }
-        }
+        await dispatcher.executeQueuedUseCase({
+          useCaseId,
+          input,
+          userId,
+          billingHoldId,
+        });
       }),
       {
         connection: workerRedisConnection,

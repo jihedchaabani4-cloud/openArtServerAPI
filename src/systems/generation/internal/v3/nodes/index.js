@@ -1,38 +1,20 @@
 import { NodeRegistry } from "../core/NodeRegistry.js";
-import { LoadMediaNode } from "./base/loadMediaNode.js";
 import { ResolveRefsNode } from "./base/resolveRefsNode.js";
-import { SafetyCheckNode } from "./base/safetyCheckNode.js";
-import { LlmTextNode } from "./base/llmTextNode.js";
-import { LlmVisionNode } from "./base/llmVisionNode.js";
-import { PromptAssembleNode } from "./base/promptAssembleNode.js";
+import { LlmNode, LLM_SKILLS_REGISTRY, buildUnifiedLlmInstruction } from "./base/llmNode.js";
 import { ImageGenerateNode } from "./base/imageGenerateNode.js";
-import { ImageUpscaleNode } from "./base/imageUpscaleNode.js";
-import { ImageRemoveBgNode } from "./base/imageRemoveBgNode.js";
 import { VideoGenerateNode } from "./base/videoGenerateNode.js";
-import { VideoUpscaleNode } from "./base/videoUpscaleNode.js";
 import { SaveMediaNode } from "./base/saveMediaNode.js";
-import { CropCharacterGridNode } from "./custom/cropCharacterGridNode.js";
-import { ExtractVideoFrameNode } from "./custom/extractVideoFrameNode.js";
 import { SaveCharacterSheetNode } from "./custom/saveCharacterSheetNode.js";
 
 export const V3_BASE_NODES = Object.freeze([
-  LoadMediaNode,
   ResolveRefsNode,
-  SafetyCheckNode,
-  LlmTextNode,
-  LlmVisionNode,
-  PromptAssembleNode,
+  LlmNode,
   ImageGenerateNode,
-  ImageUpscaleNode,
-  ImageRemoveBgNode,
   VideoGenerateNode,
-  VideoUpscaleNode,
   SaveMediaNode,
 ]);
 
 export const V3_CUSTOM_NODES = Object.freeze([
-  CropCharacterGridNode,
-  ExtractVideoFrameNode,
   SaveCharacterSheetNode,
 ]);
 
@@ -53,19 +35,12 @@ export function createDefaultV3NodeRegistry(extraNodes = []) {
 }
 
 export {
-  LoadMediaNode,
   ResolveRefsNode,
-  SafetyCheckNode,
-  LlmTextNode,
-  LlmVisionNode,
-  PromptAssembleNode,
+  LlmNode,
+  LLM_SKILLS_REGISTRY,
+  buildUnifiedLlmInstruction,
   ImageGenerateNode,
-  ImageUpscaleNode,
-  ImageRemoveBgNode,
   VideoGenerateNode,
-  VideoUpscaleNode,
   SaveMediaNode,
-  CropCharacterGridNode,
-  ExtractVideoFrameNode,
   SaveCharacterSheetNode,
 };

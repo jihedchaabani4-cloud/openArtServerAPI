@@ -1,6 +1,6 @@
 import { describe, it, before, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { llmService, LLMService, executeLLMNode, PromptService } from "#generation/tools";
+import { llmService, LLMService, LlmNode, PromptService } from "#generation/tools";
 import { ElementAnalysisService } from "#elements/tools";
 import { createElement, analyzeElement } from "#elements/api";
 import { elementService, characterService, db } from "../../../src/container.js";
@@ -229,13 +229,13 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
     assert.strictEqual(capturedUserId, "user-char-auth-777", "generateDescription must forward userId to llmService");
   });
 
-  // ── TEST 6: Workflow run with llmNode without userId fails with BILLING_CONTEXT_MISSING (no LLM call, no free execution) ──
-  it("TEST 6: llmNode without userId fails with BILLING_CONTEXT_MISSING, never free execution", async () => {
+  // ── TEST 6: Workflow run with LlmNode without userId fails with BILLING_CONTEXT_MISSING (no LLM call, no free execution) ──
+  it("TEST 6: LlmNode without userId fails with BILLING_CONTEXT_MISSING, never free execution", async () => {
     // Node invoked with null userId (e.g. ad-hoc or unauthenticated run)
     await assert.rejects(
       async () => {
-        await executeLLMNode(
-          { userPrompt: "A beautiful landscape", systemPromptOverride: "You are a prompt engineer." },
+        await LlmNode.execute(
+          { prompt: "A beautiful landscape", custom_instruction: "You are a prompt engineer." },
           { runId: "run-no-user", userId: null }
         );
       },
@@ -275,8 +275,8 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
     );
   });
 
-  // ── TEST 8: llmNode uses ONLY ctx.userId and ignores spoofed resolvedInputs.userId ──
-  it("TEST 8: llmNode derives userId ONLY from ctx.userId, ignoring spoofed input.userId", async () => {
+  // ── TEST 8: LlmNode uses ONLY ctx.userId and ignores spoofed inputs.userId ──
+  it("TEST 8: LlmNode derives userId ONLY from ctx.userId, ignoring spoofed input.userId", async () => {
     let capturedUserId = null;
     llmService.generate = async (params) => {
       capturedUserId = params.userId;
@@ -294,10 +294,10 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
       };
     };
 
-    await executeLLMNode(
+    await LlmNode.execute(
       {
-        userPrompt: "A landscape",
-        systemPromptOverride: "You are an assistant.",
+        prompt: "A landscape",
+        custom_instruction: "You are an assistant.",
         userId: "victim-attacker-spoofed-id", // Malicious spoof in input
       },
       {
@@ -309,17 +309,17 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
     assert.strictEqual(
       capturedUserId,
       "server-authenticated-user-123",
-      "Attributed userId must come strictly from ctx.userId, never resolvedInputs.userId"
+      "Attributed userId must come strictly from ctx.userId, never inputs.userId"
     );
 
     // Subcase 8B: Context has NO userId (ctx.userId: null), but input carries a victim's userId
     // Must reject with BILLING_CONTEXT_MISSING rather than charging the spoofed victim!
     await assert.rejects(
       async () => {
-        await executeLLMNode(
+        await LlmNode.execute(
           {
-            userPrompt: "A landscape",
-            systemPromptOverride: "You are an assistant.",
+            prompt: "A landscape",
+            custom_instruction: "You are an assistant.",
             userId: "victim-attacker-spoofed-id",
           },
           {

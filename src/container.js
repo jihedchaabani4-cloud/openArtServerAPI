@@ -34,7 +34,6 @@ import {
     WorkflowEventRecorder,
     WorkflowBillingGateway,
     WorkflowStorageGateway,
-    UseCaseBillingRuntime,
 } from "#generation/tools";
 import {
     MediaRepository,
@@ -219,19 +218,11 @@ export const workflowStorageGateway = new WorkflowStorageGateway({
     lifecycleService: _lifecycleService,
 });
 
-const _defaultGatewaysFactory = () => ({
-    billing: workflowBillingGateway,
-    storage: workflowStorageGateway,
-    events: workflowEventRecorder,
-});
-configureDefaultGateways(_defaultGatewaysFactory);
-
 // ─── UseCase / V3 Engine & Job Queue Services ──────────────────────────────────
 export { jobQueueService };
 export const v3Dispatcher = new V3Dispatcher({
     jobQueueService,
     db,
-    billingRuntime: new UseCaseBillingRuntime({ walletService }),
 });
 export const useCaseService = v3Dispatcher;
 

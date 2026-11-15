@@ -774,21 +774,19 @@ describe("D2.6 — Media Ratio & Dimension Preservation Boundary Tests", () => {
     assert.equal(updatedMedia.height, 768);
   });
 
-  it("TEST 6: nodeExecutor executeNodePersistence preserves placeholder dimensions when provider asset lacks width/height", async () => {
-    const { executeNodePersistence } = await import("#generation/tools");
+  it("TEST 6: SaveMediaNode preserves placeholder dimensions when provider asset lacks width/height", async () => {
+    const { SaveMediaNode } = await import("#generation/tools");
 
     let updatedMedia = null;
     const mockDb = {
       media: {
-        findByWorkflow: async (wfId) => [
-          {
-            id: "placeholder-1",
-            workflow_id: wfId,
-            status: "processing",
-            width: 1344,
-            height: 768,
-          },
-        ],
+        findById: async (id) => ({
+          id,
+          workflow_id: "wf-test-run",
+          status: "processing",
+          width: 1344,
+          height: 768,
+        }),
         updateMedia: async (id, fields) => {
           updatedMedia = { id, ...fields };
           return updatedMedia;
@@ -796,27 +794,16 @@ describe("D2.6 — Media Ratio & Dimension Preservation Boundary Tests", () => {
       },
     };
 
-    await executeNodePersistence({
-      nodeConfig: {
-        id: "generate",
-        persist: {
-          target: "media",
-          step_id: "image_generation",
-          status: "completed",
-        },
+    await SaveMediaNode.execute(
+      {
+        media_id: "placeholder-1",
+        asset_url: "https://cdn.example.com/video.mp4",
+        metadata: {}, // width and height omitted
       },
-      output: {
-        assets: [{ url: "https://cdn.example.com/video.mp4" }], // width and height omitted
-      },
-      run: {
-        targetWorkflowId: "wf-test-run",
-        targetMediaIds: ["placeholder-1"],
-      },
-      resolvedInputs: {
-        ratio: "16:9",
-      },
-      db: mockDb,
-    });
+      {
+        db: mockDb,
+      }
+    );
 
     assert.ok(updatedMedia, "Expected updateMedia to be called");
     assert.equal(updatedMedia.width, 1344);

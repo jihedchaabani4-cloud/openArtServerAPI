@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { WorkflowAuthorizationService, resolveWorkflowReference, resolveWorkflowReferences, resolvePrimaryMediaUrl, executePromptBuilder, WorkflowRepository } from "#generation/tools";
+import { WorkflowAuthorizationService, resolveWorkflowReference, resolveWorkflowReferences, resolvePrimaryMediaUrl, ResolveRefsNode, WorkflowRepository } from "#generation/tools";
 import express from "express";
 import http from "node:http";
 import { workflowsRouter, imagesRouter, videoRouter } from "#generation/api";
@@ -599,24 +599,25 @@ describe("Reference and Media Ownership Security & Boundary Tests (Task T2c)", (
     assert.strictEqual(unownedUrl, null, "Unowned primary media URL must resolve to null for User B");
   });
 
-  // ── TEST 6: PromptBuilderNode ignores unowned references ──
-  it("TEST 6: PromptBuilderNode: unowned references are discarded and not injected into prompt", async () => {
-    const nodeInputs = {
-      prompt: "Portrait of <character:char-user-A>",
-      references: [{ id: "char-user-A" }],
-    };
-    const ctx = {
-      nodeId: "test-builder",
-      runId: "run-t2c-1",
-      userId: "user-B",
-    };
+  // ── TEST 6: V3 ResolveRefsNode ignores unowned references ──
+  it("TEST 6: V3 ResolveRefsNode: unowned references are discarded and not injected into prepared_prompt", async () => {
+    const resolvedRefs = await ResolveRefsNode.execute(
+      {
+        prompt: "Portrait of",
+        references: [{ id: "char-user-A" }],
+      },
+      {
+        nodeId: "test-resolve",
+        runId: "run-t2c-1",
+        userId: "user-B",
+      }
+    );
 
-    const output = await executePromptBuilder(nodeInputs, ctx);
     // User A's character should NOT be resolved for User B
-    assert.strictEqual(output.context.entities.characters.length, 0, "Characters list must be empty because User B does not own char-user-A");
-    assert.strictEqual(output.context.references.length, 0, "No image URLs should be extracted from unowned entity");
-    assert.ok(!output.finalPrompt.includes("Alice Secret"), "Final prompt must not leak User A's character name");
-    assert.strictEqual(output.finalPrompt.trim(), "Portrait of");
+    assert.strictEqual(resolvedRefs.entities.length, 0, "Entities list must be empty because User B does not own char-user-A");
+    assert.strictEqual(resolvedRefs.reference_urls.length, 0, "No image URLs should be extracted from unowned entity");
+    assert.ok(!resolvedRefs.prepared_prompt.includes("Alice Secret"), "Prepared prompt must not leak User A's character name");
+    assert.strictEqual(resolvedRefs.prepared_prompt.trim(), "Portrait of");
   });
 
   // ── TEST 7: Legitimate owner (User A) operations succeed ──

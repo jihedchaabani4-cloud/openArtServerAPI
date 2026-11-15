@@ -15,13 +15,7 @@ import * as generationsQuery from "../internal/controllers/generationsQueryContr
 import * as projectController from "../internal/controllers/projectController.js";
 import * as generationsMutation from "../internal/controllers/generationsMutationController.js";
 import * as workflowsController from "../internal/controllers/workflowsController.js";
-import {
-    getHealth,
-    submitWorkflowRun,
-    getWorkflowRunStatus,
-} from "../internal/controllers/v2/workflowsController.js";
 
-import { promptService } from "#models/tools";
 import { requireAuth, rateLimit } from "#identity/tools";
 
 // ── Images Router ──────────────────────────────────────────────────
@@ -34,27 +28,13 @@ videoRouter.post("/generated", requireAuth, rateLimit("videoGeneration"), videoC
 
 // ── Prompt Router ──────────────────────────────────────────────────
 export const promptRouter = Router();
-promptRouter.post("/optimize", requireAuth, rateLimit("promptOptimization"), async (req, res) => {
-    const { prompt, mode = "image" } = req.body;
-    if (!prompt?.trim()) {
-        return res.status(400).json({ ok: false, message: "prompt is required" });
-    }
-    try {
-        const result = await promptService.optimizePrompt(prompt.trim(), {
-            mode,
-            userId: req.user?.id,
-        });
-        return res.json({ ok: true, ...result });
-    } catch (err) {
-        return res.status(500).json({ ok: false, message: "Failed to optimize prompt" });
-    }
-});
+promptRouter.post("/optimize", requireAuth, rateLimit("promptOptimization"), workflowsController.optimizePrompt);
 
-// ── V2 Workflows Router ────────────────────────────────────────────
+// ── Workflows Run Inspection Router ────────────────────────────────
 export const v2WorkflowsRouter = express.Router();
-v2WorkflowsRouter.get("/health", getHealth);
-v2WorkflowsRouter.post("/run", requireAuth, submitWorkflowRun);
-v2WorkflowsRouter.get("/runs/:run_id", requireAuth, getWorkflowRunStatus);
+v2WorkflowsRouter.get("/health", workflowsController.getWorkflowHealth);
+v2WorkflowsRouter.post("/run", requireAuth, workflowsController.runWorkflowDisabled);
+v2WorkflowsRouter.get("/runs/:run_id", requireAuth, workflowsController.getWorkflowRunById);
 
 // ── Workflows Router (V1 CRUD & Library) ───────────────────────────
 export const workflowsRouter = express.Router();
@@ -96,9 +76,6 @@ export {
     projectController,
     generationsMutation,
     workflowsController,
-    getHealth,
-    submitWorkflowRun,
-    getWorkflowRunStatus,
 };
 export const { generateImage } = imageController;
 export const { generateVideo } = videoController;

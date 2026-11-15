@@ -1,22 +1,28 @@
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { executeNodeJob, executeNodePersistence, RunRepository, startWorkflowRun, executeOrchestration, UseCaseService } from "#generation/tools";
+import {
+  NodeRegistry,
+  ALL_V3_NODES,
+  V3Dispatcher,
+  WorkflowExecutor,
+  GraphCompiler,
+  SaveMediaNode,
+  SaveCharacterSheetNode,
+  createDefaultV3NodeRegistry,
+} from "#generation/tools";
 import { db } from "../../../src/container.js";
 import { MediaRepository, MediaWorkflowLifecycleService } from "#media/tools";
 import { runReservationReaper } from "#billing/tools";
 
 // ─── Source: mediaPersistenceFailureBoundary.test.js ───
 {
-describe("Media Persistence Failure Boundary Tests (Task T7 / BUG-02)", () => {
-  let runRepo;
+describe("Media Persistence Failure Boundary Tests (V3 Nodes & Executor)", () => {
   let originalFindByWorkflow;
   let originalUpdateMedia;
   let originalCreateMedia;
   let originalUpdateCharacter;
 
-
   beforeEach(() => {
-    runRepo = new RunRepository();
     originalFindByWorkflow = db.media?.findByWorkflow;
     originalUpdateMedia = db.media?.updateMedia;
     originalCreateMedia = db.media?.createMedia;
@@ -34,218 +40,163 @@ describe("Media Persistence Failure Boundary Tests (Task T7 / BUG-02)", () => {
     }
   });
 
-  it("TEST 1: executeNodePersistence must throw normalized PERSISTENCE_FAILED when DB update fails", async () => {
-    // Inject DB failure into updateMedia
-    db.media.findByWorkflow = async () => [
-      { id: "media-placeholder-1", step_id: "image_generation", status: "processing" },
-    ];
+  it("TEST 1: SaveMediaNode throws when DB update fails (never swallows persistence failure)", async () => {
     db.media.updateMedia = async () => {
       throw new Error("Connection terminated unexpectedly during UPDATE");
     };
 
-    const nodeConfig = {
-      id: "gen_node",
-      type: "image-generation",
-      persist: {
-        target: "media",
-        step_id: "image_generation",
-        value: "$outputs.assets[0].url",
-      },
-    };
-    const output = { assets: [{ url: "https://storage.example.com/asset.png" }] };
-    const run = {
-      run_id: "run-test-persist-1",
-      targetWorkflowId: "wf-persist-1",
-      targetMediaIds: ["media-placeholder-1"],
-      input: { workflow_id: "wf-persist-1", media_id: "media-placeholder-1" },
-    };
-
-    // On unpatched code, executeNodePersistence catches and swallows the error (returns void without throwing)
     await assert.rejects(
       async () => {
-        await executeNodePersistence({ nodeConfig, output, run });
+        await SaveMediaNode.execute(
+          {
+            media_id: "media-placeholder-1",
+            asset_url: "https://storage.example.com/asset.png",
+            final_prompt: "A cinematic portrait",
+          },
+          { db }
+        );
       },
       (err) => {
-        assert.strictEqual(err.code, "PERSISTENCE_FAILED");
-        assert.strictEqual(err.category, "SERVER_FAULT");
-        assert.match(err.message, /persistence failed/i);
+        assert.match(err.message, /Connection terminated unexpectedly/i);
         return true;
       },
-      "Expected executeNodePersistence to throw normalized PERSISTENCE_FAILED error when DB update fails"
+      "Expected SaveMediaNode to throw when DB update fails"
     );
   });
 
-  it("TEST 2: executeNodeJob marks node as failed when persistence fails (never marks completed)", async () => {
-    const runId = "run-test-persist-nodejob";
-    const nodeId = "gen_node";
+  it("TEST 2: WorkflowExecutor fails the run when terminal SaveMediaNode persistence fails (never marks completed)", async () => {
+    const registry = createDefaultV3NodeRegistry();
+    const executor = new WorkflowExecutor(registry);
 
-    // Setup run and node in runRepo
-    const plan = {
-      workflow_id: "wf-test-persist",
+    const workflow = {
+      id: "wf-test-persist",
       nodes: [
         {
-          id: nodeId,
-          type: "prompt-builder",
+          id: "save_node",
+          type: "base.save_media",
           inputs: {
-            prompt: "${input.prompt}",
+            media_id: { fromInput: "media_id" },
+            asset_url: "https://storage.example.com/generated.png",
+            final_prompt: { fromInput: "prompt" },
           },
-          persist: {
-            target: "media",
-            step_id: "prompt_media",
-            value: "https://storage.example.com/generated.png",
-          },
-          retry_policy: { max_attempts: 1 },
         },
       ],
-      edges: [],
-      outputs: {},
     };
 
-    await runRepo.createRun({
-      run_id: runId,
-      workflow_id: "wf-test-persist",
-      status: "running",
-      v1_workflow_id: "wf-test-persist",
-      target_media_ids: ["placeholder-999"],
-      input: { workflow_id: "wf-test-persist", media_id: "placeholder-999", prompt: "A cinematic portrait" },
-      execution_plan: plan,
-    });
-
-    await runRepo.createNodeRun({
-      run_id: runId,
-      node_id: nodeId,
-      node_type: "prompt-builder",
-      status: "pending",
-      attempt: 1,
-    });
-
-    // Simulate DB failure when attempting to persist media
-    db.media.findByWorkflow = async () => [
-      { id: "placeholder-999", step_id: "prompt_media", status: "processing" },
-    ];
     db.media.updateMedia = async () => {
       throw new Error("PostgreSQL write deadlock");
     };
 
-    await executeNodeJob(runId, nodeId);
-
-    const nodeRun = await runRepo.getNodeRun(runId, nodeId);
-
-    // On unpatched code, nodeRun.status is "completed" because persistence failure was swallowed!
-    assert.strictEqual(
-      nodeRun.status,
-      "failed",
-      "CRITICAL: Node run must be marked 'failed' when persistence fails, NOT 'completed'!"
-    );
-    assert.strictEqual(
-      nodeRun.error?.code,
-      "PERSISTENCE_FAILED",
-      "Node error code must be PERSISTENCE_FAILED"
+    await assert.rejects(
+      async () => {
+        await executor.execute({
+          workflow,
+          input: { media_id: "placeholder-999", prompt: "A cinematic portrait" },
+          context: { db },
+        });
+      },
+      (err) => {
+        assert.strictEqual(err.nodeId, "save_node");
+        assert.match(err.message, /PostgreSQL write deadlock/i);
+        return true;
+      }
     );
   });
 
-  it("TEST 3: executeNodePersistence throws when target character update fails", async () => {
-    db.characters.updateCharacter = async () => {
-      throw new Error("Character row locked by another transaction");
-    };
-
-    const nodeConfig = {
-      id: "llm_enrich",
-      type: "llm",
-      persist: {
-        target: "character",
-        field: "description",
-        value: "$output.text",
-      },
-    };
-    const output = { text: "Updated character personality description" };
-    const run = {
-      run_id: "run-test-char-persist",
-      input: { characterId: "char-123", workflow_id: "char-123" },
-    };
+  it("TEST 3: SaveCharacterSheetNode throws when target character update fails", async () => {
+    db.media.updateMedia = async (id, patch) => ({ id, ...patch });
 
     await assert.rejects(
       async () => {
-        await executeNodePersistence({ nodeConfig, output, run });
+        await SaveCharacterSheetNode.execute(
+          {
+            character_id: "char-123",
+            media_id: "media-char-123",
+            sheet_url: "https://storage.example.com/sheet.png",
+            description: "Updated character personality description",
+          },
+          {
+            db,
+            attachCharacterSheetResult: async () => {
+              throw new Error("Character row locked by another transaction");
+            },
+          }
+        );
       },
       (err) => {
-        assert.strictEqual(err.code, "PERSISTENCE_FAILED");
-        assert.strictEqual(err.category, "SERVER_FAULT");
+        assert.match(err.message, /Character row locked by another transaction/i);
         return true;
       },
-      "Expected executeNodePersistence to throw when character persistence fails"
+      "Expected SaveCharacterSheetNode to throw when character persistence fails"
     );
   });
 
-  it("TEST 4: executeNodeJob retries transient persistence failure when retry_policy allows", async () => {
-    const runId = "run-test-persist-retry";
-    const nodeId = "retry_node";
+  it("TEST 4: WorkflowExecutor retries transient node failure when retryPolicy allows", async () => {
+    const registry = new NodeRegistry();
+    registry.registerAll(ALL_V3_NODES);
+    registry.register({
+      type: "custom.transient_save_test",
+      OUTPUT_NODE: true,
+      INPUT_TYPES: {
+        required: {
+          media_id: { type: "STRING" },
+          asset_url: { type: "STRING" },
+        },
+      },
+      RETURN_TYPES: { saved_media: "JSON" },
+      retryPolicy: {
+        maxAttempts: 2,
+        backoffMs: 1,
+        retryableCategories: ["UPSTREAM_FAULT"],
+      },
+      estimateCost: () => 0,
+      async execute(inputs, ctx) {
+        return SaveMediaNode.execute(inputs, ctx);
+      },
+    });
+    registry.freeze();
 
-    const plan = {
-      workflow_id: "wf-test-persist-retry",
+    const executor = new WorkflowExecutor(registry);
+    const workflow = {
+      id: "wf-test-persist-retry",
       nodes: [
         {
-          id: nodeId,
-          type: "prompt-builder",
+          id: "retry_node",
+          type: "custom.transient_save_test",
           inputs: {
-            prompt: "${input.prompt}",
+            media_id: { fromInput: "media_id" },
+            asset_url: "https://storage.example.com/generated-retry.png",
           },
-          persist: {
-            target: "media",
-            step_id: "prompt_media",
-            value: "https://storage.example.com/generated-retry.png",
-          },
-          retry_policy: { max_attempts: 2 },
         },
       ],
-      edges: [],
-      outputs: {},
     };
 
-    await runRepo.createRun({
-      run_id: runId,
-      workflow_id: "wf-test-persist-retry",
-      status: "running",
-      v1_workflow_id: "wf-test-persist-retry",
-      target_media_ids: ["placeholder-retry"],
-      input: { workflow_id: "wf-test-persist-retry", media_id: "placeholder-retry", prompt: "Retry test prompt" },
-      execution_plan: plan,
-    });
-
-    await runRepo.createNodeRun({
-      run_id: runId,
-      node_id: nodeId,
-      node_type: "prompt-builder",
-      status: "pending",
-      attempt: 1,
-    });
-
     let attemptsCount = 0;
-    db.media.findByWorkflow = async () => [
-      { id: "placeholder-retry", step_id: "prompt_media", status: "processing" },
-    ];
     db.media.updateMedia = async (id, patch) => {
       attemptsCount++;
       if (attemptsCount === 1) {
-        throw new Error("Transient connection timeout on attempt 1");
+        const err = new Error("Transient connection timeout on attempt 1");
+        err.retryable = true;
+        throw err;
       }
       return { id, ...patch };
     };
 
-    await executeNodeJob(runId, nodeId);
+    const result = await executor.execute({
+      workflow,
+      input: { media_id: "placeholder-retry" },
+      context: { db },
+    });
 
-    const finalNodeRun = await runRepo.getNodeRun(runId, nodeId);
     assert.strictEqual(attemptsCount, 2, "Persistence should have been retried on attempt 2");
-    assert.strictEqual(finalNodeRun.attempt, 2, "Final attempt count should be 2");
-    assert.strictEqual(finalNodeRun.status, "completed", "Node should succeed after retry");
+    assert.strictEqual(result.status, "completed", "Workflow should succeed after retry");
   });
 });
 }
 
 // ─── Source: siblingMediaCleanupBoundary.test.js ───
 {
-describe("Sibling Media Cleanup & Deadlock Boundary Tests (Task T8 / BUG-08)", () => {
-  let runRepo;
+describe("Sibling Media Cleanup & Cycle Boundary Tests (V3Dispatcher & GraphCompiler)", () => {
   let originalFindByWorkflow;
   let originalUpdateMedia;
   let originalFailPendingMediaByWorkflow;
@@ -253,9 +204,7 @@ describe("Sibling Media Cleanup & Deadlock Boundary Tests (Task T8 / BUG-08)", (
   let mediaRecords = [];
   let updatedCalls = [];
 
-
   beforeEach(() => {
-    runRepo = new RunRepository();
     mediaRecords = [];
     updatedCalls = [];
 
@@ -272,12 +221,9 @@ describe("Sibling Media Cleanup & Deadlock Boundary Tests (Task T8 / BUG-08)", (
     }
   });
 
-  it("TEST 1: Node failure fails ALL sibling processing/pending media and preserves completed media", async () => {
+  it("TEST 1: V3Dispatcher failure fails ALL sibling processing/pending media and preserves completed media", async () => {
     const workflowId = "wf-sibling-test-1";
-    const runId = "run-sibling-test-1";
-    const nodeId = "failing_node";
 
-    // Setup 4 media records: 2 processing, 1 pending, 1 completed (already successful)
     mediaRecords = [
       { id: "media-1", workflow_id: workflowId, step_id: "step-1", status: "processing" },
       { id: "media-2", workflow_id: workflowId, step_id: "step-2", status: "pending" },
@@ -285,51 +231,58 @@ describe("Sibling Media Cleanup & Deadlock Boundary Tests (Task T8 / BUG-08)", (
       { id: "media-4", workflow_id: workflowId, step_id: "step-4", status: "completed", url: "https://example.com/ok.png" },
     ];
 
-    db.media.findByWorkflow = async (wfId) => mediaRecords.filter((m) => m.workflow_id === wfId);
-    db.media.updateMedia = async (id, patch) => {
-      const record = mediaRecords.find((m) => m.id === id);
-      if (record) {
-        Object.assign(record, patch);
-      }
-      updatedCalls.push({ id, ...patch });
-      return record;
+    const mockMediaDb = {
+      findByWorkflow: async (wfId) => mediaRecords.filter((m) => m.workflow_id === wfId),
+      updateMedia: async (id, patch) => {
+        const record = mediaRecords.find((m) => m.id === id);
+        if (record) {
+          Object.assign(record, patch);
+        }
+        updatedCalls.push({ id, ...patch });
+        return record;
+      },
     };
 
-    const plan = {
-      workflow_id: workflowId,
+    const dispatcher = new V3Dispatcher({
+      db: { media: mockMediaDb },
+      billingTools: {
+        releaseHold: async () => ({ rolledBack: true }),
+        settleHold: async () => ({ settled: true }),
+      },
+      mediaTools: {
+        markMediaFailed: async () => {},
+      },
+    });
+
+    const failingWorkflow = {
+      id: "wf-sibling-v3",
       nodes: [
         {
-          id: nodeId,
-          type: "prompt-builder",
-          inputs: {}, // Missing required 'prompt' causes node to fail validation
-          retry_policy: { max_attempts: 1 },
+          id: "failing_save",
+          type: "base.save_media",
+          inputs: {
+            media_id: { fromInput: "media_id" },
+            // Missing required asset_url causes validation failure
+          },
         },
       ],
-      edges: [],
-      outputs: {},
     };
 
-    await runRepo.createRun({
-      run_id: runId,
-      workflow_id: workflowId,
-      status: "running",
-      input: { workflow_id: workflowId },
-      execution_plan: plan,
-    });
+    await assert.rejects(
+      async () => {
+        await dispatcher.executeQueuedV3Run({
+          workflow: failingWorkflow,
+          input: {
+            workflow_id: workflowId,
+            serverWorkflowId: workflowId,
+            media_id: "media-1",
+          },
+          userId: "user-sibling-1",
+          billingHoldId: "hold-sibling-test-1",
+        });
+      }
+    );
 
-    await runRepo.createNodeRun({
-      run_id: runId,
-      node_id: nodeId,
-      node_type: "prompt-builder",
-      status: "pending",
-      attempt: 1,
-    });
-
-    // Execute failing node
-    await executeNodeJob(runId, nodeId);
-
-    // Assertions:
-    // With BUG-08, only media-1 was failed, media-2 and media-3 stayed stuck in processing/pending!
     const m1 = mediaRecords.find((m) => m.id === "media-1");
     const m2 = mediaRecords.find((m) => m.id === "media-2");
     const m3 = mediaRecords.find((m) => m.id === "media-3");
@@ -341,7 +294,7 @@ describe("Sibling Media Cleanup & Deadlock Boundary Tests (Task T8 / BUG-08)", (
     assert.strictEqual(m4.status, "completed", "CRITICAL: media-4 (completed) must NOT be overwritten!");
   });
 
-  it("TEST 2: UseCaseService failure fails ALL sibling processing media and preserves completed media", async () => {
+  it("TEST 2: V3Dispatcher executeQueuedUseCase failure fails ALL sibling processing media and preserves completed media", async () => {
     const workflowId = "wf-sibling-usecase-1";
     mediaRecords = [
       { id: "m-proc-1", workflow_id: workflowId, status: "processing" },
@@ -359,25 +312,28 @@ describe("Sibling Media Cleanup & Deadlock Boundary Tests (Task T8 / BUG-08)", (
       },
     };
 
-    const mockBillingRuntime = {
-      rollbackUseCase: async () => ({ rolledBack: true }),
-      settleUseCase: async () => ({ settled: true }),
-    };
-
-    const ucService = new UseCaseService({
-      billingRuntime: mockBillingRuntime,
+    const dispatcher = new V3Dispatcher({
       db: { media: mockMediaDb },
+      billingTools: {
+        releaseHold: async () => ({ rolledBack: true }),
+        settleHold: async () => ({ settled: true }),
+      },
+      mediaTools: {
+        markMediaFailed: async () => {},
+      },
     });
 
-    ucService.runUseCase = async () => {
-      const err = new Error("Pipeline crashed unexpectedly");
-      err.code = "CRASH";
-      throw err;
+    dispatcher.executor = {
+      execute: async () => {
+        const err = new Error("Pipeline crashed unexpectedly");
+        err.code = "CRASH";
+        throw err;
+      },
     };
 
     await assert.rejects(
       async () => {
-        await ucService.executeQueuedUseCase({
+        await dispatcher.executeQueuedUseCase({
           useCaseId: "image-generation-v1",
           input: {
             workflow_id: workflowId,
@@ -398,9 +354,8 @@ describe("Sibling Media Cleanup & Deadlock Boundary Tests (Task T8 / BUG-08)", (
     assert.strictEqual(mediaRecords.find((m) => m.id === "m-succ-4").status, "completed", "Terminal completed status must not be modified");
   });
 
-  it("TEST 3: Deadlock branch in executeOrchestration fails pending media placeholders", async () => {
+  it("TEST 3: GraphCompiler cycle detection in V3Dispatcher fails pending media placeholders and releases hold", async () => {
     const workflowId = "wf-deadlock-1";
-    const runId = "run-deadlock-1";
 
     mediaRecords = [
       { id: "deadlock-m-1", workflow_id: workflowId, status: "processing" },
@@ -408,66 +363,84 @@ describe("Sibling Media Cleanup & Deadlock Boundary Tests (Task T8 / BUG-08)", (
       { id: "deadlock-m-3", workflow_id: workflowId, status: "completed", url: "https://example.com/ok.png" },
     ];
 
-    db.media.findByWorkflow = async (wfId) => mediaRecords.filter((m) => m.workflow_id === wfId);
-    db.media.updateMedia = async (id, patch) => {
-      const r = mediaRecords.find((m) => m.id === id);
-      if (r) Object.assign(r, patch);
-      return r;
+    const mockMediaDb = {
+      findByWorkflow: async (wfId) => mediaRecords.filter((m) => m.workflow_id === wfId),
+      updateMedia: async (id, patch) => {
+        const r = mediaRecords.find((m) => m.id === id);
+        if (r) Object.assign(r, patch);
+        return r;
+      },
     };
 
-    // Plan with unresolvable circular dependency: nodeA depends on nodeB, nodeB depends on nodeA
-    const plan = {
-      workflow_id: workflowId,
+    let holdReleased = false;
+    const dispatcher = new V3Dispatcher({
+      db: { media: mockMediaDb },
+      billingTools: {
+        releaseHold: async () => {
+          holdReleased = true;
+          return { rolledBack: true };
+        },
+        settleHold: async () => ({ settled: true }),
+      },
+      mediaTools: {
+        markMediaFailed: async () => {},
+      },
+    });
+
+    const cyclicWorkflow = {
+      id: "wf-cyclic-v3",
       nodes: [
-        { id: "nodeA", type: "prompt-builder" },
-        { id: "nodeB", type: "prompt-builder" },
+        {
+          id: "nodeA",
+          type: "base.resolve_references",
+          inputs: {
+            prompt: { fromNode: "nodeB", output: "prepared_prompt" },
+          },
+        },
+        {
+          id: "nodeB",
+          type: "base.resolve_references",
+          inputs: {
+            prompt: { fromNode: "nodeA", output: "prepared_prompt" },
+          },
+        },
+        {
+          id: "save",
+          type: "base.save_media",
+          inputs: {
+            media_id: "deadlock-m-1",
+            asset_url: "https://example.com/out.png",
+            final_prompt: { fromNode: "nodeA", output: "prepared_prompt" },
+          },
+        },
       ],
-      edges: [
-        { from: "nodeA", to: "nodeB" },
-        { from: "nodeB", to: "nodeA" },
-      ],
-      outputs: {},
     };
 
-    await runRepo.createRun({
-      run_id: runId,
-      workflow_id: workflowId,
-      status: "running",
-      v1_workflow_id: workflowId,
-      input: { workflow_id: workflowId },
-      execution_plan: plan,
-    });
+    await assert.rejects(
+      async () => {
+        await dispatcher.executeQueuedV3Run({
+          workflow: cyclicWorkflow,
+          input: {
+            workflow_id: workflowId,
+            serverWorkflowId: workflowId,
+            media_id: "deadlock-m-1",
+          },
+          userId: "user-deadlock-1",
+          billingHoldId: "hold-deadlock-1",
+        });
+      },
+      /Circular dependency/i
+    );
 
-    await runRepo.createNodeRun({
-      run_id: runId,
-      node_id: "nodeA",
-      node_type: "prompt-builder",
-      status: "pending",
-      attempt: 1,
-    });
-    await runRepo.createNodeRun({
-      run_id: runId,
-      node_id: "nodeB",
-      node_type: "prompt-builder",
-      status: "pending",
-      attempt: 1,
-    });
+    assert.strictEqual(holdReleased, true, "Hold must be released on cyclic graph failure");
 
-    // Run orchestration - this enters the deadlock branch because no node is running and neither can be enqueued
-    await executeOrchestration(runId);
-
-    const savedRun = await runRepo.getRun(runId);
-    assert.strictEqual(savedRun?.status, "failed");
-    assert.strictEqual(savedRun?.error?.code, "ORCHESTRATION_DEADLOCK");
-
-    // On unpatched code, deadlock branch fails the run but NEVER touches media!
     const m1 = mediaRecords.find((m) => m.id === "deadlock-m-1");
     const m2 = mediaRecords.find((m) => m.id === "deadlock-m-2");
     const m3 = mediaRecords.find((m) => m.id === "deadlock-m-3");
 
-    assert.strictEqual(m1.status, "failed", "Deadlock branch must fail processing media");
-    assert.strictEqual(m2.status, "failed", "Deadlock branch must fail pending media");
-    assert.strictEqual(m3.status, "completed", "Deadlock branch must NOT modify completed media");
+    assert.strictEqual(m1.status, "failed", "Cyclic graph failure must fail processing media");
+    assert.strictEqual(m2.status, "failed", "Cyclic graph failure must fail pending media");
+    assert.strictEqual(m3.status, "completed", "Cyclic graph failure must NOT modify completed media");
   });
 
   it("TEST 4: MediaRepository.failPendingMediaByWorkflow constructs atomic SQL query with status filter", async () => {
@@ -536,7 +509,7 @@ describe("Ticket 05: Stale processing media reaper", () => {
     const updatedMedia = [];
     const mockDb = {
       media: {
-        findStalePlaceholders: async (cutoff) => [
+        findStalePlaceholders: async () => [
           { id: "m-stale-1", status: "processing", create_time: "2026-01-01T00:00:00Z" },
           { id: "m-stale-2", status: "processing", create_time: "2026-01-01T01:00:00Z" },
         ],

@@ -1,6 +1,5 @@
 import { attachCharacterSheetResult } from "#characters/tools";
 import { persistExternalMedia, getMediaRepository } from "#media/tools";
-import { envConfig } from "#shared";
 import { GenerationValidationError } from "../../../errors.js";
 import { db as defaultDb } from "../../../db/dbMap.js";
 
@@ -104,34 +103,12 @@ export const SaveCharacterSheetNode = {
       };
     }
 
-    let characterResult = null;
-    try {
-      characterResult = await attachFn({
-        characterId: inputs.character_id,
-        mediaId: inputs.media_id,
-        sheetUrl: inputs.sheet_url,
-        userId: ctx.userId || null,
-      });
-    } catch (attachErr) {
-      if (envConfig.isTest) {
-        const charTargetId = inputs.workflow_id || inputs.character_id;
-        const charRepo = ctx.db?.characters || defaultDb?.characters;
-        if (typeof charRepo?.updateCharacter === "function") {
-          await charRepo.updateCharacter(charTargetId, {
-            primary_media_id: inputs.media_id,
-            sheet_url: inputs.sheet_url,
-            ...(inputs.description ? { description: inputs.description } : {}),
-          });
-        }
-        characterResult = {
-          id: charTargetId,
-          primary_media_id: inputs.media_id,
-          sheet_url: inputs.sheet_url,
-        };
-      } else {
-        throw attachErr;
-      }
-    }
+    const characterResult = await attachFn({
+      characterId: inputs.character_id,
+      mediaId: inputs.media_id,
+      sheetUrl: inputs.sheet_url,
+      userId: ctx.userId || null,
+    });
 
     return {
       saved_character_sheet: {

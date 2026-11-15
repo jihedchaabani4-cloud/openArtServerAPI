@@ -1,4 +1,7 @@
 import { getGenerationServices } from "../services/serviceAccessor.js";
+import { WorkflowLifecycleService } from "../services/WorkflowService.js";
+import { db } from "../db/dbMap.js";
+import { promptService } from "#models/tools";
 import { createLogger } from "#shared";
 
 const controllerLogger = createLogger("controller");
@@ -214,3 +217,56 @@ export const deleteMedia = async (req, res) => {
         return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
     }
 };
+
+// ── POST /api/prompt/optimize ─────────────────────────────────────────────────
+export const optimizePrompt = async (req, res) => {
+    const { prompt, mode = "image" } = req.body || {};
+    if (!prompt?.trim()) {
+        return res.status(400).json({ ok: false, message: "prompt is required" });
+    }
+    try {
+        const result = await promptService.optimizePrompt(prompt.trim(), {
+            mode,
+            userId: req.user?.id,
+        });
+        return res.json({ ok: true, ...result });
+    } catch (err) {
+        controllerLogger.error({ err }, `optimizePrompt failed: ${err.message}`);
+        return res.status(500).json({ ok: false, message: "Failed to optimize prompt" });
+    }
+};
+
+// ── GET /api/v2/workflows/health ──────────────────────────────────────────────
+export const getWorkflowHealth = (req, res) => {
+    return res.json({ engine: "v3", status: "ok" });
+};
+
+// ── POST /api/v2/workflows/run ────────────────────────────────────────────────
+export const runWorkflowDisabled = (req, res) => {
+    return res.status(404).json({
+        code: "ENDPOINT_DISABLED",
+        message: "POST /api/v2/workflows/run is disabled. Use /api/images/generated or /api/video/generated.",
+    });
+};
+
+// ── GET /api/v2/workflows/runs/:run_id ────────────────────────────────────────
+export const getWorkflowRunById = async (req, res) => {
+    try {
+        const runId = req.params.run_id;
+        const { workflowService } = getGenerationServices();
+        const { run } = workflowService
+            ? await workflowService.getWorkflowRun({ runId, userId: req.user?.id })
+            : await WorkflowLifecycleService.getWorkflowRun({ runId, userId: req.user?.id });
+        return res.json({ run });
+    } catch (err) {
+        if (err.statusCode === 404) {
+            return res.status(404).json({ code: "RUN_NOT_FOUND", message: "Run not found" });
+        }
+        return res.status(err.statusCode || 500).json({
+            ok: false,
+            code: err.code || "INTERNAL_ERROR",
+            message: err.message,
+        });
+    }
+};
+

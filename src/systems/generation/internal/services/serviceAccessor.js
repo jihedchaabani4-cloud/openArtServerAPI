@@ -12,6 +12,7 @@ const _services = {
     elementService: null,
     trashService: null,
     useCaseService: null,
+    v3Dispatcher: null,
     db: null,
 };
 
@@ -23,7 +24,13 @@ export function setGenerationServices(services = {}) {
     if (services.characterService) _services.characterService = services.characterService;
     if (services.elementService) _services.elementService = services.elementService;
     if (services.trashService) _services.trashService = services.trashService;
-    if (services.useCaseService) _services.useCaseService = services.useCaseService;
+    if (services.v3Dispatcher) {
+        _services.v3Dispatcher = services.v3Dispatcher;
+        _services.useCaseService = services.v3Dispatcher;
+    } else if (services.useCaseService) {
+        _services.useCaseService = services.useCaseService;
+        _services.v3Dispatcher = services.useCaseService;
+    }
     if (services.db) _services.db = services.db;
 }
 
@@ -31,8 +38,12 @@ export function getGenerationServices() {
     return _services;
 }
 
+export function getV3Dispatcher() {
+    return _services.v3Dispatcher || _services.useCaseService;
+}
+
 export function getUseCaseService() {
-    return _services.useCaseService;
+    return _services.v3Dispatcher || _services.useCaseService;
 }
 
 export function getDefaultDb() {

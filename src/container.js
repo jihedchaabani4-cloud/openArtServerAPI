@@ -27,6 +27,7 @@ import {
     PromptService,
     promptService,
     UseCaseService,
+    V3Dispatcher,
     jobQueueService,
     configureGeneration,
     configureDefaultGateways,
@@ -217,16 +218,13 @@ export const workflowStorageGateway = new WorkflowStorageGateway({
     lifecycleService: _lifecycleService,
 });
 
-const _defaultGatewaysFactory = () => ({
-    billing: workflowBillingGateway,
-    storage: workflowStorageGateway,
-    events: workflowEventRecorder,
-});
-configureDefaultGateways(_defaultGatewaysFactory);
-
-// ─── UseCase & Job Queue Services ─────────────────────────────────────────────
+// ─── UseCase / V3 Engine & Job Queue Services ──────────────────────────────────
 export { jobQueueService };
-export const useCaseService = new UseCaseService({ walletService, pricingService, jobQueueService, db });
+export const v3Dispatcher = new V3Dispatcher({
+    jobQueueService,
+    db,
+});
+export const useCaseService = v3Dispatcher;
 
 // ─── Domain & Platform Services ──────────────────────────────────────────────
 export const mediaUploadService = new MediaUploadService({ storageService });
@@ -304,6 +302,7 @@ configureGeneration({
     characterService,
     elementService,
     trashService,
+    v3Dispatcher,
     useCaseService,
     db,
 });

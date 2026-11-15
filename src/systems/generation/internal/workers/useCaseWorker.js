@@ -3,21 +3,16 @@ import { EventEmitter } from "node:events";
 import { Worker } from "bullmq";
 import { workerRedisConnection, wrapWorkerJob, createLogger, LogEvents, envConfig } from "#shared";
 import { USECASE_QUEUE_NAME } from "../services/jobQueueService.js";
-import { getUseCaseService, getDefaultDb } from "../services/serviceAccessor.js";
-import { executeNodeJob } from "../v2/runner/nodeExecutor.js";
-import { executeOrchestration } from "../v2/runner/workflowRunner.js";
-import { bootstrapV2 } from "../v2/bootstrap.js";
+import { getUseCaseService, getV3Dispatcher, getDefaultDb } from "../services/serviceAccessor.js";
 import { failWorkflowPendingMedia } from "#media/tools";
 
 const workerLogger = createLogger("worker");
 
-// Initialize V2 Engine, Gateways, and Register all UseCases in Worker process
 if (!envConfig.isTest) {
-  bootstrapV2();
   workerLogger.info({
     event: "worker.start",
     queue: USECASE_QUEUE_NAME,
-  }, `Specialized UseCase Worker listening on Redis queue: "${USECASE_QUEUE_NAME}"`);
+  }, `Dedicated Generation & Workflow Worker listening on Redis queue: "${USECASE_QUEUE_NAME}"`);
 }
 
 /**
@@ -28,34 +23,16 @@ export const useCaseWorker = envConfig.isTest
   : new Worker(
       USECASE_QUEUE_NAME,
       wrapWorkerJob("usecase-worker", async (job) => {
-        const useCaseService = getUseCaseService();
+        const dispatcher = getV3Dispatcher() || getUseCaseService();
+        const { useCaseId, input, userId, billingHoldId } = job.data;
+        workerLogger.debug({ useCaseId, userId }, `Processing V3 workflow/useCase "${useCaseId}" for user ${userId}`);
 
-        // ── Case 1: Full UseCase Execution Job ──────────────────────────────────
-        if (job.name === "run-usecase") {
-          const { useCaseId, input, userId, billingHoldId } = job.data;
-          workerLogger.debug({ useCaseId, userId }, `Processing UseCase "${useCaseId}" for user ${userId}`);
-
-          await useCaseService.executeQueuedUseCase({
-            useCaseId,
-            input,
-            userId,
-            billingHoldId,
-          });
-          return;
-        }
-
-        const { runId, nodeId } = job.data;
-
-        // ── Case 2: Individual Node Execution Job ───────────────────────────────
-        if (nodeId) {
-          workerLogger.debug({ runId, nodeId }, `Executing node "${nodeId}" for run ${runId}`);
-          await executeNodeJob(runId, nodeId);
-          await executeOrchestration(runId);
-        } else {
-          // ── Case 3: Workflow Orchestration Job ─────────────────────────────────
-          workerLogger.debug({ runId }, `Orchestrating run ${runId}`);
-          await executeOrchestration(runId);
-        }
+        await dispatcher.executeQueuedUseCase({
+          useCaseId,
+          input,
+          userId,
+          billingHoldId,
+        });
       }),
       {
         connection: workerRedisConnection,

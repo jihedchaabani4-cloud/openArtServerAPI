@@ -7,10 +7,10 @@ import {
     createLogger,
     LogErrorCodes,
     waitForRateLimitRedis,
+    envConfig,
 } from "#shared";
 import { requireAuth, rateLimit } from "#identity/tools";
 import { reconcileExpiredHolds } from "#billing/tools";
-import { bootstrapV2 } from "#generation/tools";
 import apiRouter from "./src/api/routes.js";
 import healthRouter from "./src/api/probes/health.js";
 import readyRouter from "./src/api/probes/ready.js";
@@ -18,23 +18,21 @@ import { walletService, mediaWorkflowLifecycleService } from "./src/container.js
 
 const systemLogger = createLogger("system");
 
-bootstrapV2();
-
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = envConfig.port;
 
 // ── Proxy Trust Configuration ────────────────────────────────
 // Configurable via TRUST_PROXY env var; defaults safe to false (direct connection).
 // When behind a reverse proxy (e.g. AWS ALB, Nginx, Cloudflare), set TRUST_PROXY=1.
-const isProd = process.env.NODE_ENV === "production";
-const isStagingOrProd = isProd || process.env.NODE_ENV === "staging";
+const isProd = envConfig.isProduction;
+const isStagingOrProd = isProd || envConfig.isStaging;
 
-if (isProd && (process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true)) {
+if (isProd && envConfig.rawDevAuthBypass) {
     throw new Error("Fatal: DEV_AUTH_BYPASS cannot be enabled in production mode (NODE_ENV=production).");
 }
 
-if (process.env.TRUST_PROXY !== undefined && process.env.TRUST_PROXY !== "") {
-    const rawTrust = process.env.TRUST_PROXY;
+if (envConfig.trustProxy !== undefined && envConfig.trustProxy !== "") {
+    const rawTrust = envConfig.trustProxy;
     if (rawTrust === "true") app.set("trust proxy", true);
     else if (rawTrust === "false") app.set("trust proxy", false);
     else if (!isNaN(Number(rawTrust))) app.set("trust proxy", Number(rawTrust));
@@ -58,7 +56,7 @@ if (isStagingOrProd) {
 
 // ── Middleware ──────────────────────────────────────────────
 const allowedOrigins = [
-    process.env.FRONTEND_URL ? process.env.FRONTEND_URL.replace(/\/$/, '') : null,
+    envConfig.frontendUrl ? envConfig.frontendUrl.replace(/\/$/, '') : null,
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:3001", // In case Next.js moved to 3001
@@ -235,15 +233,15 @@ app.use((err, req, res, next) => {
 });
 
 // ── Start server ─────────────────────────────────────────────
-if (process.env.NODE_ENV !== "test") {
-    const isRedisLimiter = (process.env.RATE_LIMIT_STORE || "").trim().toLowerCase() === "redis";
+if (!envConfig.isTest) {
+    const isRedisLimiter = (envConfig.rateLimitStore || "").trim().toLowerCase() === "redis";
     if (isRedisLimiter) {
         systemLogger.info({ event: "boot.redis_wait" }, "Waiting for rate-limit Redis connection to become ready...");
         await waitForRateLimitRedis(5000);
     }
 
     app.listen(PORT, () => {
-    const appName = process.env.APP_NAME || "Labveil";
+    const appName = envConfig.appName;
     systemLogger.info({ port: PORT, appName }, `${appName} API running on http://localhost:${PORT}`);
 
     // ── Start Cron Jobs ──────────────────────────────────────────

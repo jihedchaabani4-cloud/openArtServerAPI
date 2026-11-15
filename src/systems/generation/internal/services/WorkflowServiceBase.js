@@ -23,10 +23,9 @@ import { randomUUID } from "node:crypto";
 import { crudOperationLog, CrudServiceError, toAssetDto, AppError, createLogger } from "#shared";
 import { WorkflowAuthorizationService } from "./WorkflowAuthorizationService.js";
 import { WorkflowMediaService } from "./WorkflowMediaService.js";
+import { RunRepository } from "../db/RunRepository.js";
+import { GenerationValidationError, GenerationNotFoundError } from "../errors.js";
 import { assertOwns } from "#identity/tools";
-
-
-
 
 const workflowServiceLogger = createLogger("workflow");
 
@@ -610,6 +609,34 @@ export class WorkflowService {
         }
 
         return { workflow: result.workflow, displayName: targetName };
+    }
+
+    /**
+     * Retrieves a workflow run and its node runs, enforcing optional user ownership.
+     *
+     * @param {Object} params
+     * @param {string} params.runId
+     * @param {string|null} [params.userId=null]
+     * @returns {Promise<{ run: Object, nodeRuns: Array }>}
+     */
+    static async getWorkflowRun({ runId, userId = null } = {}) {
+        if (!runId) {
+            throw new GenerationValidationError("runId is required");
+        }
+        const runRepo = new RunRepository();
+        const run = await runRepo.getRun(runId);
+        if (!run) {
+            throw new GenerationNotFoundError(`Run "${runId}" not found`);
+        }
+        if (run.user_id && userId && run.user_id !== userId) {
+            throw new GenerationNotFoundError(`Run "${runId}" not found or unauthorized`);
+        }
+        const nodeRuns = await runRepo.listNodeRuns(runId);
+        return { run, nodeRuns };
+    }
+
+    async getWorkflowRun(params = {}) {
+        return WorkflowService.getWorkflowRun(params);
     }
 }
 

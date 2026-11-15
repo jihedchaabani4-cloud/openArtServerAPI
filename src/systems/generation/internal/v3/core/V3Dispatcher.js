@@ -7,11 +7,12 @@ import { jobQueueService as defaultJobQueueService } from "../../services/jobQue
 import { GraphCompiler } from "./GraphCompiler.js";
 import { WorkflowExecutor } from "./WorkflowExecutor.js";
 import { createDefaultV3NodeRegistry } from "../nodes/index.js";
-import { getV3Workflow, resolveV3WorkflowId, V3_WORKFLOW_ALIASES } from "../workflows/index.js";
+import { getV3Workflow, resolveV3WorkflowId, getWorkflowContract, V3_WORKFLOW_ALIASES } from "../workflows/index.js";
 import {
   GenerationError,
   GenerationValidationError,
   GenerationQueueDispatchError,
+  sanitizeClientError,
 } from "../../errors.js";
 import { db as defaultDb } from "../../db/dbMap.js";
 
@@ -289,10 +290,35 @@ export class V3Dispatcher {
     const workflow = this.resolveWorkflow(
       workflowInput || useCaseId || (workflowId && getV3Workflow(workflowId) ? workflowId : null)
     );
+    const contract = getWorkflowContract(workflow) || {
+      id: workflow.id,
+      aliases: workflow.aliases || [],
+      mediaType: workflow.mediaType || (workflow.category === "video" ? "video" : "image"),
+      mediaRole: workflow.mediaRole || (workflow.category === "character" ? "sheet" : "output"),
+      saveType:
+        workflow.saveType ||
+        (workflow.category === "character"
+          ? "character_sheet"
+          : workflow.category === "video"
+            ? "video_output"
+            : "workflow_output"),
+      requiredInputs: Array.isArray(workflow.requiredInputs) ? workflow.requiredInputs : [],
+    };
     const mergedInput = mergeServerContext(input, serverContext);
     const effectiveWorkflowId = workflowId || mergedInput.workflow_id || mergedInput.serverWorkflowId || null;
     const parentDbWorkflowId =
       effectiveWorkflowId && !getV3Workflow(effectiveWorkflowId) ? effectiveWorkflowId : null;
+
+    // Validate workflow contract requiredInputs before launching
+    for (const reqField of contract.requiredInputs || []) {
+      const val = mergedInput[reqField];
+      if (val === undefined || val === null || (typeof val === "string" && !val.trim())) {
+        throw new GenerationValidationError(
+          `Workflow "${workflow.id}" requires input "${reqField}" before launch`,
+          { field: reqField }
+        );
+      }
+    }
 
     // Step 1: Verify ownership of any input references
     await this.verifyInputOwnership(mergedInput, userId);
@@ -314,8 +340,12 @@ export class V3Dispatcher {
     try {
       compiledPlan = this.compiler.compile(workflow, {
         ...mergedInput,
-        media_id: mergedInput.media_id || "pending-placeholder",
-        character_id: mergedInput.character_id || "pending-character",
+        media_id:
+          mergedInput.media_id ||
+          mergedInput.mediaId ||
+          (Array.isArray(mergedInput.serverMediaIds) && mergedInput.serverMediaIds.length > 0
+            ? mergedInput.serverMediaIds[0]
+            : "pending-placeholder"),
       });
       totalCredits = compiledPlan.totalEstimatedCredits;
     } catch (compileErr) {
@@ -352,17 +382,29 @@ export class V3Dispatcher {
 
     const billingHoldId = totalCredits > 0 ? (reservation?.billingHoldId || reservation?.referenceId || referenceId) : null;
 
-    // Step 4: Create pending media placeholder if not already provided in input
-    let pendingMediaId = mergedInput.media_id || (Array.isArray(mergedInput.serverMediaIds) && mergedInput.serverMediaIds.length > 0 ? mergedInput.serverMediaIds[0] : null);
+    // Step 4: Unified media_id preparation using workflow contract (mediaType, mediaRole, saveType)
+    // If caller already supplied media_id (or serverMediaIds), reuse it directly without creating a new row.
+    // Otherwise, create a new "processing" media row (linked to project_id if present) and store its media_id.
+    let pendingMediaId =
+      mergedInput.media_id ||
+      mergedInput.mediaId ||
+      (Array.isArray(mergedInput.serverMediaIds) && mergedInput.serverMediaIds.length > 0
+        ? mergedInput.serverMediaIds[0]
+        : null);
     try {
-      if (!pendingMediaId && (!Array.isArray(mergedInput.serverMediaIds) || mergedInput.serverMediaIds.length === 0)) {
+      if (!pendingMediaId) {
+        const resolvedProjectId =
+          projectId || mergedInput.project_id || mergedInput.projectId || mergedInput.serverProjectId || null;
         const placeholder = await this.mediaTools.createPendingMedia({
           userId,
           workflowId: parentDbWorkflowId,
-          projectId: projectId || mergedInput.project_id || null,
+          projectId: resolvedProjectId,
           stepId: workflow.id,
-          width: Number(mergedInput.width || 1024),
-          height: Number(mergedInput.height || 1024),
+          role: contract.mediaRole,
+          saveType: contract.saveType,
+          mediaType: contract.mediaType,
+          width: Number(mergedInput.width || (contract.mediaRole === "sheet" ? 1344 : 1024)),
+          height: Number(mergedInput.height || (contract.mediaRole === "sheet" ? 768 : 1024)),
         });
         pendingMediaId = placeholder?.mediaId || placeholder?.id;
       }
@@ -601,6 +643,7 @@ export class V3Dispatcher {
       });
     }
 
+    const contract = getWorkflowContract(workflow) || {};
     const heartbeat = this.startHoldHeartbeat(effectiveHoldId, {
       intervalMs: heartbeatIntervalMs,
       extensionSeconds: 300,
@@ -613,6 +656,10 @@ export class V3Dispatcher {
         context: {
           db: this.db,
           mediaRepository: this.db?.media,
+          workflowMediaRepository: this.db?.workflowMedia,
+          workflowId: serverWorkflowId || input?.workflow_id || null,
+          mediaRole: contract.mediaRole || "output",
+          saveType: contract.saveType || "default",
           ...nodeContext,
           runId: effectiveRunId,
           userId,
@@ -654,7 +701,11 @@ export class V3Dispatcher {
         userId,
         nodeId: err?.nodeId,
       });
-      err.errorReport = report;
+      const sanitized = sanitizeClientError(err);
+      err.errorReport = {
+        ...report,
+        sanitized,
+      };
 
       v3DispatcherLogger.error(
         {
@@ -662,6 +713,8 @@ export class V3Dispatcher {
           workflowId: workflow?.id,
           runId: effectiveRunId,
           billingHoldId: effectiveHoldId,
+          errorCode: sanitized.code,
+          errorCategory: sanitized.category,
           err: err.message,
         },
         `[V3Dispatcher] Execution failed for "${workflow?.id}": ${err.message}`
@@ -675,8 +728,8 @@ export class V3Dispatcher {
               workflowId: workflow?.id,
               runId: effectiveRunId,
               failedMessage: report.system?.rawMessage || err.message,
-              errorCode: report.user?.code || err.code || "V3_EXECUTION_FAILED",
-              errorCategory: report.user?.category || "SERVER_FAULT",
+              errorCode: sanitized.code || report.user?.code || err.code || "V3_EXECUTION_FAILED",
+              errorCategory: sanitized.category || report.user?.category || "SERVER_FAULT",
             },
           })
           .catch((rbErr) => {
@@ -688,7 +741,9 @@ export class V3Dispatcher {
       }
 
       const targetWorkflowId = input?.serverWorkflowId || input?.workflow_id || null;
-      const failMsg = report.user?.message || err.message || "Workflow execution failed";
+      const failMsg = sanitized.userMessage || report.user?.message || "Workflow execution failed";
+      const failCode = sanitized.code || err.code || report.user?.code || "V3_EXECUTION_FAILED";
+
       if (targetWorkflowId && this.db?.media) {
         if (typeof this.db.media.findByWorkflow === "function" && typeof this.db.media.updateMedia === "function") {
           const rows = await this.db.media.findByWorkflow(targetWorkflowId).catch(() => []);
@@ -720,7 +775,7 @@ export class V3Dispatcher {
         await this.mediaTools
           .markMediaFailed({
             mediaId: mId,
-            errorCode: report.user?.code || err.code || "V3_EXECUTION_FAILED",
+            errorCode: failCode,
             errorMessage: failMsg,
           })
           .catch(() => {});

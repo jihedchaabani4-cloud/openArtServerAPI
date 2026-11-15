@@ -7,7 +7,6 @@ import {
   ImageGenerateNode,
   VideoGenerateNode,
   SaveMediaNode,
-  SaveCharacterSheetNode,
   createDefaultV3NodeRegistry,
   imageGenerationV3,
   GenerationService,
@@ -105,31 +104,29 @@ describe("F2 — Server-Side Workflow Context & Failure Handling Boundary Tests 
     );
   });
 
-  it("TEST 2: SaveCharacterSheetNode requires explicit character_id and media_id", async () => {
+  it("TEST 2: SaveMediaNode requires explicit media_id and asset_url", async () => {
     await assert.rejects(
       async () => {
-        await SaveCharacterSheetNode.execute(
+        await SaveMediaNode.execute(
           {
-            media_id: "media-1",
-            sheet_url: "https://cdn.example.com/char.png",
-          },
-          { db }
-        );
-      },
-      /character_id is required/i
-    );
-
-    await assert.rejects(
-      async () => {
-        await SaveCharacterSheetNode.execute(
-          {
-            character_id: "char-1",
-            sheet_url: "https://cdn.example.com/char.png",
+            asset_url: "https://cdn.example.com/char.png",
           },
           { db }
         );
       },
       /media_id is required/i
+    );
+
+    await assert.rejects(
+      async () => {
+        await SaveMediaNode.execute(
+          {
+            media_id: "media-1",
+          },
+          { db }
+        );
+      },
+      /asset_url is required/i
     );
   });
 

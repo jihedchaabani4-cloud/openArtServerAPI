@@ -1001,9 +1001,14 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
       },
     };
 
+    let prelinkedCharacterMediaId = null;
     db.characters = {
       upsert: async () => ({ id: "char-wf-e2e-999" }),
-      updateCharacter: async () => {},
+      updateCharacter: async (_id, patch) => {
+        if (patch?.primary_media_id) {
+          prelinkedCharacterMediaId = patch.primary_media_id;
+        }
+      },
       findByCharacterId: async (id) => ({ id, user_id: "11111111-1111-4111-8111-111111111111" }),
     };
 
@@ -1029,7 +1034,7 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
     useCaseService.jobQueueService = mockQueue;
     useCaseService.walletService = mockWallet;
 
-    // 1. CharacterGenerationService creates placeholder & enqueues
+    // 1. CharacterGenerationService creates placeholder, links it to character upfront, & enqueues
     const charGenService = new CharacterGenerationService({
       db,
       useCaseService,
@@ -1044,11 +1049,16 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
       name: "Cyber Samurai",
     });
 
+    assert.strictEqual(
+      prelinkedCharacterMediaId,
+      "media-e2e-char-1",
+      "CharacterGenerationService must link placeholder media_id to character upfront"
+    );
     assert.ok(enqueuedJobData, "Job must have been enqueued");
     assert.strictEqual(enqueuedJobData.input.media_id, "media-e2e-char-1");
     assert.deepStrictEqual(enqueuedJobData.input.serverMediaIds, ["media-e2e-char-1"]);
 
-    // 2. Worker executes queued job end-to-end with mocked V3 node context
+    // 2. Worker executes queued job end-to-end with mocked V3 node context (purely media-centric save_media)
     const result = await useCaseService.executeQueuedUseCase({
       useCaseId: enqueuedJobData.useCaseId,
       input: enqueuedJobData.input,
@@ -1057,19 +1067,17 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
       nodeContext: {
         executeLLM: async ({ prompt }) => ({
           content: prompt,
-          json: { is_safe: true, sanitized_prompt: prompt, prompt, description: prompt },
+          json: {
+            is_safe: true,
+            sanitized_prompt: prompt,
+            prompt,
+            description: prompt,
+            character_description: prompt,
+          },
         }),
         executeGeneration: async () => ({
           assets: [{ url: "https://storage.openart.ai/character-sheets/turnaround-char-999.png", width: 1344, height: 768 }],
         }),
-        cropCharacterSheet: async () => ({
-          panelUrls: [
-            "https://storage.openart.ai/character-sheets/front.png",
-            "https://storage.openart.ai/character-sheets/side.png",
-            "https://storage.openart.ai/character-sheets/back.png",
-          ],
-        }),
-        attachCharacterSheetResult: async () => ({ id: "char-wf-e2e-999", status: "completed" }),
       },
     });
 

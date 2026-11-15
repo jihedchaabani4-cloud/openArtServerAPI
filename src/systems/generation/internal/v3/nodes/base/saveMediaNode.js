@@ -1,12 +1,15 @@
 import { persistExternalMedia, getMediaRepository } from "#media/tools";
-import { GenerationError, GenerationValidationError } from "../../../errors.js";
+import {
+  GenerationValidationError,
+  GenerationHoldExpiredError,
+} from "../../../errors.js";
 import { db as defaultDb } from "../../../db/dbMap.js";
 
 /**
  * SaveMediaNode (`base.save_media`)
  *
  * Terminal persistence node (`OUTPUT_NODE: true`).
- * Persists completed asset URL and metadata exclusively via `#media/tools`.
+ * Persists completed asset URL, mediaRole, save_type, and generation_config exclusively via `#media/tools`.
  */
 export const SaveMediaNode = {
   type: "base.save_media",
@@ -20,7 +23,9 @@ export const SaveMediaNode = {
     },
     optional: {
       final_prompt: { type: "STRING" },
+      character_description: { type: "STRING" },
       metadata: { type: "JSON" },
+      media_role: { type: "STRING", default: "output" },
       save_type: { type: "STRING", default: "default" },
     },
   },
@@ -39,10 +44,24 @@ export const SaveMediaNode = {
       throw new GenerationValidationError("asset_url is required for base.save_media", { field: "asset_url" });
     }
 
+    const mediaRole = inputs.media_role || ctx.mediaRole || "output";
+    const saveType = inputs.save_type || ctx.saveType || "default";
+
+    // Check if context or repo indicates the hold has already expired or media is already terminal "failed"
+    if (ctx.holdExpired === true) {
+      throw new GenerationHoldExpiredError(
+        `Cannot complete media "${inputs.media_id}" because its credit hold has expired`,
+        { mediaId: inputs.media_id }
+      );
+    }
+
     if (typeof ctx.markMediaStatus === "function") {
       const saved = await ctx.markMediaStatus(inputs.media_id, "completed", {
         url: inputs.asset_url,
         prompt: inputs.final_prompt,
+        role: mediaRole,
+        save_type: saveType,
+        ...(inputs.character_description ? { character_description: inputs.character_description } : {}),
         metadata: inputs.metadata ?? {},
       });
       return { saved_media: saved };
@@ -53,9 +72,12 @@ export const SaveMediaNode = {
         mediaId: inputs.media_id,
         source: inputs.asset_url,
         userId: ctx.userId || "system",
-        saveType: inputs.save_type || "default",
+        saveType,
+        role: mediaRole,
         metadata: {
           prompt: inputs.final_prompt,
+          role: mediaRole,
+          ...(inputs.character_description ? { character_description: inputs.character_description } : {}),
           ...(inputs.metadata || {}),
         },
       });
@@ -67,9 +89,11 @@ export const SaveMediaNode = {
         mediaId: inputs.media_id,
         source: inputs.asset_url,
         userId: ctx.userId || "system",
-        saveType: inputs.save_type || "default",
+        saveType,
         metadata: {
           prompt: inputs.final_prompt,
+          role: mediaRole,
+          ...(inputs.character_description ? { character_description: inputs.character_description } : {}),
           ...(inputs.metadata || {}),
         },
       });
@@ -94,13 +118,11 @@ export const SaveMediaNode = {
       existingMedia = await repo.findById(inputs.media_id).catch(() => null);
     }
 
-    if (existingMedia?.status === "failed") {
-      throw new GenerationError({
-        code: "HOLD_EXPIRED",
-        message: `Cannot complete media "${inputs.media_id}" because its placeholder is already in terminal "failed" status (hold expired or reaped)`,
-        statusCode: 409,
-        isInternal: false,
-      });
+    if (existingMedia?.status === "failed" || existingMedia?.hold_expired === true) {
+      throw new GenerationHoldExpiredError(
+        `Cannot complete media "${inputs.media_id}" because its placeholder is already in terminal "failed" status (hold expired or reaped)`,
+        { mediaId: inputs.media_id }
+      );
     }
 
     let mergedConfig = undefined;
@@ -111,6 +133,9 @@ export const SaveMediaNode = {
       } else {
         delete baseConfig.prompt_optimized;
       }
+      if (inputs.character_description) {
+        baseConfig.character_description = inputs.character_description;
+      }
       if (meta.provider) {
         baseConfig.provider = meta.provider;
       }
@@ -118,6 +143,13 @@ export const SaveMediaNode = {
         baseConfig.model = meta.model;
       }
       mergedConfig = baseConfig;
+    } else if (inputs.character_description || meta.provider || meta.model) {
+      mergedConfig = {
+        ...(inputs.final_prompt ? { prompt_optimized: inputs.final_prompt } : {}),
+        ...(inputs.character_description ? { character_description: inputs.character_description } : {}),
+        ...(meta.provider ? { provider: meta.provider } : {}),
+        ...(meta.model ? { model: meta.model } : {}),
+      };
     }
 
     const updated = await updateFn(inputs.media_id, {
@@ -126,8 +158,20 @@ export const SaveMediaNode = {
       error_message: null,
       ...(meta.width || existingMedia?.width ? { width: meta.width || existingMedia.width } : {}),
       ...(meta.height || existingMedia?.height ? { height: meta.height || existingMedia.height } : {}),
-      ...(mergedConfig ? { generation_config: mergedConfig } : {}),
+      ...(mergedConfig && Object.keys(mergedConfig).length > 0 ? { generation_config: mergedConfig } : {}),
     });
+
+    // If a parent DB workflow ID and workflowMedia repository exist, ensure the canonical mediaRole is linked
+    const workflowMediaRepo = ctx.workflowMediaRepository || ctx.db?.workflowMedia || defaultDb?.workflowMedia;
+    const parentWorkflowId = ctx.workflowId || existingMedia?.workflow_id || null;
+    if (
+      parentWorkflowId &&
+      workflowMediaRepo &&
+      typeof workflowMediaRepo.linkMedia === "function" &&
+      mediaRole
+    ) {
+      await workflowMediaRepo.linkMedia(parentWorkflowId, inputs.media_id, mediaRole, ctx.workflowId || "save_media").catch(() => {});
+    }
 
     return {
       saved_media: {
@@ -135,6 +179,9 @@ export const SaveMediaNode = {
         id: updated?.id || inputs.media_id,
         url: updated?.url || inputs.asset_url,
         prompt: inputs.final_prompt || null,
+        role: mediaRole,
+        save_type: saveType,
+        ...(inputs.character_description ? { character_description: inputs.character_description } : {}),
         status: updated?.status || "completed",
         metadata: meta,
       },

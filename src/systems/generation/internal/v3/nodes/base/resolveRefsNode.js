@@ -2,8 +2,25 @@ import { getCharacterPromptContext } from "#characters/tools";
 import { getElementPromptContext } from "#elements/tools";
 import { getMediaById, getMediaUrls } from "#media/tools";
 import { assertOwns, assertOwnsAny } from "#identity/tools";
+import { GenerationError } from "../../../errors.js";
 
 const INLINE_TAG_REGEX = /<(character|element):([^>\s]+)>/gi;
+
+function toOwnershipGenerationError(err, resourceId = null) {
+  if (err instanceof GenerationError) return err;
+  const genErr = new GenerationError({
+    code: err?.code || "OWNERSHIP_VERIFICATION_FAILED",
+    message: err?.message || `Access denied to referenced resource "${resourceId || ""}"`,
+    userMessage: "You do not have permission to use one or more referenced resources.",
+    status: err?.statusCode || err?.status || 403,
+    statusCode: err?.statusCode || err?.status || 403,
+    category: "USER_FAULT",
+    retryable: false,
+    isInternal: false,
+    context: { resourceId },
+  });
+  return genErr;
+}
 
 /**
  * ResolveRefsNode (`base.resolve_references`)
@@ -110,7 +127,9 @@ export const ResolveRefsNode = {
           try {
             await assertOwnsAnyFn(["media", "workflow"], mId, userId);
           } catch (err) {
-            if (ctx.strictMediaLoad === true) throw err;
+            if (ctx.strictMediaLoad === true || ctx.strictOwnership === true) {
+              throw toOwnershipGenerationError(err, mId);
+            }
             canAccess = false;
           }
         }
@@ -189,7 +208,10 @@ export const ResolveRefsNode = {
           } else {
             await assertOwnsAnyFn(["character", "workflow"], charId, userId);
           }
-        } catch {
+        } catch (err) {
+          if (ctx.strictOwnership === true) {
+            throw toOwnershipGenerationError(err, charId);
+          }
           continue;
         }
       }
@@ -266,7 +288,10 @@ export const ResolveRefsNode = {
           try {
             await assertOwnsAnyFn(["element", "workflow"], eId, userId);
             verifiedElemIds.push(eId);
-          } catch {
+          } catch (err) {
+            if (ctx.strictOwnership === true) {
+              throw toOwnershipGenerationError(err, eId);
+            }
             continue;
           }
         } else {
@@ -334,7 +359,10 @@ export const ResolveRefsNode = {
         if (userId && verifyOwnership === true) {
           try {
             await assertOwnsAnyFn(["media", "workflow", "character", "element"], mId, userId);
-          } catch {
+          } catch (err) {
+            if (ctx.strictOwnership === true) {
+              throw toOwnershipGenerationError(err, mId);
+            }
             continue;
           }
         }

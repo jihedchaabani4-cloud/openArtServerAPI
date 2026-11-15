@@ -76,24 +76,41 @@ function createMockNodeExecutionContext() {
       ],
       metadata: { model, aspect_ratio: params.aspect_ratio || "16:9" },
     }),
-    attachCharacterSheetResult: async ({ characterId, mediaId, sheetUrl }) => ({
-      characterId,
-      primary_media_id: mediaId,
-      sheet_url: sheetUrl,
-    }),
   };
 }
 
 describe("V3 Declarative Workflows & #generation/tools Public Gateway", () => {
-  it("exports all V3 engine classes, registries, and 3 canonical workflows from #generation/tools", () => {
+  it("exports all V3 engine classes, registries, and 3 canonical workflows with explicit contracts from #generation/tools", () => {
     assert.ok(NodeRegistry);
     assert.ok(GraphCompiler);
     assert.ok(WorkflowExecutor);
     assert.ok(V3Dispatcher);
     assert.equal(Object.keys(V3_WORKFLOWS).length, 3);
     assert.equal(getV3Workflow("image-generation-v3"), imageGenerationV3);
+    assert.equal(getV3Workflow("image-generation-v1"), imageGenerationV3);
+    assert.equal(getV3Workflow("imageGeneration"), imageGenerationV3);
     assert.equal(getV3Workflow("video-generation-v3"), videoGenerationV3);
+    assert.equal(getV3Workflow("video-generation-v1"), videoGenerationV3);
+    assert.equal(getV3Workflow("videoGeneration"), videoGenerationV3);
     assert.equal(getV3Workflow("character-sheet-v3"), characterSheetV3);
+    assert.equal(getV3Workflow("character-sheet-v1"), characterSheetV3);
+    assert.equal(getV3Workflow("characterSheet"), characterSheetV3);
+
+    // Explicit workflow contracts
+    assert.equal(imageGenerationV3.mediaType, "image");
+    assert.equal(imageGenerationV3.mediaRole, "output");
+    assert.equal(imageGenerationV3.saveType, "workflow_output");
+    assert.deepEqual(imageGenerationV3.requiredInputs, ["prompt"]);
+
+    assert.equal(videoGenerationV3.mediaType, "video");
+    assert.equal(videoGenerationV3.mediaRole, "output");
+    assert.equal(videoGenerationV3.saveType, "video_output");
+    assert.deepEqual(videoGenerationV3.requiredInputs, ["prompt"]);
+
+    assert.equal(characterSheetV3.mediaType, "image");
+    assert.equal(characterSheetV3.mediaRole, "sheet");
+    assert.equal(characterSheetV3.saveType, "character_sheet");
+    assert.deepEqual(characterSheetV3.requiredInputs, ["prompt"]);
   });
 
   it("compiles and executes imageGenerationV3 end-to-end across 4 sequential nodes", async () => {
@@ -127,6 +144,8 @@ describe("V3 Declarative Workflows & #generation/tools Public Gateway", () => {
       res.terminalOutputs.save_media.saved_media.url,
       "https://cdn.example.com/nanobana_2-out.png"
     );
+    assert.equal(res.terminalOutputs.save_media.saved_media.role, "output");
+    assert.equal(res.terminalOutputs.save_media.saved_media.save_type, "workflow_output");
     assert.equal(res.wavesExecuted, 4);
   });
 
@@ -160,6 +179,8 @@ describe("V3 Declarative Workflows & #generation/tools Public Gateway", () => {
       res.terminalOutputs.save_media.saved_media.url,
       "https://cdn.example.com/ltx_2_3_fast-out.mp4"
     );
+    assert.equal(res.terminalOutputs.save_media.saved_media.role, "output");
+    assert.equal(res.terminalOutputs.save_media.saved_media.save_type, "video_output");
     assert.equal(res.wavesExecuted, 4);
   });
 
@@ -173,7 +194,7 @@ describe("V3 Declarative Workflows & #generation/tools Public Gateway", () => {
         "resolve_refs:base.resolve_references",
         "llm_enrich:base.llm",
         "generate_sheet:base.image_generate",
-        "save_sheet:custom.save_character_sheet",
+        "save_media:base.save_media",
       ]
     );
 
@@ -181,17 +202,18 @@ describe("V3 Declarative Workflows & #generation/tools Public Gateway", () => {
       workflow: characterSheetV3,
       input: {
         prompt: "Cyberpunk samurai warrior",
-        character_id: "char-samurai-1",
         media_id: "media-sheet-1",
       },
       context: createMockNodeExecutionContext(),
     });
 
     assert.equal(res.status, "completed");
-    const saved = res.terminalOutputs.save_sheet.saved_character_sheet;
-    assert.equal(saved.characterId, "char-samurai-1");
+    const saved = res.terminalOutputs.save_media.saved_media;
     assert.equal(saved.mediaId, "media-sheet-1");
-    assert.equal(saved.sheetUrl, "https://cdn.example.com/gpt-image-2-out.png");
+    assert.equal(saved.url, "https://cdn.example.com/gpt-image-2-out.png");
+    assert.equal(saved.role, "sheet");
+    assert.equal(saved.save_type, "character_sheet");
+    assert.match(saved.character_description, /Enhanced: Cyberpunk samurai warrior/);
     assert.equal(res.wavesExecuted, 4);
   });
 });

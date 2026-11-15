@@ -34,6 +34,25 @@ export function computeNodeSignature(nodeType, resolvedInputs) {
   return createHash("sha256").update(payload).digest("hex");
 }
 
+const NON_RETRYABLE_CATEGORIES = new Set([
+  "USER_FAULT",
+  "CONTENT_SAFETY_VIOLATION",
+  "HOLD_EXPIRED",
+  "SERVER_FAULT",
+]);
+
+const NON_RETRYABLE_CODES = new Set([
+  "CONTENT_SAFETY_VIOLATION",
+  "PROMPT_VIOLATION",
+  "PROVIDER_CONTENT_POLICY_ERROR",
+  "SAFETY_CHECK_FAILED",
+  "HOLD_EXPIRED",
+  "GENERATION_VALIDATION_ERROR",
+  "GENERATION_NOT_FOUND",
+  "OWNERSHIP_VERIFICATION_FAILED",
+  "TARGET_VERIFICATION_FAILED",
+]);
+
 /**
  * Determines whether an error is retryable according to the node's retryPolicy.
  *
@@ -41,20 +60,30 @@ export function computeNodeSignature(nodeType, resolvedInputs) {
  * @param {Object} retryPolicy
  * @returns {boolean}
  */
-function isErrorRetryable(err, retryPolicy) {
+export function isErrorRetryable(err, retryPolicy) {
   if (!retryPolicy || (retryPolicy.maxAttempts ?? 1) <= 1) return false;
   if (err?.retryable === false) return false;
+  if (err?.is_safe === false) return false;
+
+  const code = String(err?.code || err?.errorCode || "").toUpperCase();
+  if (NON_RETRYABLE_CODES.has(code)) return false;
+
+  const category = String(err?.category || "").toUpperCase();
+  const safetyCategory = String(err?.safetyCategory || "").toUpperCase();
+  if (NON_RETRYABLE_CATEGORIES.has(category) || NON_RETRYABLE_CATEGORIES.has(safetyCategory)) {
+    return false;
+  }
+
   if (err?.retryable === true) return true;
 
   const allowedCategories = Array.isArray(retryPolicy.retryableCategories)
     ? retryPolicy.retryableCategories
     : ["UPSTREAM_FAULT", "RATE_LIMIT"];
 
-  if (err?.category && allowedCategories.includes(err.category)) {
+  if (category && allowedCategories.includes(category)) {
     return true;
   }
 
-  const code = String(err?.code || err?.errorCode || "").toUpperCase();
   if (
     code.includes("RATE_LIMIT") ||
     code.includes("TIMEOUT") ||

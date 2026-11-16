@@ -1,7 +1,9 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { LLMService, llmService, ALLOWED_INTERNAL_REASONS, PromptService } from "#models/tools";
-import { LlmNode } from "#generation/tools";
+import { llmService, ALLOWED_INTERNAL_REASONS } from "#models/tools";
+import { LLMService } from "../../../src/systems/models/internal/services/LLMService.js";
+import { PromptService } from "../../../src/systems/models/internal/services/PromptService.js";
+import { LlmNode } from "../../../src/systems/generation/internal/v3/index.js";
 import { ElementAnalysisService } from "#elements/tools";
 
 // ─── Source: llmServiceNoChargeBoundary.test.js ───

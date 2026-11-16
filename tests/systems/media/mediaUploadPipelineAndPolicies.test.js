@@ -4,7 +4,7 @@ import { PassThrough, Readable } from "node:stream";
 import sharp from "sharp";
 import { DEFAULT_UPLOAD_POLICY, ELEMENT_REFERENCE_UPLOAD_POLICY, ELEMENT_SHEET_UPLOAD_POLICY, ELEMENT_SOURCES_UPLOAD_POLICY, CHARACTER_SHEET_UPLOAD_POLICY, CHARACTER_DETAIL_UPLOAD_POLICY, ValidationError, UploadError, QuotaError, MediaUploadService, SourceReader, SourcePolicy, resetActiveUploadsForTest, resetInFlightBytesForTest, StorageService, InMemoryStorageProvider, AssetUploadService, MediaService, WorkflowMediaRepository } from "#media/tools";
 import { createUploadMiddleware, resolveMiddlewarePolicy, assetsRouter, mediaIngestRouter } from "#media/api";
-import { WorkflowMediaService } from "#generation/tools";
+import { WorkflowMediaService } from "../../../src/systems/generation/internal/services/WorkflowMediaService.js";
 import dns from "node:dns/promises";
 import http from "node:http";
 import express from "express";

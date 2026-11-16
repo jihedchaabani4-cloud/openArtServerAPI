@@ -1,7 +1,8 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { WorkflowMediaService, sanitizeStoragePath, WorkflowService } from "#generation/tools";
+import { WorkflowService } from "#generation/tools";
+import { WorkflowMediaService, sanitizeStoragePath } from "../../../src/systems/generation/internal/services/WorkflowMediaService.js";
 import { QuotaError, ValidationError, UploadError, formatWorkflowReferenceQuotaMessage, isWorkflowReferenceQuotaError, WorkflowMediaRepository } from "#media/tools";
 import { CrudServiceError, baseLogger } from "#shared";
 import { ElementService, ElementMediaService, ElementRepository } from "#elements/tools";

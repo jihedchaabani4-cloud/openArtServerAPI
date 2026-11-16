@@ -1,5 +1,5 @@
 import { getGenerationServices } from "../services/serviceAccessor.js";
-import { WorkflowLifecycleService } from "../services/WorkflowService.js";
+import { WorkflowService } from "../services/WorkflowService.js";
 import { db } from "../db/dbMap.js";
 import { promptService } from "#models/tools";
 import { createLogger } from "#shared";
@@ -253,10 +253,7 @@ export const runWorkflowDisabled = (req, res) => {
 export const getWorkflowRunById = async (req, res) => {
     try {
         const runId = req.params.run_id;
-        const { workflowService } = getGenerationServices();
-        const { run } = workflowService
-            ? await workflowService.getWorkflowRun({ runId, userId: req.user?.id })
-            : await WorkflowLifecycleService.getWorkflowRun({ runId, userId: req.user?.id });
+        const { run } = await WorkflowService.getWorkflowRun({ runId, userId: req.user?.id });
         return res.json({ run });
     } catch (err) {
         if (err.statusCode === 404) {

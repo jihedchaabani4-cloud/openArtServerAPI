@@ -11,7 +11,7 @@ import {
     getWalletRepository,
     getTransactionRepository,
 } from "#billing/tools";
-import { PricingService } from "#models/tools";
+import { PricingService, promptService } from "#models/tools";
 import { redisConnection, createLogger, envConfig } from "#shared";
 
 const systemLogger = createLogger("system");
@@ -23,17 +23,10 @@ import {
     GenerationConfigRepository,
     GenerationService,
     GenerationRequestService,
-    WorkflowLifecycleService,
-    PromptService,
-    promptService,
-    UseCaseService,
+    WorkflowService,
     V3Dispatcher,
     jobQueueService,
     configureGeneration,
-    configureDefaultGateways,
-    WorkflowEventRecorder,
-    WorkflowBillingGateway,
-    WorkflowStorageGateway,
 } from "#generation/tools";
 import {
     MediaRepository,
@@ -205,18 +198,8 @@ export const db = {
 };
 setIdentityDb(db);
 
-// ─── Workflow Architecture (feature 008) ─────────────────────────────────────
-export const workflowEventRecorder = new WorkflowEventRecorder();
-export const workflowBillingGateway = new WorkflowBillingGateway({ walletService });
-
-const _lifecycleService = new MediaWorkflowLifecycleService({ db });
-export const mediaWorkflowLifecycleService = _lifecycleService;
-configureBilling({ lifecycleService: _lifecycleService });
-
-export const workflowStorageGateway = new WorkflowStorageGateway({
-    v1Db: db,
-    lifecycleService: _lifecycleService,
-});
+export const mediaWorkflowLifecycleService = new MediaWorkflowLifecycleService({ db });
+configureBilling({ lifecycleService: mediaWorkflowLifecycleService });
 
 // ─── UseCase / V3 Engine & Job Queue Services ──────────────────────────────────
 export { jobQueueService };
@@ -226,11 +209,12 @@ export const v3Dispatcher = new V3Dispatcher({
 });
 export const useCaseService = v3Dispatcher;
 
+
 // ─── Domain & Platform Services ──────────────────────────────────────────────
 export const mediaUploadService = new MediaUploadService({ storageService });
 
 export const folderService = new FolderService({ folderRepo: db.folders, projectRepo: db.projects });
-export const workflowService = new WorkflowLifecycleService({ db, storageService, folderService, mediaUploadService });
+export const workflowService = new WorkflowService({ db, storageService, folderService, mediaUploadService });
 folderService.setWorkflowService(workflowService);
 export const workflowMediaService = workflowService.mediaService;
 export const mediaService = new MediaService({ db });
@@ -255,7 +239,7 @@ export const characterMediaService = new CharacterMediaService({
 export const characterService = new CharacterService({
     db,
     workflowService,
-    useCaseService,
+    useCaseService: v3Dispatcher,
     mediaService: characterMediaService,
 });
 
@@ -290,7 +274,7 @@ export const trashService = new TrashService({
 export const projectReadService = new ProjectReadService({ db, folderService });
 export const projectService = new ProjectService({ projectRepo: db.projects });
 export const generationService = new GenerationService({ db });
-export const generationRequestService = new GenerationRequestService({ db, useCaseService, folderService });
+export const generationRequestService = new GenerationRequestService({ db, useCaseService: v3Dispatcher, folderService });
 configureCharacters({ characterService, characterMediaService, trashService });
 configureMedia({ db, assetUploadService, workflowService, storageService, mediaUploadService, mediaService });
 configureWorkspace({ trashService, projectService, folderService, projectReadService, generationService });
@@ -303,6 +287,5 @@ configureGeneration({
     elementService,
     trashService,
     v3Dispatcher,
-    useCaseService,
     db,
 });

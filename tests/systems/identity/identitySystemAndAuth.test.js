@@ -11,7 +11,7 @@ import express from "express";
 import { workflowsRouter } from "#generation/api";
 import { assertSecurityConfiguredForEnvironment, workflowService, projectReadService } from "../../../src/container.js";
 import { supabase } from "#shared/db/supabase.js";
-import { WorkflowAuthorizationService } from "#generation/tools";
+import { WorkflowAuthorizationService } from "../../../src/systems/generation/internal/services/WorkflowAuthorizationService.js";
 import { ProjectReadService } from "#workspace/tools";
 
 // ─── Source: identitySystem.test.js ───

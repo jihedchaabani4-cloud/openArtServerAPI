@@ -2,6 +2,10 @@ import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   V3Dispatcher,
+  GenerationService,
+  GenerationRequestService,
+} from "#generation/tools";
+import {
   WorkflowExecutor,
   GraphCompiler,
   ImageGenerateNode,
@@ -9,21 +13,20 @@ import {
   SaveMediaNode,
   createDefaultV3NodeRegistry,
   imageGenerationV3,
-  GenerationService,
-  GenerationRequestService,
+} from "../../../src/systems/generation/internal/v3/index.js";
+import {
   ERROR_CODES,
   parseProviderError,
-} from "#generation/tools";
+} from "../../../src/systems/generation/internal/errors.js";
 import { db } from "../../../src/container.js";
 import { redisConnection, workerRedisConnection } from "#shared";
+import { calculateCost, ProviderTransientError } from "#models/tools";
 import {
   registerProviderRunner,
   unregisterProviderRunner,
   getRunner,
-  getModelBindings,
-  calculateCost,
-  ProviderTransientError,
-} from "#models/tools";
+} from "../../../src/systems/models/internal/runtime/providerRuntimeRegistry.js";
+import { getModelBindings } from "../../../src/systems/models/internal/registry/modelRegistry.js";
 import { randomUUID } from "node:crypto";
 import * as imageController from "#generation/api";
 import { failWorkflowPendingMedia } from "#media/tools";
@@ -486,7 +489,7 @@ describe("Multi-Asset Outputs & Count Boundary (F2.4-b / V3)", () => {
   });
 
   it("TEST 2: calculateRetailCredits does NOT multiply by count", async () => {
-    const { calculateRetailCredits } = await import("#models/tools");
+    const { calculateRetailCredits } = await import("../../../src/systems/models/internal/pricing/pricingEngine.js");
     const model = { retailPricing: { table: { "1k": 8, default: 8 } } };
     const cost1 = calculateRetailCredits(model, { resolution: "1k", count: 1 });
     const cost4 = calculateRetailCredits(model, { resolution: "1k", count: 4 });
@@ -577,7 +580,7 @@ describe("D2.5 — Provider Error Semantics & Upstream Fault Mapping Boundary Te
   });
 
   it("TEST 3: normalizeError preserves terminal: true and retryable: false for polling terminal failures", async () => {
-    const { normalizeError } = await import("#models/tools");
+    const { normalizeError } = await import("../../../src/systems/models/internal/execution/errorNormalizer.js");
     const terminalErr = new Error("LTX job failed: Service unavailable on worker");
     terminalErr.terminal = true;
     terminalErr.retryable = false;
@@ -591,7 +594,7 @@ describe("D2.5 — Provider Error Semantics & Upstream Fault Mapping Boundary Te
   });
 
   it("TEST 4: RuntimeExecutor does NOT retry when an error is marked terminal", async () => {
-    const { RuntimeExecutor } = await import("#models/tools");
+    const { RuntimeExecutor } = await import("../../../src/systems/models/internal/execution/runtimeExecutor.js");
     const executor = new RuntimeExecutor();
 
     let attempts = 0;

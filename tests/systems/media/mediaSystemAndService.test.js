@@ -617,7 +617,7 @@ describe("D2.6 — Media Ratio & Dimension Preservation Boundary Tests", () => {
   });
 
   it("TEST 3: V1StorageBridge createV1Placeholder uses resolveMediaMetadata instead of hardcoded 1024x1024", async () => {
-    const { V1StorageBridge } = await import("#generation/tools");
+    const { V1StorageBridge } = await import("#media/tools");
     let insertedMediaData = null;
     let insertedConfigData = null;
 
@@ -674,7 +674,7 @@ describe("D2.6 — Media Ratio & Dimension Preservation Boundary Tests", () => {
   });
 
   it("TEST 4: V1StorageBridge finalizeV1Media preserves placeholder dimensions when asset has no width/height", async () => {
-    const { V1StorageBridge } = await import("#generation/tools");
+    const { V1StorageBridge } = await import("#media/tools");
     let updatedFields = null;
 
     const mockDb = {
@@ -775,7 +775,7 @@ describe("D2.6 — Media Ratio & Dimension Preservation Boundary Tests", () => {
   });
 
   it("TEST 6: SaveMediaNode preserves placeholder dimensions when provider asset lacks width/height", async () => {
-    const { SaveMediaNode } = await import("#generation/tools");
+    const { SaveMediaNode } = await import("../../../src/systems/generation/internal/v3/index.js");
 
     let updatedMedia = null;
     const mockDb = {

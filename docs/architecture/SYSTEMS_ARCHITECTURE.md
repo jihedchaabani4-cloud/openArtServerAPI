@@ -37,17 +37,17 @@ Every Business System inside `src/systems/<system>/` is a strict black box. It o
 - **Role:** Central execution brain for all AI generation (images, videos, character sheets, element analysis) powered 100% by the ComfyUI-Style V3 Node Engine (`src/systems/generation/internal/v3/`).
 - **Directory Structure & Internal Services:**
   - `public/api.js`: Mounts `/api/images/*`, `/api/video/*`, `/api/prompt/*`, `/api/workflows/*`, and `/api/v2/workflows/*`.
-  - `public/tools.js`: Exposes `triggerWorkflowRun`, `getWorkflowRun`, `UseCaseService` (alias to `V3Dispatcher`), and V3 engine primitives (`NodeRegistry`, `GraphCompiler`, `WorkflowExecutor`, `V3Dispatcher`, `V3_WORKFLOWS`, and the 5 V3 base nodes).
+  - `public/tools.js`: Exposes `jobQueueService`, `GenerationService`, `GenerationRequestService`, `WorkflowService`, `WorkflowRepository`, `GenerationConfigRepository`, `V3Dispatcher`, and `configureGeneration`. Internal V3 engine modules remain private to System 1.
   - `internal/controllers/`: `imageController.js`, `videoController.js`, `workflowsController.js`, `generationsQueryController.js`, `generationsMutationController.js`, `projectController.js`.
   - `internal/services/`:
     - `GenerationService.js` & `GenerationRequestService.js`: Request preparation and parameter normalization.
-    - `WorkflowService.js`, `WorkflowServiceBase.js`, `WorkflowMediaService.js`, `WorkflowAuthorizationService.js`, `mediaGuards.js`: Workflow state transitions and media attachment coordination.
+    - `WorkflowService.js`, `WorkflowMediaService.js`, `WorkflowAuthorizationService.js`, `mediaGuards.js`: Workflow state transitions and media attachment coordination.
     - `jobQueueService.js`: BullMQ producer for `v2-workflow-jobs`.
     - `NodeSafetyService.js`: Centralized input validation and safety guardrails.
   - `internal/v3/`:
     - ComfyUI-Style Node Engine Core (`NodeRegistry.js`, `GraphCompiler.js`, `WorkflowExecutor.js`, `V3Dispatcher.js`), 5 Base Nodes (`resolveRefsNode.js` [`base.resolve_references`], `llmNode.js` [`base.llm`], `imageGenerateNode.js` [`base.image_generate`], `videoGenerateNode.js` [`base.video_generate`], `saveMediaNode.js` [`base.save_media`]), 0 Custom Nodes, and 3 Declarative V3 Workflows (`imageGenerationV3.js`, `videoGenerationV3.js`, `characterSheetV3.js`).
   - `internal/resolvers/`: `WorkflowReferenceResolver.js` for resolving referenced workflows, characters, and elements.
-  - `internal/gateways/`: `workflowBillingGateway.js` (calls `#billing/tools`), `workflowStorageGateway.js` (calls `#media/tools`), `workflowEventRecorder.js`.
+  - `internal/gateways/`: `workflowBillingGateway.js` (calls `#billing/tools`).
   - `internal/workers/`: `useCaseWorker.js` and `worker.js` (BullMQ consumers executing V3 runs via `V3Dispatcher` and settling holds/media).
   - `internal/db/`: `generationClient.js`, `BaseRepository.js`, `WorkflowRepository.js`, `GenerationConfigRepository.js`, `RunRepository.js`, `dbMap.js`.
 - **Owned Database Tables:** `workflows`, `workflow_runs`, `node_runs`, `generation_configs`.
@@ -59,7 +59,7 @@ Every Business System inside `src/systems/<system>/` is a strict black box. It o
 - **Role:** Standalone registry and execution adapter for all AI models (image, video, LLM), input schemas, conditional parameter rules, model pricing calculation, and external AI providers (WaveSpeed, Google GenAI, LTX).
 - **Directory Structure & Internal Services:**
   - `public/api.js`: Mounts `/api/models/*` and admin model reload/pricing endpoints.
-  - `public/tools.js`: Exposes `getModelConfig`, `getCatalog`, `calculateCost`, `validateCanonicalInput`, `executeProvider`, `LLMService`, `PromptService`.
+  - `public/tools.js`: Exposes `getModelConfig`, `getCatalog`, `calculateCost`, `validateModelInputs`, `executeGeneration`, `executeLLM`, `initRegistry`, `reloadRegistry`, `getRegistryStats`, `PricingService`, `llmService`, `promptService`.
   - `internal/controllers/`: `modelsController.js`.
   - `internal/services/`: `PricingService.js`, `LLMService.js`, `PromptService.js`, `catalogQueries.js`, `catalogPresentation.js`, `credentialResolver.js`.
   - `internal/registry/`: `modelRegistry.js`, `bindingResolver.js`.

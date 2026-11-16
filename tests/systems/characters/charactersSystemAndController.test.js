@@ -5,7 +5,7 @@ import charactersRouter, { createCharacter, generateCharacterSheet, generateChar
 import { characterService, trashService } from "../../../src/container.js";
 import { safePublicRouteError } from "#shared";
 import { randomUUID } from "node:crypto";
-import { WorkflowMediaService } from "#generation/tools";
+import { WorkflowMediaService } from "../../../src/systems/generation/internal/services/WorkflowMediaService.js";
 
 // ─── Source: charactersSystem.test.js ───
 {

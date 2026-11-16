@@ -1,12 +1,16 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import {
-    triggerWorkflowRun,
-    getWorkflowRun,
-    RunRepository,
-    NodeSafetyService,
-    UseCaseService,
     V3Dispatcher,
+    jobQueueService,
+    GenerationService,
+    GenerationRequestService,
+    WorkflowService,
+    WorkflowRepository,
+    GenerationConfigRepository,
+    configureGeneration,
+} from "#generation/tools";
+import {
     GraphCompiler,
     WorkflowExecutor,
     NodeRegistry,
@@ -16,21 +20,15 @@ import {
     imageGenerationV3,
     videoGenerationV3,
     characterSheetV3,
-    jobQueueService,
-    GenerationService,
-    GenerationRequestService,
-    WorkflowLifecycleService,
-    WorkflowService,
-    PromptService,
-    LLMService,
-    llmService,
-    PromptBuilderProService,
+} from "../../../src/systems/generation/internal/v3/index.js";
+import {
     GenerationError,
     GenerationValidationError,
     GenerationNotFoundError,
     GenerationCompilationError,
     GenerationQueueDispatchError,
-} from "#generation/tools";
+} from "../../../src/systems/generation/internal/errors.js";
+import { RunRepository } from "../../../src/systems/generation/internal/db/RunRepository.js";
 import { imagesRouter, videoRouter, promptRouter, v2WorkflowsRouter, workflowsRouter, generationRouter } from "#generation/api";
 import apiRouter from "../../../src/api/routes.js";
 import express from "express";
@@ -49,29 +47,14 @@ import { execSync } from "node:child_process";
 
 describe("System 1: Generation & Workflows — Gateways & Public Tools Contract", () => {
     it("should export all expected V3 public tools and domain services", () => {
-        assert.equal(typeof triggerWorkflowRun, "function");
-        assert.equal(typeof getWorkflowRun, "function");
         assert.equal(typeof V3Dispatcher, "function");
-        assert.equal(typeof GraphCompiler, "function");
-        assert.equal(typeof WorkflowExecutor, "function");
-        assert.equal(typeof NodeRegistry, "function");
-        assert.equal(typeof createDefaultV3NodeRegistry, "function");
-        assert.equal(typeof getV3Workflow, "function");
-        assert.equal(typeof imageGenerationV3, "object");
-        assert.equal(typeof videoGenerationV3, "object");
-        assert.equal(typeof characterSheetV3, "object");
-        assert.equal(typeof RunRepository, "function");
-        assert.equal(typeof NodeSafetyService, "object");
-        assert.equal(typeof UseCaseService, "function");
+        assert.equal(typeof WorkflowService, "function");
         assert.equal(typeof jobQueueService, "object");
         assert.equal(typeof GenerationService, "function");
         assert.equal(typeof GenerationRequestService, "function");
-        assert.equal(typeof WorkflowLifecycleService, "function");
-        assert.equal(typeof WorkflowService, "function");
-        assert.equal(typeof PromptService, "function");
-        assert.equal(typeof LLMService, "function");
-        assert.equal(typeof llmService, "object");
-        assert.equal(typeof PromptBuilderProService, "function");
+        assert.equal(typeof WorkflowRepository, "function");
+        assert.equal(typeof GenerationConfigRepository, "function");
+        assert.equal(typeof configureGeneration, "function");
     });
 
     it("should export valid Express routers from #generation/api", () => {
@@ -117,34 +100,10 @@ describe("System 1: Generation & Workflows — Gateways & Public Tools Contract"
     });
 });
 
-describe("System 1: Generation & Workflows — triggerWorkflowRun & getWorkflowRun validations", () => {
-    it("should throw GenerationValidationError when workflowId is missing in triggerWorkflowRun", async () => {
-        await assert.rejects(
-            () => triggerWorkflowRun({}),
-            (err) => {
-                assert.ok(err instanceof GenerationValidationError);
-                assert.equal(err.statusCode, 400);
-                assert.match(err.message, /workflowId is required/);
-                return true;
-            }
-        );
-    });
-
-    it("should throw GenerationNotFoundError when workflowId is not in registries", async () => {
-        await assert.rejects(
-            () => triggerWorkflowRun({ workflowId: "non-existent-workflow-xyz" }),
-            (err) => {
-                assert.ok(err instanceof GenerationNotFoundError);
-                assert.equal(err.statusCode, 404);
-                assert.match(err.message, /not found in registry/);
-                return true;
-            }
-        );
-    });
-
+describe("System 1: Generation & Workflows — WorkflowService.getWorkflowRun validations", () => {
     it("should throw GenerationValidationError when runId is missing in getWorkflowRun", async () => {
         await assert.rejects(
-            () => getWorkflowRun({}),
+            () => WorkflowService.getWorkflowRun({}),
             (err) => {
                 assert.ok(err instanceof GenerationValidationError);
                 assert.equal(err.statusCode, 400);
@@ -156,7 +115,7 @@ describe("System 1: Generation & Workflows — triggerWorkflowRun & getWorkflowR
 
     it("should throw GenerationNotFoundError when run is missing in getWorkflowRun", async () => {
         await assert.rejects(
-            () => getWorkflowRun({ runId: "00000000-0000-0000-0000-000000000000" }),
+            () => WorkflowService.getWorkflowRun({ runId: "00000000-0000-0000-0000-000000000000" }),
             (err) => {
                 assert.ok(err instanceof GenerationNotFoundError);
                 assert.equal(err.statusCode, 404);
@@ -295,7 +254,7 @@ describe("Generation API Boundary & Separation Tests", () => {
   });
 
   it("TEST 7: LlmNode.estimateCost handles LLM node inputs with skills without capability error", async () => {
-    const { LlmNode } = await import("#generation/tools");
+    const { LlmNode } = await import("../../../src/systems/generation/internal/v3/index.js");
 
     const cost = LlmNode.estimateCost({
       model: "gemini-3-flash",

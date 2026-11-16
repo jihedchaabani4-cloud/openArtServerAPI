@@ -1,6 +1,9 @@
 import { describe, it, before, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { llmService, LLMService, LlmNode, PromptService } from "#generation/tools";
+import { llmService } from "#models/tools";
+import { LLMService } from "../../../src/systems/models/internal/services/LLMService.js";
+import { PromptService } from "../../../src/systems/models/internal/services/PromptService.js";
+import { LlmNode } from "../../../src/systems/generation/internal/v3/index.js";
 import { ElementAnalysisService } from "#elements/tools";
 import { createElement, analyzeElement } from "#elements/api";
 import { elementService, characterService, db } from "../../../src/container.js";

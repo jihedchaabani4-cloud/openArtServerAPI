@@ -2,7 +2,9 @@ import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
 import { InMemoryWalletService } from "../../helpers/inMemoryWalletService.js";
 import { WalletService, runReservationReaper, reconcileExpiredHolds, handleExpireStaleHolds } from "#billing/tools";
-import { SaveMediaNode, UseCaseService, WorkflowMediaService } from "#generation/tools";
+import { V3Dispatcher as UseCaseService } from "#generation/tools";
+import { SaveMediaNode } from "../../../src/systems/generation/internal/v3/index.js";
+import { WorkflowMediaService } from "../../../src/systems/generation/internal/services/WorkflowMediaService.js";
 import { db, mediaWorkflowLifecycleService } from "../../../src/container.js";
 import { MediaWorkflowLifecycleService, WorkflowMediaRepository } from "#media/tools";
 

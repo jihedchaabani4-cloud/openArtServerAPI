@@ -1,7 +1,8 @@
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { handleUseCaseWorkerFailure, getUseCaseQueue, useCaseWorker } from "#generation/tools";
-import { useCaseService, db } from "../../../src/container.js";
+import { handleUseCaseWorkerFailure, useCaseWorker } from "../../../src/systems/generation/internal/workers/useCaseWorker.js";
+import { getUseCaseQueue } from "../../../src/systems/generation/internal/services/jobQueueService.js";
+import { v3Dispatcher as useCaseService, db } from "../../../src/container.js";
 import { InMemoryWalletService } from "../../helpers/inMemoryWalletService.js";
 import { redisConnection } from "#shared";
 import { walletMaintenanceQueue } from "#billing/tools";

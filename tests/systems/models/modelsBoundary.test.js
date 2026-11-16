@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import * as models from "#models/tools";
+import * as modelsTools from "#models/tools";
+import { run } from "../../../src/systems/models/internal/execution/modelRunner.js";
+
+// models test helper: combine public tools with internal run runner for boundary execution tests
+const models = { ...modelsTools, run };
 
 // ─── Source: modelsBoundary.test.js ───
 {
@@ -22,17 +26,26 @@ describe("Sealed Models Subsystem Architecture", () => {
     it("should export only the intended stable public functions and standard error classes", () => {
       const expectedExports = [
         "getCatalog",
+        "getModelConfig",
         "getModelSchema",
-        "getSchema",
-        "validateInput",
+        "validateModelInputs",
         "calculateCost",
-        "estimatePrice",
-        "run",
-        // NOTE: resolveOperation is NO LONGER exported — it is internal
+        "executeGeneration",
+        "executeLLM",
         "initRegistry",
         "reloadRegistry",
         "getRegistryStats",
+        "PricingService",
+        "llmService",
+        "promptService",
+        "ALLOWED_INTERNAL_REASONS",
+        "BillingContextMissingError",
         // Typed Error Classes
+        "ModelsError",
+        "ModelsValidationError",
+        "ModelsNotFoundError",
+        "ModelsConfigurationError",
+        "ModelsProviderError",
         "ModelsSystemError",
         "ValidationError",
         "MissingOptionError",
@@ -50,7 +63,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
       for (const name of expectedExports) {
         assert.ok(
-          models[name] !== undefined,
+          modelsTools[name] !== undefined,
           `Expected public export "${name}" to exist on models facade`
         );
       }
@@ -74,11 +87,19 @@ describe("Sealed Models Subsystem Architecture", () => {
         "getDefaultBinding",
         // Operation inference is strictly INTERNAL in Semantic-First architecture
         "resolveOperation",
+        // Removed duplicate/redundant aliases and internal classes
+        "getSchema",
+        "validateInput",
+        "estimatePrice",
+        "calculateOperationCost",
+        "run",
+        "LLMService",
+        "PromptService",
       ];
 
       for (const name of forbiddenInternalNames) {
         assert.strictEqual(
-          models[name],
+          modelsTools[name],
           undefined,
           `Forbidden internal submodule or function "${name}" must NOT be exposed on models facade`
         );
@@ -98,9 +119,9 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(nanobana.activeProviders, undefined, "activeProviders must not leak into catalog");
       assert.strictEqual(nanobana.providers, undefined, "providers must not leak into catalog");
 
-      const schema = models.getSchema("nanobana_pro", "text_to_image");
-      assert.ok(schema.inputs.prompt);
-      assert.strictEqual(schema.inputs.prompt.required, true);
+      const schema = models.getModelSchema("nanobana_pro");
+      assert.ok(schema.parameters.prompt);
+      assert.strictEqual(schema.parameters.prompt.required, true);
 
       // getRegistryStats returns counts (no internal Maps leaked)
       const stats = models.getRegistryStats();
@@ -111,7 +132,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     it("external callers can validate canonical input via public API (no operation argument)", () => {
       // Semantic-First: no operation arg — inferred internally from params (no image → text_to_image)
-      const validated = models.validateInput("nanobana_pro", {
+      const validated = models.validateModelInputs("nanobana_pro", {
         prompt: "Cyberpunk Tunis",
         aspect_ratio: "16:9",
         resolution: "2k",
@@ -122,7 +143,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
       // Rejects missing required field
       assert.throws(
-        () => models.validateInput("nanobana_pro", {}),
+        () => models.validateModelInputs("nanobana_pro", {}),
         (err) => err instanceof models.ValidationError
       );
     });
@@ -170,11 +191,11 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.ok(cost > 0, "calculateCost should compute cost from configured active binding");
     });
 
-    it("estimatePrice works deterministically WITHOUT operation or bindingId", () => {
-      const estimate = models.estimatePrice("nanobana_pro", { prompt: "Test", resolution: "1k" });
+    it("calculateCost with returnQuote works deterministically WITHOUT operation or bindingId", () => {
+      const estimate = models.calculateCost("nanobana_pro", { prompt: "Test", resolution: "1k" }, { returnQuote: true });
       assert.strictEqual(typeof estimate, "object");
-      assert.ok(estimate.amount > 0, "estimatePrice should compute amount from configured active binding");
-      assert.strictEqual(estimate.currency, "credits");
+      assert.ok(estimate.credits > 0, "calculateCost should compute amount from configured active binding");
+      assert.ok(estimate.planIdentity);
     });
 
     it("run executes successfully WITHOUT operation argument", async () => {
@@ -209,7 +230,7 @@ describe("Sealed Models Subsystem Architecture", () => {
       // Model nanobana_pro allows 1k, 2k, 4k. 8k is rejected at schema level.
       assert.throws(
         () => {
-          models.validateInput("nanobana_pro", {
+          models.validateModelInputs("nanobana_pro", {
             prompt: "Test",
             resolution: "8k",
           });
@@ -219,7 +240,7 @@ describe("Sealed Models Subsystem Architecture", () => {
     });
 
     it("unambiguous active configuration: rejects multiple active bindings per operation", async () => {
-      const { initRegistry } = await import("#models/tools");
+      const { initRegistry } = await import("../../../src/systems/models/internal/registry/modelRegistry.js");
       // The validator enforces that in Phase 1, only one binding per (model, op) can be active
       const reg = initRegistry({ forceReload: true });
       assert.ok(reg.models.size > 0);
@@ -343,7 +364,7 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.ok(wavespeedCalled, "WaveSpeed should execute under default config");
 
       // 2. Switch provider configuration to Google
-      const { getRegistry } = await import("#models/tools");
+      const { getRegistry } = await import("../../../src/systems/models/internal/registry/modelRegistry.js");
       const { bindings } = getRegistry();
       const ws = bindings.get("nanobana_pro:text_to_image:wavespeed");
       const g = bindings.get("nanobana_pro:text_to_image:google");
@@ -603,7 +624,7 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.ok(wavespeedExecuted, "Test 1: WaveSpeed should be executed under default configuration");
 
       // Test 2: Change configuration in registry: nanobana_pro → Google
-      const { getRegistry } = await import("#models/tools");
+      const { getRegistry } = await import("../../../src/systems/models/internal/registry/modelRegistry.js");
       const { bindings } = getRegistry();
       const wsBinding = bindings.get("nanobana_pro:text_to_image:wavespeed");
       const gBinding = bindings.get("nanobana_pro:text_to_image:google");
@@ -841,7 +862,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // TEST 7 — Provider switch
     it("TEST 7: Provider switch from WaveSpeed to Google executes with identical caller invocation", async () => {
-      const { getRegistry } = await import("#models/tools");
+      const { getRegistry } = await import("../../../src/systems/models/internal/registry/modelRegistry.js");
       const { bindings } = getRegistry();
       const ws = bindings.get("nanobana_pro:text_to_image:wavespeed");
       const g = bindings.get("nanobana_pro:text_to_image:google");
@@ -1009,7 +1030,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // TEST 13 — Capability isolation (semantic capabilities do not dictate provider routing)
     it("TEST 13: Capability isolation: model capabilities describe input vocabulary; provider route resolution depends only on semantic input and route rules", async () => {
-      const { getModel } = await import("#models/tools");
+      const { getModel } = await import("../../../src/systems/models/internal/registry/modelRegistry.js");
       const model = getModel("nanobana_pro");
       const originalCaps = { ...model.capabilities };
 
@@ -1492,7 +1513,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // TEST 17 — Google remains independent
     it("TEST 17: Provider isolation: resolving Google bindings does not invoke WaveSpeed resolver logic", async () => {
-      const { resolveProviderRoute } = await import("#models/tools");
+      const { resolveProviderRoute } = await import("../../../src/systems/models/internal/runtime/providerRuntimeRegistry.js");
 
       const googleBinding = {
         modelId: "nanobana_pro",
@@ -1611,7 +1632,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // TEST 21 — Capability purity & operation taxonomy rejection
     it("TEST 21: Model capabilities contain no provider operation taxonomy and config validator rejects operation keys", async () => {
-      const { getRegistry } = await import("#models/tools");
+      const { getRegistry } = await import("../../../src/systems/models/internal/registry/modelRegistry.js");
       const { models: loadedModels } = getRegistry();
 
       const forbiddenOps = new Set([
@@ -1641,17 +1662,12 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // TEST 22 — Quote / Execution plan identity consistency
     it("TEST 22: Quote/execution plan identity is deterministic and prevents silent execution under a mutated plan", async () => {
-      // 22a: estimatePrice returns planIdentity
-      const estimate = models.estimatePrice("nanobana_pro", { prompt: "quote consistency test", resolution: "1k" });
-      assert.ok(estimate.planIdentity, "estimatePrice must return planIdentity");
-      assert.strictEqual(typeof estimate.planIdentity, "string");
-      assert.ok(estimate.planIdentity.includes("nanobana_pro:wavespeed:generation:"));
-
-      // 22b: calculateCost with returnQuote: true returns planIdentity
+      // calculateCost with returnQuote: true returns planIdentity
       const quote = models.calculateCost("nanobana_pro", { prompt: "quote consistency test", resolution: "1k" }, { returnQuote: true });
       assert.strictEqual(quote.credits, 10);
       assert.ok(quote.planIdentity);
-      assert.strictEqual(quote.planIdentity, estimate.planIdentity);
+      assert.strictEqual(typeof quote.planIdentity, "string");
+      assert.ok(quote.planIdentity.includes("nanobana_pro:wavespeed:generation:"));
 
       // 22c: models.run with matching planIdentity succeeds and records planIdentity in metadata
       const runResult = await models.run(
@@ -1702,7 +1718,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test A — nano-banana-pro, prompt only, resolves correctly
     it("Test A: nano-banana-pro, prompt only, resolves correctly to generation route", async () => {
-      const { resolveExecutionPlan } = await import("#models/tools");
+      const { resolveExecutionPlan } = await import("../../../src/systems/models/internal/registry/bindingResolver.js");
       const { route } = resolveExecutionPlan("nano-banana-pro", { prompt: "a sunrise over the mountains", resolution: "1k" });
       assert.strictEqual(route.providerId, "wavespeed");
       assert.strictEqual(route.id, "generation");
@@ -1711,7 +1727,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test B — nano-banana-pro, prompt + input_image, resolves to WaveSpeed edit
     it("Test B: nano-banana-pro, prompt + input_image, resolves to WaveSpeed edit implementation", async () => {
-      const { resolveExecutionPlan } = await import("#models/tools");
+      const { resolveExecutionPlan } = await import("../../../src/systems/models/internal/registry/bindingResolver.js");
       const { route } = resolveExecutionPlan("nano-banana-pro", { prompt: "add sunglasses", input_image: "https://cdn.example.com/source.png" });
       assert.strictEqual(route.providerId, "wavespeed");
       assert.strictEqual(route.id, "edit");
@@ -1720,7 +1736,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test C — nano-banana-pro-ultra, prompt only, resolves to WaveSpeed Ultra generation endpoint
     it("Test C: nano-banana-pro-ultra, prompt only, resolves to WaveSpeed Ultra generation endpoint", async () => {
-      const { resolveExecutionPlan } = await import("#models/tools");
+      const { resolveExecutionPlan } = await import("../../../src/systems/models/internal/registry/bindingResolver.js");
       const { route } = resolveExecutionPlan("nano-banana-pro-ultra", { prompt: "hyper-realistic landscape", resolution: "4k" });
       assert.strictEqual(route.providerId, "wavespeed");
       assert.strictEqual(route.id, "generation");
@@ -1729,7 +1745,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test D — nano-banana-pro-ultra, prompt + input_image, resolves to WaveSpeed Ultra edit endpoint
     it("Test D: nano-banana-pro-ultra, prompt + input_image, resolves to WaveSpeed Ultra edit endpoint", async () => {
-      const { resolveExecutionPlan } = await import("#models/tools");
+      const { resolveExecutionPlan } = await import("../../../src/systems/models/internal/registry/bindingResolver.js");
       const { route } = resolveExecutionPlan("nano-banana-pro-ultra", { prompt: "retouch face", input_image: "https://cdn.example.com/portrait.png", resolution: "4k" });
       assert.strictEqual(route.providerId, "wavespeed");
       assert.strictEqual(route.id, "edit");
@@ -1738,7 +1754,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test E — seedance-2-5, prompt only, resolves to text_to_video
     it("Test E: seedance-2-5, prompt only, resolves to text_to_video", async () => {
-      const { resolveExecutionPlan } = await import("#models/tools");
+      const { resolveExecutionPlan } = await import("../../../src/systems/models/internal/registry/bindingResolver.js");
       const { route } = resolveExecutionPlan("seedance-2-5", { prompt: "cinematic drone flight over waterfall", duration: 5 });
       assert.strictEqual(route.providerId, "wavespeed");
       assert.strictEqual(route.id, "text_to_video");
@@ -1747,7 +1763,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test F — seedream-v5 resolves to dedicated text_to_image implementation without artificial route layer
     it("Test F: seedream-v5 resolves to dedicated text_to_image implementation without artificial route layer", async () => {
-      const { resolveExecutionPlan } = await import("#models/tools");
+      const { resolveExecutionPlan } = await import("../../../src/systems/models/internal/registry/bindingResolver.js");
       const { route, binding } = resolveExecutionPlan("seedream-v5", { prompt: "a sunrise over mountains" });
       assert.strictEqual(route.providerId, "wavespeed");
       assert.strictEqual(route.providerModelId, "bytedance/seedream-v5.0-pro");
@@ -1807,9 +1823,8 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test I — pricing and execution resolve the same plan
     it("Test I: pricing and execution resolve the same plan", async () => {
-      const estimate = models.estimatePrice("nano-banana-pro-ultra", { prompt: "8k landscape", resolution: "8k" });
       const quote = models.calculateCost("nano-banana-pro-ultra", { prompt: "8k landscape", resolution: "8k" }, { returnQuote: true });
-      assert.strictEqual(estimate.planIdentity, quote.planIdentity);
+      assert.ok(quote.planIdentity);
 
       const runResult = await models.run("nano-banana-pro-ultra", { prompt: "8k landscape", resolution: "8k" }, {
         userId: "u-plan-sym",
@@ -1841,8 +1856,8 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test K — requesting a Model under a provider with no eligible binding returns distinct typed NoEligibleBindingError (C7)
     it("Test K: requesting a Model under a provider with no eligible binding returns distinct typed NoEligibleBindingError", async () => {
-      const { resolveBindingForTest } = await import("#models/tools");
-      const { NoEligibleBindingError } = await import("#models/tools");
+      const { resolveBindingForTest } = await import("../../../src/systems/models/internal/registry/bindingResolver.js");
+      const { NoEligibleBindingError } = await import("../../../src/systems/models/internal/errors.js");
       assert.throws(
         () => resolveBindingForTest("seedance_2_5", "google"),
         (err) => err instanceof NoEligibleBindingError && err.code === "NO_ELIGIBLE_BINDING" && err.modelId === "seedance_2_5"
@@ -1879,7 +1894,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test N — Wan 3.0 topology (T2V and I2V)
     it("Test N: Wan 3.0 resolves text_to_video and image_to_video correctly", async () => {
-      const { resolveExecutionPlan } = await import("#models/tools");
+      const { resolveExecutionPlan } = await import("../../../src/systems/models/internal/registry/bindingResolver.js");
       
       const planT2V = resolveExecutionPlan("wan_3_0", { prompt: "a sunset scene", duration: 5 });
       assert.strictEqual(planT2V.route.id, "text_to_video");
@@ -1896,7 +1911,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test O — Single-path models must not declare routes[]
     it("Test O: Single-path models must have flat bindings without routes[] array", async () => {
-      const { getModelBindings } = await import("#models/tools");
+      const { getModelBindings } = await import("../../../src/systems/models/internal/registry/modelRegistry.js");
       const singlePathModels = [
         "wavespeed_upscale",
         "seedream_v5",
@@ -1917,7 +1932,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test P — Multi-path models declare routes[]
     it("Test P: Multi-path models declare declarative routes[] array with when conditions", async () => {
-      const { getModelBindings } = await import("#models/tools");
+      const { getModelBindings } = await import("../../../src/systems/models/internal/registry/modelRegistry.js");
       const multiPathModels = [
         "nanobana_pro",
         "nanobana_pro_ultra",
@@ -2030,7 +2045,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test T — gpt_image_2 multi-path resolution and execution (generation vs edit)
     it("Test T: gpt_image_2 resolves generation and edit routes correctly and wraps input_image", async () => {
-      const { resolveExecutionPlan } = await import("#models/tools");
+      const { resolveExecutionPlan } = await import("../../../src/systems/models/internal/registry/bindingResolver.js");
 
       // 1. Generation (prompt only)
       const planGen = resolveExecutionPlan("gpt_image_2", { prompt: "a cute kitten", resolution: "1k" });
@@ -2092,8 +2107,8 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test V — Mutating model.capabilities does NOT affect route resolution
     it("Test V: Mutating model.capabilities does NOT affect route resolution (passive documentation)", async () => {
-      const { getRegistry } = await import("#models/tools");
-      const { resolveExecutionPlan } = await import("#models/tools");
+      const { getRegistry } = await import("../../../src/systems/models/internal/registry/modelRegistry.js");
+      const { resolveExecutionPlan } = await import("../../../src/systems/models/internal/registry/bindingResolver.js");
       const reg = getRegistry();
       const m = reg.models.get("nanobana_pro");
       const originalCaps = { ...m.capabilities };
@@ -2150,12 +2165,12 @@ describe("Sealed Models Subsystem Architecture", () => {
     it("nanobana_pro: validates 10 verified aspect ratios, output_format, and rejects invalid aspect ratio", async () => {
       const validRatios = ["1:1", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
       for (const ratio of validRatios) {
-        const validated = models.validateInput("nanobana_pro", { prompt: "test", aspect_ratio: ratio });
+        const validated = models.validateModelInputs("nanobana_pro", { prompt: "test", aspect_ratio: ratio });
         assert.strictEqual(validated.aspect_ratio, ratio);
       }
 
       assert.throws(
-        () => models.validateInput("nanobana_pro", { prompt: "test", aspect_ratio: "100:1" }),
+        () => models.validateModelInputs("nanobana_pro", { prompt: "test", aspect_ratio: "100:1" }),
         (err) => err.code === "INVALID_ENUM_VALUE"
       );
 
@@ -2176,18 +2191,18 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // 2. nanobana_pro_ultra: resolution 4k/8k, default 4k, rejects 1k/2k
     it("nanobana_pro_ultra: verifies resolution 4k/8k, default 4k, and rejects fake 1k/2k", async () => {
-      const def = models.validateInput("nanobana_pro_ultra", { prompt: "test" });
+      const def = models.validateModelInputs("nanobana_pro_ultra", { prompt: "test" });
       assert.strictEqual(def.resolution, "4k");
 
-      const val8k = models.validateInput("nanobana_pro_ultra", { prompt: "test", resolution: "8k" });
+      const val8k = models.validateModelInputs("nanobana_pro_ultra", { prompt: "test", resolution: "8k" });
       assert.strictEqual(val8k.resolution, "8k");
 
       assert.throws(
-        () => models.validateInput("nanobana_pro_ultra", { prompt: "test", resolution: "1k" }),
+        () => models.validateModelInputs("nanobana_pro_ultra", { prompt: "test", resolution: "1k" }),
         (err) => err.code === "INVALID_ENUM_VALUE"
       );
       assert.throws(
-        () => models.validateInput("nanobana_pro_ultra", { prompt: "test", resolution: "2k" }),
+        () => models.validateModelInputs("nanobana_pro_ultra", { prompt: "test", resolution: "2k" }),
         (err) => err.code === "INVALID_ENUM_VALUE"
       );
     });
@@ -2196,7 +2211,7 @@ describe("Sealed Models Subsystem Architecture", () => {
     it("nanobana_2: accepts 14 aspect ratios, search toggles, and rejects removed legacy parameters", async () => {
       const validRatios = ["1:1", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "1:4", "4:1", "1:8", "8:1"];
       for (const ratio of validRatios) {
-        const validated = models.validateInput("nanobana_2", { prompt: "test", aspect_ratio: ratio });
+        const validated = models.validateModelInputs("nanobana_2", { prompt: "test", aspect_ratio: ratio });
         assert.strictEqual(validated.aspect_ratio, ratio);
       }
 
@@ -2216,11 +2231,11 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(executedPayload.enable_image_search, true);
 
       assert.throws(
-        () => models.validateInput("nanobana_2", { prompt: "test", quality: "hd" }),
+        () => models.validateModelInputs("nanobana_2", { prompt: "test", quality: "hd" }),
         (err) => err.code === "UNKNOWN_PARAMETER"
       );
       assert.throws(
-        () => models.validateInput("nanobana_2", { prompt: "test", negative_prompt: "bad quality" }),
+        () => models.validateModelInputs("nanobana_2", { prompt: "test", negative_prompt: "bad quality" }),
         (err) => err.code === "UNKNOWN_PARAMETER"
       );
     });
@@ -2229,17 +2244,17 @@ describe("Sealed Models Subsystem Architecture", () => {
     it("gpt_image_2: accepts 15 aspect ratios, native quality levels (low/medium/high), and output_format", async () => {
       const qualities = ["low", "medium", "high"];
       for (const q of qualities) {
-        const validated = models.validateInput("gpt_image_2", { prompt: "test", quality: q });
+        const validated = models.validateModelInputs("gpt_image_2", { prompt: "test", quality: q });
         assert.strictEqual(validated.quality, q);
       }
 
       // Rejects non-native quality values like "standard" or "hd"
       assert.throws(
-        () => models.validateInput("gpt_image_2", { prompt: "test", quality: "standard" }),
+        () => models.validateModelInputs("gpt_image_2", { prompt: "test", quality: "standard" }),
         (err) => err?.code === "INVALID_ENUM_VALUE" || err?.name === "InvalidEnumValueError"
       );
       assert.throws(
-        () => models.validateInput("gpt_image_2", { prompt: "test", quality: "hd" }),
+        () => models.validateModelInputs("gpt_image_2", { prompt: "test", quality: "hd" }),
         (err) => err?.code === "INVALID_ENUM_VALUE" || err?.name === "InvalidEnumValueError"
       );
 
@@ -2260,11 +2275,11 @@ describe("Sealed Models Subsystem Architecture", () => {
 
       // Verify unsupported parameters (negative_prompt, seed) are strictly rejected as UnknownParameterError
       assert.throws(
-        () => models.validateInput("gpt_image_2", { prompt: "test", negative_prompt: "blurry" }),
+        () => models.validateModelInputs("gpt_image_2", { prompt: "test", negative_prompt: "blurry" }),
         (err) => err?.code === "UNKNOWN_PARAMETER" || err?.name === "UnknownParameterError"
       );
       assert.throws(
-        () => models.validateInput("gpt_image_2", { prompt: "test", seed: 12345 }),
+        () => models.validateModelInputs("gpt_image_2", { prompt: "test", seed: 12345 }),
         (err) => err?.code === "UNKNOWN_PARAMETER" || err?.name === "UnknownParameterError"
       );
     });
@@ -2273,7 +2288,7 @@ describe("Sealed Models Subsystem Architecture", () => {
     it("seedream_v5: verifies 1k/1.5k/2k resolutions and prompt_optimization_mode", async () => {
       const resolutions = ["1k", "1.5k", "2k"];
       for (const r of resolutions) {
-        const validated = models.validateInput("seedream_v5", { prompt: "test", resolution: r });
+        const validated = models.validateModelInputs("seedream_v5", { prompt: "test", resolution: r });
         assert.strictEqual(validated.resolution, r);
       }
 
@@ -2407,7 +2422,7 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(executedPayload.output_format, "webp");
 
       assert.throws(
-        () => models.validateInput("wavespeed_upscale", { input_image: "https://example.com/low.png", scale_factor: 16 }),
+        () => models.validateModelInputs("wavespeed_upscale", { input_image: "https://example.com/low.png", scale_factor: 16 }),
         (err) => err.code === "INVALID_ENUM_VALUE"
       );
     });
@@ -2826,7 +2841,7 @@ describe("Sealed Models Subsystem Architecture", () => {
       // 7. Validation: Rejects undeclared unknown canonical parameter
       it("Validation: Rejects undeclared unknown parameter", () => {
         assert.throws(
-          () => models.validateInput("seedance_2_5", { prompt: "test", unknown_random_prop: "invalid" }),
+          () => models.validateModelInputs("seedance_2_5", { prompt: "test", unknown_random_prop: "invalid" }),
           (err) => err.name === "UnknownParameterError" || err.code === "UNKNOWN_PARAMETER"
         );
       });

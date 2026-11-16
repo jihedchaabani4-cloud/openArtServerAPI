@@ -8,7 +8,7 @@ import {
   GraphCompiler,
   SaveMediaNode,
   createDefaultV3NodeRegistry,
-} from "#generation/tools";
+} from "../../../src/systems/generation/internal/v3/index.js";
 import { db } from "../../../src/container.js";
 import { MediaRepository, MediaWorkflowLifecycleService } from "#media/tools";
 import { runReservationReaper } from "#billing/tools";

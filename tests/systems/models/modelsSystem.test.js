@@ -1,9 +1,11 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import * as models from "#models/tools";
-import { getModelConfig, validateModelInputs, calculateOperationCost, executeGeneration, executeLLM, initRegistry, getCatalog, getModelSchema, estimatePrice, ModelsError, ModelsValidationError, ModelsNotFoundError, ModelsConfigurationError, ModelsProviderError, registerProviderRunner, unregisterProviderRunner } from "#models/tools";
+import { getModelConfig, validateModelInputs, calculateCost, executeGeneration, executeLLM, getCatalog, getModelSchema, ModelsError, ModelsValidationError, ModelsNotFoundError, ModelsConfigurationError, ModelsProviderError } from "#models/tools";
+import { initRegistry } from "../../../src/systems/models/internal/registry/modelRegistry.js";
+import { registerProviderRunner, unregisterProviderRunner } from "../../../src/systems/models/internal/runtime/providerRuntimeRegistry.js";
 import modelsRouter, { formatModelDto } from "#models/api";
-import { VideoGenerateNode } from "#generation/tools";
+import { VideoGenerateNode } from "../../../src/systems/generation/internal/v3/index.js";
 import { resolveMediaMetadata } from "#media/tools";
 
 // ─── Source: modelsSystem.test.js ───
@@ -49,28 +51,28 @@ describe("System 2: Models Management (#models/tools & #models/api)", () => {
       assert.equal(clean.prompt, "a cute robot painting");
     });
 
-    it("calculateOperationCost returns financial cost estimate DTO decoupled from wallet ledger", () => {
+    it("calculateCost returns financial credit cost decoupled from wallet ledger", () => {
       const catalog = getCatalog();
       const imageModel = catalog.find((m) => m.domain === "image") || catalog[0];
       const modelId = imageModel.modelFamily || imageModel.id;
 
-      const result = calculateOperationCost({
-        modelId,
-        params: { prompt: "fantasy landscape" },
-      });
+      const credits = calculateCost(modelId, { prompt: "fantasy landscape" });
 
-      assert.ok(result);
-      assert.equal(typeof result.credits, "number");
-      assert.ok(result.credits > 0);
-      assert.equal(result.currency, "credits");
-      assert.ok(result.pricingVersion);
+      assert.equal(typeof credits, "number");
+      assert.ok(credits > 0);
     });
 
-    it("calculateOperationCost throws ModelsValidationError if modelId is missing", () => {
-      assert.throws(
-        () => calculateOperationCost({}),
-        (err) => err instanceof ModelsValidationError && err.statusCode === 400
-      );
+    it("calculateCost with returnQuote returns detailed financial estimate DTO", () => {
+      const catalog = getCatalog();
+      const imageModel = catalog.find((m) => m.domain === "image") || catalog[0];
+      const modelId = imageModel.modelFamily || imageModel.id;
+
+      const quote = calculateCost(modelId, { prompt: "fantasy landscape" }, { returnQuote: true });
+
+      assert.ok(quote);
+      assert.equal(typeof quote.credits, "number");
+      assert.ok(quote.credits > 0);
+      assert.ok(quote.planIdentity);
     });
 
     it("executeGeneration throws ModelsValidationError if modelId is omitted", async () => {

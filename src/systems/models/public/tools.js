@@ -14,26 +14,13 @@ import {
   initRegistry,
   getRegistry,
   getModel,
-  getModelBindings,
-  getProvider,
   reloadRegistry,
 } from "../internal/registry/modelRegistry.js";
 import {
-  resolveExecutionPlan,
-  resolveConfiguredBinding,
-  resolveBindingForTest,
-} from "../internal/registry/bindingResolver.js";
-import {
   validateCanonicalInput,
-  validateBindingConstraints,
   getModelSchema as getModelSchemaInternal,
 } from "../internal/schema/schemaValidator.js";
 import { getModelConfig as getInternalModelConfig } from "../internal/services/catalogPresentation.js";
-import {
-  calculateRetailCredits,
-  calculateWholesaleCostUsd,
-  calculateMargin,
-} from "../internal/pricing/pricingEngine.js";
 import {
   calculateCost,
   getCatalog,
@@ -41,22 +28,11 @@ import {
 import { PricingService } from "../internal/services/PricingService.js";
 import {
   llmService,
-  LLMService,
   BillingContextMissingError,
   ALLOWED_INTERNAL_REASONS,
 } from "../internal/services/LLMService.js";
-import { PromptService, promptService } from "../internal/services/PromptService.js";
+import { promptService } from "../internal/services/PromptService.js";
 import { run as runInternal } from "../internal/execution/modelRunner.js";
-import { normalizeError } from "../internal/execution/errorNormalizer.js";
-import { RuntimeExecutor } from "../internal/execution/runtimeExecutor.js";
-import {
-  resolveProviderRoute,
-  registerProviderResolver,
-  getRunner,
-  registerProviderRunner,
-  unregisterProviderRunner,
-  executeProvider,
-} from "../internal/runtime/providerRuntimeRegistry.js";
 import { createLogger } from "#shared";
 
 import {
@@ -67,24 +43,17 @@ import {
   ModelsProviderError,
   ModelsSystemError,
   ValidationError,
-  InvalidEnumValueError,
-  UnknownParameterError,
   MissingOptionError,
   ProviderTransientError,
   ProviderRequestError,
-  ProviderContentPolicyError,
-  ProviderMalformedResponseError,
   OutputContractViolationError,
   UnsupportedCapabilityError,
   UnknownModelFamilyError,
-  ModelNotFoundError,
   UnknownOperationError,
-  OperationNotFoundError,
   BindingNotFoundError,
   BindingModelMismatchError,
   BindingOperationMismatchError,
   ConfigIntegrityError,
-  NoEligibleBindingError,
 } from "../internal/errors.js";
 
 const modelsLogger = createLogger("models");
@@ -94,34 +63,6 @@ try {
   initRegistry();
 } catch (err) {
   modelsLogger.error({ error: err.message }, `Registry boot initialization error: ${err.message}`);
-}
-
-export function estimatePrice(modelFamily, rawInput = {}, options = {}) {
-  const cleanInput = validateInput(modelFamily, rawInput);
-  const { model, route, planIdentity } = resolveExecutionPlan(modelFamily, cleanInput, options);
-  validateBindingConstraints(route, cleanInput);
-  const amount = calculateRetailCredits(model, cleanInput, route);
-  return {
-    amount,
-    currency: "credits",
-    pricingVersion: "fixed_retail",
-    manifestVersion: model?.version || "1.0.0",
-    planIdentity: planIdentity?.id || null,
-  };
-}
-
-export async function run(modelFamily, semanticParams = {}, options = {}) {
-  const model = getModel(modelFamily);
-
-  modelsLogger.debug(
-    {
-      modelFamily,
-      event: "models.execution.started",
-    },
-    `Executing model ${modelFamily}`
-  );
-
-  return runInternal(modelFamily, semanticParams, { ...options, model });
 }
 
 // ── Inter-System Tools Functions (System 2 Interface) ──────────────────────────
@@ -174,30 +115,6 @@ export function getModelSchema(modelOrFamily) {
 }
 
 /**
- * Legacy schema helper for backward compatibility.
- * @deprecated Use getModelSchema(modelFamily) instead.
- */
-export function getSchema(modelFamily, operation = null) {
-  const model = getModel(modelFamily);
-
-  if (operation && model.operations?.[operation]) {
-    const opDef = model.operations[operation];
-    return {
-      id: model.id,
-      modelFamily: model.id,
-      modelId: model.id,
-      operation,
-      domain: model.domain,
-      inputs: opDef.canonicalInputs || model.canonicalInputs || {},
-      parameters: opDef.canonicalInputs || model.canonicalInputs || {},
-      retailPricing: opDef.retailPricing || model.retailPricing || null,
-    };
-  }
-
-  return getModelSchema(modelFamily);
-}
-
-/**
  * Validates and sanitizes raw input against model's canonical schema.
  *
  * @param {string} modelId
@@ -205,39 +122,9 @@ export function getSchema(modelFamily, operation = null) {
  * @returns {object} Clean sanitized input DTO
  */
 export function validateModelInputs(modelId, params = {}) {
-  return validateInput(modelId, params);
-}
-
-/**
- * Validates and sanitizes input (legacy signature).
- */
-export function validateInput(modelFamily, rawInput = {}) {
-  const model = getModel(modelFamily);
+  const model = getModel(modelId);
   const modelContract = getModelSchema(model);
-  return validateCanonicalInput(modelContract.parameters, rawInput);
-}
-
-/**
- * Calculates operation credit cost. Pure financial calculation.
- *
- * @param {object} input
- * @param {string} input.modelId - Target model ID
- * @param {string} [input.operation] - Operation name (optional)
- * @param {object} [input.params] - Semantic parameters
- * @returns {{ credits: number, currency: string, pricingVersion: string, planIdentity?: string }}
- */
-export function calculateOperationCost({ modelId, operation = null, params = {} } = {}) {
-  if (!modelId) {
-    throw new ModelsValidationError("modelId is required to calculate operation cost");
-  }
-  const estimate = estimatePrice(modelId, params);
-  return {
-    credits: estimate.amount,
-    currency: estimate.currency || "credits",
-    pricingVersion: estimate.pricingVersion || "fixed_retail",
-    planIdentity: estimate.planIdentity || null,
-    manifestVersion: estimate.manifestVersion || "1.0.0",
-  };
+  return validateCanonicalInput(modelContract.parameters, params);
 }
 
 /**
@@ -273,7 +160,16 @@ export async function executeGeneration({
     semanticParams.references = references;
   }
 
-  return run(modelId, semanticParams, { userId, ...options });
+  const model = getModel(modelId);
+  modelsLogger.debug(
+    {
+      modelFamily: modelId,
+      event: "models.execution.started",
+    },
+    `Executing model ${modelId}`
+  );
+
+  return runInternal(modelId, semanticParams, { userId, ...options, model });
 }
 
 /**
@@ -324,43 +220,21 @@ export function getRegistryStats() {
   };
 }
 
-// ── Facade Re-exports for Backward Compatibility ──────────────────────────────
+// ── Public System 2 Tools Gateway Exports ─────────────────────────────────────
 
 export {
-  // Registry & Inspection
-  initRegistry,
-  getRegistry,
-  getModel,
-  getModelBindings,
-  getProvider,
-  reloadRegistry,
-  resolveExecutionPlan,
-  resolveConfiguredBinding,
-  resolveBindingForTest,
-  validateCanonicalInput,
-  validateBindingConstraints,
+  // Catalog & Execution Gateway (imported)
   getCatalog,
   calculateCost,
-  normalizeError,
-  RuntimeExecutor,
-  resolveProviderRoute,
-  registerProviderResolver,
-  getRunner,
-  registerProviderRunner,
-  unregisterProviderRunner,
-  executeProvider,
-  calculateRetailCredits,
-  calculateWholesaleCostUsd,
-  calculateMargin,
+  initRegistry,
+  reloadRegistry,
 
   // Services
   PricingService,
-  LLMService,
+  llmService,
+  promptService,
   BillingContextMissingError,
   ALLOWED_INTERNAL_REASONS,
-  PromptService,
-  promptService,
-  llmService,
 
   // Typed Errors
   ModelsError,
@@ -370,53 +244,36 @@ export {
   ModelsProviderError,
   ModelsSystemError,
   ValidationError,
-  InvalidEnumValueError,
-  UnknownParameterError,
   MissingOptionError,
   ProviderTransientError,
   ProviderRequestError,
-  ProviderContentPolicyError,
-  ProviderMalformedResponseError,
   OutputContractViolationError,
   UnsupportedCapabilityError,
   UnknownModelFamilyError,
-  ModelNotFoundError,
   UnknownOperationError,
-  OperationNotFoundError,
   BindingNotFoundError,
   BindingModelMismatchError,
   BindingOperationMismatchError,
   ConfigIntegrityError,
-  NoEligibleBindingError,
 };
 
 export default {
   // Inter-system tools
   getModelConfig,
   getModelSchema,
-  getSchema,
   validateModelInputs,
-  validateInput,
-  calculateOperationCost,
+  calculateCost,
+  getCatalog,
   executeGeneration,
   executeLLM,
-  getRegistryStats,
-
-  // Facade functions
   initRegistry,
   reloadRegistry,
-  getCatalog,
-  calculateCost,
-  estimatePrice,
-  run,
-  calculateRetailCredits,
-  calculateWholesaleCostUsd,
-  calculateMargin,
+  getRegistryStats,
+
+  // Services
   PricingService,
-  LLMService,
-  PromptService,
-  promptService,
   llmService,
+  promptService,
 
   // Errors
   ModelsError,

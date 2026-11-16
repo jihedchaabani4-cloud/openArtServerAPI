@@ -1,6 +1,8 @@
 import { describe, it, beforeEach, afterEach, after, before } from "node:test";
 import assert from "node:assert/strict";
-import { LlmNode, characterSheetV3, getV3Workflow, llmService, NodeSafetyService } from "#generation/tools";
+import { LlmNode, characterSheetV3, getV3Workflow } from "../../../src/systems/generation/internal/v3/index.js";
+import { NodeSafetyService } from "../../../src/systems/generation/internal/services/NodeSafetyService.js";
+import { llmService } from "#models/tools";
 import express from "express";
 import http from "node:http";
 import { promptRouter } from "#generation/api";

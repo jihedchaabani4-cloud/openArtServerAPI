@@ -8,7 +8,8 @@ import { redisConnection, workerRedisConnection, rateLimitRedisConnection, waitF
 import { setLimiterForTest, resetLimitersForTest, requireAuth, isInternalSecretAllowedRoute } from "#identity/tools";
 import { MediaInspector, StorageService, createSizeLimitedMemoryStorage, resetActiveUploadsForTest, getActiveUploadsCountForTest, MediaUploadService, resetInFlightBytesForTest, getInFlightBytesForTest } from "#media/tools";
 import { Readable } from "node:stream";
-import { registerProviderRunner, unregisterProviderRunner, resolveBindingForTest } from "#models/tools";
+import { registerProviderRunner, unregisterProviderRunner } from "../../../src/systems/models/internal/runtime/providerRuntimeRegistry.js";
+import { resolveBindingForTest } from "../../../src/systems/models/internal/registry/bindingResolver.js";
 import express from "express";
 import { assetUploadService, workflowService } from "../../../src/container.js";
 import { assetsRouter, mediaIngestRouter } from "#media/api";

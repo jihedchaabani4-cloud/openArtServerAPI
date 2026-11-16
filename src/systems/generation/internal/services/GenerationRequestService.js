@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { AppError, createLogger } from "#shared";
 import { createMediaInWorkflow } from "#media/tools";
 import { toMediaIdList } from "#identity/tools";
-import { validateInput, getModelSchema } from "#models/tools";
+import { validateModelInputs, getModelSchema } from "#models/tools";
 
 const logger = createLogger("generation_request_service");
 const ARRAY_MEDIA_PARAM_KEYS = ["images", "reference_images", "reference_videos"];
@@ -25,7 +25,7 @@ export class GenerationRequestService {
      * @param {Object} deps.folderService
      * @param {Function} [deps.modelValidator]
      */
-    constructor({ db, useCaseService, folderService, modelValidator = validateInput }) {
+    constructor({ db, useCaseService, folderService, modelValidator = validateModelInputs }) {
         this.db = db;
         this.useCaseService = useCaseService;
         this.folderService = folderService;

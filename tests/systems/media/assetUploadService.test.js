@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { AssetUploadService, DEFAULT_UPLOAD_POLICY, MediaService, WorkflowMediaRepository } from "#media/tools";
-import { WorkflowMediaService } from "#generation/tools";
+import { WorkflowMediaService } from "../../../src/systems/generation/internal/services/WorkflowMediaService.js";
 
 // ─── Source: assetUploadServiceMigrated.test.js ───
 {
@@ -446,7 +446,7 @@ describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaS
     });
 
     it("10. Integrated 4-step rollback with real WorkflowMediaService: executes unlink -> delete media -> discard -> delete containerWf", async () => {
-        const { WorkflowMediaService } = await import("#generation/tools");
+        const { WorkflowMediaService } = await import("../../../src/systems/generation/internal/services/WorkflowMediaService.js");
 
         const orderEvents = [];
         const discarded = [];

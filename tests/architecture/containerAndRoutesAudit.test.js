@@ -2,7 +2,9 @@ import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import * as container from "../../src/container.js";
 import { db, workflowService, projectReadService } from "../../src/container.js";
-import { WorkflowMediaService, WorkflowLifecycleService, WorkflowService as WorkflowServiceBase, RunRepository } from "#generation/tools";
+import { WorkflowService } from "#generation/tools";
+import { WorkflowMediaService } from "../../src/systems/generation/internal/services/WorkflowMediaService.js";
+import { RunRepository } from "../../src/systems/generation/internal/db/RunRepository.js";
 import { MediaUploadService, MediaService, MediaWorkflowLifecycleService } from "#media/tools";
 import { ElementService, ElementMediaService } from "#elements/tools";
 import { CharacterService, CharacterMediaService } from "#characters/tools";
@@ -28,9 +30,8 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
 
         const rootUploadService = container.mediaUploadService;
 
-        // 2. WorkflowLifecycleService (subclass of WorkflowServiceBase) and its WorkflowMediaService
-        assert.ok(container.workflowService instanceof WorkflowLifecycleService, "workflowService must be WorkflowLifecycleService");
-        assert.ok(container.workflowService instanceof WorkflowServiceBase, "workflowService must inherit WorkflowServiceBase");
+        // 2. WorkflowService and its WorkflowMediaService
+        assert.ok(container.workflowService instanceof WorkflowService, "workflowService must be WorkflowService");
         assert.ok(container.workflowService.mediaService instanceof WorkflowMediaService, "workflowService.mediaService must be WorkflowMediaService");
         assert.equal(
             container.workflowService.mediaService.mediaUploadService,

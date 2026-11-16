@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { AppError } from "#shared";
 import { getCreditBalance, reserveCredits, settleCredits, rollbackCredits, addCredits, listTransactions, listCreditPackages, getCreditPackage, resolvePackageCredits, configureBilling, getBillingService, getWalletService, getCreditPackageRepository, getFailedOpsService, getWalletRepository, createWalletService, createFailedOpsService, createBillingRepositories, WalletService, FailedOpsService, reconcileExpiredHolds, handleExpireStaleHolds, BillingError, BillingValidationError, BillingNotFoundError, BillingInsufficientFundsError, BillingConflictError, BillingConfigurationError, WalletError } from "#billing/tools";
 import billingApiRouter from "#billing/api";
-import { V3Dispatcher, GraphCompiler, createDefaultV3NodeRegistry, getV3Workflow } from "#generation/tools";
+import { V3Dispatcher } from "#generation/tools";
+import { GraphCompiler, createDefaultV3NodeRegistry, getV3Workflow } from "../../../src/systems/generation/internal/v3/index.js";
 
 // ─── Source: billingSystem.test.js ───
 {

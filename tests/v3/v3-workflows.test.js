@@ -11,7 +11,7 @@ import {
   imageGenerationV3,
   videoGenerationV3,
   characterSheetV3,
-} from "#generation/tools";
+} from "../../src/systems/generation/internal/v3/index.js";
 
 function createMockNodeExecutionContext() {
   return {
@@ -79,8 +79,8 @@ function createMockNodeExecutionContext() {
   };
 }
 
-describe("V3 Declarative Workflows & #generation/tools Public Gateway", () => {
-  it("exports all V3 engine classes, registries, and 3 canonical workflows with explicit contracts from #generation/tools", () => {
+describe("V3 Declarative Workflows & Internal Engine", () => {
+  it("exports all V3 engine classes, registries, and 3 canonical workflows with explicit contracts from internal v3", () => {
     assert.ok(NodeRegistry);
     assert.ok(GraphCompiler);
     assert.ok(WorkflowExecutor);

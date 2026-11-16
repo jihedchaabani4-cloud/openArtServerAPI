@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { CharacterMediaService, CHARACTER_MAX_DETAIL_MEDIA, CharacterGenerationService } from "#characters/tools";
 import { CrudServiceError } from "#shared";
 import { CHARACTER_SHEET_UPLOAD_POLICY, CHARACTER_DETAIL_UPLOAD_POLICY, createWorkflowWithMediaAtomic, failWorkflowPendingMedia, WorkflowMediaRepository } from "#media/tools";
-import { WorkflowMediaService } from "#generation/tools";
+import { WorkflowMediaService } from "../../../src/systems/generation/internal/services/WorkflowMediaService.js";
 import { ElementMediaService, ElementService } from "#elements/tools";
 import { supabase } from "#shared/db/supabase.js";
 import { setDb } from "#identity/tools";
@@ -1689,8 +1689,8 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
 
   it("5. Worker crash handler: refunds credits idempotently (exactly once on double failure / retry / timeout) and marks direct media failed", async () => {
     process.env.NODE_ENV = "test";
-    const { handleUseCaseWorkerFailure, useCaseWorker } = await import("#generation/tools");
-    const { useCaseService, db } = await import("../../../src/container.js");
+    const { handleUseCaseWorkerFailure, useCaseWorker } = await import("../../../src/systems/generation/internal/workers/useCaseWorker.js");
+    const { v3Dispatcher: useCaseService, db } = await import("../../../src/container.js");
     const { redisConnection, workerRedisConnection, rateLimitRedisConnection } = await import("#shared");
 
     let actualRefundCount = 0;

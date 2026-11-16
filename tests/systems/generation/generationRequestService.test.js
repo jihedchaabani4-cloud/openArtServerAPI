@@ -1,11 +1,13 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { GenerationRequestService, V1StorageBridge, RunRepository } from "#generation/tools";
+import { GenerationRequestService } from "#generation/tools";
+import { V1StorageBridge } from "#media/tools";
+import { RunRepository } from "../../../src/systems/generation/internal/db/RunRepository.js";
 import { AppError, redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared";
 import express from "express";
 import http from "node:http";
 import apiRouter from "../../../src/api/routes.js";
-import { db, walletService, useCaseService, folderService, workflowService } from "../../../src/container.js";
+import { db, walletService, v3Dispatcher as useCaseService, folderService, workflowService } from "../../../src/container.js";
 import { supabase } from "#shared/db/supabase.js";
 import { CharacterGenerationService } from "#characters/tools";
 import { generateImage, generateVideo } from "#generation/api";

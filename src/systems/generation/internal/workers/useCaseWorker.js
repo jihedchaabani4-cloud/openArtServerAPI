@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { Worker } from "bullmq";
 import { workerRedisConnection, wrapWorkerJob, createLogger, LogEvents, envConfig } from "#shared";
 import { USECASE_QUEUE_NAME } from "../services/jobQueueService.js";
-import { getUseCaseService, getV3Dispatcher, getDefaultDb } from "../services/serviceAccessor.js";
+import { getV3Dispatcher, getDefaultDb } from "../services/serviceAccessor.js";
 import { failWorkflowPendingMedia } from "#media/tools";
 
 const workerLogger = createLogger("worker");
@@ -23,7 +23,7 @@ export const useCaseWorker = envConfig.isTest
   : new Worker(
       USECASE_QUEUE_NAME,
       wrapWorkerJob("usecase-worker", async (job) => {
-        const dispatcher = getV3Dispatcher() || getUseCaseService();
+        const dispatcher = getV3Dispatcher();
         const { useCaseId, input, userId, billingHoldId } = job.data;
         workerLogger.debug({ useCaseId, userId }, `Processing V3 workflow/useCase "${useCaseId}" for user ${userId}`);
 
@@ -78,14 +78,14 @@ export async function handleUseCaseWorkerFailure(job, err) {
     `[Worker] Job #${job?.id} failed without errorReport — Worker crash detected. Running manual cleanup.`
   );
 
-  const useCaseService = getUseCaseService();
+  const dispatcher = getV3Dispatcher();
   const db = getDefaultDb();
 
   const billingHoldId = job?.data?.billingHoldId || job?.data?.input?.billing_hold_id;
   const workflowId    = job?.data?.input?.workflow_id || job?.data?.serverContext?.workflowId || job?.data?.input?.serverWorkflowId;
 
-  if (billingHoldId && useCaseService) {
-    await useCaseService.rollbackPreparedBilling(billingHoldId, {
+  if (billingHoldId && dispatcher) {
+    await dispatcher.rollbackPreparedBilling(billingHoldId, {
       failedMessage: err?.message || "Worker crash",
       errorCategory: "WORKER_CRASH",
     }).catch((rollbackErr) => {

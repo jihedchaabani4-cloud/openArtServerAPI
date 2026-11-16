@@ -1,6 +1,13 @@
 import { describe, it, beforeEach, afterEach, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { WorkflowAuthorizationService, resolveWorkflowReference, resolveWorkflowReferences, resolvePrimaryMediaUrl, ResolveRefsNode, WorkflowRepository } from "#generation/tools";
+import { WorkflowRepository } from "#generation/tools";
+import { WorkflowAuthorizationService } from "../../../src/systems/generation/internal/services/WorkflowAuthorizationService.js";
+import {
+  resolveWorkflowReference,
+  resolveWorkflowReferences,
+  resolvePrimaryMediaUrl,
+} from "../../../src/systems/generation/internal/resolvers/WorkflowReferenceResolver.js";
+import { ResolveRefsNode } from "../../../src/systems/generation/internal/v3/index.js";
 import express from "express";
 import http from "node:http";
 import { workflowsRouter, imagesRouter, videoRouter } from "#generation/api";

@@ -677,6 +677,70 @@ export class WorkflowMediaRepository {
         return data || [];
     }
 
+    /**
+     * Batch-fetches lightweight media status records grouped by workflow ID in a single query.
+     *
+     * @param {string[]} workflowIds
+     * @returns {Promise<Map<string, Array<{ id: string, status: string|null, url: string|null }>>>}
+     */
+    async findMediaStatusesByWorkflowIds(workflowIds = []) {
+        const ids = Array.isArray(workflowIds) ? [...new Set(workflowIds.filter(Boolean))] : [];
+        const grouped = new Map(ids.map((wfId) => [wfId, []]));
+        if (ids.length === 0) return grouped;
+
+        if (this._isMemoryMode()) {
+            const seenByWorkflow = new Map();
+            for (const row of memoryWorkflowMedia) {
+                if (!grouped.has(row.workflow_id)) continue;
+                let seen = seenByWorkflow.get(row.workflow_id);
+                if (!seen) {
+                    seen = new Set();
+                    seenByWorkflow.set(row.workflow_id, seen);
+                }
+                if (seen.has(row.media_id)) continue;
+                seen.add(row.media_id);
+                grouped.get(row.workflow_id).push({
+                    id: row.media_id,
+                    status: row.status ?? null,
+                    url: row.url ?? null,
+                });
+            }
+            return grouped;
+        }
+
+        const { data, error } = await this._getClientOrThrow()
+            .from(this.tableName)
+            .select("workflow_id, media_id, media:media_id (id, status, url)")
+            .in("workflow_id", ids);
+        if (error) throw error;
+
+        const seenByWorkflow = new Map();
+        for (const row of data || []) {
+            const media = Array.isArray(row.media) ? row.media[0] : row.media;
+            if (!media) continue;
+            const wfId = row.workflow_id;
+            const mediaId = media.id || row.media_id;
+            if (!wfId || !mediaId) continue;
+
+            if (!grouped.has(wfId)) grouped.set(wfId, []);
+            let seen = seenByWorkflow.get(wfId);
+            if (!seen) {
+                seen = new Set();
+                seenByWorkflow.set(wfId, seen);
+            }
+            if (seen.has(mediaId)) continue;
+            seen.add(mediaId);
+
+            grouped.get(wfId).push({
+                id: mediaId,
+                status: media.status ?? null,
+                url: media.url ?? null,
+            });
+        }
+
+        return grouped;
+    }
+
     async findByMedia(mediaId) {
         if (!mediaId) return [];
         if (this._isMemoryMode()) {

@@ -4,7 +4,21 @@ import { AppError, ProviderError, ValidationError, BillingError, SystemError, In
 import { createLogger, runWithContext, setContext, getContext, getCleanContext, LogEvents, LogErrorCodes, baseLogger } from "../../src/shared/logger/index.js";
 import { sanitizeData } from "../../src/shared/logger/redaction.js";
 import { errSerializer, reqSerializer, resSerializer } from "../../src/shared/logger/serializers.js";
-import { envConfig, loggingConfig, redisConnection, workerRedisConnection, rateLimitRedisConnection, waitForRateLimitRedis, RECONCILIATION_CACHE_KEY } from "#shared";
+import {
+  envConfig,
+  loggingConfig,
+  redisConnection,
+  workerRedisConnection,
+  rateLimitRedisConnection,
+  waitForRateLimitRedis,
+  RECONCILIATION_CACHE_KEY,
+  RATE_LIMIT_POLICIES,
+  clampBulkDeleteConcurrency,
+  BULK_DELETE_CONCURRENCY_DEFAULT,
+  BULK_DELETE_CONCURRENCY_MIN,
+  BULK_DELETE_CONCURRENCY_MAX,
+  runWithConcurrency,
+} from "#shared";
 import { isProductionEnvironment, assertSecurityConfiguredForEnvironment, assertWalletConfiguredForEnvironment, assertRateLimitConfiguredForEnvironment, workflowService } from "../../src/container.js";
 import http from "node:http";
 import app from "../../index.js";
@@ -227,6 +241,138 @@ describe("Shared Redis & Config Kernel", () => {
 
     const ready = await waitForRateLimitRedis(100);
     assert.equal(ready, true); // in test environment, resolves immediately to true
+  });
+
+  it("parses and clamps BULK_DELETE_CONCURRENCY into [1, 15] with default 10", () => {
+    const orig = process.env.BULK_DELETE_CONCURRENCY;
+    try {
+      assert.equal(BULK_DELETE_CONCURRENCY_DEFAULT, 10);
+      assert.equal(BULK_DELETE_CONCURRENCY_MIN, 1);
+      assert.equal(BULK_DELETE_CONCURRENCY_MAX, 15);
+
+      // Direct clamp helper checks
+      assert.equal(clampBulkDeleteConcurrency(undefined), 10);
+      assert.equal(clampBulkDeleteConcurrency(null), 10);
+      assert.equal(clampBulkDeleteConcurrency(""), 10);
+      assert.equal(clampBulkDeleteConcurrency("   "), 10);
+      assert.equal(clampBulkDeleteConcurrency("not-a-number"), 10);
+      assert.equal(clampBulkDeleteConcurrency(NaN), 10);
+      assert.equal(clampBulkDeleteConcurrency(Infinity), 10);
+      assert.equal(clampBulkDeleteConcurrency(true), 10);
+      assert.equal(clampBulkDeleteConcurrency(0), 1);
+      assert.equal(clampBulkDeleteConcurrency(-5), 1);
+      assert.equal(clampBulkDeleteConcurrency("0"), 1);
+      assert.equal(clampBulkDeleteConcurrency("-5"), 1);
+      assert.equal(clampBulkDeleteConcurrency(1), 1);
+      assert.equal(clampBulkDeleteConcurrency(12), 12);
+      assert.equal(clampBulkDeleteConcurrency("12"), 12);
+      assert.equal(clampBulkDeleteConcurrency(15), 15);
+      assert.equal(clampBulkDeleteConcurrency(50), 15);
+      assert.equal(clampBulkDeleteConcurrency("50"), 15);
+
+      // Dynamic envConfig.bulkDeleteConcurrency getter checks
+      delete process.env.BULK_DELETE_CONCURRENCY;
+      assert.equal(envConfig.bulkDeleteConcurrency, 10);
+
+      process.env.BULK_DELETE_CONCURRENCY = "";
+      assert.equal(envConfig.bulkDeleteConcurrency, 10);
+
+      process.env.BULK_DELETE_CONCURRENCY = "invalid";
+      assert.equal(envConfig.bulkDeleteConcurrency, 10);
+
+      process.env.BULK_DELETE_CONCURRENCY = "0";
+      assert.equal(envConfig.bulkDeleteConcurrency, 1);
+
+      process.env.BULK_DELETE_CONCURRENCY = "-5";
+      assert.equal(envConfig.bulkDeleteConcurrency, 1);
+
+      process.env.BULK_DELETE_CONCURRENCY = "12";
+      assert.equal(envConfig.bulkDeleteConcurrency, 12);
+
+      process.env.BULK_DELETE_CONCURRENCY = "50";
+      assert.equal(envConfig.bulkDeleteConcurrency, 15);
+    } finally {
+      if (orig === undefined) {
+        delete process.env.BULK_DELETE_CONCURRENCY;
+      } else {
+        process.env.BULK_DELETE_CONCURRENCY = orig;
+      }
+    }
+  });
+
+  it("defines bulkDelete rate limit policy at 30 req / 60s per user (fail-open)", () => {
+    assert.deepEqual(RATE_LIMIT_POLICIES.bulkDelete, {
+      points: 30,
+      duration: 60,
+      keyBy: "user",
+      failPolicy: "open",
+    });
+  });
+
+  it("runWithConcurrency strictly bounds max in-flight workers across 1, 10, 15, and clamped <1 / >15", async () => {
+    const cases = [
+      { input: 1, expectedCap: 1, totalItems: 6 },
+      { input: 0, expectedCap: 1, totalItems: 6 },
+      { input: -5, expectedCap: 1, totalItems: 6 },
+      { input: 10, expectedCap: 10, totalItems: 25 },
+      { input: 15, expectedCap: 15, totalItems: 35 },
+      { input: 50, expectedCap: 15, totalItems: 35 },
+    ];
+
+    for (const { input, expectedCap, totalItems } of cases) {
+      let inFlight = 0;
+      let maxInFlight = 0;
+      const items = Array.from({ length: totalItems }, (_, i) => i + 1);
+
+      const results = await runWithConcurrency(
+        items,
+        async (item) => {
+          inFlight += 1;
+          if (inFlight > maxInFlight) maxInFlight = inFlight;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          inFlight -= 1;
+          return item * 2;
+        },
+        { concurrency: input }
+      );
+
+      assert.deepEqual(
+        results,
+        items.map((n) => n * 2),
+        `Result order must match input order for concurrency=${input}`
+      );
+      assert.equal(inFlight, 0);
+      assert.ok(
+        maxInFlight <= expectedCap,
+        `maxInFlight (${maxInFlight}) exceeded cap (${expectedCap}) for concurrency=${input}`
+      );
+      assert.equal(
+        maxInFlight,
+        Math.min(expectedCap, totalItems),
+        `Pool should utilize full bounded concurrency (${expectedCap}) for concurrency=${input}`
+      );
+    }
+
+    // Empty list returns empty array immediately
+    assert.deepEqual(await runWithConcurrency([], async () => 1, { concurrency: 5 }), []);
+
+    // Propagates errors and stops launching remaining queued items
+    let started = 0;
+    await assert.rejects(
+      () =>
+        runWithConcurrency(
+          [1, 2, 3, 4, 5, 6],
+          async (item) => {
+            started += 1;
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            if (item === 2) throw new Error("boom-item-2");
+            return item;
+          },
+          { concurrency: 1 }
+        ),
+      /boom-item-2/
+    );
+    assert.equal(started, 2, "Must stop picking up new items after first error");
   });
 });
 }

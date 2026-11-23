@@ -118,4 +118,12 @@ export const RATE_LIMIT_POLICIES = {
     keyBy:      "user",
     failPolicy: "open",
   },
+
+  /** Bulk delete operations (POST /api/workspace/bulk-delete, POST /api/trash/delete) */
+  bulkDelete: {
+    points:     Number(process.env.RATE_LIMIT_BULK_DELETE_POINTS) || 30,
+    duration:   Number(process.env.RATE_LIMIT_BULK_DELETE_DURATION) || 60,
+    keyBy:      "user",
+    failPolicy: "open",
+  },
 };

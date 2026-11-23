@@ -306,6 +306,8 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
         assert.equal(container.workflowService.trashService, undefined, "workflowService must not depend on trashService");
         assert.equal(container.elementService.trashService, undefined, "elementService must not depend on trashService");
         assert.equal(container.characterService.trashService, undefined, "characterService must not depend on trashService");
+        assert.equal(container.folderService.trashRepo, container.db.trash, "folderService.trashRepo must hold container.db.trash");
+        assert.equal(container.folderService.workflowService, container.workflowService, "folderService.workflowService must hold container.workflowService");
     });
 
     it("Media platform wiring: container exposes MediaService & MediaWorkflowLifecycleService and drops legacy ingestion shims", () => {
@@ -976,6 +978,42 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     const body = await res.json();
     assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
     assert.equal(body.ok, false);
+  });
+
+  it("TEST R4-49: POST /api/workspace/bulk-delete with foreign folder or workflow returns 404", async () => {
+    const resFolder = await reqAlice("/api/workspace/bulk-delete", {
+      method: "POST",
+      body: JSON.stringify({ folder_ids: ["00000000-0000-0000-0000-000000000088"] }),
+    });
+    const bodyFolder = await resFolder.json();
+    assert.equal(resFolder.status, 404, `Expected 404, got ${resFolder.status}`);
+    assert.equal(bodyFolder.ok, false);
+
+    const resWf = await reqAlice("/api/workspace/bulk-delete", {
+      method: "POST",
+      body: JSON.stringify({ workflow_ids: [FOREIGN_WF_ID] }),
+    });
+    const bodyWf = await resWf.json();
+    assert.equal(resWf.status, 404, `Expected 404, got ${resWf.status}`);
+    assert.equal(bodyWf.ok, false);
+  });
+
+  it("TEST R4-50: POST /api/trash/delete with foreign workflow or foreign project_id returns 404", async () => {
+    const resWf = await reqAlice("/api/trash/delete", {
+      method: "POST",
+      body: JSON.stringify({ workflow_ids: [FOREIGN_WF_ID] }),
+    });
+    const bodyWf = await resWf.json();
+    assert.equal(resWf.status, 404, `Expected 404, got ${resWf.status}`);
+    assert.equal(bodyWf.ok, false);
+
+    const resProj = await reqAlice("/api/trash/delete", {
+      method: "POST",
+      body: JSON.stringify({ all: true, project_id: FOREIGN_PROJ_ID }),
+    });
+    const bodyProj = await resProj.json();
+    assert.equal(resProj.status, 404, `Expected 404, got ${resProj.status}`);
+    assert.equal(bodyProj.ok, false);
   });
 
   // ── PART 2: Generic Automated Test — Walks Dumped Route Table & Asserts 100% Foreign Refusal Coverage ──

@@ -33,8 +33,15 @@ foldersRouter.delete("/:folderId", rateLimit("folderWrite"), foldersController.d
 export const trashRouter = express.Router();
 trashRouter.use(requireAuth);
 
+trashRouter.post("/delete", rateLimit("bulkDelete"), trashController.deleteTrashed);
 trashRouter.post("/restore-all", trashController.restoreAllWorkflows);
 trashRouter.post("/:workflowId/restore", trashController.restoreWorkflow);
+
+// ── Workspace Bulk Operations Router ────────────────────────────────
+export const workspaceBulkRouter = express.Router();
+workspaceBulkRouter.use(requireAuth);
+
+workspaceBulkRouter.post("/bulk-delete", rateLimit("bulkDelete"), trashController.bulkDeleteWorkspace);
 
 // ── Unified Workspace Router ─────────────────────────────────────────
 export const workspaceRouter = express.Router();
@@ -44,7 +51,7 @@ workspaceRouter.use("/trash", trashRouter);
 
 export const { getAll, create, update, remove, listAssets } = projectsController;
 export const { createProjectFolder, updateFolder, deleteFolder } = foldersController;
-export const { restoreWorkflow, restoreAllWorkflows } = trashController;
+export const { restoreWorkflow, restoreAllWorkflows, bulkDeleteWorkspace, deleteTrashed } = trashController;
 export { projectsController, foldersController, trashController };
 
 export default workspaceRouter;

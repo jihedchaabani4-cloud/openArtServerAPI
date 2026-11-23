@@ -73,7 +73,8 @@ export const updateFolder = async (req, res, next) => {
 
 /**
  * DELETE /api/folders/:folderId
- * Deletes the folder, its descendant folders, and workflows in that tree.
+ * Permanently deletes the folder and its descendant subfolders after moving
+ * all contained workflows to Trash and unlinking them to the project root.
  */
 export const deleteFolder = async (req, res, next) => {
   const { folderId } = req.params;

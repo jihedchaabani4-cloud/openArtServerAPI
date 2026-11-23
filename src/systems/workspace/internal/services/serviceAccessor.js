@@ -5,6 +5,7 @@ import { ProjectService } from "./ProjectService.js";
 import { FolderService } from "./FolderService.js";
 import { projectRepository } from "../db/ProjectRepository.js";
 import { folderRepository } from "../db/FolderRepository.js";
+import { trashRepository } from "../db/TrashRepository.js";
 
 let _projectService = null;
 let _folderService = null;
@@ -27,7 +28,11 @@ export function getProjectService() {
 
 export function getFolderService() {
     if (!_folderService) {
-        _folderService = new FolderService({ folderRepo: folderRepository, projectRepo: projectRepository });
+        _folderService = new FolderService({
+            folderRepo: folderRepository,
+            projectRepo: projectRepository,
+            trashRepo: trashRepository,
+        });
     }
     return _folderService;
 }

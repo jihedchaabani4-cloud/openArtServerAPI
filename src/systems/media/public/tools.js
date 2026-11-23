@@ -68,6 +68,11 @@ import { MediaService } from "../internal/services/MediaService.js";
 import {
     MediaWorkflowLifecycleService,
     MEDIA_WORKFLOW_STATUS,
+    MEDIA_IN_FLIGHT_STATUSES,
+    isMediaInFlight,
+    isMediaFailed,
+    hasInFlightMedia,
+    areAllWorkflowMediaFailed,
     failWorkflowPendingMedia,
     normalizeNodeMediaOutputs,
 } from "../internal/services/MediaLifecycleService.js";
@@ -84,6 +89,7 @@ import {
     MediaError,
     MediaValidationError,
     MediaNotFoundError,
+    MediaConflictError,
     MediaStorageError,
     MediaUploadError,
     MediaQuotaError,
@@ -405,6 +411,14 @@ export async function deleteMedia({ mediaId, workflowId = null } = {}) {
     if (!mediaId) throw new MediaValidationError("mediaId is required for deleteMedia");
 
     const repo = getMediaRepository();
+    if (typeof repo?.findById === "function") {
+        const record = await repo.findById(mediaId);
+        if (isMediaInFlight(record)) {
+            throw new MediaConflictError("Cannot delete media while it is still processing", {
+                context: { mediaId, workflowId, status: record.status },
+            });
+        }
+    }
     await repo.deleteByIdAndWorkflow(mediaId, workflowId);
 
     return { deleted: true, mediaId };
@@ -479,6 +493,11 @@ export {
     MediaWorkflowLifecycleService,
     V1StorageBridge,
     MEDIA_WORKFLOW_STATUS,
+    MEDIA_IN_FLIGHT_STATUSES,
+    isMediaInFlight,
+    isMediaFailed,
+    hasInFlightMedia,
+    areAllWorkflowMediaFailed,
     resolveMediaMetadata,
     calculateAspectRatio,
     failWorkflowPendingMedia,
@@ -488,6 +507,7 @@ export {
     MediaError,
     MediaValidationError,
     MediaNotFoundError,
+    MediaConflictError,
     MediaStorageError,
     MediaUploadError,
     MediaQuotaError,

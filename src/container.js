@@ -213,7 +213,13 @@ export const useCaseService = v3Dispatcher;
 // ─── Domain & Platform Services ──────────────────────────────────────────────
 export const mediaUploadService = new MediaUploadService({ storageService });
 
-export const folderService = new FolderService({ folderRepo: db.folders, projectRepo: db.projects });
+export const folderService = new FolderService({
+    folderRepo: db.folders,
+    projectRepo: db.projects,
+    trashRepo: db.trash,
+    mediaRepo: db.media,
+    workflowMediaRepo: db.workflowMedia,
+});
 export const workflowService = new WorkflowService({ db, storageService, folderService, mediaUploadService });
 folderService.setWorkflowService(workflowService);
 export const workflowMediaService = workflowService.mediaService;
@@ -270,9 +276,12 @@ export const trashService = new TrashService({
     elementService,
     characterService,
 });
+folderService.setPermanentDeleteWorkflow(({ workflowId, userId, req = null }) =>
+    trashService.permanentlyDeleteByWorkflowOwner({ workflowId, userId, req })
+);
 
 export const projectReadService = new ProjectReadService({ db, folderService });
-export const projectService = new ProjectService({ projectRepo: db.projects });
+export const projectService = new ProjectService({ projectRepo: db.projects, mediaRepo: db.media });
 export const generationService = new GenerationService({ db });
 export const generationRequestService = new GenerationRequestService({ db, useCaseService: v3Dispatcher, folderService });
 configureCharacters({ characterService, characterMediaService, trashService });

@@ -59,6 +59,7 @@ import {
     projectsRouter,
     foldersRouter,
     trashRouter,
+    workspaceBulkRouter,
 } from '#workspace/api';
 
 // System-wide Infrastructure Probes
@@ -88,6 +89,7 @@ router.use('/characters',   charactersRouter);
 // ── System 8: Workspace ──────────────────────────────────────────────────────
 router.use('/projects',     projectsRouter);
 router.use('/folders',      foldersRouter);
+router.use('/workspace',    workspaceBulkRouter);
 
 // ── System 2: Models Management ──────────────────────────────────────────────
 router.use('/models',       modelsRouter);

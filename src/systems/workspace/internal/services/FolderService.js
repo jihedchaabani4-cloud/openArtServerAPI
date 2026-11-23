@@ -4,6 +4,12 @@
  */
 import { AppError, envConfig } from "#shared";
 import {
+  hasInFlightMedia,
+  areAllWorkflowMediaFailed,
+  MediaConflictError,
+} from "#media/tools";
+import { getMediaStatusesByWorkflowIds } from "./workflowMediaStatus.js";
+import {
   indexById,
   indexChildren,
   wouldCreateCycle,
@@ -33,13 +39,21 @@ export class FolderService {
   constructor({
     folderRepo,
     projectRepo = null,
+    trashRepo = null,
     workflowService = null,
+    mediaRepo = null,
+    workflowMediaRepo = null,
+    permanentDeleteWorkflow = null,
     maxDepth = envConfig.folderMaxDepth,
     maxFoldersPerProject = envConfig.folderMaxPerProject,
   } = {}) {
     this.folderRepo = folderRepo;
     this.projectRepo = projectRepo;
+    this.trashRepo = trashRepo;
     this.workflowService = workflowService;
+    this.mediaRepo = mediaRepo;
+    this.workflowMediaRepo = workflowMediaRepo;
+    this.permanentDeleteWorkflow = permanentDeleteWorkflow;
     this.maxDepth = Number.isFinite(maxDepth) && maxDepth > 0 ? maxDepth : 3;
     this.maxFoldersPerProject =
       Number.isFinite(maxFoldersPerProject) && maxFoldersPerProject > 0
@@ -53,6 +67,14 @@ export class FolderService {
    */
   setWorkflowService(workflowService) {
     this.workflowService = workflowService || null;
+  }
+
+  /**
+   * Late-bind owner-aware permanent workflow deletion handler (e.g. TrashService.permanentlyDeleteByWorkflowOwner)
+   * so failed-only character/element workflows inside deleted folders clean up their sidecar rows without cycles.
+   */
+  setPermanentDeleteWorkflow(handler) {
+    this.permanentDeleteWorkflow = typeof handler === "function" ? handler : null;
   }
 
   /**
@@ -376,7 +398,8 @@ export class FolderService {
   }
 
   /**
-   * Deletes a folder, every descendant folder, and every workflow in that tree.
+   * Permanently deletes a folder and every descendant subfolder after
+   * idempotently moving all contained workflows to Trash and clearing their folder_id.
    */
   async remove({ folderId, userId }) {
     if (!folderId || !userId) {
@@ -393,14 +416,111 @@ export class FolderService {
     const children = indexChildren(projectFolders);
     const treeIds = [...collectDescendantIds(children, folderId)];
 
-    if (this.workflowService?.deleteWorkflowsInFolders) {
-      await this.workflowService.deleteWorkflowsInFolders({
+    if (this.workflowService?.listOwnedWorkflowIdsInFolders) {
+      // 1. Collect and verify ownership of ALL workflows in the folder tree before any mutation.
+      const ownedWorkflowIds = await this.workflowService.listOwnedWorkflowIdsInFolders({
         folderIds: treeIds,
         userId,
         projectId: folder.project_id,
       });
+
+      if (ownedWorkflowIds.length > 0) {
+        // 1b. Inspect media statuses upfront (before any mutations):
+        //     - Reject with 409 MEDIA_PROCESSING if any workflow has in-flight media
+        //     - Partition failed-only workflows for direct permanent delete (never trashed)
+        const mediaStatusMap = await getMediaStatusesByWorkflowIds({
+          workflowIds: ownedWorkflowIds,
+          mediaRepo: this.mediaRepo || this.workflowService?.db?.media || null,
+          workflowMediaRepo: this.workflowMediaRepo || this.workflowService?.db?.workflowMedia || null,
+        });
+
+        const inFlightWorkflowIds = ownedWorkflowIds.filter((wfId) =>
+          hasInFlightMedia(mediaStatusMap.get(wfId))
+        );
+        if (inFlightWorkflowIds.length > 0) {
+          throw new MediaConflictError("Cannot delete folder while media is still processing", {
+            context: { folderId, workflowIds: inFlightWorkflowIds },
+          });
+        }
+
+        const failedOnlyWorkflowIds = ownedWorkflowIds.filter((wfId) =>
+          areAllWorkflowMediaFailed(mediaStatusMap.get(wfId))
+        );
+        const failedOnlySet = new Set(failedOnlyWorkflowIds);
+        const trashableWorkflowIds = ownedWorkflowIds.filter((wfId) => !failedOnlySet.has(wfId));
+
+        // 1c. Pre-flight collaborator checks upfront before ANY DB mutation (all-or-nothing atomicity)
+        const deleteWorkflowFn =
+          typeof this.permanentDeleteWorkflow === "function"
+            ? this.permanentDeleteWorkflow
+            : typeof this.workflowService?.deleteWorkflow === "function"
+              ? (params) => this.workflowService.deleteWorkflow(params)
+              : null;
+
+        if (trashableWorkflowIds.length > 0) {
+          if (!this.trashRepo) {
+            throw new FolderError(
+              "Trash repository is required to delete non-empty folders",
+              500,
+              "TRASH_REPO_UNAVAILABLE"
+            );
+          }
+          if (typeof this.workflowService.unlinkWorkflowsFromFolders !== "function") {
+            throw new FolderError(
+              "Workflow unlinking service is unavailable",
+              500,
+              "WORKFLOW_UNLINK_UNAVAILABLE"
+            );
+          }
+        }
+
+        if (failedOnlyWorkflowIds.length > 0 && !deleteWorkflowFn) {
+          throw new FolderError(
+            "Workflow deletion service is unavailable",
+            500,
+            "WORKFLOW_DELETE_UNAVAILABLE"
+          );
+        }
+
+        if (trashableWorkflowIds.length > 0) {
+          // 2. Idempotently move non-failed workflows in treeIds into public.trash (ON CONFLICT DO NOTHING).
+          //    Already-trashed workflows stay in Trash with their original deleted_at preserved.
+          if (typeof this.trashRepo.insertManyIfAbsent === "function") {
+            await this.trashRepo.insertManyIfAbsent({
+              workflowIds: trashableWorkflowIds,
+              userId,
+              deletedBy: userId,
+            });
+          } else {
+            for (const workflowId of trashableWorkflowIds) {
+              await this.trashRepo.insertIfAbsent({
+                workflowId,
+                userId,
+                deletedBy: userId,
+              });
+            }
+          }
+
+          // 3. Unlink trashed workflows from deleted folders (SET folder_id = NULL) before removing folders.
+          await this.workflowService.unlinkWorkflowsFromFolders({
+            workflowIds: trashableWorkflowIds,
+            folderIds: treeIds,
+            userId,
+            projectId: folder.project_id,
+          });
+        }
+
+        // 3b. Permanently delete failed-only workflows directly (via canonical owner when wired, bypassing trash)
+        //     before removing folders.
+        if (failedOnlyWorkflowIds.length > 0) {
+          for (const workflowId of failedOnlyWorkflowIds) {
+            await deleteWorkflowFn({ workflowId, userId });
+          }
+        }
+      }
     }
 
+    // 4. Permanently delete folders deepest-first.
     const deepestFirst = treeIds
       .slice()
       .sort((a, b) => getDepth(byId, b) - getDepth(byId, a));

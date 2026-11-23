@@ -373,6 +373,8 @@ export class WorkflowRepository extends BaseRepository {
 
     /**
      * Lists workflow ids in the given folders, scoped to one project.
+     * Includes both active and already-trashed workflows so folder deletion
+     * can preserve trashed workflows and detach every folder_id before removing folders.
      * FolderService uses this only through WorkflowService.
      */
     async listIdsByFolderIds({ folderIds, projectId, userId } = {}) {
@@ -385,6 +387,30 @@ export class WorkflowRepository extends BaseRepository {
             .select("id")
             .eq("project_id", projectId)
             .in("folder_id", folderIds);
+
+        if (error) throw error;
+        return (data || []).map((row) => row.id).filter(Boolean);
+    }
+
+    /**
+     * Clears folder_id to NULL for the given workflow IDs within a project and folder set.
+     * Used during folder deletion after trashing workflows and before deleting folders so
+     * workflow_folder_same_project_fk stays satisfied and restored workflows return to project root.
+     */
+    async clearFolderIds({ workflowIds = [], folderIds = [], projectId } = {}) {
+        const cleanWorkflowIds = [...new Set((workflowIds || []).filter(Boolean))];
+        const cleanFolderIds = [...new Set((folderIds || []).filter(Boolean))];
+        if (!projectId || !cleanWorkflowIds.length || !cleanFolderIds.length) {
+            return [];
+        }
+
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .update({ folder_id: null })
+            .eq("project_id", projectId)
+            .in("id", cleanWorkflowIds)
+            .in("folder_id", cleanFolderIds)
+            .select("id");
 
         if (error) throw error;
         return (data || []).map((row) => row.id).filter(Boolean);

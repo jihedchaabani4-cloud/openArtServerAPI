@@ -11,14 +11,24 @@ async function getV1StorageBridge() {
 }
 import { resolveMediaMetadata } from "./mediaMetadataResolver.js";
 import { createLogger } from "#shared";
+import {
+  MEDIA_WORKFLOW_STATUS,
+  MEDIA_IN_FLIGHT_STATUSES,
+  isMediaInFlight,
+  isMediaFailed,
+  hasInFlightMedia,
+  areAllWorkflowMediaFailed,
+} from "./mediaStatus.js";
 
 const lifecycleLogger = createLogger("media_lifecycle");
 
-/** Canonical media statuses written to the V1 `media` table. */
-export const MEDIA_WORKFLOW_STATUS = {
-  PROCESSING: "processing",
-  SUCCESS: "success",
-  FAILED: "failed",
+export {
+  MEDIA_WORKFLOW_STATUS,
+  MEDIA_IN_FLIGHT_STATUSES,
+  isMediaInFlight,
+  isMediaFailed,
+  hasInFlightMedia,
+  areAllWorkflowMediaFailed,
 };
 
 const PROVIDER_BACKED_NODE_TYPES = new Set([

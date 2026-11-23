@@ -1,3 +1,29 @@
+export const BULK_DELETE_CONCURRENCY_DEFAULT = 10;
+export const BULK_DELETE_CONCURRENCY_MIN = 1;
+export const BULK_DELETE_CONCURRENCY_MAX = 15;
+
+/**
+ * Parses and clamps bulk-delete worker-pool concurrency into [1, 15].
+ * Unset, empty, boolean, or non-finite values fall back to default (10).
+ */
+export function clampBulkDeleteConcurrency(rawValue) {
+  if (rawValue === undefined || rawValue === null || typeof rawValue === "boolean") {
+    return BULK_DELETE_CONCURRENCY_DEFAULT;
+  }
+  const normalized = typeof rawValue === "string" ? rawValue.trim() : rawValue;
+  if (normalized === "") {
+    return BULK_DELETE_CONCURRENCY_DEFAULT;
+  }
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) {
+    return BULK_DELETE_CONCURRENCY_DEFAULT;
+  }
+  const intVal = Math.trunc(parsed);
+  if (intVal < BULK_DELETE_CONCURRENCY_MIN) return BULK_DELETE_CONCURRENCY_MIN;
+  if (intVal > BULK_DELETE_CONCURRENCY_MAX) return BULK_DELETE_CONCURRENCY_MAX;
+  return intVal;
+}
+
 export const envConfig = {
   get env() { return process.env.NODE_ENV || "development"; },
   get isProduction() { return (process.env.NODE_ENV || "development") === "production"; },
@@ -23,6 +49,9 @@ export const envConfig = {
   },
   get folderMaxPerProject() {
     return Number(process.env.FOLDER_MAX_PER_PROJECT || 50);
+  },
+  get bulkDeleteConcurrency() {
+    return clampBulkDeleteConcurrency(process.env.BULK_DELETE_CONCURRENCY);
   },
   get elementMaxMedia() {
     const raw = process.env.ELEMENT_MAX_MEDIA || process.env.ELEMENT_MAX_REFERENCE_MEDIA;

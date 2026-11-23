@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { indexById, indexChildren, getAncestorIds, getDepth, getSubtreeHeight, collectDescendantIds, wouldCreateCycle, wouldExceedDepth, depthForNewChild, FolderService, FolderError, FolderRepository } from "#workspace/tools";
+import { MediaConflictError } from "#media/tools";
 import express from "express";
 import http from "node:http";
 import apiRouter from "../../../src/api/routes.js";
@@ -421,36 +422,533 @@ describe("FolderService Business Rules & Error Scenarios (Task F-T4)", () => {
       );
     });
 
-    it("cascades delete of sub-folders and workflows when removing a folder", async () => {
-      const deletedWorkflowIds = [];
+    it("moves nested folder tree workflows to Trash, unlinks folder_id, and deletes folders deepest-first", async () => {
+      const callOrder = [];
+      const trashRows = new Map();
+      const deletedFolderIds = [];
+
+      const trackingFolderRepo = {
+        ...mockRepo,
+        deleteOwned: async (folderId, userId) => {
+          callOrder.push(`deleteFolder:${folderId}`);
+          deletedFolderIds.push(folderId);
+          return mockRepo.deleteOwned(folderId, userId);
+        },
+      };
+
       service = new FolderService({
-        folderRepo: mockRepo,
+        folderRepo: trackingFolderRepo,
         maxDepth: 3,
         maxFoldersPerProject: 5,
+        trashRepo: {
+          insertManyIfAbsent: async ({ workflowIds, userId, deletedBy }) => {
+            callOrder.push(`trash:${workflowIds.slice().sort().join(",")}`);
+            const inserted = [];
+            for (const workflowId of workflowIds) {
+              if (!trashRows.has(workflowId)) {
+                const row = {
+                  workflow_id: workflowId,
+                  user_id: userId,
+                  deleted_by: deletedBy,
+                  deleted_at: "2026-11-21T00:00:00.000Z",
+                };
+                trashRows.set(workflowId, row);
+                inserted.push(row);
+              }
+            }
+            return inserted;
+          },
+        },
         workflowService: {
-          deleteWorkflowsInFolders: async ({ folderIds, userId, projectId }) => {
-            const removed = workflowsInDb.filter(
-              (wf) =>
+          listOwnedWorkflowIdsInFolders: async ({ folderIds, projectId }) => {
+            callOrder.push("listOwnedWorkflows");
+            return workflowsInDb
+              .filter((wf) => folderIds.includes(wf.folder_id) && wf.project_id === projectId)
+              .map((wf) => wf.id);
+          },
+          unlinkWorkflowsFromFolders: async ({ workflowIds, folderIds, projectId }) => {
+            callOrder.push(`unlink:${workflowIds.slice().sort().join(",")}`);
+            const unlinked = [];
+            for (const wf of workflowsInDb) {
+              if (
+                workflowIds.includes(wf.id) &&
                 folderIds.includes(wf.folder_id) &&
                 wf.project_id === projectId
-            );
-            for (const wf of removed) {
-              deletedWorkflowIds.push(wf.id);
+              ) {
+                wf.folder_id = null;
+                unlinked.push(wf.id);
+              }
             }
-            workflowsInDb = workflowsInDb.filter((wf) => !removed.includes(wf));
-            return { workflow_ids: deletedWorkflowIds, count: deletedWorkflowIds.length };
+            return { workflow_ids: unlinked, count: unlinked.length };
           },
         },
       });
 
       const res = await service.remove({ folderId: "f-root-1", userId: "user-1" });
       assert.equal(res, true);
+
+      // Folders deleted deepest-first, sibling folder untouched
+      assert.deepEqual(deletedFolderIds, ["f-leaf-1", "f-child-1", "f-root-1"]);
       assert.equal(foldersInDb.some((f) => f.id === "f-root-1"), false);
       assert.equal(foldersInDb.some((f) => f.id === "f-child-1"), false);
       assert.equal(foldersInDb.some((f) => f.id === "f-leaf-1"), false);
       assert.equal(foldersInDb.some((f) => f.id === "f-root-2"), true);
-      assert.deepEqual(deletedWorkflowIds.sort(), ["wf-1", "wf-2", "wf-3"]);
-      assert.equal(workflowsInDb.some((wf) => wf.folder_id === "f-root-1"), false);
+
+      // Workflows preserved (NOT permanently deleted), trashed, and unlinked to project root
+      assert.deepEqual(workflowsInDb.map((w) => w.id).sort(), ["wf-1", "wf-2", "wf-3"]);
+      assert.equal(workflowsInDb.every((w) => w.folder_id === null), true);
+      assert.deepEqual([...trashRows.keys()].sort(), ["wf-1", "wf-2", "wf-3"]);
+
+      // Strict ordering: verify ownership -> insert into trash -> clear folder_id -> delete folders deepest-first
+      assert.deepEqual(callOrder, [
+        "listOwnedWorkflows",
+        "trash:wf-1,wf-2,wf-3",
+        "unlink:wf-1,wf-2,wf-3",
+        "deleteFolder:f-leaf-1",
+        "deleteFolder:f-child-1",
+        "deleteFolder:f-root-1",
+      ]);
+    });
+
+    it("preserves already-trashed workflows (original deleted_at intact), unlinks folder_id, and deletes folder", async () => {
+      const originalDeletedAt = "2026-10-01T12:00:00.000Z";
+      const trashRows = new Map([
+        [
+          "wf-1",
+          {
+            workflow_id: "wf-1",
+            user_id: "user-1",
+            deleted_by: "user-1",
+            deleted_at: originalDeletedAt,
+          },
+        ],
+      ]);
+      let permanentDeleteCalled = false;
+
+      service = new FolderService({
+        folderRepo: mockRepo,
+        maxDepth: 3,
+        maxFoldersPerProject: 5,
+        trashRepo: {
+          insertManyIfAbsent: async ({ workflowIds, userId, deletedBy }) => {
+            const inserted = [];
+            for (const workflowId of workflowIds) {
+              if (!trashRows.has(workflowId)) {
+                const row = {
+                  workflow_id: workflowId,
+                  user_id: userId,
+                  deleted_by: deletedBy,
+                  deleted_at: "2026-11-21T00:00:00.000Z",
+                };
+                trashRows.set(workflowId, row);
+                inserted.push(row);
+              }
+            }
+            return inserted;
+          },
+        },
+        workflowService: {
+          deleteWorkflow: async () => {
+            permanentDeleteCalled = true;
+          },
+          listOwnedWorkflowIdsInFolders: async ({ folderIds, projectId }) =>
+            workflowsInDb
+              .filter((wf) => folderIds.includes(wf.folder_id) && wf.project_id === projectId)
+              .map((wf) => wf.id),
+          unlinkWorkflowsFromFolders: async ({ workflowIds, folderIds, projectId }) => {
+            for (const wf of workflowsInDb) {
+              if (
+                workflowIds.includes(wf.id) &&
+                folderIds.includes(wf.folder_id) &&
+                wf.project_id === projectId
+              ) {
+                wf.folder_id = null;
+              }
+            }
+            return { workflow_ids: workflowIds, count: workflowIds.length };
+          },
+        },
+      });
+
+      const res = await service.remove({ folderId: "f-root-1", userId: "user-1" });
+      assert.equal(res, true);
+      assert.equal(permanentDeleteCalled, false);
+      assert.equal(trashRows.get("wf-1").deleted_at, originalDeletedAt);
+      assert.equal(trashRows.has("wf-2"), true);
+      assert.equal(trashRows.has("wf-3"), true);
+      assert.equal(workflowsInDb.every((w) => w.folder_id === null), true);
+      assert.equal(workflowsInDb.length, 3);
+    });
+
+    it("deletes empty folder and nested empty subfolders directly with zero trash inserts", async () => {
+      foldersInDb.push({
+        id: "f-root-2-child",
+        project_id: "proj-1",
+        user_id: "user-1",
+        parent_id: "f-root-2",
+        name: "Empty Sub",
+        position: 0,
+      });
+
+      let trashInsertCalls = 0;
+      let unlinkCalls = 0;
+      const deletedOrder = [];
+
+      service = new FolderService({
+        folderRepo: {
+          ...mockRepo,
+          deleteOwned: async (folderId, userId) => {
+            deletedOrder.push(folderId);
+            return mockRepo.deleteOwned(folderId, userId);
+          },
+        },
+        trashRepo: {
+          insertManyIfAbsent: async () => {
+            trashInsertCalls += 1;
+            return [];
+          },
+        },
+        workflowService: {
+          listOwnedWorkflowIdsInFolders: async ({ folderIds, projectId }) =>
+            workflowsInDb
+              .filter((wf) => folderIds.includes(wf.folder_id) && wf.project_id === projectId)
+              .map((wf) => wf.id),
+          unlinkWorkflowsFromFolders: async () => {
+            unlinkCalls += 1;
+            return { workflow_ids: [], count: 0 };
+          },
+        },
+      });
+
+      const res = await service.remove({ folderId: "f-root-2", userId: "user-1" });
+      assert.equal(res, true);
+      assert.equal(trashInsertCalls, 0);
+      assert.equal(unlinkCalls, 0);
+      assert.deepEqual(deletedOrder, ["f-root-2-child", "f-root-2"]);
+    });
+
+    it("aborts without deleting folders if ownership verification, trash insert, or unlinking fails", async () => {
+      // Case A: Ownership verification fails before any mutation
+      let trashCalls = 0;
+      let unlinkCalls = 0;
+      let deleteCalls = 0;
+
+      const makeGuardedFolderRepo = () => ({
+        ...mockRepo,
+        deleteOwned: async (folderId, userId) => {
+          deleteCalls += 1;
+          return mockRepo.deleteOwned(folderId, userId);
+        },
+      });
+
+      const authFailService = new FolderService({
+        folderRepo: makeGuardedFolderRepo(),
+        trashRepo: {
+          insertManyIfAbsent: async () => {
+            trashCalls += 1;
+            return [];
+          },
+        },
+        workflowService: {
+          listOwnedWorkflowIdsInFolders: async () => {
+            const err = new Error("Workflow not found");
+            err.statusCode = 404;
+            err.errorCode = "NOT_FOUND";
+            throw err;
+          },
+          unlinkWorkflowsFromFolders: async () => {
+            unlinkCalls += 1;
+          },
+        },
+      });
+
+      await assert.rejects(
+        () => authFailService.remove({ folderId: "f-root-1", userId: "user-1" }),
+        { statusCode: 404 }
+      );
+      assert.equal(trashCalls, 0);
+      assert.equal(unlinkCalls, 0);
+      assert.equal(deleteCalls, 0);
+      assert.equal(foldersInDb.some((f) => f.id === "f-root-1"), true);
+
+      // Case B: Trash insertion fails -> no unlink, no folder delete
+      const trashFailService = new FolderService({
+        folderRepo: makeGuardedFolderRepo(),
+        trashRepo: {
+          insertManyIfAbsent: async () => {
+            throw new Error("DB trash insert failed");
+          },
+        },
+        workflowService: {
+          listOwnedWorkflowIdsInFolders: async () => ["wf-1", "wf-2", "wf-3"],
+          unlinkWorkflowsFromFolders: async () => {
+            unlinkCalls += 1;
+          },
+        },
+      });
+
+      await assert.rejects(
+        () => trashFailService.remove({ folderId: "f-root-1", userId: "user-1" }),
+        /DB trash insert failed/
+      );
+      assert.equal(unlinkCalls, 0);
+      assert.equal(deleteCalls, 0);
+      assert.equal(workflowsInDb.find((w) => w.id === "wf-1").folder_id, "f-root-1");
+      assert.equal(foldersInDb.some((f) => f.id === "f-root-1"), true);
+
+      // Case C: Clearing folder_id fails -> no folder delete
+      const unlinkFailService = new FolderService({
+        folderRepo: makeGuardedFolderRepo(),
+        trashRepo: {
+          insertManyIfAbsent: async () => [{ workflow_id: "wf-1" }],
+        },
+        workflowService: {
+          listOwnedWorkflowIdsInFolders: async () => ["wf-1", "wf-2", "wf-3"],
+          unlinkWorkflowsFromFolders: async () => {
+            throw new Error("DB unlink failed");
+          },
+        },
+      });
+
+      await assert.rejects(
+        () => unlinkFailService.remove({ folderId: "f-root-1", userId: "user-1" }),
+        /DB unlink failed/
+      );
+      assert.equal(deleteCalls, 0);
+      assert.equal(foldersInDb.some((f) => f.id === "f-root-1"), true);
+      assert.equal(foldersInDb.some((f) => f.id === "f-leaf-1"), true);
+    });
+
+    it("rejects folder deletion with 409 MEDIA_PROCESSING and zero mutations when any workflow in subtree has processing or pending media", async () => {
+      let trashCalls = 0;
+      let unlinkCalls = 0;
+      let deleteWfCalls = 0;
+      let deleteFolderCalls = 0;
+
+      const mediaStatusService = new FolderService({
+        folderRepo: {
+          ...mockRepo,
+          deleteOwned: async (folderId, userId) => {
+            deleteFolderCalls += 1;
+            return mockRepo.deleteOwned(folderId, userId);
+          },
+        },
+        trashRepo: {
+          insertManyIfAbsent: async () => {
+            trashCalls += 1;
+            return [];
+          },
+        },
+        workflowMediaRepo: {
+          findMediaStatusesByWorkflowIds: async () =>
+            new Map([
+              ["wf-1", [{ id: "m-1", status: "completed", url: "https://cdn/1.png" }]],
+              ["wf-2", [{ id: "m-2", status: "failed", url: null }]],
+              ["wf-3", [{ id: "m-3", status: "processing", url: null }]],
+            ]),
+        },
+        workflowService: {
+          listOwnedWorkflowIdsInFolders: async ({ folderIds, projectId }) =>
+            workflowsInDb
+              .filter((wf) => folderIds.includes(wf.folder_id) && wf.project_id === projectId)
+              .map((wf) => wf.id),
+          unlinkWorkflowsFromFolders: async () => {
+            unlinkCalls += 1;
+            return { workflow_ids: [], count: 0 };
+          },
+          deleteWorkflow: async () => {
+            deleteWfCalls += 1;
+          },
+        },
+      });
+
+      await assert.rejects(
+        () => mediaStatusService.remove({ folderId: "f-root-1", userId: "user-1" }),
+        (err) => {
+          assert.ok(err instanceof MediaConflictError);
+          assert.equal(err.statusCode, 409);
+          assert.equal(err.errorCode, "MEDIA_PROCESSING");
+          return true;
+        }
+      );
+
+      assert.equal(trashCalls, 0);
+      assert.equal(unlinkCalls, 0);
+      assert.equal(deleteWfCalls, 0);
+      assert.equal(deleteFolderCalls, 0);
+      assert.equal(foldersInDb.some((f) => f.id === "f-root-1"), true);
+      assert.equal(workflowsInDb.find((w) => w.id === "wf-3").folder_id, "f-child-1");
+    });
+
+    it("hard-deletes failed-only workflows directly (never trashing them) while trashing completed and mixed (failed + completed) workflows during folder deletion", async () => {
+      const trashedIds = [];
+      const unlinkedIds = [];
+      const hardDeletedIds = [];
+      const deletedFolderIds = [];
+
+      const mixedFolderService = new FolderService({
+        folderRepo: {
+          ...mockRepo,
+          deleteOwned: async (folderId, userId) => {
+            deletedFolderIds.push(folderId);
+            return mockRepo.deleteOwned(folderId, userId);
+          },
+        },
+        trashRepo: {
+          insertManyIfAbsent: async ({ workflowIds }) => {
+            trashedIds.push(...workflowIds);
+            return workflowIds.map((id) => ({ workflow_id: id }));
+          },
+        },
+        workflowMediaRepo: {
+          findMediaStatusesByWorkflowIds: async () =>
+            new Map([
+              ["wf-1", [{ id: "m-1", status: "completed", url: "https://cdn/1.png" }]],
+              ["wf-2", [{ id: "m-2", status: "failed", url: null }]],
+              [
+                "wf-3",
+                [
+                  { id: "m-3a", status: "failed", url: null },
+                  { id: "m-3b", status: "success", url: "https://cdn/3.png" },
+                ],
+              ],
+            ]),
+        },
+        workflowService: {
+          listOwnedWorkflowIdsInFolders: async ({ folderIds, projectId }) =>
+            workflowsInDb
+              .filter((wf) => folderIds.includes(wf.folder_id) && wf.project_id === projectId)
+              .map((wf) => wf.id),
+          unlinkWorkflowsFromFolders: async ({ workflowIds }) => {
+            unlinkedIds.push(...workflowIds);
+            for (const wf of workflowsInDb) {
+              if (workflowIds.includes(wf.id)) wf.folder_id = null;
+            }
+            return { workflow_ids: workflowIds, count: workflowIds.length };
+          },
+          deleteWorkflow: async ({ workflowId }) => {
+            hardDeletedIds.push(workflowId);
+            const idx = workflowsInDb.findIndex((w) => w.id === workflowId);
+            if (idx !== -1) workflowsInDb.splice(idx, 1);
+            return { workflowId, deletedMediaCount: 1 };
+          },
+        },
+      });
+
+      const ok = await mixedFolderService.remove({ folderId: "f-root-1", userId: "user-1" });
+      assert.equal(ok, true);
+      assert.deepEqual(trashedIds.slice().sort(), ["wf-1", "wf-3"], "Completed and mixed workflows must be trashed, NOT failed-only wf-2");
+      assert.deepEqual(unlinkedIds.slice().sort(), ["wf-1", "wf-3"]);
+      assert.deepEqual(hardDeletedIds, ["wf-2"], "Failed-only wf-2 must be directly hard-deleted");
+      assert.deepEqual(deletedFolderIds, ["f-leaf-1", "f-child-1", "f-root-1"]);
+    });
+
+    it("delegates failed-only character/element workflows inside a deleted folder to permanentDeleteWorkflow (canonical owner cleanup, zero orphan sidecars)", async () => {
+      const characters = [{ id: "char-1", workflow_id: "wf-2" }];
+      const elements = [{ id: "elem-1", workflow_id: "wf-3" }];
+      const ownerDeletes = [];
+      let rawDeleteWorkflowCalls = 0;
+      const trashedIds = [];
+
+      const ownerAwareService = new FolderService({
+        folderRepo: mockRepo,
+        trashRepo: {
+          insertManyIfAbsent: async ({ workflowIds }) => {
+            trashedIds.push(...workflowIds);
+            return workflowIds.map((id) => ({ workflow_id: id }));
+          },
+        },
+        workflowMediaRepo: {
+          findMediaStatusesByWorkflowIds: async () =>
+            new Map([
+              ["wf-1", [{ id: "m-1", status: "completed", url: "https://cdn/1.png" }]],
+              ["wf-2", [{ id: "m-2", status: "failed", url: null }]],
+              ["wf-3", [{ id: "m-3", status: "failed", url: null }]],
+            ]),
+        },
+        workflowService: {
+          listOwnedWorkflowIdsInFolders: async ({ folderIds, projectId }) =>
+            workflowsInDb
+              .filter((wf) => folderIds.includes(wf.folder_id) && wf.project_id === projectId)
+              .map((wf) => wf.id),
+          unlinkWorkflowsFromFolders: async ({ workflowIds }) => {
+            for (const wf of workflowsInDb) {
+              if (workflowIds.includes(wf.id)) wf.folder_id = null;
+            }
+            return { workflow_ids: workflowIds, count: workflowIds.length };
+          },
+          deleteWorkflow: async () => {
+            rawDeleteWorkflowCalls += 1;
+          },
+        },
+        permanentDeleteWorkflow: async ({ workflowId, userId }) => {
+          ownerDeletes.push({ workflowId, userId });
+          const cIdx = characters.findIndex((c) => c.workflow_id === workflowId);
+          if (cIdx !== -1) characters.splice(cIdx, 1);
+          const eIdx = elements.findIndex((e) => e.workflow_id === workflowId);
+          if (eIdx !== -1) elements.splice(eIdx, 1);
+          const wIdx = workflowsInDb.findIndex((w) => w.id === workflowId);
+          if (wIdx !== -1) workflowsInDb.splice(wIdx, 1);
+        },
+      });
+
+      const ok = await ownerAwareService.remove({ folderId: "f-root-1", userId: "user-1" });
+      assert.equal(ok, true);
+      assert.equal(rawDeleteWorkflowCalls, 0, "Must use owner-aware permanentDeleteWorkflow instead of bare workflowService.deleteWorkflow");
+      assert.deepEqual(ownerDeletes.map((d) => d.workflowId).sort(), ["wf-2", "wf-3"]);
+      assert.equal(characters.length, 0, "Character sidecar row must be cleaned up (no orphan)");
+      assert.equal(elements.length, 0, "Element sidecar row must be cleaned up (no orphan)");
+      assert.deepEqual(trashedIds, ["wf-1"]);
+      assert.equal(foldersInDb.some((f) => f.id === "f-root-1"), false);
+    });
+
+    it("checks failed-only delete capability upfront before any trash or unlink mutations (pre-flight atomicity)", async () => {
+      let trashCalls = 0;
+      let unlinkCalls = 0;
+      let deleteFolderCalls = 0;
+
+      const missingDeleteService = new FolderService({
+        folderRepo: {
+          ...mockRepo,
+          deleteOwned: async () => {
+            deleteFolderCalls += 1;
+            return true;
+          },
+        },
+        trashRepo: {
+          insertManyIfAbsent: async () => {
+            trashCalls += 1;
+            return [];
+          },
+        },
+        workflowMediaRepo: {
+          findMediaStatusesByWorkflowIds: async () =>
+            new Map([
+              ["wf-1", [{ id: "m-1", status: "completed", url: "https://cdn/1.png" }]],
+              ["wf-2", [{ id: "m-2", status: "failed", url: null }]],
+              ["wf-3", [{ id: "m-3", status: "completed", url: "https://cdn/3.png" }]],
+            ]),
+        },
+        workflowService: {
+          listOwnedWorkflowIdsInFolders: async ({ folderIds, projectId }) =>
+            workflowsInDb
+              .filter((wf) => folderIds.includes(wf.folder_id) && wf.project_id === projectId)
+              .map((wf) => wf.id),
+          unlinkWorkflowsFromFolders: async () => {
+            unlinkCalls += 1;
+            return { workflow_ids: [], count: 0 };
+          },
+        },
+      });
+
+      await assert.rejects(
+        () => missingDeleteService.remove({ folderId: "f-root-1", userId: "user-1" }),
+        (err) => err.statusCode === 500 && err.errorCode === "WORKFLOW_DELETE_UNAVAILABLE"
+      );
+      assert.equal(trashCalls, 0, "Zero trash writes when pre-flight fails");
+      assert.equal(unlinkCalls, 0, "Zero unlinks when pre-flight fails");
+      assert.equal(deleteFolderCalls, 0, "Zero folder deletes when pre-flight fails");
+      assert.equal(workflowsInDb.find((w) => w.id === "wf-1").folder_id, "f-root-1");
     });
 
     it("throws NOT_FOUND when updating or removing an unknown or foreign folder", async () => {
@@ -1042,14 +1540,18 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
   let baseUrl;
   let origGetUser;
   let origWorkflowService;
+  let origTrashInsertMany;
 
   // In-memory data store for the test suite
   let projects = [];
   let folders = [];
   let workflows = [];
+  let trashRows = [];
+  let deletedFolderOrder = [];
 
   before(async () => {
     origWorkflowService = folderService.workflowService;
+    origTrashInsertMany = db.trash.insertManyIfAbsent;
     origGetUser = supabase.auth.getUser;
     supabase.auth.getUser = async (token) => {
       if (token === "token-user-A") {
@@ -1080,6 +1582,7 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
 
   after(async () => {
     folderService.setWorkflowService(origWorkflowService);
+    db.trash.insertManyIfAbsent = origTrashInsertMany;
     supabase.auth.getUser = origGetUser;
     try {
       await redisConnection?.quit().catch(() => redisConnection?.disconnect());
@@ -1133,6 +1636,8 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
     workflows = [
       { id: "wf-1", project_id: "proj-A", folder_id: "f-root-A1", user_id: "user-A" },
     ];
+    trashRows = [];
+    deletedFolderOrder = [];
 
     // Mock project ownership checks
     db.projects.findByUser = async (userId, projectId) => {
@@ -1199,8 +1704,27 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
     db.folders.deleteOwned = async (folderId, userId) => {
       const idx = folders.findIndex((fol) => fol.id === folderId && fol.user_id === userId);
       if (idx === -1) return false;
+      deletedFolderOrder.push(folderId);
       folders.splice(idx, 1);
       return true;
+    };
+
+    db.trash.insertManyIfAbsent = async ({ workflowIds = [], userId, deletedBy = userId } = {}) => {
+      const inserted = [];
+      for (const workflowId of workflowIds) {
+        if (!trashRows.some((t) => t.workflow_id === workflowId)) {
+          const row = {
+            id: `trash-${workflowId}`,
+            workflow_id: workflowId,
+            user_id: userId,
+            deleted_by: deletedBy ?? userId,
+            deleted_at: "2026-11-21T00:00:00.000Z",
+          };
+          trashRows.push(row);
+          inserted.push(row);
+        }
+      }
+      return inserted;
     };
 
     db.folders.countAssetsByFolder = async (projectId, userId) => {
@@ -1222,12 +1746,26 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
     };
 
     folderService.setWorkflowService({
-      deleteWorkflowsInFolders: async ({ folderIds }) => {
-        const removed = workflows.filter((wf) => folderIds.includes(wf.folder_id));
-        workflows = workflows.filter((wf) => !folderIds.includes(wf.folder_id));
+      listOwnedWorkflowIdsInFolders: async ({ folderIds, projectId }) => {
+        return workflows
+          .filter((wf) => wf.project_id === projectId && folderIds.includes(wf.folder_id))
+          .map((wf) => wf.id);
+      },
+      unlinkWorkflowsFromFolders: async ({ workflowIds, folderIds, projectId }) => {
+        const unlinked = [];
+        for (const wf of workflows) {
+          if (
+            wf.project_id === projectId &&
+            workflowIds.includes(wf.id) &&
+            folderIds.includes(wf.folder_id)
+          ) {
+            wf.folder_id = null;
+            unlinked.push(wf.id);
+          }
+        }
         return {
-          workflow_ids: removed.map((wf) => wf.id),
-          count: removed.length,
+          workflow_ids: unlinked,
+          count: unlinked.length,
         };
       },
     });
@@ -1286,12 +1824,15 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
       assert.equal(res.status, 404);
     });
 
-    it("returns 404 when User B tries to delete User A's folder (cross-tenant)", async () => {
+    it("returns 404 when User B tries to delete User A's folder (cross-tenant) without mutating folders, workflows, or trash", async () => {
       const res = await fetch(`${baseUrl}/api/folders/f-root-A1`, {
         method: "DELETE",
         headers: { Authorization: "Bearer token-user-B" },
       });
       assert.equal(res.status, 404);
+      assert.equal(folders.some((f) => f.id === "f-root-A1"), true);
+      assert.equal(workflows.find((w) => w.id === "wf-1").folder_id, "f-root-A1");
+      assert.equal(trashRows.length, 0);
     });
   });
 
@@ -1375,7 +1916,49 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
       assert.equal(data.parentId, null);
     });
 
-    it("Scenario 6: cascade-deletes folder, sub-folders, and workflows (204)", async () => {
+    it("Scenario 6: deletes folder and nested subfolders deepest-first while moving contained workflows to Trash and unlinking folder_id (204)", async () => {
+      folders.push({
+        id: "f-leaf-A1",
+        project_id: "proj-A",
+        user_id: "user-A",
+        parent_id: "f-sub-A1",
+        name: "Takes",
+        position: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+      workflows.push(
+        { id: "wf-sub", project_id: "proj-A", folder_id: "f-sub-A1", user_id: "user-A" },
+        { id: "wf-leaf", project_id: "proj-A", folder_id: "f-leaf-A1", user_id: "user-A" }
+      );
+
+      const res = await fetch(`${baseUrl}/api/folders/f-root-A1`, {
+        method: "DELETE",
+        headers: { Authorization: "Bearer token-user-A" },
+      });
+
+      assert.equal(res.status, 204);
+      assert.deepEqual(deletedFolderOrder, ["f-leaf-A1", "f-sub-A1", "f-root-A1"]);
+      assert.equal(folders.some((f) => f.id === "f-root-A1"), false);
+      assert.equal(folders.some((f) => f.id === "f-sub-A1"), false);
+      assert.equal(folders.some((f) => f.id === "f-leaf-A1"), false);
+
+      // Workflows preserved (not hard-deleted), unlinked to project root, and moved to Trash
+      assert.deepEqual(workflows.map((wf) => wf.id).sort(), ["wf-1", "wf-leaf", "wf-sub"]);
+      assert.equal(workflows.every((wf) => wf.folder_id === null), true);
+      assert.deepEqual(trashRows.map((t) => t.workflow_id).sort(), ["wf-1", "wf-leaf", "wf-sub"]);
+    });
+
+    it("Scenario 6b: preserves already-trashed workflow in deleted folder with original deleted_at intact (204)", async () => {
+      const earlierDeletedAt = "2026-10-10T08:00:00.000Z";
+      trashRows.push({
+        id: "trash-existing",
+        workflow_id: "wf-1",
+        user_id: "user-A",
+        deleted_by: "user-A",
+        deleted_at: earlierDeletedAt,
+      });
+
       const res = await fetch(`${baseUrl}/api/folders/f-root-A1`, {
         method: "DELETE",
         headers: { Authorization: "Bearer token-user-A" },
@@ -1383,11 +1966,14 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
 
       assert.equal(res.status, 204);
       assert.equal(folders.some((f) => f.id === "f-root-A1"), false);
-      assert.equal(folders.some((f) => f.id === "f-sub-A1"), false);
-      assert.equal(workflows.some((wf) => wf.folder_id === "f-root-A1"), false);
+      assert.equal(workflows.length, 1);
+      assert.equal(workflows[0].id, "wf-1");
+      assert.equal(workflows[0].folder_id, null);
+      assert.equal(trashRows.length, 1);
+      assert.equal(trashRows[0].deleted_at, earlierDeletedAt);
     });
 
-    it("Scenario 5: deletes empty folder successfully (204 No Content)", async () => {
+    it("Scenario 5: deletes empty folder successfully with zero trash inserts (204 No Content)", async () => {
       // f-sub-A1 has 0 assets and 0 sub-folders
       const res = await fetch(`${baseUrl}/api/folders/f-sub-A1`, {
         method: "DELETE",
@@ -1396,6 +1982,83 @@ describe("Folder Routes HTTP Acceptance & Security (Task F-T5)", () => {
 
       assert.equal(res.status, 204);
       assert.equal(folders.some((f) => f.id === "f-sub-A1"), false);
+      assert.equal(trashRows.length, 0);
+    });
+
+    it("Scenario 6c: aborts folder deletion when trash insertion fails and preserves folders", async () => {
+      db.trash.insertManyIfAbsent = async () => {
+        throw new Error("Simulated trash write failure");
+      };
+
+      const res = await fetch(`${baseUrl}/api/folders/f-root-A1`, {
+        method: "DELETE",
+        headers: { Authorization: "Bearer token-user-A" },
+      });
+
+      assert.equal(res.status, 500);
+      assert.equal(folders.some((f) => f.id === "f-root-A1"), true);
+      assert.equal(folders.some((f) => f.id === "f-sub-A1"), true);
+      assert.equal(workflows.find((wf) => wf.id === "wf-1").folder_id, "f-root-A1");
+    });
+
+    it("Scenario 6d: DELETE /api/folders/:folderId returns 409 MEDIA_PROCESSING when folder contains processing media and leaves folder untouched", async () => {
+      const origFindStatuses = db.workflowMedia.findMediaStatusesByWorkflowIds;
+      db.workflowMedia.findMediaStatusesByWorkflowIds = async () =>
+        new Map([["wf-1", [{ id: "m-proc", status: "processing", url: null }]]]);
+
+      try {
+        const res = await fetch(`${baseUrl}/api/folders/f-root-A1`, {
+          method: "DELETE",
+          headers: { Authorization: "Bearer token-user-A" },
+        });
+
+        assert.equal(res.status, 409);
+        const body = await res.json();
+        assert.equal(body.ok, false);
+        assert.equal(body.errorCode, "MEDIA_PROCESSING");
+        assert.equal(folders.some((f) => f.id === "f-root-A1"), true);
+        assert.equal(trashRows.length, 0);
+        assert.equal(workflows.find((wf) => wf.id === "wf-1").folder_id, "f-root-A1");
+      } finally {
+        db.workflowMedia.findMediaStatusesByWorkflowIds = origFindStatuses;
+      }
+    });
+
+    it("Scenario 6e: DELETE /api/folders/:folderId returns 204, hard-deletes failed-only workflow via owner-aware handler without trashing, and trashes succeeded workflow", async () => {
+      const origFindStatuses = db.workflowMedia.findMediaStatusesByWorkflowIds;
+      const origPermanentDelete = folderService.permanentDeleteWorkflow;
+      assert.equal(typeof origPermanentDelete, "function", "container folderService must wire permanentDeleteWorkflow");
+
+      const hardDeleted = [];
+      workflows.push({ id: "wf-failed", project_id: "proj-A", folder_id: "f-sub-A1", user_id: "user-A" });
+
+      db.workflowMedia.findMediaStatusesByWorkflowIds = async () =>
+        new Map([
+          ["wf-1", [{ id: "m-ok", status: "completed", url: "https://cdn/ok.png" }]],
+          ["wf-failed", [{ id: "m-fail", status: "failed", url: null }]],
+        ]);
+      folderService.setPermanentDeleteWorkflow(async ({ workflowId }) => {
+        hardDeleted.push(workflowId);
+        const idx = workflows.findIndex((w) => w.id === workflowId);
+        if (idx !== -1) workflows.splice(idx, 1);
+        return { workflowId, deletedMediaCount: 1 };
+      });
+
+      try {
+        const res = await fetch(`${baseUrl}/api/folders/f-root-A1`, {
+          method: "DELETE",
+          headers: { Authorization: "Bearer token-user-A" },
+        });
+
+        assert.equal(res.status, 204);
+        assert.deepEqual(hardDeleted, ["wf-failed"]);
+        assert.deepEqual(trashRows.map((t) => t.workflow_id), ["wf-1"]);
+        assert.equal(folders.some((f) => f.id === "f-root-A1"), false);
+        assert.equal(folders.some((f) => f.id === "f-sub-A1"), false);
+      } finally {
+        db.workflowMedia.findMediaStatusesByWorkflowIds = origFindStatuses;
+        folderService.setPermanentDeleteWorkflow(origPermanentDelete);
+      }
     });
 
     it("confirms standalone GET /api/projects/:projectId/folders is removed (returns 404)", async () => {

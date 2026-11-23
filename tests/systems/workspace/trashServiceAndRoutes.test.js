@@ -1,16 +1,17 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { TrashRepository, TrashService, FolderRepository, ProjectReadService } from "#workspace/tools";
-import { setDb, assertOwns } from "#identity/tools";
+import { TrashRepository, TrashService, FolderRepository, FolderService, ProjectReadService, configureWorkspace } from "#workspace/tools";
+import { MediaConflictError } from "#media/tools";
+import { setDb, assertOwns, resetLimitersForTest } from "#identity/tools";
 import { supabase, supabaseAdmin } from "#shared/db/supabase.js";
-import { WorkflowRepository } from "#generation/tools";
+import { WorkflowRepository, WorkflowService } from "#generation/tools";
 import { WorkflowAuthorizationService } from "../../../src/systems/generation/internal/services/WorkflowAuthorizationService.js";
 import { ElementRepository } from "#elements/tools";
 import { CharacterRepository } from "#characters/tools";
 import express from "express";
 import http from "node:http";
 import apiRouter from "../../../src/api/routes.js";
-import { db, workflowService } from "../../../src/container.js";
+import { db, workflowService, trashService as containerTrashService } from "../../../src/container.js";
 import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared";
 import { workflowsRouter } from "#generation/api";
 import elementRoutes from "#elements/api";
@@ -2415,6 +2416,1305 @@ describe("Workflow Trash Delete Routes Boundary Tests (T3)", () => {
         assert.equal("trashed" in bulkBody.results[0], false);
         assert.equal(mockTrash.length, 0);
         assert.equal(mockWorkflows.some((w) => w.id === "wf-std-A-2"), false);
+    });
+});
+}
+
+// ─── Folder Deletion -> Trash & Restore-at-Root Integration ───
+{
+describe("Folder Deletion -> Idempotent Trash, Unlink, and Restore at Project Root", () => {
+    it("TrashRepository.insertManyIfAbsent bulk-upserts with ignoreDuplicates and preserves existing deleted_at", async () => {
+        const repo = new TrashRepository();
+        const existingRow = {
+            id: "t-old",
+            workflow_id: "wf-already-trashed",
+            user_id: "user-1",
+            deleted_by: "user-1",
+            deleted_at: "2026-10-01T00:00:00.000Z",
+        };
+        const tableRows = [existingRow];
+        const recordedOpts = [];
+
+        repo.client = () => ({
+            from: (table) => {
+                assert.equal(table, "trash");
+                return {
+                    upsert: (rows, opts) => {
+                        recordedOpts.push(opts);
+                        const inserted = [];
+                        for (const row of rows) {
+                            if (!tableRows.some((r) => r.workflow_id === row.workflow_id)) {
+                                const created = {
+                                    id: `t-${row.workflow_id}`,
+                                    ...row,
+                                    deleted_at: "2026-11-21T01:00:00.000Z",
+                                };
+                                tableRows.push(created);
+                                inserted.push(created);
+                            }
+                        }
+                        return {
+                            select: async () => ({ data: inserted, error: null }),
+                        };
+                    },
+                };
+            },
+        });
+
+        const empty = await repo.insertManyIfAbsent({ workflowIds: [], userId: "user-1" });
+        assert.deepEqual(empty, []);
+        assert.equal(recordedOpts.length, 0);
+
+        const inserted = await repo.insertManyIfAbsent({
+            workflowIds: ["wf-already-trashed", "wf-new-1", "wf-new-1"],
+            userId: "user-1",
+        });
+
+        assert.deepEqual(recordedOpts, [{ onConflict: "workflow_id", ignoreDuplicates: true }]);
+        assert.equal(inserted.length, 1);
+        assert.equal(inserted[0].workflow_id, "wf-new-1");
+        assert.equal(tableRows.length, 2);
+        assert.equal(
+            tableRows.find((r) => r.workflow_id === "wf-already-trashed").deleted_at,
+            "2026-10-01T00:00:00.000Z"
+        );
+    });
+
+    it("Deleting a folder tree moves active media/character/element workflows to Trash, preserves already-trashed workflows, unlinks folder_id, deletes folders deepest-first, and restores cleanly to project root", async () => {
+        const earlierDeletedAt = "2026-10-15T09:30:00.000Z";
+        const foldersTable = [
+            { id: "f-A", project_id: "proj-1", user_id: "user-1", parent_id: null, name: "Root A", position: 0 },
+            { id: "f-B", project_id: "proj-1", user_id: "user-1", parent_id: "f-A", name: "Child B", position: 0 },
+            { id: "f-C", project_id: "proj-1", user_id: "user-1", parent_id: "f-B", name: "Leaf C", position: 0 },
+            { id: "f-keep", project_id: "proj-1", user_id: "user-1", parent_id: null, name: "Keep", position: 1 },
+        ];
+        const workflowsTable = [
+            { id: "wf-media-A", project_id: "proj-1", folder_id: "f-A", user_id: "user-1", workflow_type: "GENERATION" },
+            { id: "wf-char-B", project_id: "proj-1", folder_id: "f-B", user_id: "user-1", workflow_type: "CHARACTER" },
+            { id: "wf-elem-C", project_id: "proj-1", folder_id: "f-C", user_id: "user-1", workflow_type: "ELEMENT_SHEET" },
+            { id: "wf-already-trashed", project_id: "proj-1", folder_id: "f-B", user_id: "user-1", workflow_type: "UPLOAD" },
+            { id: "wf-untouched", project_id: "proj-1", folder_id: "f-keep", user_id: "user-1", workflow_type: "GENERATION" },
+        ];
+        const mediaTable = [
+            { id: "m-1", project_id: "proj-1", url: "https://cdn.example/1.png" },
+            { id: "m-2", project_id: "proj-1", url: "https://cdn.example/2.png" },
+        ];
+        const trashTable = [
+            {
+                id: "t-existing",
+                workflow_id: "wf-already-trashed",
+                user_id: "user-1",
+                deleted_by: "user-1",
+                deleted_at: earlierDeletedAt,
+            },
+        ];
+        const deletedFoldersOrder = [];
+
+        const trashRepo = new TrashRepository();
+        trashRepo.client = () => ({
+            from: (table) => {
+                assert.equal(table, "trash");
+                return {
+                    upsert: (rows, opts) => {
+                        assert.equal(opts.onConflict, "workflow_id");
+                        assert.equal(opts.ignoreDuplicates, true);
+                        const list = Array.isArray(rows) ? rows : [rows];
+                        const inserted = [];
+                        for (const row of list) {
+                            if (!trashTable.some((t) => t.workflow_id === row.workflow_id)) {
+                                const created = {
+                                    id: `t-${row.workflow_id}`,
+                                    ...row,
+                                    deleted_at: "2026-11-21T02:00:00.000Z",
+                                };
+                                trashTable.push(created);
+                                inserted.push(created);
+                            }
+                        }
+                        return { select: async () => ({ data: inserted, error: null }) };
+                    },
+                    delete: () => {
+                        const filters = {};
+                        const chain = {
+                            eq: (col, val) => {
+                                filters[col] = val;
+                                return chain;
+                            },
+                            select: async () => {
+                                const removed = [];
+                                for (let i = trashTable.length - 1; i >= 0; i -= 1) {
+                                    const row = trashTable[i];
+                                    const matches = Object.entries(filters).every(([k, v]) => row[k] === v);
+                                    if (matches) {
+                                        removed.push(row);
+                                        trashTable.splice(i, 1);
+                                    }
+                                }
+                                return { data: removed, error: null };
+                            },
+                        };
+                        return chain;
+                    },
+                };
+            },
+        });
+
+        const wfRepo = new WorkflowRepository();
+        wfRepo.client = () => ({
+            from: (table) => {
+                assert.equal(table, "workflow");
+                return {
+                    select: () => {
+                        const filters = {};
+                        const chain = {
+                            eq: (col, val) => {
+                                filters[col] = val;
+                                return chain;
+                            },
+                            in: (col, vals) => {
+                                filters[col] = vals;
+                                return chain;
+                            },
+                            then: (resolve) => {
+                                const rows = workflowsTable
+                                    .filter((w) => {
+                                        if (filters.project_id && w.project_id !== filters.project_id) return false;
+                                        if (filters.folder_id && !filters.folder_id.includes(w.folder_id)) return false;
+                                        if (filters.id && !filters.id.includes(w.id)) return false;
+                                        return true;
+                                    })
+                                    .map((w) => ({
+                                        ...w,
+                                        project: { user_id: w.user_id },
+                                    }));
+                                resolve({ data: rows, error: null });
+                            },
+                        };
+                        return chain;
+                    },
+                    update: (patch) => {
+                        const filters = {};
+                        const chain = {
+                            eq: (col, val) => {
+                                filters[col] = val;
+                                return chain;
+                            },
+                            in: (col, vals) => {
+                                filters[col] = vals;
+                                return chain;
+                            },
+                            select: async () => {
+                                const updated = [];
+                                for (const w of workflowsTable) {
+                                    if (filters.project_id && w.project_id !== filters.project_id) continue;
+                                    if (filters.id && !filters.id.includes(w.id)) continue;
+                                    if (filters.folder_id && !filters.folder_id.includes(w.folder_id)) continue;
+                                    Object.assign(w, patch);
+                                    updated.push({ id: w.id });
+                                }
+                                return { data: updated, error: null };
+                            },
+                        };
+                        return chain;
+                    },
+                };
+            },
+        });
+
+        const folderRepo = {
+            findOwned: async (id, userId) => foldersTable.find((f) => f.id === id && f.user_id === userId) || null,
+            listByProject: async (projectId, userId) =>
+                foldersTable.filter((f) => f.project_id === projectId && f.user_id === userId),
+            deleteOwned: async (id, userId) => {
+                // Enforce workflow_folder_same_project_fk (NO ACTION) in test double!
+                const stillReferencedByWorkflow = workflowsTable.some((w) => w.folder_id === id);
+                if (stillReferencedByWorkflow) {
+                    const fkErr = new Error("violates foreign key constraint workflow_folder_same_project_fk");
+                    fkErr.code = "23503";
+                    throw fkErr;
+                }
+                const stillReferencedByChild = foldersTable.some((f) => f.parent_id === id);
+                if (stillReferencedByChild) {
+                    const fkErr = new Error("violates foreign key constraint folders_parent_same_project_fk");
+                    fkErr.code = "23503";
+                    throw fkErr;
+                }
+                const idx = foldersTable.findIndex((f) => f.id === id && f.user_id === userId);
+                if (idx === -1) return false;
+                deletedFoldersOrder.push(id);
+                foldersTable.splice(idx, 1);
+                return true;
+            },
+        };
+
+        const wfService = new WorkflowService({
+            db: { workflows: wfRepo, workflowMedia: { findByMedia: async () => [] } },
+            storageService: {},
+            mediaUploadService: { discard: async () => ({}) },
+        });
+        let deleteWorkflowCalled = false;
+        wfService.deleteWorkflow = async () => {
+            deleteWorkflowCalled = true;
+            throw new Error("deleteWorkflow must NOT be called during folder deletion");
+        };
+
+        const folderServiceInst = new FolderService({
+            folderRepo,
+            trashRepo,
+            workflowService: wfService,
+        });
+
+        const trashServiceInst = new TrashService({
+            db: { trash: trashRepo, workflows: wfRepo },
+            workflowService: wfService,
+            elementService: {},
+            characterService: {},
+        });
+
+        // 1. Delete root folder f-A (tree: f-A -> f-B -> f-C)
+        const removed = await folderServiceInst.remove({ folderId: "f-A", userId: "user-1" });
+        assert.equal(removed, true);
+        assert.equal(deleteWorkflowCalled, false, "Folder deletion must never permanently delete workflows");
+
+        // Folders deleted deepest-first without hitting FK 23503; sibling folder kept
+        assert.deepEqual(deletedFoldersOrder, ["f-C", "f-B", "f-A"]);
+        assert.deepEqual(foldersTable.map((f) => f.id), ["f-keep"]);
+
+        // All workflows in tree are in Trash, with already-trashed deleted_at preserved
+        assert.deepEqual(
+            trashTable.map((t) => t.workflow_id).sort(),
+            ["wf-already-trashed", "wf-char-B", "wf-elem-C", "wf-media-A"]
+        );
+        assert.equal(
+            trashTable.find((t) => t.workflow_id === "wf-already-trashed").deleted_at,
+            earlierDeletedAt,
+            "Already-trashed workflow must preserve its original deleted_at"
+        );
+
+        // All workflows in tree are preserved in workflow table with folder_id = null; media untouched
+        assert.equal(workflowsTable.length, 5);
+        assert.equal(mediaTable.length, 2);
+        for (const wfId of ["wf-media-A", "wf-char-B", "wf-elem-C", "wf-already-trashed"]) {
+            assert.equal(
+                workflowsTable.find((w) => w.id === wfId).folder_id,
+                null,
+                `${wfId} must be unlinked to project root (folder_id = null)`
+            );
+        }
+        assert.equal(workflowsTable.find((w) => w.id === "wf-untouched").folder_id, "f-keep");
+
+        // 2. Restore a trashed workflow whose original folder was deleted -> restores cleanly at project root
+        const restoreRes = await trashServiceInst.restore({ workflowId: "wf-media-A", userId: "user-1" });
+        assert.deepEqual(restoreRes, { workflow_id: "wf-media-A", restored: true });
+        assert.equal(trashTable.some((t) => t.workflow_id === "wf-media-A"), false);
+        assert.equal(workflowsTable.find((w) => w.id === "wf-media-A").folder_id, null);
+        assert.equal(foldersTable.some((f) => f.id === "f-A"), false, "Restoring must not recreate deleted folder");
+    });
+});
+}
+
+// ─── Source: explicitIntentBulkDelete.test.js ───
+{
+describe("ADR-0002: Explicit-Intent Bulk Delete (POST /api/workspace/bulk-delete & POST /api/trash/delete)", () => {
+    it("TrashRepository.findTrashedWorkflowIds enforces userId scoping and supports candidate filtering", async () => {
+        const repo = new TrashRepository();
+        const rows = [
+            { workflow_id: "wf-1", user_id: "user-1" },
+            { workflow_id: "wf-2", user_id: "user-1" },
+            { workflow_id: "wf-3", user_id: "user-2" },
+        ];
+
+        repo.client = () => ({
+            from: (table) => {
+                assert.equal(table, "trash");
+                const filters = {};
+                const chain = {
+                    select: () => chain,
+                    eq: (col, val) => {
+                        filters[col] = val;
+                        return chain;
+                    },
+                    in: (col, vals) => {
+                        filters[col] = vals;
+                        return chain;
+                    },
+                    then: (resolve) => {
+                        const matched = rows.filter((r) => {
+                            if (filters.user_id && r.user_id !== filters.user_id) return false;
+                            if (filters.workflow_id && !filters.workflow_id.includes(r.workflow_id)) return false;
+                            return true;
+                        });
+                        resolve({ data: matched, error: null });
+                    },
+                };
+                return chain;
+            },
+        });
+
+        assert.deepEqual(await repo.findTrashedWorkflowIds({}), []);
+        assert.deepEqual(await repo.findTrashedWorkflowIds({ userId: "user-1", workflowIds: [] }), []);
+        assert.deepEqual(
+            (await repo.findTrashedWorkflowIds({ userId: "user-1" })).sort(),
+            ["wf-1", "wf-2"]
+        );
+        assert.deepEqual(
+            await repo.findTrashedWorkflowIds({
+                userId: "user-1",
+                workflowIds: ["workflows/wf-1", "wf-3", "wf-missing"],
+            }),
+            ["wf-1"]
+        );
+    });
+
+    describe("HTTP + Service end-to-end tests for /api/workspace/bulk-delete and /api/trash/delete", () => {
+        let server;
+        let baseUrl;
+        let origGetUser;
+
+        const USER_A = "user-bulk-A";
+        const USER_B = "user-bulk-B";
+
+        let state;
+        let fakeTrashService;
+        let origBulkConcurrencyEnv;
+
+        function buildHarnessState() {
+            const earlierDeletedAt = "2026-10-01T00:00:00.000Z";
+            const projects = [
+                { id: "proj-A1", user_id: USER_A, project_name: "A Project 1" },
+                { id: "proj-A2", user_id: USER_A, project_name: "A Project 2" },
+                { id: "proj-B1", user_id: USER_B, project_name: "B Project 1" },
+            ];
+            const folders = [
+                { id: "f-root", project_id: "proj-A1", user_id: USER_A, parent_id: null, name: "Root" },
+                { id: "f-child", project_id: "proj-A1", user_id: USER_A, parent_id: "f-root", name: "Child" },
+                { id: "f-grand", project_id: "proj-A1", user_id: USER_A, parent_id: "f-child", name: "Grand" },
+                { id: "f-sibling", project_id: "proj-A1", user_id: USER_A, parent_id: null, name: "Sibling" },
+                { id: "f-p2", project_id: "proj-A2", user_id: USER_A, parent_id: null, name: "Proj2 Folder" },
+                { id: "f-foreign", project_id: "proj-B1", user_id: USER_B, parent_id: null, name: "Foreign" },
+            ];
+            const workflows = [
+                { id: "wf-in-root", project_id: "proj-A1", user_id: USER_A, folder_id: "f-root", workflow_type: "GENERATION" },
+                { id: "wf-in-grand", project_id: "proj-A1", user_id: USER_A, folder_id: "f-grand", workflow_type: "GENERATION" },
+                { id: "wf-already-trashed-in-folder", project_id: "proj-A1", user_id: USER_A, folder_id: "f-child", workflow_type: "GENERATION" },
+                { id: "wf-in-p2-folder", project_id: "proj-A2", user_id: USER_A, folder_id: "f-p2", workflow_type: "GENERATION" },
+                { id: "wf-explicit", project_id: "proj-A1", user_id: USER_A, folder_id: null, workflow_type: "UPLOAD" },
+                { id: "wf-explicit-already-trashed", project_id: "proj-A1", user_id: USER_A, folder_id: null, workflow_type: "UPLOAD" },
+                { id: "wf-char-backed", project_id: "proj-A1", user_id: USER_A, folder_id: null, workflow_type: "CHARACTER" },
+                { id: "wf-elem-backed", project_id: "proj-A1", user_id: USER_A, folder_id: null, workflow_type: "ELEMENT_SHEET" },
+                { id: "wf-p2-trashed", project_id: "proj-A2", user_id: USER_A, folder_id: null, workflow_type: "GENERATION" },
+                { id: "wf-untouched", project_id: "proj-A1", user_id: USER_A, folder_id: "f-sibling", workflow_type: "GENERATION" },
+                { id: "wf-foreign", project_id: "proj-B1", user_id: USER_B, folder_id: "f-foreign", workflow_type: "GENERATION" },
+            ];
+            const characters = [
+                { id: "char-backed-1", workflow_id: "wf-char-backed", user_id: USER_A, project_id: "proj-A1", name: "Nova" },
+                { id: "char-orphan-1", workflow_id: null, user_id: USER_A, project_id: "proj-A1", name: "Orphan Char" },
+                { id: "char-foreign", workflow_id: "wf-foreign", user_id: USER_B, project_id: "proj-B1", name: "Foreign Char" },
+            ];
+            const elements = [
+                { id: "elem-backed-1", workflow_id: "wf-elem-backed", user_id: USER_A, name: "Relic" },
+                { id: "elem-orphan-1", workflow_id: null, user_id: USER_A, name: "Orphan Relic" },
+                { id: "elem-foreign", workflow_id: "wf-foreign", user_id: USER_B, name: "Foreign Relic" },
+            ];
+            const trash = [
+                { id: "t-1", workflow_id: "wf-already-trashed-in-folder", user_id: USER_A, deleted_by: USER_A, deleted_at: earlierDeletedAt },
+                { id: "t-2", workflow_id: "wf-explicit-already-trashed", user_id: USER_A, deleted_by: USER_A, deleted_at: earlierDeletedAt },
+                { id: "t-3", workflow_id: "wf-p2-trashed", user_id: USER_A, deleted_by: USER_A, deleted_at: earlierDeletedAt },
+                { id: "t-foreign", workflow_id: "wf-foreign", user_id: USER_B, deleted_by: USER_B, deleted_at: earlierDeletedAt },
+            ];
+
+            const deletedFoldersOrder = [];
+            const permanentlyDeletedWorkflows = [];
+            const deletedOrphanCharacters = [];
+            const deletedOrphanElements = [];
+            const listByProjectCalls = [];
+            let requestDeleteCalls = 0;
+
+            const fakeDb = {
+                projects: {
+                    findByUser: async (uid, pid) => projects.filter((p) => p.user_id === uid && (!pid || p.id === pid)),
+                    findById: async (pid) => projects.find((p) => p.id === pid) || null,
+                },
+                folders: {
+                    findOwned: async (id, uid) => folders.find((f) => f.id === id && f.user_id === uid) || null,
+                    listByProject: async (pid, uid) => {
+                        listByProjectCalls.push(pid);
+                        return folders.filter((f) => f.project_id === pid && f.user_id === uid);
+                    },
+                    deleteOwned: async (id, uid) => {
+                        if (workflows.some((w) => w.folder_id === id)) {
+                            const err = new Error("FK violation: workflow still references folder");
+                            err.code = "23503";
+                            throw err;
+                        }
+                        if (folders.some((f) => f.parent_id === id)) {
+                            const err = new Error("FK violation: child folder still references parent");
+                            err.code = "23503";
+                            throw err;
+                        }
+                        const idx = folders.findIndex((f) => f.id === id && f.user_id === uid);
+                        if (idx === -1) return false;
+                        deletedFoldersOrder.push(id);
+                        folders.splice(idx, 1);
+                        return true;
+                    },
+                },
+                workflows: {
+                    findById: async (id) => workflows.find((w) => w.id === id) || null,
+                    getWorkflow: async (id) => workflows.find((w) => w.id === id) || null,
+                    findByProject: async (pid, { partitioned = false } = {}) => {
+                        const rows = workflows.filter((w) => w.project_id === pid);
+                        if (!partitioned) return rows;
+                        const trashedIds = new Set(trash.map((t) => t.workflow_id));
+                        return {
+                            active: rows.filter((w) => !trashedIds.has(w.id)),
+                            trashed: rows.filter((w) => trashedIds.has(w.id)),
+                        };
+                    },
+                },
+                characters: {
+                    findByCharacterId: async (id) =>
+                        characters.find((c) => c.id === id || c.workflow_id === id) || null,
+                    findById: async (id) => characters.find((c) => c.id === id) || null,
+                },
+                elements: {
+                    resolveRecord: async (id) =>
+                        elements.find((e) => e.id === id || e.workflow_id === id) || null,
+                    findById: async (id) => elements.find((e) => e.id === id) || null,
+                    findByWorkflowId: async (wfId) => elements.find((e) => e.workflow_id === wfId) || null,
+                },
+                trash: {
+                    insertManyIfAbsent: async ({ workflowIds = [], userId, deletedBy = userId }) => {
+                        const inserted = [];
+                        for (const wfId of [...new Set(workflowIds)]) {
+                            if (!trash.some((t) => t.workflow_id === wfId)) {
+                                const row = {
+                                    id: `t-${wfId}`,
+                                    workflow_id: wfId,
+                                    user_id: userId,
+                                    deleted_by: deletedBy,
+                                    deleted_at: "2026-11-21T03:00:00.000Z",
+                                };
+                                trash.push(row);
+                                inserted.push(row);
+                            }
+                        }
+                        return inserted;
+                    },
+                    findTrashedWorkflowIds: async ({ userId, workflowIds = null } = {}) => {
+                        if (!userId) return [];
+                        return trash
+                            .filter((t) => t.user_id === userId && (!workflowIds || workflowIds.includes(t.workflow_id)))
+                            .map((t) => t.workflow_id);
+                    },
+                },
+            };
+
+            const mockWorkflowService = {
+                authService: {
+                    verifyWorkflowOwnership: async (wfId, uid) => {
+                        const wf = workflows.find((w) => w.id === wfId);
+                        return Boolean(wf && wf.user_id === uid);
+                    },
+                    verifyWorkflowOwnershipBulk: async (wfIds, uid) => {
+                        const clean = [...new Set(wfIds)];
+                        const owned = clean.filter((id) => workflows.find((w) => w.id === id)?.user_id === uid);
+                        return owned.length === clean.length ? owned : null;
+                    },
+                },
+                listOwnedWorkflowIdsInFolders: async ({ folderIds, userId, projectId }) => {
+                    const matched = workflows.filter(
+                        (w) => w.project_id === projectId && folderIds.includes(w.folder_id)
+                    );
+                    if (matched.some((w) => w.user_id !== userId)) {
+                        const err = new Error("Workflow not found");
+                        err.statusCode = 404;
+                        throw err;
+                    }
+                    return matched.map((w) => w.id);
+                },
+                unlinkWorkflowsFromFolders: async ({ workflowIds, folderIds, projectId }) => {
+                    const unlinked = [];
+                    for (const w of workflows) {
+                        if (
+                            w.project_id === projectId &&
+                            workflowIds.includes(w.id) &&
+                            folderIds.includes(w.folder_id)
+                        ) {
+                            w.folder_id = null;
+                            unlinked.push(w.id);
+                        }
+                    }
+                    return { workflow_ids: unlinked, count: unlinked.length };
+                },
+                deleteWorkflow: async ({ workflowId, userId }) => {
+                    permanentlyDeletedWorkflows.push({ owner: "workflow", workflowId, userId });
+                    const wfIdx = workflows.findIndex((w) => w.id === workflowId);
+                    if (wfIdx !== -1) workflows.splice(wfIdx, 1);
+                    const tIdx = trash.findIndex((t) => t.workflow_id === workflowId);
+                    if (tIdx !== -1) trash.splice(tIdx, 1);
+                    return {
+                        workflowId,
+                        deletedMediaCount: 2,
+                        storageFailures: workflowId === "wf-explicit-already-trashed" ? ["user/a/fail.png"] : [],
+                    };
+                },
+            };
+
+            const mockElementService = {
+                deleteElement: async (id, userId) => {
+                    const idx = elements.findIndex((e) => e.id === id);
+                    const rec = idx !== -1 ? elements[idx] : null;
+                    if (idx !== -1) elements.splice(idx, 1);
+                    if (rec?.workflow_id) {
+                        permanentlyDeletedWorkflows.push({ owner: "element", id, workflowId: rec.workflow_id, userId });
+                        const wfIdx = workflows.findIndex((w) => w.id === rec.workflow_id);
+                        if (wfIdx !== -1) workflows.splice(wfIdx, 1);
+                        const tIdx = trash.findIndex((t) => t.workflow_id === rec.workflow_id);
+                        if (tIdx !== -1) trash.splice(tIdx, 1);
+                        return { workflowId: rec.workflow_id, deletedMediaCount: 3, storageFailures: [] };
+                    }
+                    deletedOrphanElements.push(id);
+                    return { workflowId: id, deletedMediaCount: 0, storageFailures: [] };
+                },
+            };
+
+            const mockCharacterService = {
+                deleteCharacter: async ({ characterId, userId }) => {
+                    const idx = characters.findIndex((c) => c.id === characterId || c.workflow_id === characterId);
+                    const rec = idx !== -1 ? characters[idx] : null;
+                    if (idx !== -1) characters.splice(idx, 1);
+                    if (rec?.workflow_id) {
+                        permanentlyDeletedWorkflows.push({ owner: "character", characterId, workflowId: rec.workflow_id, userId });
+                        const wfIdx = workflows.findIndex((w) => w.id === rec.workflow_id);
+                        if (wfIdx !== -1) workflows.splice(wfIdx, 1);
+                        const tIdx = trash.findIndex((t) => t.workflow_id === rec.workflow_id);
+                        if (tIdx !== -1) trash.splice(tIdx, 1);
+                        return { workflowId: rec.workflow_id, deletedMediaCount: 4, storageFailures: [] };
+                    }
+                    deletedOrphanCharacters.push(rec?.id || characterId);
+                    return { workflowId: characterId, deletedMediaCount: 0, storageFailures: [] };
+                },
+            };
+
+            const svc = new TrashService({
+                db: fakeDb,
+                workflowService: mockWorkflowService,
+                elementService: mockElementService,
+                characterService: mockCharacterService,
+            });
+            const origReqDel = svc.requestDelete.bind(svc);
+            svc.requestDelete = async (...args) => {
+                requestDeleteCalls += 1;
+                return origReqDel(...args);
+            };
+
+            return {
+                earlierDeletedAt,
+                projects,
+                folders,
+                workflows,
+                characters,
+                elements,
+                trash,
+                deletedFoldersOrder,
+                permanentlyDeletedWorkflows,
+                deletedOrphanCharacters,
+                deletedOrphanElements,
+                listByProjectCalls,
+                getRequestDeleteCalls: () => requestDeleteCalls,
+                fakeDb,
+                svc,
+            };
+        }
+
+        before(async () => {
+            origGetUser = supabase.auth.getUser;
+            supabase.auth.getUser = async (token) => {
+                if (token === "token-user-a") return { data: { user: { id: USER_A } }, error: null };
+                if (token === "token-user-b") return { data: { user: { id: USER_B } }, error: null };
+                return { data: { user: null }, error: new Error("Invalid token") };
+            };
+
+            const app = express();
+            app.use(express.json());
+            app.use("/api", apiRouter);
+            app.use((err, req, res, _next) => {
+                res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+            });
+
+            server = http.createServer(app);
+            await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+            baseUrl = `http://127.0.0.1:${server.address().port}`;
+        });
+
+        after(async () => {
+            supabase.auth.getUser = origGetUser;
+            configureWorkspace({ trashService: containerTrashService });
+            setDb(db);
+            resetLimitersForTest();
+            if (server) {
+                await new Promise((resolve) => server.close(resolve));
+            }
+        });
+
+        beforeEach(() => {
+            origBulkConcurrencyEnv = process.env.BULK_DELETE_CONCURRENCY;
+            resetLimitersForTest();
+            state = buildHarnessState();
+            fakeTrashService = state.svc;
+            configureWorkspace({ trashService: fakeTrashService });
+            setDb(state.fakeDb);
+        });
+
+        afterEach(() => {
+            if (origBulkConcurrencyEnv === undefined) {
+                delete process.env.BULK_DELETE_CONCURRENCY;
+            } else {
+                process.env.BULK_DELETE_CONCURRENCY = origBulkConcurrencyEnv;
+            }
+            configureWorkspace({ trashService: containerTrashService });
+            setDb(db);
+        });
+
+        const postAsA = (path, body) =>
+            fetch(`${baseUrl}${path}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: "Bearer token-user-a",
+                },
+                body: JSON.stringify(body),
+            });
+
+        it("POST /api/workspace/bulk-delete handles mixed folders (nested + overlapping + cross-project), workflows, characters, elements, already-trashed preservation, and orphan direct deletion", async () => {
+            const res = await postAsA("/api/workspace/bulk-delete", {
+                // Overlapping parent + child folder AND a folder from a second project
+                folder_ids: ["f-root", "f-child", "f-p2"],
+                // Explicit workflow + duplicate of nested workflow + already-trashed workflow
+                workflow_ids: ["workflows/wf-explicit", "wf-in-root", "wf-explicit-already-trashed"],
+                // Workflow-backed character + orphan character
+                character_ids: ["char-backed-1", "char-orphan-1"],
+                // Workflow-backed element + orphan element
+                element_ids: ["elem-backed-1", "elem-orphan-1"],
+            });
+
+            assert.equal(res.status, 200);
+            const body = await res.json();
+
+            assert.equal(body.ok, true);
+            // Request must NEVER call TrashService.requestDelete (no implicit toggle!)
+            assert.equal(state.getRequestDeleteCalls(), 0);
+            assert.equal(state.permanentlyDeletedWorkflows.length, 0, "Workspace bulk delete must never permanently delete workflows");
+
+            // Folders deleted deepest-first per project (f-grand -> f-child -> f-root, plus f-p2); sibling untouched
+            assert.deepEqual(body.deleted_folder_ids, ["f-grand", "f-child", "f-root", "f-p2"]);
+            assert.deepEqual(state.deletedFoldersOrder, ["f-grand", "f-child", "f-root", "f-p2"]);
+            assert.equal(state.folders.some((f) => f.id === "f-sibling"), true);
+            // listByProject called once per project (proj-A1 and proj-A2), not twice for overlapping folders
+            assert.deepEqual(state.listByProjectCalls.sort(), ["proj-A1", "proj-A2"]);
+
+            // Newly trashed vs already trashed accurately distinguished and deduplicated
+            assert.deepEqual(body.trashed_workflow_ids.slice().sort(), [
+                "wf-char-backed",
+                "wf-elem-backed",
+                "wf-explicit",
+                "wf-in-grand",
+                "wf-in-p2-folder",
+                "wf-in-root",
+            ]);
+            assert.deepEqual(body.already_trashed_workflow_ids.slice().sort(), [
+                "wf-already-trashed-in-folder",
+                "wf-explicit-already-trashed",
+            ]);
+
+            // Already-trashed rows keep original deleted_at intact
+            assert.equal(
+                state.trash.find((t) => t.workflow_id === "wf-already-trashed-in-folder").deleted_at,
+                state.earlierDeletedAt
+            );
+            assert.equal(
+                state.trash.find((t) => t.workflow_id === "wf-explicit-already-trashed").deleted_at,
+                state.earlierDeletedAt
+            );
+
+            // Workflows in deleted folders unlinked to folder_id = null; untouched workflow remains in f-sibling
+            for (const wfId of ["wf-in-root", "wf-in-grand", "wf-already-trashed-in-folder", "wf-in-p2-folder"]) {
+                assert.equal(state.workflows.find((w) => w.id === wfId).folder_id, null);
+            }
+            assert.equal(state.workflows.find((w) => w.id === "wf-untouched").folder_id, "f-sibling");
+
+            // Orphan character & orphan element deleted directly; workflow-backed ones remain (in trash via workflow)
+            assert.deepEqual(body.deleted_orphan_character_ids, ["char-orphan-1"]);
+            assert.deepEqual(body.deleted_orphan_element_ids, ["elem-orphan-1"]);
+            assert.deepEqual(state.deletedOrphanCharacters, ["char-orphan-1"]);
+            assert.deepEqual(state.deletedOrphanElements, ["elem-orphan-1"]);
+            assert.equal(state.characters.some((c) => c.id === "char-backed-1"), true);
+            assert.equal(state.elements.some((e) => e.id === "elem-backed-1"), true);
+        });
+
+        it("POST /api/workspace/bulk-delete accepts camelCase payload aliases", async () => {
+            const res = await postAsA("/api/workspace/bulk-delete", {
+                folderIds: ["f-p2"],
+                workflowIds: ["wf-explicit"],
+                characterIds: ["char-orphan-1"],
+                elementIds: ["elem-orphan-1"],
+            });
+            assert.equal(res.status, 200);
+            const body = await res.json();
+            assert.equal(body.ok, true);
+            assert.deepEqual(body.deleted_folder_ids, ["f-p2"]);
+            assert.deepEqual(body.trashed_workflow_ids.slice().sort(), ["wf-explicit", "wf-in-p2-folder"]);
+            assert.deepEqual(body.already_trashed_workflow_ids, []);
+            assert.deepEqual(body.deleted_orphan_character_ids, ["char-orphan-1"]);
+            assert.deepEqual(body.deleted_orphan_element_ids, ["elem-orphan-1"]);
+        });
+
+        it("POST /api/workspace/bulk-delete rejects empty, >100, non-array, and invalid entries with 400 and 0 mutations", async () => {
+            const badPayloads = [
+                {},
+                { folder_ids: [], workflow_ids: [] },
+                { workflow_ids: "wf-explicit" },
+                { folder_ids: [""] },
+                { workflow_ids: ["workflows/"] },
+                { character_ids: [123] },
+                {
+                    workflow_ids: Array.from({ length: 101 }, (_, i) => `wf-${i}`),
+                },
+                {
+                    folder_ids: Array.from({ length: 60 }, (_, i) => `f-${i}`),
+                    workflow_ids: Array.from({ length: 41 }, (_, i) => `wf-${i}`),
+                },
+            ];
+
+            for (const payload of badPayloads) {
+                const res = await postAsA("/api/workspace/bulk-delete", payload);
+                assert.equal(res.status, 400, `Expected 400 for payload ${JSON.stringify(payload).slice(0, 80)}`);
+                const body = await res.json();
+                assert.equal(body.ok, false);
+            }
+
+            assert.equal(state.deletedFoldersOrder.length, 0);
+            assert.equal(state.trash.length, 4);
+            assert.equal(state.deletedOrphanCharacters.length, 0);
+            assert.equal(state.deletedOrphanElements.length, 0);
+        });
+
+        it("POST /api/workspace/bulk-delete enforces all-or-nothing 404 ownership across folders, workflows, characters, and elements with 0 mutations", async () => {
+            const crossTenantPayloads = [
+                { folder_ids: ["f-p2", "f-foreign"], workflow_ids: ["wf-explicit"] },
+                { folder_ids: ["f-p2"], workflow_ids: ["wf-explicit", "wf-foreign"] },
+                { folder_ids: ["f-p2"], character_ids: ["char-orphan-1", "char-foreign"] },
+                { folder_ids: ["f-p2"], element_ids: ["elem-orphan-1", "elem-foreign"] },
+                { workflow_ids: ["wf-explicit", "wf-does-not-exist"] },
+            ];
+
+            for (const payload of crossTenantPayloads) {
+                const res = await postAsA("/api/workspace/bulk-delete", payload);
+                assert.equal(res.status, 404, `Expected 404 for ${JSON.stringify(payload)}`);
+                const body = await res.json();
+                assert.equal(body.ok, false);
+            }
+
+            assert.equal(state.deletedFoldersOrder.length, 0, "No folders may be deleted on 404");
+            assert.equal(state.trash.length, 4, "No workflows may be trashed on 404");
+            assert.equal(state.deletedOrphanCharacters.length, 0, "No orphan characters may be deleted on 404");
+            assert.equal(state.deletedOrphanElements.length, 0, "No orphan elements may be deleted on 404");
+        });
+
+        it("POST /api/trash/delete permanently deletes selected trashed workflows, dispatches to canonical owners, and aggregates media + storage failures", async () => {
+            // Put char-backed and elem-backed into trash first via workspace bulk-delete
+            const prep = await postAsA("/api/workspace/bulk-delete", {
+                character_ids: ["char-backed-1"],
+                element_ids: ["elem-backed-1"],
+            });
+            assert.equal(prep.status, 200);
+
+            const res = await postAsA("/api/trash/delete", {
+                workflow_ids: [
+                    "workflows/wf-explicit-already-trashed",
+                    "wf-char-backed",
+                    "wf-elem-backed",
+                    "wf-char-backed", // duplicate deduplicated
+                ],
+            });
+            assert.equal(res.status, 200);
+            const body = await res.json();
+
+            assert.equal(body.ok, true);
+            assert.equal(body.count, 3);
+            assert.deepEqual(body.deleted_workflow_ids, [
+                "wf-explicit-already-trashed",
+                "wf-char-backed",
+                "wf-elem-backed",
+            ]);
+            // 2 (workflow) + 4 (character) + 3 (element) = 9
+            assert.equal(body.deleted_media_count, 9);
+            assert.deepEqual(body.storage_failures, ["user/a/fail.png"]);
+            assert.deepEqual(
+                state.permanentlyDeletedWorkflows.map((x) => `${x.owner}:${x.workflowId}`).sort(),
+                [
+                    "character:wf-char-backed",
+                    "element:wf-elem-backed",
+                    "workflow:wf-explicit-already-trashed",
+                ]
+            );
+            // Foreign trash untouched
+            assert.equal(state.trash.some((t) => t.workflow_id === "wf-foreign"), true);
+        });
+
+        it("POST /api/trash/delete rejects active non-trashed workflow with 400 WORKFLOW_NOT_IN_TRASH and deletes nothing", async () => {
+            const res = await postAsA("/api/trash/delete", {
+                workflowIds: ["wf-explicit-already-trashed", "wf-explicit"],
+            });
+            assert.equal(res.status, 400);
+            const body = await res.json();
+            assert.equal(body.ok, false);
+            assert.equal(body.errorCode, "WORKFLOW_NOT_IN_TRASH");
+            assert.equal(state.permanentlyDeletedWorkflows.length, 0, "Zero permanent deletes when any workflow is not in Trash");
+            assert.equal(state.trash.some((t) => t.workflow_id === "wf-explicit-already-trashed"), true);
+        });
+
+        it("POST /api/trash/delete rejects folder_ids, >100, empty, invalid modes, and cross-tenant items with 0 mutations", async () => {
+            const bad400 = [
+                { folder_ids: ["f-root"], workflow_ids: ["wf-explicit-already-trashed"] },
+                { folderIds: ["f-root"] },
+                {},
+                { all: false },
+                { all: "true" },
+                { all: true, workflow_ids: ["wf-explicit-already-trashed"] },
+                { all: true, workflowIds: ["wf-explicit-already-trashed"] },
+                { workflow_ids: [] },
+                { workflow_ids: ["   "] },
+                { workflow_ids: "wf-explicit-already-trashed" },
+                { workflow_ids: Array.from({ length: 101 }, (_, i) => `wf-${i}`) },
+            ];
+
+            for (const payload of bad400) {
+                const res = await postAsA("/api/trash/delete", payload);
+                assert.equal(res.status, 400, `Expected 400 for ${JSON.stringify(payload).slice(0, 80)}`);
+            }
+
+            // Cross-tenant workflow -> 404
+            const resForeignWf = await postAsA("/api/trash/delete", {
+                workflow_ids: ["wf-explicit-already-trashed", "wf-foreign"],
+            });
+            assert.equal(resForeignWf.status, 404);
+
+            // Cross-tenant project_id on Empty Trash -> 404
+            const resForeignProj = await postAsA("/api/trash/delete", {
+                all: true,
+                project_id: "proj-B1",
+            });
+            assert.equal(resForeignProj.status, 404);
+
+            assert.equal(state.permanentlyDeletedWorkflows.length, 0);
+        });
+
+        it("POST /api/trash/delete supports Empty Trash scoped by project_id, global { all: true }, and idempotent empty trash", async () => {
+            // 1. Project-scoped Empty Trash on proj-A2 -> only deletes wf-p2-trashed
+            const resProj = await postAsA("/api/trash/delete", {
+                all: true,
+                projectId: "proj-A2",
+            });
+            assert.equal(resProj.status, 200);
+            const bodyProj = await resProj.json();
+            assert.equal(bodyProj.ok, true);
+            assert.equal(bodyProj.count, 1);
+            assert.deepEqual(bodyProj.deleted_workflow_ids, ["wf-p2-trashed"]);
+            assert.equal(bodyProj.deleted_media_count, 2);
+
+            // proj-A1 trashed items and foreign user's trashed items still remain
+            assert.equal(state.trash.some((t) => t.workflow_id === "wf-explicit-already-trashed"), true);
+            assert.equal(state.trash.some((t) => t.workflow_id === "wf-already-trashed-in-folder"), true);
+            assert.equal(state.trash.some((t) => t.workflow_id === "wf-foreign"), true);
+
+            // 2. Global Empty Trash { all: true } -> deletes remaining USER_A trashed items only
+            const resAll = await postAsA("/api/trash/delete", { all: true });
+            assert.equal(resAll.status, 200);
+            const bodyAll = await resAll.json();
+            assert.equal(bodyAll.ok, true);
+            assert.equal(bodyAll.count, 2);
+            assert.deepEqual(bodyAll.deleted_workflow_ids.slice().sort(), [
+                "wf-already-trashed-in-folder",
+                "wf-explicit-already-trashed",
+            ]);
+            assert.equal(bodyAll.deleted_media_count, 4);
+            assert.deepEqual(bodyAll.storage_failures, ["user/a/fail.png"]);
+            // Foreign user's trash STILL untouched
+            assert.equal(state.trash.some((t) => t.workflow_id === "wf-foreign"), true);
+
+            // 3. Idempotent Empty Trash when Trash is already empty -> 200 OK with count: 0
+            const resEmpty = await postAsA("/api/trash/delete", { all: true });
+            assert.equal(resEmpty.status, 200);
+            const bodyEmpty = await resEmpty.json();
+            assert.deepEqual(bodyEmpty, {
+                ok: true,
+                deleted_workflow_ids: [],
+                count: 0,
+                deleted_media_count: 0,
+                storage_failures: [],
+            });
+        });
+
+        it("TrashService.deleteTrashed bounds in-flight permanent deletes via BULK_DELETE_CONCURRENCY across 1, 10, 15, and clamped <1 / >15", async () => {
+            const testCases = [
+                { envValue: "1", expectedCap: 1, total: 6 },
+                { envValue: "0", expectedCap: 1, total: 6 },
+                { envValue: "-5", expectedCap: 1, total: 6 },
+                { envValue: "10", expectedCap: 10, total: 24 },
+                { envValue: "15", expectedCap: 15, total: 32 },
+                { envValue: "99", expectedCap: 15, total: 32 },
+            ];
+
+            for (const { envValue, expectedCap, total } of testCases) {
+                process.env.BULK_DELETE_CONCURRENCY = envValue;
+
+                const ids = Array.from({ length: total }, (_, i) => `wf-conc-${i}`);
+                let inFlight = 0;
+                let maxInFlight = 0;
+
+                const svc = new TrashService({
+                    db: {
+                        trash: {
+                            findTrashedWorkflowIds: async ({ userId, workflowIds }) =>
+                                userId === USER_A ? (workflowIds || ids) : [],
+                        },
+                        elements: { findByWorkflowId: async () => null },
+                        characters: { findByCharacterId: async () => null },
+                    },
+                    workflowService: {
+                        authService: {
+                            verifyWorkflowOwnershipBulk: async (wfIds, uid) => (uid === USER_A ? wfIds : null),
+                        },
+                        deleteWorkflow: async ({ workflowId }) => {
+                            inFlight += 1;
+                            if (inFlight > maxInFlight) maxInFlight = inFlight;
+                            await new Promise((resolve) => setTimeout(resolve, 10));
+                            inFlight -= 1;
+                            return { workflowId, deletedMediaCount: 1, storageFailures: [] };
+                        },
+                    },
+                    elementService: { deleteElement: async () => ({}) },
+                    characterService: { deleteCharacter: async () => ({}) },
+                });
+
+                const res = await svc.deleteTrashed({
+                    userId: USER_A,
+                    workflow_ids: ids,
+                });
+
+                assert.equal(res.ok, true);
+                assert.equal(res.count, total);
+                assert.equal(res.deleted_media_count, total);
+                assert.deepEqual(res.deleted_workflow_ids, ids);
+                assert.equal(inFlight, 0);
+                assert.ok(
+                    maxInFlight <= expectedCap,
+                    `maxInFlight (${maxInFlight}) exceeded cap (${expectedCap}) for BULK_DELETE_CONCURRENCY=${envValue}`
+                );
+                assert.equal(
+                    maxInFlight,
+                    Math.min(expectedCap, total),
+                    `Expected worker pool to saturate up to cap (${expectedCap}) for BULK_DELETE_CONCURRENCY=${envValue}`
+                );
+            }
+        });
+
+        it("POST /api/workspace/bulk-delete rejects upfront with 409 MEDIA_PROCESSING and 0 mutations when any targeted workflow (explicit or inside folder) has processing/pending media", async () => {
+            state.fakeDb.workflowMedia = {
+                findMediaStatusesByWorkflowIds: async (ids) =>
+                    new Map(
+                        ids.map((id) => [
+                            id,
+                            id === "wf-in-grand"
+                                ? [{ id: "m-proc", status: "processing", url: null }]
+                                : [{ id: `m-${id}`, status: "completed", url: "https://cdn/ok.png" }],
+                        ])
+                    ),
+            };
+
+            const res = await postAsA("/api/workspace/bulk-delete", {
+                folder_ids: ["f-root"],
+                workflow_ids: ["wf-explicit"],
+                character_ids: ["char-orphan-1"],
+            });
+
+            assert.equal(res.status, 409);
+            const body = await res.json();
+            assert.equal(body.ok, false);
+            assert.equal(body.errorCode, "MEDIA_PROCESSING");
+            assert.equal(state.deletedFoldersOrder.length, 0, "No folders deleted on 409");
+            assert.equal(state.trash.length, 4, "No workflows trashed on 409");
+            assert.equal(state.permanentlyDeletedWorkflows.length, 0);
+            assert.equal(state.deletedOrphanCharacters.length, 0);
+        });
+
+        it("POST /api/workspace/bulk-delete hard-deletes failed-only workflows directly (never trashing them) while trashing completed and mixed (failed + completed) workflows", async () => {
+            state.fakeDb.workflowMedia = {
+                findMediaStatusesByWorkflowIds: async (ids) =>
+                    new Map(
+                        ids.map((id) => {
+                            if (id === "wf-explicit" || id === "wf-in-grand") {
+                                return [id, [{ id: `m-${id}`, status: "failed", url: null }]];
+                            }
+                            if (id === "wf-in-root") {
+                                return [
+                                    id,
+                                    [
+                                        { id: "m-root-fail", status: "failed", url: null },
+                                        { id: "m-root-ok", status: "success", url: "https://cdn/root.png" },
+                                    ],
+                                ];
+                            }
+                            return [id, [{ id: `m-${id}`, status: "completed", url: "https://cdn/ok.png" }]];
+                        })
+                    ),
+            };
+
+            const res = await postAsA("/api/workspace/bulk-delete", {
+                folder_ids: ["f-root"],
+                workflow_ids: ["wf-explicit"],
+            });
+
+            assert.equal(res.status, 200);
+            const body = await res.json();
+            assert.equal(body.ok, true);
+            assert.deepEqual(body.deleted_folder_ids, ["f-grand", "f-child", "f-root"]);
+            assert.deepEqual(
+                body.deleted_workflow_ids.slice().sort(),
+                ["wf-explicit", "wf-in-grand"],
+                "Failed-only workflows must be hard-deleted directly"
+            );
+            assert.deepEqual(
+                body.trashed_workflow_ids,
+                ["wf-in-root"],
+                "Mixed (failed + success) workflow must still go to trash"
+            );
+            assert.deepEqual(body.already_trashed_workflow_ids, ["wf-already-trashed-in-folder"]);
+            assert.equal(state.trash.some((t) => t.workflow_id === "wf-explicit"), false, "Failed-only wf-explicit must never enter trash");
+            assert.equal(state.trash.some((t) => t.workflow_id === "wf-in-grand"), false, "Failed-only wf-in-grand must never enter trash");
+            assert.deepEqual(
+                state.permanentlyDeletedWorkflows.map((x) => x.workflowId).sort(),
+                ["wf-explicit", "wf-in-grand"]
+            );
+        });
+
+        it("POST /api/trash/delete defense-in-depth rejects with 409 MEDIA_PROCESSING and 0 deletes if a trashed workflow has processing media", async () => {
+            state.fakeDb.workflowMedia = {
+                findMediaStatusesByWorkflowIds: async (ids) =>
+                    new Map(
+                        ids.map((id) => [
+                            id,
+                            id === "wf-explicit-already-trashed"
+                                ? [{ id: "m-proc", status: "pending", url: null }]
+                                : [{ id: `m-${id}`, status: "completed", url: "https://cdn/ok.png" }],
+                        ])
+                    ),
+            };
+
+            // Selected mode
+            const resSelected = await postAsA("/api/trash/delete", {
+                workflow_ids: ["wf-explicit-already-trashed", "wf-already-trashed-in-folder"],
+            });
+            assert.equal(resSelected.status, 409);
+            const bodySelected = await resSelected.json();
+            assert.equal(bodySelected.ok, false);
+            assert.equal(bodySelected.errorCode, "MEDIA_PROCESSING");
+            assert.equal(state.permanentlyDeletedWorkflows.length, 0);
+
+            // Empty trash ({ all: true }) mode
+            const resAll = await postAsA("/api/trash/delete", { all: true });
+            assert.equal(resAll.status, 409);
+            const bodyAll = await resAll.json();
+            assert.equal(bodyAll.errorCode, "MEDIA_PROCESSING");
+            assert.equal(state.permanentlyDeletedWorkflows.length, 0);
+        });
+    });
+});
+
+describe("Media Status Deletion Guard: TrashService.requestDelete & requestDeleteMany", () => {
+    it("requestDelete rejects processing/pending/queued media (409 MEDIA_PROCESSING) on both trash=true and trash=false, hard-deletes failed-only directly, and trashes mixed or completed workflows", async () => {
+        const trashRows = new Map();
+        const permanentDeletes = [];
+        const mediaByWf = new Map([
+            ["wf-processing", [{ id: "m-1", status: "processing", url: null }]],
+            ["wf-pending", [{ id: "m-2", status: "pending", url: null }]],
+            ["wf-queued", [{ id: "m-3", status: "queued", url: null }]],
+            [
+                "wf-mixed-processing",
+                [
+                    { id: "m-4a", status: "completed", url: "https://cdn/ok.png" },
+                    { id: "m-4b", status: "processing", url: null },
+                ],
+            ],
+            ["wf-failed-only", [{ id: "m-5", status: "failed", url: null }]],
+            [
+                "wf-all-failed-multi",
+                [
+                    { id: "m-6a", status: "failed", url: null },
+                    { id: "m-6b", status: "FAILED", url: null },
+                ],
+            ],
+            [
+                "wf-mixed-failed-completed",
+                [
+                    { id: "m-7a", status: "failed", url: null },
+                    { id: "m-7b", status: "completed", url: "https://cdn/7.png" },
+                ],
+            ],
+            ["wf-completed", [{ id: "m-8", status: "success", url: "https://cdn/8.png" }]],
+            ["wf-empty", []],
+        ]);
+
+        const trashService = new TrashService({
+            db: {
+                trash: {
+                    insertIfAbsent: async ({ workflowId, userId }) => {
+                        if (trashRows.has(workflowId)) return null;
+                        const row = { workflow_id: workflowId, user_id: userId };
+                        trashRows.set(workflowId, row);
+                        return row;
+                    },
+                },
+                workflowMedia: {
+                    findMediaStatusesByWorkflowIds: async (ids) =>
+                        new Map(ids.map((id) => [id, mediaByWf.get(id) || []])),
+                },
+                elements: { findByWorkflowId: async () => null },
+                characters: { findByCharacterId: async () => null },
+            },
+            workflowService: {
+                authService: {
+                    verifyWorkflowOwnership: async (id, uid) => uid === "user-1" && mediaByWf.has(id),
+                    verifyWorkflowOwnershipBulk: async (ids, uid) =>
+                        uid === "user-1" && ids.every((id) => mediaByWf.has(id)) ? ids : null,
+                },
+                deleteWorkflow: async ({ workflowId }) => {
+                    permanentDeletes.push(workflowId);
+                    trashRows.delete(workflowId);
+                    return {
+                        workflowId,
+                        unlinkedMediaCount: 1,
+                        deletedOrphanCount: 1,
+                        deletedMediaCount: 1,
+                        storageFailures: [],
+                    };
+                },
+            },
+            elementService: { deleteElement: async () => ({}) },
+            characterService: { deleteCharacter: async () => ({}) },
+        });
+
+        // 1. In-flight statuses rejected for BOTH trash=true and trash=false with 0 mutations
+        for (const wfId of ["wf-processing", "wf-pending", "wf-queued", "wf-mixed-processing"]) {
+            for (const trash of [true, false]) {
+                await assert.rejects(
+                    () => trashService.requestDelete({ kind: "workflow", id: wfId, userId: "user-1", trash }),
+                    (err) => {
+                        assert.ok(err instanceof MediaConflictError);
+                        assert.equal(err.statusCode, 409);
+                        assert.equal(err.errorCode, "MEDIA_PROCESSING");
+                        return true;
+                    }
+                );
+            }
+        }
+        assert.equal(trashRows.size, 0);
+        assert.equal(permanentDeletes.length, 0);
+
+        // 2. Failed-only workflows bypass Trash and hard-delete directly on 1st delete (default trash=true)
+        const failedRes = await trashService.requestDelete({ kind: "workflow", id: "wf-failed-only", userId: "user-1" });
+        assert.equal("trashed" in failedRes, false, "Failed-only workflow must not return trashed: true");
+        assert.equal(failedRes.workflowId, "wf-failed-only");
+        assert.equal(failedRes.deletedMediaCount, 1);
+        assert.equal(trashRows.has("wf-failed-only"), false, "Failed-only workflow must never enter public.trash");
+        assert.deepEqual(permanentDeletes, ["wf-failed-only"]);
+
+        const multiFailedRes = await trashService.requestDelete({ kind: "workflow", id: "wf-all-failed-multi", userId: "user-1" });
+        assert.equal("trashed" in multiFailedRes, false);
+        assert.equal(trashRows.has("wf-all-failed-multi"), false);
+        assert.deepEqual(permanentDeletes, ["wf-failed-only", "wf-all-failed-multi"]);
+
+        // 3. Mixed (failed + completed), completed, and empty workflows still move to Trash
+        for (const wfId of ["wf-mixed-failed-completed", "wf-completed", "wf-empty"]) {
+            const res = await trashService.requestDelete({ kind: "workflow", id: wfId, userId: "user-1" });
+            assert.equal(res.trashed, true, `${wfId} must move to trash`);
+            assert.equal(trashRows.has(wfId), true);
+        }
+        assert.deepEqual(permanentDeletes, ["wf-failed-only", "wf-all-failed-multi"]);
+    });
+
+    it("requestDeleteMany rejects upfront with 409 MEDIA_PROCESSING if any workflow is processing (0 mutations), and directly hard-deletes failed-only workflows while trashing completed ones", async () => {
+        const trashRows = new Map();
+        const permanentDeletes = [];
+        const mediaByWf = new Map([
+            ["wf-ok", [{ id: "m-1", status: "completed", url: "https://cdn/1.png" }]],
+            ["wf-fail", [{ id: "m-2", status: "failed", url: null }]],
+            ["wf-busy", [{ id: "m-3", status: "processing", url: null }]],
+        ]);
+
+        const trashService = new TrashService({
+            db: {
+                trash: {
+                    insertIfAbsent: async ({ workflowId, userId }) => {
+                        if (trashRows.has(workflowId)) return null;
+                        const row = { workflow_id: workflowId, user_id: userId };
+                        trashRows.set(workflowId, row);
+                        return row;
+                    },
+                },
+                workflowMedia: {
+                    findMediaStatusesByWorkflowIds: async (ids) =>
+                        new Map(ids.map((id) => [id, mediaByWf.get(id) || []])),
+                },
+                elements: { findByWorkflowId: async () => null },
+                characters: { findByCharacterId: async () => null },
+            },
+            workflowService: {
+                authService: {
+                    verifyWorkflowOwnership: async (id, uid) => uid === "user-1" && mediaByWf.has(id),
+                    verifyWorkflowOwnershipBulk: async (ids, uid) =>
+                        uid === "user-1" && ids.every((id) => mediaByWf.has(id)) ? ids : null,
+                },
+                deleteWorkflow: async ({ workflowId }) => {
+                    permanentDeletes.push(workflowId);
+                    return {
+                        workflowId,
+                        unlinkedMediaCount: 1,
+                        deletedOrphanCount: 1,
+                        deletedMediaCount: 1,
+                        storageFailures: [],
+                    };
+                },
+            },
+            elementService: { deleteElement: async () => ({}) },
+            characterService: { deleteCharacter: async () => ({}) },
+        });
+
+        // 1. Batch containing one processing workflow -> rejected upfront with 409 and 0 mutations
+        await assert.rejects(
+            () => trashService.requestDeleteMany({ ids: ["wf-ok", "wf-fail", "wf-busy"], userId: "user-1" }),
+            (err) => {
+                assert.ok(err instanceof MediaConflictError);
+                assert.equal(err.statusCode, 409);
+                assert.equal(err.errorCode, "MEDIA_PROCESSING");
+                return true;
+            }
+        );
+        assert.equal(trashRows.size, 0);
+        assert.equal(permanentDeletes.length, 0);
+
+        // 2. Batch containing [completed, failed-only] -> completed trashed, failed-only directly hard-deleted
+        const res = await trashService.requestDeleteMany({ ids: ["wf-ok", "wf-fail"], userId: "user-1" });
+        assert.equal(res.count, 2);
+        assert.deepEqual(res.workflow_ids, ["wf-ok", "wf-fail"]);
+        assert.equal(res.trashed, true);
+        assert.equal(res.results[0].trashed, true);
+        assert.equal("trashed" in res.results[1], false);
+        assert.equal(trashRows.has("wf-ok"), true);
+        assert.equal(trashRows.has("wf-fail"), false);
+        assert.deepEqual(permanentDeletes, ["wf-fail"]);
     });
 });
 }

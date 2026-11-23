@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { WorkflowService } from "#generation/tools";
 import { WorkflowMediaService, sanitizeStoragePath } from "../../../src/systems/generation/internal/services/WorkflowMediaService.js";
-import { QuotaError, ValidationError, UploadError, formatWorkflowReferenceQuotaMessage, isWorkflowReferenceQuotaError, WorkflowMediaRepository } from "#media/tools";
+import { QuotaError, ValidationError, UploadError, MediaConflictError, formatWorkflowReferenceQuotaMessage, isWorkflowReferenceQuotaError, WorkflowMediaRepository } from "#media/tools";
 import { CrudServiceError, baseLogger } from "#shared";
 import { ElementService, ElementMediaService, ElementRepository } from "#elements/tools";
 import { CharacterService, CharacterMediaService } from "#characters/tools";
@@ -2944,6 +2944,20 @@ function createHarness() {
         workflows
           .filter((w) => (!projectId || w.project_id === projectId) && folderIds?.includes(w.folder_id))
           .map((w) => w.id),
+      clearFolderIds: async ({ workflowIds = [], folderIds = [], projectId } = {}) => {
+        const unlinked = [];
+        for (const wf of workflows) {
+          if (
+            (!projectId || wf.project_id === projectId) &&
+            workflowIds.includes(wf.id) &&
+            folderIds.includes(wf.folder_id)
+          ) {
+            wf.folder_id = null;
+            unlinked.push(wf.id);
+          }
+        }
+        return unlinked;
+      },
       deleteById: async (id) => {
         deletedWorkflowIds.push(id);
         const idx = workflows.findIndex((w) => w.id === id);
@@ -2995,6 +3009,7 @@ function createHarness() {
 
   return {
     db,
+    workflows,
     mediaRows,
     relationRows,
     mediaService,
@@ -3033,17 +3048,59 @@ describe("Workflow media unlink vs delete", () => {
     assert.equal(result.unlinkedMediaCount, 2);
   });
 
-  it("deleteWorkflowsInFolders deletes owned workflows in those folders only", async () => {
-    const result = await harness.workflowService.deleteWorkflowsInFolders({
+  it("listOwnedWorkflowIdsInFolders and unlinkWorkflowsFromFolders detach owned workflows in target folders without deleting workflows or media", async () => {
+    const ownedIds = await harness.workflowService.listOwnedWorkflowIdsInFolders({
       folderIds: ["folder-1", "folder-1-child"],
       userId: "user-1",
       projectId: "proj-1",
     });
 
-    assert.equal(harness.deletedWorkflowIds.includes("wf-1"), true);
-    assert.equal(harness.deletedWorkflowIds.includes("wf-3"), true);
-    assert.equal(harness.deletedWorkflowIds.includes("wf-keep"), false);
+    assert.deepEqual(ownedIds.slice().sort(), ["wf-1", "wf-3"]);
+
+    const result = await harness.workflowService.unlinkWorkflowsFromFolders({
+      workflowIds: ownedIds,
+      folderIds: ["folder-1", "folder-1-child"],
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+
+    assert.deepEqual(result.workflow_ids.slice().sort(), ["wf-1", "wf-3"]);
     assert.equal(result.count, 2);
+
+    // Workflows and media are preserved (NOT permanently deleted)
+    assert.equal(harness.deletedWorkflowIds.length, 0);
+    assert.equal(harness.deletedMediaIds.length, 0);
+    assert.equal(harness.deletedStorageUrls.length, 0);
+    assert.equal(harness.workflows.find((w) => w.id === "wf-1").folder_id, null);
+    assert.equal(harness.workflows.find((w) => w.id === "wf-3").folder_id, null);
+    assert.equal(harness.workflows.find((w) => w.id === "wf-keep").folder_id, "folder-other");
+  });
+
+  it("listOwnedWorkflowIdsInFolders and unlinkWorkflowsFromFolders fail closed with 404 when ownership check fails", async () => {
+    harness.workflowService.authService.verifyWorkflowOwnershipBulk = async () => null;
+
+    await assert.rejects(
+      () =>
+        harness.workflowService.listOwnedWorkflowIdsInFolders({
+          folderIds: ["folder-1"],
+          userId: "user-foreign",
+          projectId: "proj-1",
+        }),
+      (err) => err.statusCode === 404 && err.errorCode === "NOT_FOUND"
+    );
+
+    await assert.rejects(
+      () =>
+        harness.workflowService.unlinkWorkflowsFromFolders({
+          workflowIds: ["wf-1"],
+          folderIds: ["folder-1"],
+          userId: "user-foreign",
+          projectId: "proj-1",
+        }),
+      (err) => err.statusCode === 404 && err.errorCode === "NOT_FOUND"
+    );
+
+    assert.equal(harness.workflows.find((w) => w.id === "wf-1").folder_id, "folder-1");
   });
 
   it("deleteMedia removes the media record and storage, not only the relation", async () => {
@@ -3298,6 +3355,314 @@ describe("Task A: Scoped Media Deletion & Shared-Media Lifecycle Boundary Tests"
     assert.equal(await repo.countLinksForMedia(mediaId), 0, "No associations remain");
     assert.equal(mediaStore.has(mediaId), false, "Media database record must be deleted");
     assert.deepEqual(deletedStorage, [storageUrl], "Storage object must be deleted for orphan");
+  });
+});
+}
+
+// ─── Media Status Deletion Guard (processing rejection & failed hard-delete) ───
+{
+describe("Media Status Deletion Guard in WorkflowMediaService & WorkflowService", () => {
+  function makeStatusGuardHarness({
+    mediaById = {},
+    workflowMediaByWf = {},
+    useBatchStatusLookup = false,
+  } = {}) {
+    const calls = {
+      findByIdSelects: [],
+      unlinkAndReap: [],
+      mediaDeleteById: [],
+      storageDeleteByUrl: [],
+      workflowUpdateFields: [],
+      workflowUpdatePrimary: [],
+      workflowDeleteById: [],
+    };
+
+    const mediaStore = new Map(Object.entries(mediaById).map(([k, v]) => [k, { ...v }]));
+    const wfMediaStore = new Map(
+      Object.entries(workflowMediaByWf).map(([wfId, list]) => [wfId, list.map((m) => ({ ...m }))])
+    );
+
+    const db = {
+      media: {
+        findById: async (id, select) => {
+          calls.findByIdSelects.push({ id, select });
+          const m = mediaStore.get(id);
+          return m ? { ...m } : null;
+        },
+        deleteById: async (id) => {
+          calls.mediaDeleteById.push(id);
+          mediaStore.delete(id);
+          return { id };
+        },
+        findByWorkflow: async (wfId) => {
+          return (wfMediaStore.get(wfId) || []).map((m) => ({ ...m }));
+        },
+      },
+      workflows: {
+        findById: async (wfId) => ({ id: wfId, primary_media_id: null, workflow_type: "GENERATION" }),
+        updateFields: async (wfId, fields) => {
+          calls.workflowUpdateFields.push({ wfId, fields });
+          return { id: wfId, ...fields };
+        },
+        updatePrimaryMedia: async (wfId, mediaId) => {
+          calls.workflowUpdatePrimary.push({ wfId, mediaId });
+          return {};
+        },
+        deleteById: async (wfId) => {
+          calls.workflowDeleteById.push(wfId);
+          return true;
+        },
+      },
+      workflowMedia: {
+        findByMedia: async (mediaId) => {
+          const links = [];
+          for (const [wfId, list] of wfMediaStore.entries()) {
+            if (list.some((m) => m.id === mediaId)) {
+              links.push({ workflow_id: wfId, media_id: mediaId });
+            }
+          }
+          return links;
+        },
+        findByWorkflow: async (wfId) => (wfMediaStore.get(wfId) || []).map((m) => ({ workflow_id: wfId, media_id: m.id })),
+        unlinkAndReapOrphan: async ({ workflowId, mediaId }) => {
+          calls.unlinkAndReap.push({ workflowId, mediaId });
+          const list = wfMediaStore.get(workflowId) || [];
+          const removed = list.find((m) => m.id === mediaId);
+          wfMediaStore.set(workflowId, list.filter((m) => m.id !== mediaId));
+          const stillLinkedElsewhere = [...wfMediaStore.values()].some((arr) => arr.some((m) => m.id === mediaId));
+          return {
+            unlinked: Boolean(removed),
+            is_orphan: Boolean(removed) && !stillLinkedElsewhere,
+            storage_url: removed?.url || null,
+            remaining_links: stillLinkedElsewhere ? 1 : 0,
+            was_primary: false,
+          };
+        },
+        ...(useBatchStatusLookup
+          ? {
+              findMediaStatusesByWorkflowIds: async (wfIds) => {
+                const map = new Map();
+                for (const wfId of wfIds) {
+                  map.set(
+                    wfId,
+                    (wfMediaStore.get(wfId) || []).map((m) => ({ id: m.id, status: m.status ?? null, url: m.url ?? null }))
+                  );
+                }
+                return map;
+              },
+            }
+          : {}),
+      },
+    };
+
+    const storageService = {
+      deleteByUrl: async (url) => {
+        calls.storageDeleteByUrl.push(url);
+      },
+    };
+
+    const authService = {
+      verifyMediaOwnership: async () => true,
+      verifyWorkflowOwnership: async () => true,
+      verifyWorkflowOwnershipBulk: async (ids) => ids,
+    };
+
+    const mediaUploadService = { discard: async () => ({}) };
+    const mediaService = new WorkflowMediaService({ db, storageService, authService, mediaUploadService });
+    const wfService = new WorkflowService({ db, storageService, authService, mediaService, mediaUploadService });
+
+    return { db, mediaService, wfService, calls, mediaStore, wfMediaStore };
+  }
+
+  it("deleteMedia rejects in-flight statuses (processing, pending, queued, uploading, in_progress, starting) with 409 MEDIA_PROCESSING and zero mutations", async () => {
+    for (const status of ["processing", "pending", "queued", "uploading", "in_progress", "starting"]) {
+      const mediaId = `m-${status}`;
+      const wfId = `wf-${status}`;
+      const h = makeStatusGuardHarness({
+        mediaById: { [mediaId]: { id: mediaId, url: null, status } },
+        workflowMediaByWf: { [wfId]: [{ id: mediaId, url: null, status }] },
+      });
+
+      await assert.rejects(
+        () => h.mediaService.deleteMedia({ mediaId, workflowId: wfId, userId: "user-1" }),
+        (err) => {
+          assert.ok(err instanceof MediaConflictError, `Expected MediaConflictError for ${status}`);
+          assert.equal(err.statusCode, 409);
+          assert.equal(err.errorCode, "MEDIA_PROCESSING");
+          return true;
+        }
+      );
+
+      assert.equal(h.calls.findByIdSelects[0]?.select, "id, url, status");
+      assert.equal(h.calls.unlinkAndReap.length, 0, `Must not unlink ${status} media`);
+      assert.equal(h.calls.mediaDeleteById.length, 0, `Must not delete ${status} media row`);
+      assert.equal(h.calls.storageDeleteByUrl.length, 0, `Must not delete storage for ${status} media`);
+      assert.equal(h.calls.workflowDeleteById.length, 0, `Must not delete workflow for ${status} media`);
+      assert.equal(h.mediaStore.has(mediaId), true);
+    }
+  });
+
+  it("deleteMedia hard-deletes failed media with url: null and removes empty non-sidecar workflow container cleanly", async () => {
+    const h = makeStatusGuardHarness({
+      mediaById: { "m-failed-null": { id: "m-failed-null", url: null, status: "failed" } },
+      workflowMediaByWf: { "wf-failed-1": [{ id: "m-failed-null", url: null, status: "failed" }] },
+    });
+
+    const result = await h.mediaService.deleteMedia({
+      mediaId: "m-failed-null",
+      workflowId: "wf-failed-1",
+      userId: "user-1",
+    });
+
+    assert.equal(result.deleted, true);
+    assert.equal(result.workflow_deleted, true);
+    assert.deepEqual(h.calls.mediaDeleteById, ["m-failed-null"]);
+    assert.deepEqual(h.calls.storageDeleteByUrl, []);
+    assert.deepEqual(h.calls.workflowDeleteById, ["wf-failed-1"]);
+    assert.equal(h.mediaStore.has("m-failed-null"), false);
+  });
+
+  it("deleteMedia hard-deletes failed media with non-null url and cleans up storage + empty workflow", async () => {
+    const url = "https://cdn.example.com/failed-partial.png";
+    const h = makeStatusGuardHarness({
+      mediaById: { "m-failed-url": { id: "m-failed-url", url, status: "failed" } },
+      workflowMediaByWf: { "wf-failed-2": [{ id: "m-failed-url", url, status: "failed" }] },
+    });
+
+    const result = await h.mediaService.deleteMedia({
+      mediaId: "m-failed-url",
+      workflowId: "wf-failed-2",
+      userId: "user-1",
+    });
+
+    assert.equal(result.deleted, true);
+    assert.equal(result.workflow_deleted, true);
+    assert.deepEqual(h.calls.mediaDeleteById, ["m-failed-url"]);
+    assert.deepEqual(h.calls.storageDeleteByUrl, [url]);
+    assert.deepEqual(h.calls.workflowDeleteById, ["wf-failed-2"]);
+  });
+
+  it("deleteWorkflow and releaseWorkflowMedia reject workflows containing processing/pending media with 409 MEDIA_PROCESSING and zero mutations", async () => {
+    for (const useBatchStatusLookup of [false, true]) {
+      const h = makeStatusGuardHarness({
+        mediaById: {
+          "m-ok": { id: "m-ok", url: "https://cdn.example.com/ok.png", status: "completed" },
+          "m-proc": { id: "m-proc", url: null, status: "processing" },
+        },
+        workflowMediaByWf: {
+          "wf-in-flight": [
+            { id: "m-ok", url: "https://cdn.example.com/ok.png", status: "completed" },
+            { id: "m-proc", url: null, status: "processing" },
+          ],
+        },
+        useBatchStatusLookup,
+      });
+
+      await assert.rejects(
+        () => h.wfService.deleteWorkflow({ workflowId: "wf-in-flight", userId: "user-1" }),
+        (err) => {
+          assert.ok(err instanceof MediaConflictError);
+          assert.equal(err.statusCode, 409);
+          assert.equal(err.errorCode, "MEDIA_PROCESSING");
+          return true;
+        }
+      );
+
+      // Zero mutations: primary_media_id was NOT cleared, no unlinks, no deletes
+      assert.equal(h.calls.workflowUpdateFields.length, 0);
+      assert.equal(h.calls.workflowUpdatePrimary.length, 0);
+      assert.equal(h.calls.unlinkAndReap.length, 0);
+      assert.equal(h.calls.mediaDeleteById.length, 0);
+      assert.equal(h.calls.workflowDeleteById.length, 0);
+
+      // Direct releaseWorkflowMedia call is also guarded
+      await assert.rejects(
+        () => h.mediaService.releaseWorkflowMedia({ workflowId: "wf-in-flight" }),
+        (err) => err instanceof MediaConflictError && err.statusCode === 409 && err.errorCode === "MEDIA_PROCESSING"
+      );
+      assert.equal(h.calls.workflowUpdatePrimary.length, 0);
+      assert.equal(h.calls.unlinkAndReap.length, 0);
+    }
+  });
+
+  it("deleteWorkflow succeeds for failed media workflows and bulkDeleteWorkflows rejects upfront if any workflow is processing", async () => {
+    const h = makeStatusGuardHarness({
+      mediaById: {
+        "m-failed": { id: "m-failed", url: null, status: "failed" },
+        "m-pending": { id: "m-pending", url: null, status: "pending" },
+      },
+      workflowMediaByWf: {
+        "wf-failed": [{ id: "m-failed", url: null, status: "failed" }],
+        "wf-pending": [{ id: "m-pending", url: null, status: "pending" }],
+      },
+      useBatchStatusLookup: true,
+    });
+
+    // bulkDeleteWorkflows fails fast upfront with zero mutations when batch includes a pending workflow
+    await assert.rejects(
+      () => h.wfService.bulkDeleteWorkflows({ workflowIds: ["wf-failed", "wf-pending"], userId: "user-1" }),
+      (err) => err instanceof MediaConflictError && err.statusCode === 409 && err.errorCode === "MEDIA_PROCESSING"
+    );
+    assert.equal(h.calls.workflowDeleteById.length, 0);
+    assert.equal(h.calls.mediaDeleteById.length, 0);
+
+    // Deleting the failed workflow alone hard-deletes media and workflow
+    const res = await h.wfService.deleteWorkflow({ workflowId: "wf-failed", userId: "user-1" });
+    assert.equal(res.workflowId, "wf-failed");
+    assert.equal(res.deletedMediaCount, 1);
+    assert.deepEqual(h.calls.mediaDeleteById, ["m-failed"]);
+    assert.deepEqual(h.calls.workflowDeleteById, ["wf-failed"]);
+  });
+
+  it("fails closed when status-lookup DB query throws and does not fall back to N+1 findByWorkflow on empty batch result", async () => {
+    let findByWorkflowCalls = 0;
+    const dbErr = new Error("Transient DB connection error");
+
+    const hFail = makeStatusGuardHarness({
+      workflowMediaByWf: { "wf-err": [] },
+      useBatchStatusLookup: true,
+    });
+    hFail.db.workflowMedia.findMediaStatusesByWorkflowIds = async () => {
+      throw dbErr;
+    };
+    hFail.db.media.findByWorkflow = async () => {
+      findByWorkflowCalls += 1;
+      return [];
+    };
+
+    // deleteWorkflow, bulkDeleteWorkflows, and releaseWorkflowMedia all propagate DB errors (fail closed)
+    await assert.rejects(
+      () => hFail.wfService.deleteWorkflow({ workflowId: "wf-err", userId: "user-1" }),
+      (err) => err === dbErr
+    );
+    await assert.rejects(
+      () => hFail.wfService.bulkDeleteWorkflows({ workflowIds: ["wf-err"], userId: "user-1" }),
+      (err) => err === dbErr
+    );
+    await assert.rejects(
+      () => hFail.mediaService.releaseWorkflowMedia({ workflowId: "wf-err" }),
+      (err) => err === dbErr
+    );
+    assert.equal(hFail.calls.workflowUpdateFields.length, 0);
+    assert.equal(hFail.calls.workflowDeleteById.length, 0);
+    assert.equal(hFail.calls.unlinkAndReap.length, 0);
+    assert.equal(findByWorkflowCalls, 0);
+
+    // When batch lookup returns an empty array for an empty workflow, assertWorkflowMediaNotInFlight /
+    // _assertWorkflowsMediaNotInFlight must NOT trigger redundant N+1 findByWorkflow fallback calls
+    const hEmpty = makeStatusGuardHarness({
+      workflowMediaByWf: { "wf-empty-1": [], "wf-empty-2": [] },
+      useBatchStatusLookup: true,
+    });
+    let emptyFallbackCalls = 0;
+    hEmpty.db.media.findByWorkflow = async () => {
+      emptyFallbackCalls += 1;
+      return [];
+    };
+
+    await hEmpty.mediaService.assertWorkflowMediaNotInFlight("wf-empty-1");
+    await hEmpty.wfService._assertWorkflowsMediaNotInFlight(["wf-empty-1", "wf-empty-2"]);
+    assert.equal(emptyFallbackCalls, 0, "Empty batch lookup must not fall back to N+1 db.media.findByWorkflow");
   });
 });
 }

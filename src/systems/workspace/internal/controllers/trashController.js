@@ -57,3 +57,66 @@ export async function restoreAllWorkflows(req, res) {
         return res.status(statusCode).json({ ok: false, errorCode, message: publicMessage });
     }
 }
+
+/**
+ * POST /api/workspace/bulk-delete
+ * Unified explicit Move-to-Trash bulk delete for folders, workflows, characters, and elements.
+ */
+export async function bulkDeleteWorkspace(req, res) {
+    try {
+        const trashService = getTrashService();
+        if (!trashService) {
+            return res.status(500).json({ ok: false, message: "TrashService not initialized" });
+        }
+
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const result = await trashService.bulkDeleteWorkspace({
+            userId: req.user.id,
+            folder_ids: body.folder_ids,
+            folderIds: body.folderIds,
+            workflow_ids: body.workflow_ids,
+            workflowIds: body.workflowIds,
+            character_ids: body.character_ids,
+            characterIds: body.characterIds,
+            element_ids: body.element_ids,
+            elementIds: body.elementIds,
+        });
+
+        return res.status(200).json(result);
+    } catch (err) {
+        controllerLogger.error({ userId: req.user?.id, err }, `bulkDeleteWorkspace error: ${err.message}`);
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        return res.status(statusCode).json({ ok: false, errorCode, message: publicMessage });
+    }
+}
+
+/**
+ * POST /api/trash/delete
+ * Explicit permanent bulk delete for selected trashed workflows or Empty Trash ({ all: true, project_id? }).
+ */
+export async function deleteTrashed(req, res) {
+    try {
+        const trashService = getTrashService();
+        if (!trashService) {
+            return res.status(500).json({ ok: false, message: "TrashService not initialized" });
+        }
+
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const result = await trashService.deleteTrashed({
+            userId: req.user.id,
+            workflow_ids: body.workflow_ids,
+            workflowIds: body.workflowIds,
+            folder_ids: body.folder_ids,
+            folderIds: body.folderIds,
+            all: body.all,
+            project_id: body.project_id,
+            projectId: body.projectId,
+        });
+
+        return res.status(200).json(result);
+    } catch (err) {
+        controllerLogger.error({ userId: req.user?.id, err }, `deleteTrashed error: ${err.message}`);
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        return res.status(statusCode).json({ ok: false, errorCode, message: publicMessage });
+    }
+}

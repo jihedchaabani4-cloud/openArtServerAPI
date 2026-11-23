@@ -3,6 +3,7 @@
  * @owns System 8: Workspace — project lifecycle, naming, user scoping, and project DTO mapping.
  */
 import { AppError, createLogger } from "#shared";
+import { hasInFlightMedia, MediaConflictError } from "#media/tools";
 
 const logger = createLogger("workspace:project");
 
@@ -10,9 +11,11 @@ export class ProjectService {
     /**
      * @param {Object} deps
      * @param {import("../db/ProjectRepository.js").ProjectRepository} deps.projectRepo
+     * @param {Object|null} [deps.mediaRepo=null]
      */
-    constructor({ projectRepo }) {
+    constructor({ projectRepo, mediaRepo = null }) {
         this.projectRepo = projectRepo;
+        this.mediaRepo = mediaRepo;
     }
 
     /**
@@ -104,6 +107,21 @@ export class ProjectService {
         if (!existing) {
             logger.warn({ userId, projectId: id }, "Foreign or non-existent project delete denied");
             throw new AppError("Project not found", 404);
+        }
+
+        if (this.mediaRepo) {
+            let hasInFlight = false;
+            if (typeof this.mediaRepo.hasInFlightMediaByProjectId === "function") {
+                hasInFlight = await this.mediaRepo.hasInFlightMediaByProjectId(id);
+            } else if (typeof this.mediaRepo.findByProjectAll === "function") {
+                const projectMedia = await this.mediaRepo.findByProjectAll(id);
+                hasInFlight = hasInFlightMedia(projectMedia);
+            }
+            if (hasInFlight) {
+                throw new MediaConflictError("Cannot delete project while media is still processing", {
+                    context: { projectId: id },
+                });
+            }
         }
 
         await this.projectRepo.deleteOwnedProject(id, userId);

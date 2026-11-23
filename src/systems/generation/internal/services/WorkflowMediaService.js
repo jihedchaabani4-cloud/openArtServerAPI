@@ -26,6 +26,9 @@ import {
     createMediaInWorkflow,
     QuotaError,
     ValidationError,
+    MediaConflictError,
+    isMediaInFlight,
+    hasInFlightMedia,
     isWorkflowReferenceQuotaError,
 } from "#media/tools";
 
@@ -1065,6 +1068,40 @@ export class WorkflowMediaService {
     }
 
     /**
+     * Checks whether a workflow currently owns any in-flight media (processing/pending/queued/etc.)
+     * and throws MediaConflictError (409, MEDIA_PROCESSING) before any mutation occurs.
+     *
+     * Priority:
+     *   1. db.workflowMedia.findMediaStatusesByWorkflowIds
+     *   2. db.media.findMediaStatusesByWorkflowIds
+     *   3. db.media.findByWorkflow
+     *
+     * Propagates repository errors (fail-closed) so transient DB faults never permit deleting
+     * in-flight media, while gracefully no-oping on minimal mock DBs that expose none of these methods.
+     */
+    async assertWorkflowMediaNotInFlight(workflowId) {
+        if (!workflowId) return;
+
+        let statusItems = null;
+        if (typeof this.db?.workflowMedia?.findMediaStatusesByWorkflowIds === "function") {
+            const statusMap = await this.db.workflowMedia.findMediaStatusesByWorkflowIds([workflowId]);
+            statusItems = statusMap instanceof Map ? (statusMap.get(workflowId) || []) : [];
+        } else if (typeof this.db?.media?.findMediaStatusesByWorkflowIds === "function") {
+            const statusMap = await this.db.media.findMediaStatusesByWorkflowIds([workflowId]);
+            statusItems = statusMap instanceof Map ? (statusMap.get(workflowId) || []) : [];
+        } else if (typeof this.db?.media?.findByWorkflow === "function") {
+            const rows = await this.db.media.findByWorkflow(workflowId);
+            statusItems = Array.isArray(rows) ? rows : [];
+        }
+
+        if (hasInFlightMedia(statusItems)) {
+            throw new MediaConflictError("Cannot delete workflow while media is still processing", {
+                context: { workflowId },
+            });
+        }
+    }
+
+    /**
      * Removes every workflow_media link for a workflow. Does not delete the workflow.
      * Media that still belongs to another workflow is kept.
      * Media with no remaining workflow is deleted (row + storage).
@@ -1074,7 +1111,12 @@ export class WorkflowMediaService {
             return { unlinkedMediaIds: [], deletedOrphanIds: [] };
         }
 
-        const mediaItems = await this.db.media.findByWorkflow(workflowId).catch(() => []);
+        await this.assertWorkflowMediaNotInFlight(workflowId);
+
+        const mediaItems = typeof this.db?.media?.findByWorkflow === "function"
+            ? await this.db.media.findByWorkflow(workflowId).catch(() => [])
+            : [];
+
         const unlinkedMediaIds = [...new Set(mediaItems.map((m) => m.id).filter(Boolean))];
 
         if (this.db.workflows?.updatePrimaryMedia) {
@@ -1269,7 +1311,13 @@ export class WorkflowMediaService {
                 }
             }
 
-            const mediaRec = await this.db.media.findById(mediaId, "id, url");
+            const mediaRec = await this.db.media.findById(mediaId, "id, url, status");
+
+            if (isMediaInFlight(mediaRec)) {
+                throw new MediaConflictError("Cannot delete media while it is still processing", {
+                    context: { mediaId, workflowId, status: mediaRec?.status },
+                });
+            }
 
             // Collect existing links BEFORE unlinking so we know which workflow
             // containers may become empty afterward.

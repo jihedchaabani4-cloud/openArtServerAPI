@@ -2,6 +2,7 @@ import { describe, it, beforeEach, afterEach, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { ProjectService, ProjectReadService, ProjectRepository } from "#workspace/tools";
 import { getAll, create, update, remove, projectsRouter } from "#workspace/api";
+import { MediaConflictError } from "#media/tools";
 import { projectService } from "../../../src/container.js";
 import { AppError, redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared";
 import express from "express";
@@ -81,6 +82,61 @@ describe("Slice B: ProjectService & Repository isolation", () => {
                 return true;
             }
         );
+    });
+
+    it("ProjectService.deleteProject rejects with 409 MEDIA_PROCESSING when project has in-flight media (hasInFlightMediaByProjectId & findByProjectAll)", async () => {
+        let deleted = false;
+        const mockRepo = {
+            findOwnedProject: async (id, userId) => ({ id, user_id: userId, project_name: "Active Project" }),
+            deleteOwnedProject: async () => {
+                deleted = true;
+                return true;
+            },
+        };
+
+        // 1. Primary path: mediaRepo.hasInFlightMediaByProjectId returns true
+        const servicePrimary = new ProjectService({
+            projectRepo: mockRepo,
+            mediaRepo: {
+                hasInFlightMediaByProjectId: async (projectId) => projectId === "p-busy",
+            },
+        });
+
+        await assert.rejects(
+            async () => servicePrimary.deleteProject({ id: "p-busy", userId: "u1" }),
+            (err) => {
+                assert.ok(err instanceof MediaConflictError);
+                assert.equal(err.statusCode, 409);
+                assert.equal(err.errorCode, "MEDIA_PROCESSING");
+                return true;
+            }
+        );
+        assert.equal(deleted, false, "deleteOwnedProject must not be called when media is processing");
+
+        // 2. Fallback path: mediaRepo.findByProjectAll returns processing/pending media
+        const serviceFallback = new ProjectService({
+            projectRepo: mockRepo,
+            mediaRepo: {
+                findByProjectAll: async () => [{ id: "m-1", status: "pending" }],
+            },
+        });
+
+        await assert.rejects(
+            async () => serviceFallback.deleteProject({ id: "p-busy", userId: "u1" }),
+            (err) => err.statusCode === 409 && err.errorCode === "MEDIA_PROCESSING"
+        );
+        assert.equal(deleted, false);
+
+        // 3. Allowed when project has only failed or completed media
+        const serviceClean = new ProjectService({
+            projectRepo: mockRepo,
+            mediaRepo: {
+                hasInFlightMediaByProjectId: async () => false,
+            },
+        });
+        const res = await serviceClean.deleteProject({ id: "p-clean", userId: "u1" });
+        assert.deepEqual(res, { ok: true });
+        assert.equal(deleted, true);
     });
 
     it("ProjectReadService.getProjectData queries strictly through injected db repositories", async () => {
@@ -319,6 +375,7 @@ describe("Project Deletion with Folders Boundary & Cascade (7.7 & Acceptance Che
   let projects = [];
   let folders = [];
   let workflows = [];
+  let media = [];
 
   before(async () => {
     origGetUser = supabase.auth.getUser;
@@ -330,6 +387,22 @@ describe("Project Deletion with Folders Boundary & Cascade (7.7 & Acceptance Che
 
     origFrom = supabase.from;
     supabase.from = (table) => {
+      if (table === "media") {
+        return {
+          select: () => ({
+            eq: (col, val) => ({
+              in: (inCol, inVals) => ({
+                limit: async (n) => {
+                  const matched = media
+                    .filter((m) => m[col] === val && inVals.includes(m[inCol]))
+                    .slice(0, n);
+                  return { data: matched, error: null };
+                },
+              }),
+            }),
+          }),
+        };
+      }
       if (table === "project") {
         return {
           select: () => ({
@@ -411,6 +484,7 @@ describe("Project Deletion with Folders Boundary & Cascade (7.7 & Acceptance Che
         folder_id: "00000000-0000-0000-0000-000000000010",
       },
     ];
+    media = [];
   });
 
   it("deleting a project with child folders succeeds and cleans up folder records without error", async () => {
@@ -437,6 +511,54 @@ describe("Project Deletion with Folders Boundary & Cascade (7.7 & Acceptance Che
 
     assert.equal(res.status, 404);
     assert.equal(projects.some((p) => p.id === "00000000-0000-0000-0000-000000000001"), true);
+  });
+
+  it("DELETE /api/projects/:id returns 409 MEDIA_PROCESSING and leaves project intact when project has processing or pending media", async () => {
+    media = [
+      {
+        id: "00000000-0000-0000-0000-000000000030",
+        project_id: "00000000-0000-0000-0000-000000000001",
+        status: "processing",
+      },
+    ];
+
+    const res = await fetch(`${baseUrl}/api/projects/00000000-0000-0000-0000-000000000001`, {
+      method: "DELETE",
+      headers: { Authorization: "Bearer token-user-A" },
+    });
+
+    assert.equal(res.status, 409);
+    const body = await res.json();
+    assert.equal(body.ok, false);
+    assert.equal(body.errorCode, "MEDIA_PROCESSING");
+    assert.equal(projects.some((p) => p.id === "00000000-0000-0000-0000-000000000001"), true);
+    assert.equal(folders.length, 2);
+    assert.equal(workflows.length, 1);
+  });
+
+  it("DELETE /api/projects/:id succeeds (200) when project contains only failed or completed media", async () => {
+    media = [
+      {
+        id: "00000000-0000-0000-0000-000000000031",
+        project_id: "00000000-0000-0000-0000-000000000001",
+        status: "failed",
+      },
+      {
+        id: "00000000-0000-0000-0000-000000000032",
+        project_id: "00000000-0000-0000-0000-000000000001",
+        status: "completed",
+      },
+    ];
+
+    const res = await fetch(`${baseUrl}/api/projects/00000000-0000-0000-0000-000000000001`, {
+      method: "DELETE",
+      headers: { Authorization: "Bearer token-user-A" },
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(projects.some((p) => p.id === "00000000-0000-0000-0000-000000000001"), false);
   });
 });
 }

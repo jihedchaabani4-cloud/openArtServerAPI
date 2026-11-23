@@ -11,7 +11,8 @@
  *   - moveToFolder({ assetId, folderId, userId })
  *   - deleteWorkflow({ workflowId, userId, req })
  *   - bulkDeleteWorkflows({ workflowIds, userId, req })
- *   - deleteWorkflowsInFolders({ folderIds, userId, projectId, req })
+ *   - listOwnedWorkflowIdsInFolders({ folderIds, userId, projectId, req })
+ *   - unlinkWorkflowsFromFolders({ workflowIds, folderIds, userId, projectId, req })
  *   - toggleLike({ workflowId, userId, req })
  *   - bulkToggleLike({ workflowIds, favorited, userId, req })
  *   - setPrimaryMedia({ workflowId, mediaId, userId, req })
@@ -26,6 +27,7 @@ import { WorkflowMediaService } from "./WorkflowMediaService.js";
 import { RunRepository } from "../db/RunRepository.js";
 import { GenerationValidationError, GenerationNotFoundError } from "../errors.js";
 import { assertOwns } from "#identity/tools";
+import { hasInFlightMedia, MediaConflictError } from "#media/tools";
 
 const workflowServiceLogger = createLogger("workflow");
 
@@ -254,6 +256,50 @@ export class WorkflowService {
         };
     }
 
+    async _assertWorkflowsMediaNotInFlight(workflowIds = []) {
+        const cleanIds = normalizeWorkflowIds(workflowIds);
+        if (!cleanIds.length) return;
+
+        if (typeof this.db?.workflowMedia?.findMediaStatusesByWorkflowIds === "function") {
+            const statusMap = await this.db.workflowMedia.findMediaStatusesByWorkflowIds(cleanIds);
+            if (statusMap instanceof Map) {
+                for (const wfId of cleanIds) {
+                    if (hasInFlightMedia(statusMap.get(wfId))) {
+                        throw new MediaConflictError("Cannot delete workflow while media is still processing", {
+                            context: { workflowId: wfId },
+                        });
+                    }
+                }
+            }
+            return;
+        }
+
+        if (typeof this.db?.media?.findMediaStatusesByWorkflowIds === "function") {
+            const statusMap = await this.db.media.findMediaStatusesByWorkflowIds(cleanIds);
+            if (statusMap instanceof Map) {
+                for (const wfId of cleanIds) {
+                    if (hasInFlightMedia(statusMap.get(wfId))) {
+                        throw new MediaConflictError("Cannot delete workflow while media is still processing", {
+                            context: { workflowId: wfId },
+                        });
+                    }
+                }
+            }
+            return;
+        }
+
+        if (typeof this.db?.media?.findByWorkflow === "function") {
+            for (const wfId of cleanIds) {
+                const rows = await this.db.media.findByWorkflow(wfId);
+                if (hasInFlightMedia(rows)) {
+                    throw new MediaConflictError("Cannot delete workflow while media is still processing", {
+                        context: { workflowId: wfId },
+                    });
+                }
+            }
+        }
+    }
+
     // ── deleteWorkflow ───────────────────────────────────────────────────────
 
     async deleteWorkflow({ workflowId, userId, req = null }) {
@@ -290,6 +336,12 @@ export class WorkflowService {
                     traceId,
                     operation: "deleteWorkflow",
                 });
+            }
+
+            if (typeof this.mediaService?.assertWorkflowMediaNotInFlight === "function") {
+                await this.mediaService.assertWorkflowMediaNotInFlight(workflowId);
+            } else {
+                await this._assertWorkflowsMediaNotInFlight([workflowId]);
             }
 
             if (typeof this.db.workflows.updateFields === "function") {
@@ -372,6 +424,8 @@ export class WorkflowService {
                 });
             }
 
+            await this._assertWorkflowsMediaNotInFlight(ownedIds);
+
             const results = await Promise.allSettled(
                 ownedIds.map((id) => this.deleteWorkflow({ workflowId: id, userId, req }))
             );
@@ -411,13 +465,13 @@ export class WorkflowService {
     }
 
     /**
-     * Deletes every owned workflow whose folder_id is in folderIds.
-     * FolderService owns the folder tree; this method only deletes workflows.
+     * Lists every workflow ID (active and already-trashed) whose folder_id is in folderIds
+     * and verifies bulk ownership before any folder-deletion mutation runs.
      */
-    async deleteWorkflowsInFolders({ folderIds = [], userId, projectId, req = null }) {
+    async listOwnedWorkflowIdsInFolders({ folderIds = [], userId, projectId, req = null } = {}) {
         const uniqueFolderIds = [...new Set((folderIds || []).filter(Boolean))];
         if (!uniqueFolderIds.length || !userId || !projectId) {
-            return { workflow_ids: [], count: 0 };
+            return [];
         }
 
         const ids = await this.db.workflows.listIdsByFolderIds({
@@ -426,7 +480,7 @@ export class WorkflowService {
             userId,
         });
         if (!ids.length) {
-            return { workflow_ids: [], count: 0 };
+            return [];
         }
 
         const ownedIds = await this.authService.verifyWorkflowOwnershipBulk(ids, userId, req);
@@ -434,15 +488,41 @@ export class WorkflowService {
             throw new CrudServiceError("Workflow not found", {
                 statusCode: 404,
                 errorCode: "NOT_FOUND",
-                operation: "deleteWorkflowsInFolders",
+                operation: "listOwnedWorkflowIdsInFolders",
             });
         }
 
-        await Promise.all(
-            ownedIds.map((id) => this.deleteWorkflow({ workflowId: id, userId, req }))
-        );
+        return ownedIds;
+    }
 
-        return { workflow_ids: ownedIds, count: ownedIds.length };
+    /**
+     * Clears folder_id = NULL on owned workflows belonging to the given folders.
+     * FolderService calls this after idempotently moving workflows to Trash and
+     * before permanently deleting the folders deepest-first.
+     */
+    async unlinkWorkflowsFromFolders({ workflowIds = [], folderIds = [], userId, projectId, req = null } = {}) {
+        const cleanWorkflowIds = normalizeWorkflowIds(workflowIds);
+        const uniqueFolderIds = [...new Set((folderIds || []).filter(Boolean))];
+        if (!cleanWorkflowIds.length || !uniqueFolderIds.length || !userId || !projectId) {
+            return { workflow_ids: [], count: 0 };
+        }
+
+        const ownedIds = await this.authService.verifyWorkflowOwnershipBulk(cleanWorkflowIds, userId, req);
+        if (!ownedIds) {
+            throw new CrudServiceError("Workflow not found", {
+                statusCode: 404,
+                errorCode: "NOT_FOUND",
+                operation: "unlinkWorkflowsFromFolders",
+            });
+        }
+
+        const unlinkedIds = await this.db.workflows.clearFolderIds({
+            workflowIds: ownedIds,
+            folderIds: uniqueFolderIds,
+            projectId,
+        });
+
+        return { workflow_ids: unlinkedIds, count: unlinkedIds.length };
     }
 
     // ── Media Delegations to WorkflowMediaService ─────────────────────────────

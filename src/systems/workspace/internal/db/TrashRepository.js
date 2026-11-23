@@ -37,6 +37,35 @@ export class TrashRepository {
     }
 
     /**
+     * Bulk-inserts trash rows for workflows not already in trash:
+     * INSERT INTO public.trash (workflow_id, user_id, deleted_by)
+     * VALUES (...) ON CONFLICT (workflow_id) DO NOTHING RETURNING *
+     *
+     * Existing rows in public.trash are left untouched (preserving original deleted_at).
+     * @returns {Promise<Array<Object>>} The newly inserted trash rows.
+     */
+    async insertManyIfAbsent({ workflowIds = [], userId, deletedBy = userId } = {}) {
+        const cleanIds = Array.isArray(workflowIds)
+            ? [...new Set(workflowIds.map((id) => String(id || "").trim()).filter(Boolean))]
+            : [];
+        if (!cleanIds.length || !userId) return [];
+
+        const rows = cleanIds.map((workflowId) => ({
+            workflow_id: workflowId,
+            user_id: userId,
+            deleted_by: deletedBy ?? userId,
+        }));
+
+        const { data, error } = await this.client()
+            .from("trash")
+            .upsert(rows, { onConflict: "workflow_id", ignoreDuplicates: true })
+            .select();
+
+        if (error) throw error;
+        return Array.isArray(data) ? data : [];
+    }
+
+    /**
      * Returns a Map of workflow_id -> { workflow_id, deleted_at, deleted_by } for candidate workflow IDs.
      */
     async getTrashedDetailsMap({ workflowIds = null, client = null } = {}) {
@@ -131,6 +160,24 @@ export class TrashRepository {
         const { data, error } = await query;
         if (error) throw error;
         return (data || []).map((row) => row.workflow_id).filter(Boolean);
+    }
+
+    /**
+     * Returns trashed workflow_ids owned by userId, optionally filtered to a candidate list.
+     * Always requires userId for tenant isolation.
+     */
+    async findTrashedWorkflowIds({ userId, workflowIds = null, client = null } = {}) {
+        if (!userId) return [];
+
+        if (workflowIds !== null && workflowIds !== undefined) {
+            const cleanIds = Array.isArray(workflowIds)
+                ? [...new Set(workflowIds.map((id) => String(id || "").replace(/^workflows\//, "").trim()).filter(Boolean))]
+                : [];
+            if (!cleanIds.length) return [];
+            return this.listWorkflowIds({ workflowIds: cleanIds, userId, client });
+        }
+
+        return this.listWorkflowIds({ userId, client });
     }
 
     /**

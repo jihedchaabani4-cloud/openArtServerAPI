@@ -2,8 +2,9 @@ import { describe, it, beforeEach, afterEach, after, before } from "node:test";
 import assert from "node:assert/strict";
 import * as imageController from "#generation/api";
 import * as videoController from "#generation/api";
-import { generateImage, generateVideo, deleteItem, toggleItemLike as toggleLike, imagesRouter } from "#generation/api";
-import { generationRequestService, db, workflowService, useCaseService, characterService, folderService } from "../../../src/container.js";
+import { generateImage, generateVideo, deleteItem, toggleItemLike as toggleLike, imagesRouter, workflowsRouter, deleteWorkflow, bulkDeleteWorkflows, deleteMedia } from "#generation/api";
+import { generationRequestService, db, workflowService, useCaseService, characterService, folderService, trashService } from "../../../src/container.js";
+import { MediaConflictError } from "#media/tools";
 import { AppError, redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared";
 import { randomUUID } from "node:crypto";
 import * as characterController from "#characters/api";
@@ -1985,6 +1986,128 @@ describe("Generation & Gen-Edit APIs — All Models & Parameters Boundary Suite"
       });
       assert.equal(crossVideo.status, 404);
     });
+  });
+});
+}
+
+// ─── HTTP Delete Controllers & Routes: 409 MEDIA_PROCESSING Propagation ───
+{
+describe("Generation Delete Endpoints — 409 MEDIA_PROCESSING Error Propagation", () => {
+  let server;
+  let baseUrl;
+  let origGetUser;
+  let origDeleteMedia;
+  let origRequestDelete;
+  let origRequestDeleteMany;
+
+  before(async () => {
+    origGetUser = supabase.auth.getUser;
+    supabase.auth.getUser = async (token) => {
+      if (token === "token-gen-owner") {
+        return { data: { user: { id: "user-gen-owner" } }, error: null };
+      }
+      return { data: { user: null }, error: new Error("Invalid token") };
+    };
+
+    const app = express();
+    app.use(express.json());
+    app.use("/api/workflows", workflowsRouter);
+
+    server = http.createServer(app);
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address();
+    baseUrl = `http://127.0.0.1:${port}`;
+  });
+
+  after(async () => {
+    supabase.auth.getUser = origGetUser;
+    if (server) {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  beforeEach(() => {
+    origDeleteMedia = workflowService.deleteMedia;
+    origRequestDelete = trashService.requestDelete;
+    origRequestDeleteMany = trashService.requestDeleteMany;
+  });
+
+  afterEach(() => {
+    workflowService.deleteMedia = origDeleteMedia;
+    trashService.requestDelete = origRequestDelete;
+    trashService.requestDeleteMany = origRequestDeleteMany;
+  });
+
+  it("DELETE /api/workflows/media/:media_id returns 409 with errorCode MEDIA_PROCESSING", async () => {
+    workflowService.deleteMedia = async () => {
+      throw new MediaConflictError("Cannot delete media while it is still processing");
+    };
+
+    const res = await fetch(`${baseUrl}/api/workflows/media/m-proc-1?workflow_id=wf-1`, {
+      method: "DELETE",
+      headers: { Authorization: "Bearer token-gen-owner" },
+    });
+    const body = await res.json();
+
+    assert.equal(res.status, 409);
+    assert.equal(body.ok, false);
+    assert.equal(body.errorCode, "MEDIA_PROCESSING");
+    assert.match(body.message, /still processing/i);
+  });
+
+  it("DELETE /api/workflows/items/:id returns 409 with errorCode MEDIA_PROCESSING", async () => {
+    workflowService.deleteMedia = async () => {
+      throw new MediaConflictError("Cannot delete media while it is still processing");
+    };
+
+    const res = await fetch(`${baseUrl}/api/workflows/items/m-proc-2`, {
+      method: "DELETE",
+      headers: { Authorization: "Bearer token-gen-owner" },
+    });
+    const body = await res.json();
+
+    assert.equal(res.status, 409);
+    assert.equal(body.ok, false);
+    assert.equal(body.errorCode, "MEDIA_PROCESSING");
+    assert.match(body.message, /still processing/i);
+  });
+
+  it("DELETE /api/workflows/:id returns 409 with errorCode MEDIA_PROCESSING", async () => {
+    trashService.requestDelete = async () => {
+      throw new MediaConflictError("Cannot delete workflow while media is still processing");
+    };
+
+    const res = await fetch(`${baseUrl}/api/workflows/wf-proc-1`, {
+      method: "DELETE",
+      headers: { Authorization: "Bearer token-gen-owner" },
+    });
+    const body = await res.json();
+
+    assert.equal(res.status, 409);
+    assert.equal(body.ok, false);
+    assert.equal(body.errorCode, "MEDIA_PROCESSING");
+    assert.match(body.message, /still processing/i);
+  });
+
+  it("DELETE /api/workflows/workflows returns 409 with errorCode MEDIA_PROCESSING", async () => {
+    trashService.requestDeleteMany = async () => {
+      throw new MediaConflictError("Cannot delete workflow while media is still processing");
+    };
+
+    const res = await fetch(`${baseUrl}/api/workflows/workflows`, {
+      method: "DELETE",
+      headers: {
+        Authorization: "Bearer token-gen-owner",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ workflow_ids: ["wf-proc-1"] }),
+    });
+    const body = await res.json();
+
+    assert.equal(res.status, 409);
+    assert.equal(body.ok, false);
+    assert.equal(body.errorCode, "MEDIA_PROCESSING");
+    assert.match(body.message, /still processing/i);
   });
 });
 }

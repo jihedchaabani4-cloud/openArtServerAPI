@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { assertProjectAccess, moveItemToTrash, ProjectService, ProjectReadService, FolderService, TrashService, folderTree, indexById, indexChildren, getDepth, wouldCreateCycle, ProjectRepository, FolderRepository, TrashRepository, WorkspaceError, WorkspaceValidationError, WorkspaceNotFoundError, WorkspaceConflictError, WorkspaceUnauthorizedError, FolderError } from "#workspace/tools";
-import { projectsRouter, foldersRouter, trashRouter, workspaceRouter } from "#workspace/api";
+import { projectsRouter, foldersRouter, trashRouter, workspaceBulkRouter, workspaceRouter } from "#workspace/api";
 
 // ─── Source: workspaceSystem.test.js ───
 {
@@ -37,12 +37,14 @@ describe("System 8: Workspace — Gateways & Public Tools Contract", () => {
         assert.equal(typeof projectsRouter, "function");
         assert.equal(typeof foldersRouter, "function");
         assert.equal(typeof trashRouter, "function");
+        assert.equal(typeof workspaceBulkRouter, "function");
         assert.equal(typeof workspaceRouter, "function");
 
         // Verify stack exists on express routers
         assert.ok(Array.isArray(projectsRouter.stack));
         assert.ok(Array.isArray(foldersRouter.stack));
         assert.ok(Array.isArray(trashRouter.stack));
+        assert.ok(Array.isArray(workspaceBulkRouter.stack));
         assert.ok(Array.isArray(workspaceRouter.stack));
     });
 

@@ -56,7 +56,13 @@ export const deleteWorkflow = async (req, res) => {
             ...(result.trashed ? { trashed: true } : {}),
         });
     } catch (err) {
-        return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+        const statusCode = err.statusCode || 500;
+        const errorCode = err.errorCode || err.code;
+        return res.status(statusCode).json({
+            ok: false,
+            ...(errorCode ? { errorCode } : {}),
+            message: err.message,
+        });
     }
 };
 
@@ -83,7 +89,13 @@ export const bulkDeleteWorkflows = async (req, res) => {
             ...(result.trashed ? { trashed: true } : {}),
         });
     } catch (err) {
-        return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+        const statusCode = err.statusCode || 500;
+        const errorCode = err.errorCode || err.code;
+        return res.status(statusCode).json({
+            ok: false,
+            ...(errorCode ? { errorCode } : {}),
+            message: err.message,
+        });
     }
 };
 
@@ -214,7 +226,13 @@ export const deleteMedia = async (req, res) => {
         });
     } catch (err) {
         controllerLogger.error({ mediaId: req.params.media_id, err }, `Error deleting media ${req.params.media_id}: ${err.message}`);
-        return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+        const statusCode = err.statusCode || 500;
+        const errorCode = err.errorCode || err.code;
+        return res.status(statusCode).json({
+            ok: false,
+            ...(errorCode ? { errorCode } : {}),
+            message: err.message,
+        });
     }
 };
 

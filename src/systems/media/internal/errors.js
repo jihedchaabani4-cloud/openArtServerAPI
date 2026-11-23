@@ -54,6 +54,29 @@ export class MediaNotFoundError extends MediaError {
     }
 }
 
+export class MediaConflictError extends MediaError {
+    constructor(
+        message = "Cannot delete media while it is still processing",
+        {
+            code = "MEDIA_PROCESSING",
+            errorCode = code,
+            statusCode = 409,
+            context = {},
+        } = {}
+    ) {
+        super(code, message, {
+            statusCode,
+            category: "USER_FAULT",
+            type: "OPERATIONAL",
+            retryable: false,
+            billingAction: "NONE",
+            context,
+        });
+        this.errorCode = errorCode;
+        this.safeMessage = message;
+    }
+}
+
 export class MediaStorageError extends MediaError {
     constructor(message, { context = {}, retryable = false } = {}) {
         super("MEDIA_STORAGE_ERROR", message, {
@@ -203,6 +226,7 @@ export default {
     MediaError,
     MediaValidationError,
     MediaNotFoundError,
+    MediaConflictError,
     MediaStorageError,
     MediaUploadError,
     MediaQuotaError,

@@ -1,5 +1,6 @@
 import { supabase } from "./mediaClient.js";
 import { createLogger } from "#shared";
+import { MEDIA_IN_FLIGHT_STATUSES } from "../services/mediaStatus.js";
 
 const mediaRepositoryLogger = createLogger("media_repository");
 
@@ -426,6 +427,68 @@ export class MediaRepository {
             .lt("create_time", cutoffIso);
         if (error) throw error;
         return data || [];
+    }
+
+    /**
+     * Batch-fetches lightweight media status records grouped by workflow ID in a single query.
+     *
+     * @param {string[]} workflowIds
+     * @returns {Promise<Map<string, Array<{ id: string, status: string|null, url: string|null }>>>}
+     */
+    async findMediaStatusesByWorkflowIds(workflowIds = []) {
+        const ids = Array.isArray(workflowIds) ? [...new Set(workflowIds.filter(Boolean))] : [];
+        const grouped = new Map(ids.map((wfId) => [wfId, []]));
+        if (ids.length === 0) return grouped;
+
+        const { data, error } = await this.client()
+            .from("workflow_media")
+            .select("workflow_id, media_id, media:media_id (id, status, url)")
+            .in("workflow_id", ids);
+        if (error) throw error;
+
+        const seenByWorkflow = new Map();
+        for (const row of data || []) {
+            const media = Array.isArray(row.media) ? row.media[0] : row.media;
+            if (!media) continue;
+            const wfId = row.workflow_id;
+            const mediaId = media.id || row.media_id;
+            if (!wfId || !mediaId) continue;
+
+            if (!grouped.has(wfId)) grouped.set(wfId, []);
+            let seen = seenByWorkflow.get(wfId);
+            if (!seen) {
+                seen = new Set();
+                seenByWorkflow.set(wfId, seen);
+            }
+            if (seen.has(mediaId)) continue;
+            seen.add(mediaId);
+
+            grouped.get(wfId).push({
+                id: mediaId,
+                status: media.status ?? null,
+                url: media.url ?? null,
+            });
+        }
+
+        return grouped;
+    }
+
+    /**
+     * Returns true if the project currently contains any media in an in-flight status.
+     *
+     * @param {string} projectId
+     * @returns {Promise<boolean>}
+     */
+    async hasInFlightMediaByProjectId(projectId) {
+        if (!projectId) return false;
+        const { data, error } = await this.client()
+            .from(this.tableName)
+            .select("id")
+            .eq("project_id", projectId)
+            .in("status", [...MEDIA_IN_FLIGHT_STATUSES])
+            .limit(1);
+        if (error) throw error;
+        return Array.isArray(data) && data.length > 0;
     }
 }
 

@@ -1,9 +1,39 @@
 import { describe, it, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { saveTypeRegistry, SAVE_TYPES, RETENTION_POLICIES, StorageService, StoragePathResolver, InMemoryStorageProvider, StorageValidationError, MediaValidationError, MediaRepository, WorkflowMediaRepository, getMediaRepository, getWorkflowMediaRepository, getStorageService, setStorageService, createPendingMedia, markMediaFailed, linkMediaToEntity, getMediaUrls, deleteMedia, MediaService, resolveMediaMetadata } from "#media/tools";
-import { mediaRouter, assetsRouter, mediaIngestRouter } from "#media/api";
+import {
+    saveTypeRegistry,
+    SAVE_TYPES,
+    RETENTION_POLICIES,
+    StorageService,
+    StoragePathResolver,
+    InMemoryStorageProvider,
+    StorageValidationError,
+    MediaError,
+    MediaValidationError,
+    MediaConflictError,
+    MediaRepository,
+    WorkflowMediaRepository,
+    configureMedia,
+    getMediaRepository,
+    getWorkflowMediaRepository,
+    getStorageService,
+    setStorageService,
+    createPendingMedia,
+    markMediaFailed,
+    linkMediaToEntity,
+    getMediaUrls,
+    deleteMedia,
+    MediaService,
+    resolveMediaMetadata,
+    MEDIA_IN_FLIGHT_STATUSES,
+    isMediaInFlight,
+    isMediaFailed,
+    hasInFlightMedia,
+    areAllWorkflowMediaFailed,
+} from "#media/tools";
+import { mediaRouter, assetsRouter, mediaIngestRouter, handleDeleteMedia } from "#media/api";
 import { randomUUID } from "node:crypto";
-import { calculateAspectRatio } from "#shared";
+import { AppError, calculateAspectRatio } from "#shared";
 
 // ─── Source: mediaSystem.test.js ───
 {
@@ -293,6 +323,12 @@ describe("Platform Media & Media-Ingestion Public Barrels", () => {
         assert.equal(typeof mediaBarrel.MediaService, "function");
         assert.equal(typeof mediaBarrel.MediaWorkflowLifecycleService, "function");
         assert.equal(typeof mediaBarrel.MEDIA_WORKFLOW_STATUS, "object");
+        assert.ok(Array.isArray(mediaBarrel.MEDIA_IN_FLIGHT_STATUSES));
+        assert.equal(typeof mediaBarrel.isMediaInFlight, "function");
+        assert.equal(typeof mediaBarrel.isMediaFailed, "function");
+        assert.equal(typeof mediaBarrel.hasInFlightMedia, "function");
+        assert.equal(typeof mediaBarrel.areAllWorkflowMediaFailed, "function");
+        assert.equal(typeof mediaBarrel.MediaConflictError, "function");
         assert.equal(typeof mediaBarrel.failWorkflowPendingMedia, "function");
         assert.equal(typeof mediaBarrel.normalizeNodeMediaOutputs, "function");
         assert.equal(typeof mediaBarrel.resolveMediaMetadata, "function");
@@ -497,6 +533,298 @@ describe("MediaRepository — Ownership, Listing, and Stale Placeholder Queries"
             ["in", "status", ["processing", "pending"]],
             ["lt", "create_time", "2026-01-01T00:00:00.000Z"],
         ]);
+    });
+
+    it("findMediaStatusesByWorkflowIds batch-fetches, groups, deduplicates, and propagates DB errors", async () => {
+        const repo = new MediaRepository();
+        let queryCount = 0;
+        let queriedTable = null;
+        let queriedIn = null;
+
+        repo.client = () => ({
+            from: (table) => {
+                queryCount += 1;
+                queriedTable = table;
+                return {
+                    select: () => ({
+                        in: async (col, vals) => {
+                            queriedIn = { col, vals };
+                            if (vals.includes("wf-err")) {
+                                return { data: null, error: new Error("batch status failure") };
+                            }
+                            return {
+                                data: [
+                                    { workflow_id: "wf-1", media_id: "m-1", media: { id: "m-1", status: "processing", url: null } },
+                                    { workflow_id: "wf-1", media_id: "m-1", media: { id: "m-1", status: "processing", url: null } },
+                                    { workflow_id: "wf-2", media_id: "m-2", media: [{ id: "m-2", status: "failed", url: null }] },
+                                    { workflow_id: "wf-2", media_id: "m-3", media: { id: "m-3", status: "success", url: "https://cdn/3.png" } },
+                                ],
+                                error: null,
+                            };
+                        },
+                    }),
+                };
+            },
+        });
+
+        const empty = await repo.findMediaStatusesByWorkflowIds([]);
+        assert.equal(empty.size, 0);
+        assert.equal(queryCount, 0);
+
+        const result = await repo.findMediaStatusesByWorkflowIds(["wf-1", "wf-2", "wf-empty", "wf-1"]);
+        assert.equal(queryCount, 1);
+        assert.equal(queriedTable, "workflow_media");
+        assert.deepEqual(queriedIn, { col: "workflow_id", vals: ["wf-1", "wf-2", "wf-empty"] });
+        assert.deepEqual(result.get("wf-1"), [{ id: "m-1", status: "processing", url: null }]);
+        assert.deepEqual(result.get("wf-2"), [
+            { id: "m-2", status: "failed", url: null },
+            { id: "m-3", status: "success", url: "https://cdn/3.png" },
+        ]);
+        assert.deepEqual(result.get("wf-empty"), []);
+
+        await assert.rejects(() => repo.findMediaStatusesByWorkflowIds(["wf-err"]), /batch status failure/);
+    });
+
+    it("hasInFlightMediaByProjectId queries in-flight statuses with limit(1) and propagates errors", async () => {
+        const repo = new MediaRepository();
+        const filters = [];
+
+        repo.client = () => ({
+            from: (table) => {
+                assert.equal(table, "media");
+                let projectIdVal = null;
+                const builder = {
+                    select: (cols) => {
+                        filters.push(["select", cols]);
+                        return builder;
+                    },
+                    eq: (col, val) => {
+                        filters.push(["eq", col, val]);
+                        projectIdVal = val;
+                        return builder;
+                    },
+                    in: (col, vals) => {
+                        filters.push(["in", col, vals]);
+                        return builder;
+                    },
+                    limit: (n) => {
+                        filters.push(["limit", n]);
+                        return builder;
+                    },
+                    then: (resolve) => {
+                        if (projectIdVal === "proj-err") {
+                            return resolve({ data: null, error: new Error("project check failed") });
+                        }
+                        if (projectIdVal === "proj-busy") {
+                            return resolve({ data: [{ id: "m-busy" }], error: null });
+                        }
+                        return resolve({ data: [], error: null });
+                    },
+                };
+                return builder;
+            },
+        });
+
+        assert.equal(await repo.hasInFlightMediaByProjectId(null), false);
+        assert.equal(filters.length, 0);
+
+        assert.equal(await repo.hasInFlightMediaByProjectId("proj-busy"), true);
+        assert.deepEqual(filters, [
+            ["select", "id"],
+            ["eq", "project_id", "proj-busy"],
+            ["in", "status", [...MEDIA_IN_FLIGHT_STATUSES]],
+            ["limit", 1],
+        ]);
+
+        assert.equal(await repo.hasInFlightMediaByProjectId("proj-idle"), false);
+        await assert.rejects(() => repo.hasInFlightMediaByProjectId("proj-err"), /project check failed/);
+    });
+});
+
+describe("WorkflowMediaRepository — Batch Media Status Lookup", () => {
+    it("findMediaStatusesByWorkflowIds works in DB mode and in test memory mode", async () => {
+        const dbRepo = new WorkflowMediaRepository();
+        dbRepo.client = () => ({
+            from: (table) => {
+                assert.equal(table, "workflow_media");
+                return {
+                    select: () => ({
+                        in: async (_col, vals) => {
+                            if (vals.includes("wf-db-err")) {
+                                return { data: null, error: new Error("wf status db error") };
+                            }
+                            return {
+                                data: [
+                                    { workflow_id: "wf-a", media_id: "m-a1", media: { id: "m-a1", status: "failed", url: null } },
+                                    { workflow_id: "wf-a", media_id: "m-a1", media: { id: "m-a1", status: "failed", url: null } },
+                                    { workflow_id: "wf-b", media_id: "m-b1", media: { id: "m-b1", status: "queued", url: null } },
+                                ],
+                                error: null,
+                            };
+                        },
+                    }),
+                };
+            },
+        });
+
+        const map = await dbRepo.findMediaStatusesByWorkflowIds(["wf-a", "wf-b", "wf-c"]);
+        assert.deepEqual(map.get("wf-a"), [{ id: "m-a1", status: "failed", url: null }]);
+        assert.deepEqual(map.get("wf-b"), [{ id: "m-b1", status: "queued", url: null }]);
+        assert.deepEqual(map.get("wf-c"), []);
+        await assert.rejects(() => dbRepo.findMediaStatusesByWorkflowIds(["wf-db-err"]), /wf status db error/);
+
+        // Test memory mode (preserve prior global test memory mode state)
+        const prevMemoryMode = WorkflowMediaRepository.useMemoryFallback;
+        WorkflowMediaRepository.enableTestMemoryFallback();
+        WorkflowMediaRepository.clearMemory();
+        try {
+            const memRepo = new WorkflowMediaRepository();
+            await memRepo.linkMedia({ workflowId: "wf-mem-1", mediaId: "m-mem-1", role: "output" });
+            await memRepo.linkMedia({ workflowId: "wf-mem-1", mediaId: "m-mem-1", role: "detail" });
+            WorkflowMediaRepository.getMemoryStore()[0].status = "processing";
+
+            const memMap = await memRepo.findMediaStatusesByWorkflowIds(["wf-mem-1", "wf-mem-empty"]);
+            assert.deepEqual(memMap.get("wf-mem-1"), [{ id: "m-mem-1", status: "processing", url: null }]);
+            assert.deepEqual(memMap.get("wf-mem-empty"), []);
+        } finally {
+            WorkflowMediaRepository.clearMemory();
+            WorkflowMediaRepository.useMemoryFallback = prevMemoryMode;
+        }
+    });
+});
+
+describe("Media Deletion Status Predicates, MediaConflictError & deleteMedia Guard", () => {
+    it("exports frozen MEDIA_IN_FLIGHT_STATUSES and evaluates in-flight/failed predicates accurately", () => {
+        assert.ok(Object.isFrozen(MEDIA_IN_FLIGHT_STATUSES));
+        assert.deepEqual(MEDIA_IN_FLIGHT_STATUSES, [
+            "processing",
+            "pending",
+            "queued",
+            "uploading",
+            "in_progress",
+            "starting",
+        ]);
+
+        for (const st of MEDIA_IN_FLIGHT_STATUSES) {
+            assert.equal(isMediaInFlight(st), true, `expected ${st} to be in-flight`);
+            assert.equal(isMediaInFlight(`  ${st.toUpperCase()}  `), true);
+            assert.equal(isMediaInFlight({ status: st }), true);
+            assert.equal(isMediaFailed(st), false);
+        }
+
+        // Terminal, empty, and missing statuses MUST NOT be treated as in-flight (protects minimal test mocks)
+        for (const nonFlight of ["success", "completed", "failed", "saved", "", "   ", null, undefined, {}, { id: "m1" }, { status: null }, { status: undefined }]) {
+            assert.equal(isMediaInFlight(nonFlight), false, `expected ${JSON.stringify(nonFlight)} not to be in-flight`);
+        }
+
+        assert.equal(isMediaFailed("failed"), true);
+        assert.equal(isMediaFailed("  FAILED "), true);
+        assert.equal(isMediaFailed({ status: "failed" }), true);
+        assert.equal(isMediaFailed({ status: "success" }), false);
+        assert.equal(isMediaFailed({}), false);
+        assert.equal(isMediaFailed(null), false);
+
+        assert.equal(hasInFlightMedia([]), false);
+        assert.equal(hasInFlightMedia(null), false);
+        assert.equal(hasInFlightMedia([{ status: "failed" }, { status: "success" }]), false);
+        assert.equal(hasInFlightMedia([{ status: "failed" }, { status: "processing" }]), true);
+
+        assert.equal(areAllWorkflowMediaFailed([]), false);
+        assert.equal(areAllWorkflowMediaFailed(null), false);
+        assert.equal(areAllWorkflowMediaFailed([{ status: "failed" }]), true);
+        assert.equal(areAllWorkflowMediaFailed([{ status: "failed" }, { status: "FAILED" }]), true);
+        assert.equal(areAllWorkflowMediaFailed([{ status: "failed" }, { status: "success" }]), false);
+        assert.equal(areAllWorkflowMediaFailed([{ status: "failed" }, {}]), false);
+    });
+
+    it("MediaConflictError provides 409 MEDIA_PROCESSING defaults and maps cleanly through handleDeleteMedia", async () => {
+        const defaultErr = new MediaConflictError();
+        assert.ok(defaultErr instanceof MediaConflictError);
+        assert.ok(defaultErr instanceof MediaError);
+        assert.ok(defaultErr instanceof AppError);
+        assert.equal(defaultErr.statusCode, 409);
+        assert.equal(defaultErr.code, "MEDIA_PROCESSING");
+        assert.equal(defaultErr.errorCode, "MEDIA_PROCESSING");
+        assert.equal(defaultErr.category, "USER_FAULT");
+        assert.equal(defaultErr.message, "Cannot delete media while it is still processing");
+        assert.equal(defaultErr.safeMessage, "Cannot delete media while it is still processing");
+
+        const customErr = new MediaConflictError("Custom busy message", { context: { mediaId: "m-1" } });
+        assert.equal(customErr.statusCode, 409);
+        assert.equal(customErr.message, "Custom busy message");
+        assert.deepEqual(customErr.context, { mediaId: "m-1" });
+
+        // Verify HTTP controller response mapping via #media/api handleDeleteMedia
+        configureMedia({
+            workflowService: {
+                deleteMedia: async () => {
+                    throw new MediaConflictError();
+                },
+            },
+        });
+
+        let statusOut = null;
+        let jsonOut = null;
+        const mockReq = { params: { id: "m-proc" }, user: { id: "user-1" } };
+        const mockRes = {
+            status(code) {
+                statusOut = code;
+                return this;
+            },
+            json(payload) {
+                jsonOut = payload;
+                return this;
+            },
+        };
+
+        await handleDeleteMedia(mockReq, mockRes);
+        assert.equal(statusOut, 409);
+        assert.equal(jsonOut.ok, false);
+        assert.equal(jsonOut.errorCode, "MEDIA_PROCESSING");
+        assert.equal(jsonOut.error, "Cannot delete media while it is still processing");
+    });
+
+    it("deleteMedia tool rejects in-flight media with MediaConflictError and allows failed/terminal/untyped media", async () => {
+        const previousRepo = getMediaRepository();
+        const deletedCalls = [];
+        const records = new Map([
+            ["m-processing", { id: "m-processing", status: "processing", url: null }],
+            ["m-pending", { id: "m-pending", status: "pending", url: null }],
+            ["m-queued", { id: "m-queued", status: "queued", url: null }],
+            ["m-failed", { id: "m-failed", status: "failed", url: null }],
+            ["m-success", { id: "m-success", status: "success", url: "https://cdn/ok.png" }],
+            ["m-minimal", { id: "m-minimal" }],
+        ]);
+
+        configureMedia({
+            mediaRepo: {
+                findById: async (id) => records.get(id) ?? null,
+                deleteByIdAndWorkflow: async (mediaId, workflowId) => {
+                    deletedCalls.push({ mediaId, workflowId });
+                },
+            },
+        });
+
+        try {
+            for (const id of ["m-processing", "m-pending", "m-queued"]) {
+                await assert.rejects(
+                    () => deleteMedia({ mediaId: id, workflowId: "wf-1" }),
+                    (err) => err instanceof MediaConflictError && err.statusCode === 409 && err.errorCode === "MEDIA_PROCESSING"
+                );
+            }
+            assert.equal(deletedCalls.length, 0, "deleteByIdAndWorkflow must not be called for in-flight media");
+
+            for (const id of ["m-failed", "m-success", "m-minimal"]) {
+                const res = await deleteMedia({ mediaId: id, workflowId: "wf-1" });
+                assert.deepEqual(res, { deleted: true, mediaId: id });
+            }
+            assert.deepEqual(
+                deletedCalls.map((c) => c.mediaId),
+                ["m-failed", "m-success", "m-minimal"]
+            );
+        } finally {
+            configureMedia({ mediaRepo: previousRepo });
+        }
     });
 });
 

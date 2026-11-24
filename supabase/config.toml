@@ -40,7 +40,7 @@ health_timeout = "2m"
 # server_version;` on the remote database to check.
 major_version = 17
 # OrioleDB version to use as the Postgres storage engine. Leave empty to use the default engine.
-orioledb_version = ""
+# orioledb_version = ""
 
 [db.pooler]
 enabled = false
@@ -103,10 +103,10 @@ openai_api_key = "env(OPENAI_API_KEY)" # gate:allow-secret
 
 # Email testing server. Emails sent with the local dev setup are not actually sent - rather, they
 # are monitored, and you can view the emails that would have been sent from the web interface.
-[local_smtp]
-enabled = true
-# Port to use for the email testing server web interface.
-port = 54324
+# [local_smtp]
+# enabled = true
+# # Port to use for the email testing server web interface.
+# port = 54324
 # Uncomment to expose additional ports for testing user applications that send emails.
 # smtp_port = 54325
 # pop3_port = 54326

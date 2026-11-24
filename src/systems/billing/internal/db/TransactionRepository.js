@@ -32,6 +32,20 @@ export class TransactionRepository {
     }
 
     /**
+     * Executes the single-hop atomic hold_credits_for_user RPC (resolves wallet by user_id in DB).
+     */
+    async holdCreditsForUserRpc({ userId, amount, referenceId, metadata = {}, expiresAt }) {
+        const { data: tx, error } = await this.supabase.rpc("hold_credits_for_user", {
+            p_user_id: userId,
+            p_amount: amount,
+            p_reference_id: referenceId,
+            p_metadata: metadata,
+            p_expires_at: expiresAt,
+        });
+        return { tx, error };
+    }
+
+    /**
      * Executes the atomic extend_hold RPC.
      */
     async extendHoldRpc({ referenceId, additionalSeconds = 300 }) {
@@ -52,12 +66,29 @@ export class TransactionRepository {
 
     /**
      * Executes either commit_transaction or rollback_transaction RPC.
+     * Passes p_extra_metadata atomically when provided, falling back to the 1-arg RPC
+     * if a pre-migration PostgREST schema cache returns PGRST202.
      */
-    async resolveTransactionRpc(fnName, referenceId) {
-        const { data: tx, error } = await this.supabase.rpc(fnName, {
-            p_reference_id: referenceId,
-        });
-        return { tx, error };
+    async resolveTransactionRpc(fnName, referenceId, extraMetadata = null) {
+        const hasExtra = Boolean(
+            extraMetadata && typeof extraMetadata === "object" && Object.keys(extraMetadata).length > 0
+        );
+        const params = hasExtra
+            ? { p_reference_id: referenceId, p_extra_metadata: extraMetadata }
+            : { p_reference_id: referenceId };
+
+        const { data: tx, error } = await this.supabase.rpc(fnName, params);
+
+        if (
+            error &&
+            hasExtra &&
+            (error.code === "PGRST202" || String(error.message || "").toLowerCase().includes("schema cache"))
+        ) {
+            const fallback = await this.supabase.rpc(fnName, { p_reference_id: referenceId });
+            return { tx: fallback.data, error: fallback.error, metadataAppliedAtomically: false };
+        }
+
+        return { tx, error, metadataAppliedAtomically: hasExtra && !error };
     }
 
     /**

@@ -2,7 +2,7 @@ import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import * as container from "../../src/container.js";
 import { db, workflowService, projectReadService } from "../../src/container.js";
-import { WorkflowService } from "#generation/tools";
+import { WorkflowService, ExecutionEngine } from "#generation/tools";
 import { WorkflowMediaService } from "../../src/systems/generation/internal/services/WorkflowMediaService.js";
 import { RunRepository } from "../../src/systems/generation/internal/db/RunRepository.js";
 import { MediaUploadService, MediaService, MediaWorkflowLifecycleService } from "#media/tools";
@@ -329,6 +329,22 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
             container.assetUploadService.binaryIngestionService,
             undefined,
             "container.assetUploadService.binaryIngestionService must be removed"
+        );
+    });
+
+    it("V3 ExecutionEngine wiring: container exposes executionEngine cleanly and removes legacy V3Dispatcher/useCaseService aliases", () => {
+        assert.ok(container.executionEngine instanceof ExecutionEngine, "container.executionEngine must be instance of ExecutionEngine");
+        assert.equal("v3Dispatcher" in container, false, "container.v3Dispatcher must be removed");
+        assert.equal("useCaseService" in container, false, "container.useCaseService must be removed");
+        assert.equal(
+            container.generationRequestService.executionEngine,
+            container.executionEngine,
+            "generationRequestService must hold container.executionEngine"
+        );
+        assert.equal(
+            container.characterService.generationService.executionEngine,
+            container.executionEngine,
+            "characterService.generationService must hold container.executionEngine"
         );
     });
 });

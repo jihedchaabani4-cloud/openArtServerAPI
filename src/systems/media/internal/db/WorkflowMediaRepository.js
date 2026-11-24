@@ -110,17 +110,28 @@ export class WorkflowMediaRepository {
         if (!resolvedWorkflowId || !resolvedMediaId) return null;
 
         const resolvedRole = inferWorkflowMediaRole({ role, stepId, step_id, workflowType, workflow_type });
+        const hasExplicitPrimary = is_primary !== undefined || isPrimary !== undefined;
         const resolvedIsPrimary = Boolean(is_primary ?? isPrimary ?? false);
-        const resolvedMetadata = (metadata && typeof metadata === "object") ? metadata : {};
+        const hasExplicitMetadata = metadata !== undefined && metadata !== null && typeof metadata === "object";
+        const resolvedMetadata = hasExplicitMetadata ? metadata : {};
 
         if (this._isMemoryMode()) {
+            const idx = memoryWorkflowMedia.findIndex(
+                (m) => m.workflow_id === resolvedWorkflowId && m.media_id === resolvedMediaId && m.role === resolvedRole
+            );
+            if (idx >= 0 && !hasExplicitPrimary) {
+                const existing = memoryWorkflowMedia[idx];
+                const preserved = {
+                    ...existing,
+                    metadata: hasExplicitMetadata ? resolvedMetadata : (existing.metadata || {}),
+                };
+                memoryWorkflowMedia[idx] = preserved;
+                return preserved;
+            }
             const hasExistingPrimary = memoryWorkflowMedia.some(
                 (m) => m.workflow_id === resolvedWorkflowId && m.media_id !== resolvedMediaId && m.is_primary === true
             );
             const actualIsPrimary = resolvedIsPrimary && !hasExistingPrimary;
-            const idx = memoryWorkflowMedia.findIndex(
-                (m) => m.workflow_id === resolvedWorkflowId && m.media_id === resolvedMediaId && m.role === resolvedRole
-            );
             const row = {
                 workflow_id: resolvedWorkflowId,
                 media_id: resolvedMediaId,
@@ -145,6 +156,45 @@ export class WorkflowMediaRepository {
                 .eq("workflow_id", resolvedWorkflowId)
                 .eq("is_primary", true)
                 .neq("media_id", resolvedMediaId);
+        }
+
+        if (!hasExplicitPrimary) {
+            const upsertQuery = client
+                .from(this.tableName)
+                .upsert(
+                    {
+                        workflow_id: resolvedWorkflowId,
+                        media_id: resolvedMediaId,
+                        role: resolvedRole,
+                        is_primary: false,
+                        metadata: resolvedMetadata,
+                    },
+                    { onConflict: "workflow_id,media_id,role", ignoreDuplicates: true }
+                )
+                .select();
+
+            const { data, error } =
+                typeof upsertQuery.maybeSingle === "function"
+                    ? await upsertQuery.maybeSingle()
+                    : await upsertQuery;
+            if (error) throw error;
+
+            const inserted = Array.isArray(data) ? data[0] : data;
+            if (inserted) return inserted;
+
+            const { data: existing, error: fetchErr } = await client
+                .from(this.tableName)
+                .select("*")
+                .eq("workflow_id", resolvedWorkflowId)
+                .eq("media_id", resolvedMediaId)
+                .eq("role", resolvedRole)
+                .maybeSingle();
+            if (fetchErr) throw fetchErr;
+            return existing || {
+                workflow_id: resolvedWorkflowId,
+                media_id: resolvedMediaId,
+                role: resolvedRole,
+            };
         }
 
         const { data, error } = await client

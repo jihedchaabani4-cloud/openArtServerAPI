@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { EventEmitter } from "node:events";
 import { Worker } from "bullmq";
 import {
   workerRedisConnection,
@@ -8,7 +9,7 @@ import {
   LogEvents,
   envConfig,
 } from "#shared";
-import { walletMaintenanceQueue, WALLET_QUEUE_NAME, scheduleWalletJobs } from "./walletQueue.js";
+import { WALLET_QUEUE_NAME, scheduleWalletJobs } from "./walletQueue.js";
 import {
   getWalletService,
   getFailedOpsService,
@@ -23,28 +24,30 @@ const logger = createLogger("wallet-worker");
  * Wallet Maintenance Worker (System 3: Billing & Wallet)
  * ─────────────────────────────────────────────────────────────────────────────
  * Dedicated BullMQ worker for wallet housekeeping jobs.
- * Note: container.js boot assertions are verified before worker startup.
+ * Pure module on import — ZERO top-level worker creation, scheduling, or signal hooks.
+ * Must be started explicitly via `startWalletWorker()` from root `worker.js`.
  */
 
-const supabaseUrl = envConfig.rawSupabaseUrl;
-const supabaseServiceKey = envConfig.supabaseServiceRoleKey;
-
-if (!supabaseUrl || !supabaseServiceKey) {
-  if (!envConfig.isTest) {
-    logger.error({ event: "worker.boot_failed" }, "[WalletWorker] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY — exiting.");
-    process.exit(1);
+function resolveDefaultWalletService() {
+  if (!envConfig.rawSupabaseUrl || !envConfig.supabaseServiceRoleKey) {
+    return null;
   }
+  return getWalletService();
 }
 
-const walletService = supabaseUrl && supabaseServiceKey ? getWalletService() : null;
-const failedOpsService = supabaseUrl && supabaseServiceKey ? getFailedOpsService() : null;
+function resolveDefaultFailedOpsService() {
+  if (!envConfig.rawSupabaseUrl || !envConfig.supabaseServiceRoleKey) {
+    return null;
+  }
+  return getFailedOpsService();
+}
 
 export async function handleExpireStaleHolds({
   walletService: injectedWallet = null,
   lifecycleService: injectedLifecycle = undefined,
 } = {}) {
   const start = Date.now();
-  const activeWallet = injectedWallet || walletService;
+  const activeWallet = injectedWallet || resolveDefaultWalletService();
   const releasedCount = await runReservationReaper({
     walletService: activeWallet,
     lifecycleService: injectedLifecycle,
@@ -70,8 +73,10 @@ export async function handleRetryFailedOps({
   replayFn = null,
 } = {}) {
   const start = Date.now();
-  const activeOps = injectedOps || failedOpsService;
-  const activeReplay = replayFn || ((operation) => replayOperation(operation, { walletService: injectedWallet || walletService }));
+  const activeOps = injectedOps || resolveDefaultFailedOpsService();
+  const activeReplay =
+    replayFn ||
+    ((operation) => replayOperation(operation, { walletService: injectedWallet || resolveDefaultWalletService() }));
   const ops = await activeOps.getPendingOps();
 
   if (ops.length === 0) {
@@ -163,7 +168,7 @@ export async function handleRetryFailedOps({
 }
 
 export async function replayOperation(op, { walletService: injectedWallet = null } = {}) {
-  const activeWallet = injectedWallet || walletService;
+  const activeWallet = injectedWallet || resolveDefaultWalletService();
   const { operation_type, reference_id, user_id, amount, payload } = op;
 
   switch (operation_type) {
@@ -321,50 +326,102 @@ export async function handleReconcileWallets({ supabaseClient = null } = {}) {
   return summary;
 }
 
-export const walletWorker = envConfig.isTest
-  ? { on: () => {}, close: async () => {} }
-  : new Worker(
-      WALLET_QUEUE_NAME,
-      async (job) => {
-        switch (job.name) {
-          case "expire-stale-holds":
-            return handleExpireStaleHolds();
+async function processWalletJob(job) {
+  switch (job.name) {
+    case "expire-stale-holds":
+      return handleExpireStaleHolds();
 
-          case "retry-failed-ops":
-            return handleRetryFailedOps();
+    case "retry-failed-ops":
+      return handleRetryFailedOps();
 
-          case "reconcile-wallets":
-            return handleReconcileWallets();
+    case "reconcile-wallets":
+      return handleReconcileWallets();
 
-          default:
-            throw new Error(`[WalletWorker] Unknown job name: ${job.name}`);
-        }
-      },
-      {
-        connection: workerRedisConnection,
-        concurrency: 1,
-        stalledInterval: 60_000,
-        maxStalledCount: 1,
-        lockDuration: 2 * 60 * 1000,
-        lockRenewTime: 30_000,
-      }
-    );
+    default:
+      throw new Error(`[WalletWorker] Unknown job name: ${job.name}`);
+  }
+}
 
-if (!envConfig.isTest) {
-  walletWorker.on("completed", (job, result) => {
+let activeWorker = null;
+let sigintHandler = null;
+let sigtermHandler = null;
+
+/**
+ * Live reference to the active wallet worker instance (null until `startWalletWorker()` is called).
+ */
+export let walletWorker = null;
+
+/**
+ * Explicitly starts the dedicated BullMQ wallet maintenance worker (idempotent).
+ * Must ONLY be called from root `worker.js` — never at module import time or from `index.js`.
+ *
+ * @param {Object} [options]
+ * @param {Function} [options.WorkerClass] - Optional BullMQ Worker constructor override for testing.
+ * @param {Function} [options.scheduleJobs] - Optional scheduler override for testing.
+ * @param {Object} [options.connection] - Optional Redis connection override.
+ * @param {boolean} [options.registerShutdownHooks] - Whether to attach SIGINT/SIGTERM hooks.
+ * @returns {Promise<Object>} Active worker instance
+ */
+export async function startWalletWorker({
+  WorkerClass = null,
+  scheduleJobs = scheduleWalletJobs,
+  connection = workerRedisConnection,
+  registerShutdownHooks = !envConfig.isTest,
+} = {}) {
+  if (activeWorker) {
+    return activeWorker;
+  }
+
+  if (!envConfig.isTest && !WorkerClass) {
+    const supabaseUrl = envConfig.rawSupabaseUrl;
+    const supabaseServiceKey = envConfig.supabaseServiceRoleKey;
+    if (!supabaseUrl || !supabaseServiceKey) {
+      logger.error(
+        { event: "worker.boot_failed" },
+        "[WalletWorker] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY — cannot start wallet worker."
+      );
+      throw new Error("[WalletWorker] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+    }
+  }
+
+  const workerInstance =
+    WorkerClass
+      ? new WorkerClass(WALLET_QUEUE_NAME, processWalletJob, {
+          connection,
+          concurrency: 1,
+          stalledInterval: 60_000,
+          maxStalledCount: 1,
+          lockDuration: 2 * 60 * 1000,
+          lockRenewTime: 30_000,
+        })
+      : envConfig.isTest
+        ? Object.assign(new EventEmitter(), {
+            name: WALLET_QUEUE_NAME,
+            close: async () => {},
+          })
+        : new Worker(WALLET_QUEUE_NAME, processWalletJob, {
+            connection,
+            concurrency: 1,
+            stalledInterval: 60_000,
+            maxStalledCount: 1,
+            lockDuration: 2 * 60 * 1000,
+            lockRenewTime: 30_000,
+          });
+
+  workerInstance.on("completed", (job, result) => {
     logger.info(
       {
         event: "wallet.job_completed",
         operation: "job-completed",
-        jobName: job.name,
-        jobId: job.id,
+        jobName: job?.name,
+        jobId: job?.id,
         result: typeof result === "number" ? result : undefined,
       },
-      `Job ${job.name} completed`
+      `Job ${job?.name} completed`
     );
   });
 
-  walletWorker.on("failed", (job, err) => {
+  workerInstance.on("failed", (job, err) => {
     logger.error(
       {
         event: "wallet.job_failed",
@@ -377,7 +434,7 @@ if (!envConfig.isTest) {
     );
   });
 
-  walletWorker.on("error", (err) => {
+  workerInstance.on("error", (err) => {
     logger.error(
       {
         event: "wallet.worker_error",
@@ -387,26 +444,63 @@ if (!envConfig.isTest) {
     );
   });
 
-  (async () => {
-    await scheduleWalletJobs();
-    logger.info({ event: "worker.start" }, "[WalletWorker] Wallet maintenance worker started.");
-  })();
+  activeWorker = workerInstance;
+  walletWorker = workerInstance;
 
-  let shuttingDown = false;
-  const shutdown = async (signal) => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    logger.info({ event: "worker.shutdown", signal }, `[WalletWorker] ${signal} — shutting down gracefully...`);
-    try {
-      await walletWorker.close();
-      logger.info({ event: "worker.stopped" }, "[WalletWorker] Stopped cleanly.");
-    } catch (err) {
-      logger.error({ event: "worker.close_error", error: err?.message }, `[WalletWorker] close() error: ${err?.message}`);
-    } finally {
-      process.exit(0);
-    }
-  };
+  try {
+    await scheduleJobs();
+  } catch (err) {
+    activeWorker = null;
+    walletWorker = null;
+    await workerInstance.close?.().catch(() => {});
+    throw err;
+  }
 
-  process.once("SIGINT", () => shutdown("SIGINT"));
-  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  logger.info({ event: "worker.start" }, "[WalletWorker] Wallet maintenance worker started.");
+
+  if (registerShutdownHooks) {
+    let shuttingDown = false;
+    const shutdown = async (signal) => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      logger.info({ event: "worker.shutdown", signal }, `[WalletWorker] ${signal} — shutting down gracefully...`);
+      try {
+        await stopWalletWorker();
+        logger.info({ event: "worker.stopped" }, "[WalletWorker] Stopped cleanly.");
+      } catch (err) {
+        logger.error({ event: "worker.close_error", error: err?.message }, `[WalletWorker] close() error: ${err?.message}`);
+      } finally {
+        process.exit(0);
+      }
+    };
+
+    sigintHandler = () => shutdown("SIGINT");
+    sigtermHandler = () => shutdown("SIGTERM");
+    process.once("SIGINT", sigintHandler);
+    process.once("SIGTERM", sigtermHandler);
+  }
+
+  return activeWorker;
+}
+
+/**
+ * Stops the active wallet worker and detaches any registered signal handlers.
+ */
+export async function stopWalletWorker() {
+  const workerToClose = activeWorker;
+  activeWorker = null;
+  walletWorker = null;
+
+  if (sigintHandler) {
+    process.removeListener("SIGINT", sigintHandler);
+    sigintHandler = null;
+  }
+  if (sigtermHandler) {
+    process.removeListener("SIGTERM", sigtermHandler);
+    sigtermHandler = null;
+  }
+
+  if (workerToClose && typeof workerToClose.close === "function") {
+    await workerToClose.close();
+  }
 }

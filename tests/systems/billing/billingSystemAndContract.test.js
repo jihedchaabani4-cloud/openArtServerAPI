@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { AppError } from "#shared";
 import { getCreditBalance, reserveCredits, settleCredits, rollbackCredits, addCredits, listTransactions, listCreditPackages, getCreditPackage, resolvePackageCredits, configureBilling, getBillingService, getWalletService, getCreditPackageRepository, getFailedOpsService, getWalletRepository, createWalletService, createFailedOpsService, createBillingRepositories, WalletService, FailedOpsService, reconcileExpiredHolds, handleExpireStaleHolds, BillingError, BillingValidationError, BillingNotFoundError, BillingInsufficientFundsError, BillingConflictError, BillingConfigurationError, WalletError } from "#billing/tools";
 import billingApiRouter from "#billing/api";
-import { V3Dispatcher } from "#generation/tools";
+import { ExecutionEngine } from "#generation/tools";
 import { GraphCompiler, createDefaultV3NodeRegistry, getV3Workflow } from "../../../src/systems/generation/internal/v3/index.js";
 
 // ─── Source: billingSystem.test.js ───
@@ -745,7 +745,7 @@ describe("D2.3 — Compact Billing Metadata & UTF-8 Byte Validation Boundary Tes
     assert.ok(!json.includes("futuristic city"), "Compact breakdown must not leak prompt text");
   });
 
-  it("TEST 2: V3Dispatcher.prepareAndEnqueue with a 20KB base64 input successfully reserves without throwing 'Metadata too large'", async () => {
+  it("TEST 2: ExecutionEngine.launch with a 20KB base64 input successfully reserves without throwing 'Metadata too large'", async () => {
     let capturedMetadata = null;
     const mockWallet = {
       reserve: async ({ userId, amount, referenceId, metadata }) => {
@@ -767,7 +767,7 @@ describe("D2.3 — Compact Billing Metadata & UTF-8 Byte Validation Boundary Tes
       },
     };
 
-    const dispatcher = new V3Dispatcher({
+    const engine = new ExecutionEngine({
       walletService: mockWallet,
       identityTools: {
         assertOwns: async () => true,
@@ -782,7 +782,7 @@ describe("D2.3 — Compact Billing Metadata & UTF-8 Byte Validation Boundary Tes
       },
     });
 
-    const result = await dispatcher.prepareAndEnqueue({
+    const result = await engine.launch({
       useCaseId: "video-generation-v1",
       userId: "user-test-d23",
       executionId: "run-d23-test",
@@ -806,6 +806,75 @@ describe("D2.3 — Compact Billing Metadata & UTF-8 Byte Validation Boundary Tes
       `Captured metadata size must be strictly compact (< 600 bytes), got ${byteLength} bytes`
     );
     assert.ok(!jsonStr.includes("data:image"), "Metadata must not contain image data URIs");
+  });
+
+  it("TEST 2b (H1): #billing/tools settleCredits & rollbackCredits pass { referenceId } reservation objects to real WalletService.settle / release (never raw strings)", async () => {
+    const rpcCalls = [];
+    const settleArgs = [];
+    const releaseArgs = [];
+
+    const realWallet = new WalletService("https://mock.supabase.co", "mock-service-key");
+    realWallet.txRepo = {
+      resolveTransactionRpc: async (fnName, referenceId) => {
+        rpcCalls.push({ fnName, referenceId });
+        return {
+          tx: {
+            reference_id: referenceId,
+            status: fnName === "commit_transaction" ? "COMPLETED" : "FAILED",
+          },
+          error: null,
+        };
+      },
+      mergeMetadata: async () => {},
+      findByReference: async () => null,
+    };
+
+    const origSettle = realWallet.settle.bind(realWallet);
+    const origRelease = realWallet.release.bind(realWallet);
+    realWallet.settle = async (reservation, extraMetadata) => {
+      settleArgs.push({ reservation, extraMetadata });
+      return origSettle(reservation, extraMetadata);
+    };
+    realWallet.release = async (reservation, extraMetadata) => {
+      releaseArgs.push({ reservation, extraMetadata });
+      return origRelease(reservation, extraMetadata);
+    };
+
+    const settleRes = await settleCredits(
+      { referenceId: "hold-h1-settle", metadata: { runId: "run-h1" } },
+      { walletService: realWallet }
+    );
+    const rollbackRes = await rollbackCredits(
+      { referenceId: "hold-h1-rollback", metadata: { reason: "provider_error" } },
+      { walletService: realWallet }
+    );
+    // Also verify string shorthand wraps into { referenceId } object
+    await settleCredits("hold-h1-str-settle", { walletService: realWallet });
+    await rollbackCredits("hold-h1-str-rollback", { walletService: realWallet });
+
+    assert.equal(settleRes.settled, true);
+    assert.equal(settleRes.referenceId, "hold-h1-settle");
+    assert.equal(rollbackRes.rolledBack, true);
+    assert.equal(rollbackRes.referenceId, "hold-h1-rollback");
+
+    assert.equal(settleArgs.length, 2);
+    assert.equal(typeof settleArgs[0].reservation, "object");
+    assert.equal(settleArgs[0].reservation.referenceId, "hold-h1-settle");
+    assert.equal(typeof settleArgs[1].reservation, "object");
+    assert.equal(settleArgs[1].reservation.referenceId, "hold-h1-str-settle");
+
+    assert.equal(releaseArgs.length, 2);
+    assert.equal(typeof releaseArgs[0].reservation, "object");
+    assert.equal(releaseArgs[0].reservation.referenceId, "hold-h1-rollback");
+    assert.equal(typeof releaseArgs[1].reservation, "object");
+    assert.equal(releaseArgs[1].reservation.referenceId, "hold-h1-str-rollback");
+
+    assert.deepEqual(rpcCalls, [
+      { fnName: "commit_transaction", referenceId: "hold-h1-settle" },
+      { fnName: "rollback_transaction", referenceId: "hold-h1-rollback" },
+      { fnName: "commit_transaction", referenceId: "hold-h1-str-settle" },
+      { fnName: "rollback_transaction", referenceId: "hold-h1-str-rollback" },
+    ]);
   });
 
   it("TEST 3: WalletService.validateMetadata measures actual UTF-8 byte length (not UTF-16 string length)", () => {

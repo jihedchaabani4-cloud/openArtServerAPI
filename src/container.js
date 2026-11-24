@@ -24,7 +24,7 @@ import {
     GenerationService,
     GenerationRequestService,
     WorkflowService,
-    V3Dispatcher,
+    ExecutionEngine,
     jobQueueService,
     configureGeneration,
 } from "#generation/tools";
@@ -201,13 +201,11 @@ setIdentityDb(db);
 export const mediaWorkflowLifecycleService = new MediaWorkflowLifecycleService({ db });
 configureBilling({ lifecycleService: mediaWorkflowLifecycleService });
 
-// ─── UseCase / V3 Engine & Job Queue Services ──────────────────────────────────
+// ─── V3 Execution Engine & Job Queue Services ──────────────────────────────────
 export { jobQueueService };
-export const v3Dispatcher = new V3Dispatcher({
+export const executionEngine = new ExecutionEngine({
     jobQueueService,
-    db,
 });
-export const useCaseService = v3Dispatcher;
 
 
 // ─── Domain & Platform Services ──────────────────────────────────────────────
@@ -245,7 +243,7 @@ export const characterMediaService = new CharacterMediaService({
 export const characterService = new CharacterService({
     db,
     workflowService,
-    useCaseService: v3Dispatcher,
+    executionEngine,
     mediaService: characterMediaService,
 });
 
@@ -283,7 +281,7 @@ folderService.setPermanentDeleteWorkflow(({ workflowId, userId, req = null }) =>
 export const projectReadService = new ProjectReadService({ db, folderService });
 export const projectService = new ProjectService({ projectRepo: db.projects, mediaRepo: db.media });
 export const generationService = new GenerationService({ db });
-export const generationRequestService = new GenerationRequestService({ db, useCaseService: v3Dispatcher, folderService });
+export const generationRequestService = new GenerationRequestService({ db, executionEngine, folderService });
 configureCharacters({ characterService, characterMediaService, trashService });
 configureMedia({ db, assetUploadService, workflowService, storageService, mediaUploadService, mediaService });
 configureWorkspace({ trashService, projectService, folderService, projectReadService, generationService });
@@ -295,6 +293,6 @@ configureGeneration({
     characterService,
     elementService,
     trashService,
-    v3Dispatcher,
+    executionEngine,
     db,
 });

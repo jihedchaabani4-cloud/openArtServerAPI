@@ -25,12 +25,18 @@ export class InMemoryWalletService {
   }
 
   async reserve({ userId, amount, model, operation, pricingVersion, referenceId, metadata = {} }) {
-    const currentBalance = await this.getBalance(userId);
+    const currentBalance = this.balances.get(userId) || 0;
     if (currentBalance < amount) {
       throw new InsufficientCreditsError(amount, currentBalance);
     }
 
     const reservationId = referenceId || `res_${uuidv4()}`;
+    if (this.reservations.has(reservationId)) {
+      const err = new Error(`Transaction ${reservationId} already exists (duplicate)`);
+      err.code = "DUPLICATE_TRANSACTION";
+      err.statusCode = 409;
+      throw err;
+    }
     const now = Date.now();
     const reservation = {
       reservationId,
@@ -97,8 +103,8 @@ export class InMemoryWalletService {
     reservation.releasedAt = new Date().toISOString();
     reservation.releaseReason = metadata.reason || "operation_failed";
 
-    // Restore user balance
-    const currentBalance = await this.getBalance(reservation.userId);
+    // Restore user balance atomically
+    const currentBalance = this.balances.get(reservation.userId) || 0;
     this.balances.set(reservation.userId, currentBalance + reservation.amount);
 
     return reservation;

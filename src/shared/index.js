@@ -5,7 +5,7 @@
  * - Errors: AppError, ProviderError, ValidationError, BillingError, SystemError, CrudServiceError, safePublicRouteError, ErrorSystem
  * - Logger: createLogger, runWithContext, setContext, getContext, LogEvents, LogErrorCodes, requestLogger, wrapWorkerJob
  * - Config: envConfig, loggingConfig
- * - Redis: redisConnection, workerRedisConnection, rateLimitRedisConnection, waitForRateLimitRedis
+ * - Redis: redisConnection, workerRedisConnection, rateLimitRedisConnection, waitForRedis, waitForRateLimitRedis
  */
 
 export * from "./errors/index.js";

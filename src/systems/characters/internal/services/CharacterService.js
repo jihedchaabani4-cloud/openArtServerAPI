@@ -5,7 +5,7 @@
  *
  * Clean Architecture Boundary:
  *   - CharacterMediaService handles storage uploads, Supabase buckets, and media rows.
- *   - CharacterGenerationService handles AI UseCase job dispatching and LLM descriptions.
+ *   - CharacterGenerationService handles AI ExecutionEngine job dispatching and LLM descriptions.
  *   - WorkflowService handles workflow lifecycle and low-level workflow deletion.
  *   - CharacterRepository (db.characters) & WorkflowRepository (db.workflows) handle data persistence.
  */
@@ -23,11 +23,11 @@ export class CharacterService {
      * @param {Object} deps
      * @param {Object} deps.db                   - Repository map (db.characters, db.workflows, db.media, db.projects)
      * @param {Object} deps.workflowService      - WorkflowLifecycleService instance
-     * @param {Object} [deps.useCaseService]     - UseCaseService instance
+     * @param {Object} [deps.executionEngine]    - ExecutionEngine instance
      * @param {Object} [deps.mediaService]       - Optional pre-configured CharacterMediaService
      * @param {Object} [deps.generationService]  - Optional pre-configured CharacterGenerationService
      */
-    constructor({ db, workflowService, useCaseService, mediaService, generationService } = {}) {
+    constructor({ db, workflowService, executionEngine, useCaseService, mediaService, generationService } = {}) {
         this.db = db;
         this.workflowService = workflowService;
 
@@ -35,14 +35,17 @@ export class CharacterService {
             throw new Error("CharacterService requires mediaService (CharacterMediaService)");
         }
         this.mediaService = mediaService;
-        this.generationService = generationService || new CharacterGenerationService({ db, useCaseService });
+        this.generationService = generationService || new CharacterGenerationService({
+            db,
+            executionEngine: executionEngine || useCaseService || null,
+        });
     }
 
     /**
-     * Allows setting/updating useCaseService after container initialization
+     * Allows setting/updating executionEngine after container initialization
      */
-    setUseCaseService(useCaseService) {
-        this.generationService.useCaseService = useCaseService;
+    setExecutionEngine(executionEngine) {
+        this.generationService.executionEngine = executionEngine;
     }
 
     // ── createCharacter ──────────────────────────────────────────────────────

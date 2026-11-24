@@ -4,7 +4,7 @@ import express from "express";
 import http from "node:http";
 import charactersRouter from "#characters/api";
 import elementRoutes from "#elements/api";
-import { db, characterService, elementService, useCaseService } from "../../../src/container.js";
+import { db, characterService, elementService, executionEngine } from "../../../src/container.js";
 import { rateLimitRedisConnection, redisConnection, workerRedisConnection, AppError } from "#shared";
 import { supabase } from "#shared/db/supabase.js";
 import { imagesRouter, videoRouter } from "#generation/api";
@@ -526,7 +526,7 @@ describe("Project Ownership Security & Boundary Tests (Task T2a)", () => {
   let originalFindByUser;
   let originalCreateWorkflow;
   let originalCreateMedia;
-  let originalPrepareAndEnqueue;
+  let originalLaunch;
 
   let workflowCreationCalls = [];
   let mediaCreationCalls = [];
@@ -573,7 +573,7 @@ describe("Project Ownership Security & Boundary Tests (Task T2a)", () => {
     originalFindByUser = db.projects?.findByUser;
     originalCreateWorkflow = db.workflows?.createWorkflow;
     originalCreateMedia = db.media?.createMedia;
-    originalPrepareAndEnqueue = useCaseService?.prepareAndEnqueue;
+    originalLaunch = executionEngine?.launch;
 
     workflowCreationCalls = [];
     mediaCreationCalls = [];
@@ -608,8 +608,8 @@ describe("Project Ownership Security & Boundary Tests (Task T2a)", () => {
       };
     }
 
-    if (useCaseService) {
-      useCaseService.prepareAndEnqueue = async (params) => {
+    if (executionEngine) {
+      executionEngine.launch = async (params) => {
         enqueueCalls.push(params);
         return {
           jobId: "mock-job-123",
@@ -624,7 +624,7 @@ describe("Project Ownership Security & Boundary Tests (Task T2a)", () => {
     if (db.projects && originalFindByUser) db.projects.findByUser = originalFindByUser;
     if (db.workflows && originalCreateWorkflow) db.workflows.createWorkflow = originalCreateWorkflow;
     if (db.media && originalCreateMedia) db.media.createMedia = originalCreateMedia;
-    if (useCaseService && originalPrepareAndEnqueue) useCaseService.prepareAndEnqueue = originalPrepareAndEnqueue;
+    if (executionEngine && originalLaunch) executionEngine.launch = originalLaunch;
   });
 
   it("TEST 1: Image: User B using User A's projectId returns 404 and creates NO workflow/media/hold", async () => {

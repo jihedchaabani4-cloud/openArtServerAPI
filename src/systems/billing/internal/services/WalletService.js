@@ -111,16 +111,15 @@ export class WalletService {
       };
     }
 
-    // Paid usage path — financial hold
-    const wallet = await this.getWalletOrThrow(userId);
-    const tx = await this._holdForWallet({ wallet, userId, amount, referenceId, metadata });
+    // Paid usage path — single-hop atomic financial hold (with 2-hop fallback for mocked/pre-migration repos)
+    const { tx, walletId } = await this._holdForUser({ userId, amount, referenceId, metadata });
     walletLogger.info({ event: LogEvents.WALLET_HOLD_CREATED, referenceId, amount: tx.amount ?? amount, userId }, `Placed credit hold of ${tx.amount ?? amount} credits`);
     return {
       kind: "CHARGEABLE",
       status: "HELD",
       referenceId: tx.reference_id || referenceId,
       amount: tx.amount ?? amount,
-      walletId: wallet.id,
+      walletId: tx.wallet_id || walletId || null,
       transaction: tx,
     };
   }
@@ -171,6 +170,64 @@ export class WalletService {
   // HOLD / COMMIT / ROLLBACK
   // ─────────────────────────────────────────────
 
+  _mapHoldRpcError(error, referenceId, rpcName) {
+    if (this.isMissingRpcError(error)) {
+      return new BillingConfigurationError(`[WalletService] RPC ${rpcName} missing (PGRST202 / schema cache): fail closed`);
+    }
+    if (error.code === "23505") {
+      return new WalletError(
+        `Transaction ${referenceId} already exists (duplicate)`,
+        "DUPLICATE_TRANSACTION"
+      );
+    }
+    const msg = String(error.message || "");
+    if (/insufficient funds/i.test(msg)) {
+      const insufficientErr = new WalletError(msg, "INSUFFICIENT_FUNDS");
+      const availMatch = msg.match(/have\s+([0-9]+(?:\.[0-9]+)?)/i);
+      if (availMatch) insufficientErr.available = Number(availMatch[1]);
+      return insufficientErr;
+    }
+    if (/wallet .*not found|wallet not found/i.test(msg)) {
+      return new WalletError(msg, "WALLET_NOT_FOUND");
+    }
+    return new WalletError(error.message, "DB_ERROR");
+  }
+
+  async _holdForUser({ userId, amount, referenceId, metadata }) {
+    this.validateMetadata(metadata);
+
+    const expiresAt = new Date(Date.now() + this.HOLD_TTL_SECONDS * 1000).toISOString();
+
+    if (typeof this.txRepo?.holdCreditsForUserRpc === "function") {
+      const { tx, error } = await this.txRepo.holdCreditsForUserRpc({
+        userId,
+        amount,
+        referenceId,
+        metadata,
+        expiresAt,
+      });
+
+      if (!error && tx) {
+        return { tx, walletId: tx.wallet_id || null };
+      }
+
+      if (error && !this.isMissingRpcError(error)) {
+        throw this._mapHoldRpcError(error, referenceId, "hold_credits_for_user");
+      }
+
+      if (error && this.isMissingRpcError(error)) {
+        walletLogger.warn(
+          { rpc: "hold_credits_for_user" },
+          "RPC hold_credits_for_user not found in schema cache, falling back to 2-hop hold_credits"
+        );
+      }
+    }
+
+    const wallet = await this.getWalletOrThrow(userId);
+    const tx = await this._holdForWallet({ wallet, userId, amount, referenceId, metadata });
+    return { tx, walletId: tx?.wallet_id || wallet.id };
+  }
+
   async _holdForWallet({ wallet, amount, referenceId, metadata }) {
     this.validateMetadata(metadata);
 
@@ -192,16 +249,7 @@ export class WalletService {
     });
 
     if (error) {
-      if (this.isMissingRpcError(error)) {
-        throw new BillingConfigurationError("[WalletService] RPC hold_credits missing (PGRST202 / schema cache): fail closed");
-      }
-      if (error.code === "23505") {
-        throw new WalletError(
-          `Transaction ${referenceId} already exists (duplicate)`,
-          "DUPLICATE_TRANSACTION"
-        );
-      }
-      throw new WalletError(error.message, "DB_ERROR");
+      throw this._mapHoldRpcError(error, referenceId, "hold_credits");
     }
 
     return tx;
@@ -215,44 +263,8 @@ export class WalletService {
       err.statusCode = 500;
       throw err;
     }
-    this.validateMetadata(metadata);
 
-    const wallet = await this.getWalletOrThrow(userId);
-
-    if (wallet.balance < amount) {
-      throw new WalletError(
-        `Insufficient funds: need ${amount}, have ${wallet.balance}`,
-        "INSUFFICIENT_FUNDS"
-      );
-    }
-
-    const expiresAt = new Date(
-      Date.now() + this.HOLD_TTL_SECONDS * 1000
-    ).toISOString();
-
-    const { tx, error } = await this.txRepo.holdCreditsRpc({
-      walletId: wallet.id,
-      amount,
-      referenceId,
-      metadata,
-      expiresAt,
-    });
-
-    if (error) {
-      if (this.isMissingRpcError(error)) {
-        throw new BillingConfigurationError("[WalletService] RPC hold_credits missing (PGRST202 / schema cache): fail closed");
-      }
-
-      if (error.code === "23505") {
-        throw new WalletError(
-          `Transaction ${referenceId} already exists (duplicate)`,
-          "DUPLICATE_TRANSACTION"
-        );
-      }
-
-      throw new WalletError(error.message, "DB_ERROR");
-    }
-
+    const { tx } = await this._holdForUser({ userId, amount, referenceId, metadata });
     return tx;
   }
 
@@ -543,7 +555,15 @@ export class WalletService {
     const fnName =
       newStatus === "COMPLETED" ? "commit_transaction" : "rollback_transaction";
 
-    const { tx, error } = await this.txRepo.resolveTransactionRpc(fnName, referenceId);
+    const hasExtra = Boolean(
+      extraMetadata && typeof extraMetadata === "object" && Object.keys(extraMetadata).length > 0
+    );
+
+    const { tx, error, metadataAppliedAtomically } = await this.txRepo.resolveTransactionRpc(
+      fnName,
+      referenceId,
+      hasExtra ? extraMetadata : null
+    );
 
     if (error) {
       if (this.isMissingRpcError(error)) {
@@ -553,7 +573,8 @@ export class WalletService {
       throw new WalletError(error.message, "TRANSACTION_NOT_FOUND");
     }
 
-    if (extraMetadata && typeof extraMetadata === "object") {
+    // Only issue legacy 2-hop mergeMetadata when the repository explicitly fell back to a 1-arg RPC.
+    if (hasExtra && metadataAppliedAtomically === false && typeof this.txRepo?.mergeMetadata === "function") {
       await this._mergeTransactionMetadata(referenceId, extraMetadata).catch(() => {});
     }
 

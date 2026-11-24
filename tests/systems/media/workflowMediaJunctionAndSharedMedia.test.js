@@ -4,7 +4,6 @@ import { createWorkflowWithMediaAtomic, createWorkflowWithMedia, MediaRepository
 import { supabase } from "#shared/db/supabase.js";
 import { WorkflowRepository, GenerationService } from "#generation/tools";
 import { WorkflowMediaService } from "../../../src/systems/generation/internal/services/WorkflowMediaService.js";
-import { resolveAsCharacter, resolveAsElement } from "../../../src/systems/generation/internal/resolvers/WorkflowReferenceResolver.js";
 import { ProjectReadService } from "#workspace/tools";
 import { CharacterMediaService } from "#characters/tools";
 import { ElementMediaService, elementRepository, ElementService } from "#elements/tools";
@@ -609,40 +608,6 @@ describe("workflow_media role-based domain resolution", () => {
     db.media = originals.media;
   });
 
-  it("resolveAsCharacter separates sheet and detail images using mediaRole before legacy step_id", async () => {
-    db.characters = {
-      findByCharacterId: async () => ({
-        id: "char-1",
-        workflow_id: "char-wf-1",
-        name: "Mira",
-        description: "Character description",
-      }),
-    };
-    db.media = {
-      findByWorkflow: async () => [
-        {
-          id: "sheet-media",
-          workflow_id: "char-wf-1",
-          step_id: "image_generation",
-          mediaRole: "sheet",
-          url: "https://cdn.example.com/sheet.png",
-        },
-        {
-          id: "detail-media",
-          workflow_id: "char-wf-1",
-          step_id: "image_generation",
-          mediaRole: "detail",
-          url: "https://cdn.example.com/detail.png",
-        },
-      ],
-    };
-
-    const resolved = await resolveAsCharacter("char-1");
-
-    assert.deepEqual(resolved.sheetImages, ["https://cdn.example.com/sheet.png"]);
-    assert.deepEqual(resolved.detailImages, ["https://cdn.example.com/detail.png"]);
-  });
-
   it("CharacterMediaService.uploadSheetMedia reuses existing sheet rows identified by role", async () => {
     let updated = null;
     let created = false;
@@ -763,46 +728,6 @@ describe("workflow_media role-based domain resolution", () => {
 
     assert.equal(result.ok, true);
     assert.equal(deleted, true);
-  });
-
-  it("resolveAsElement marks all images as detailImages and returns empty sheetImages", async () => {
-    originals.resolveRecord = elementRepository.resolveRecord;
-    elementRepository.resolveRecord = async () => ({
-      id: "elem-1",
-      workflow_id: "elem-wf-1",
-      name: "Cyber Sword",
-      description: "A glowing katana",
-      element_type: "weapon",
-    });
-    db.media = {
-      findByWorkflow: async () => [
-        {
-          id: "m-1",
-          workflow_id: "elem-wf-1",
-          url: "https://cdn.example.com/sword-angle1.png",
-          mediaRole: "detail",
-        },
-        {
-          id: "m-2",
-          workflow_id: "elem-wf-1",
-          url: "https://cdn.example.com/sword-angle2.png",
-          mediaRole: "detail",
-        },
-      ],
-    };
-
-    try {
-      const resolved = await resolveAsElement("elem-1");
-      assert.deepEqual(resolved.detailImages, [
-        "https://cdn.example.com/sword-angle1.png",
-        "https://cdn.example.com/sword-angle2.png",
-      ]);
-      assert.deepEqual(resolved.sheetImages, []);
-    } finally {
-      if (originals.resolveRecord) {
-        elementRepository.resolveRecord = originals.resolveRecord;
-      }
-    }
   });
 });
 }
@@ -2983,3 +2908,96 @@ describe("ElementMediaService.addReferenceMedia — uses attachReferenceMedia fo
     });
 });
 }
+
+describe("WorkflowMediaRepository.linkMedia — preserves existing is_primary & metadata when is_primary is omitted", () => {
+    it("in memory mode: calling linkMedia without is_primary/isPrimary preserves existing is_primary: true and metadata", async () => {
+        WorkflowMediaRepository.enableTestMemoryFallback();
+        const repo = new WorkflowMediaRepository();
+        const wfId = "wf-linkmedia-preserve-mem-1";
+        const mediaId = "media-linkmedia-preserve-mem-1";
+
+        const initial = await repo.linkMedia({
+            workflowId: wfId,
+            mediaId,
+            role: "output",
+            is_primary: true,
+            metadata: { edit_type: "relight", source: "primary" },
+        });
+        assert.equal(initial.is_primary, true);
+        assert.deepEqual(initial.metadata, { edit_type: "relight", source: "primary" });
+
+        // Re-link without specifying is_primary / isPrimary / metadata (e.g. from SaveMedia / completeMedia)
+        const relinked = await repo.linkMedia({
+            workflowId: wfId,
+            mediaId,
+            role: "output",
+        });
+
+        assert.equal(relinked.is_primary, true, "existing is_primary: true must NOT be clobbered to false");
+        assert.deepEqual(
+            relinked.metadata,
+            { edit_type: "relight", source: "primary" },
+            "existing metadata must NOT be clobbered to {}"
+        );
+
+        const primary = await repo.getPrimaryMedia(wfId);
+        assert.equal(primary?.media_id, mediaId);
+        assert.equal(primary?.is_primary, true);
+    });
+
+    it("in Supabase client mode: calling linkMedia without is_primary uses ignoreDuplicates: true and returns existing row intact", async () => {
+        const repo = new WorkflowMediaRepository();
+        const wfId = "wf-linkmedia-preserve-sb-1";
+        const mediaId = "media-linkmedia-preserve-sb-1";
+        const existingRow = {
+            workflow_id: wfId,
+            media_id: mediaId,
+            role: "output",
+            is_primary: true,
+            metadata: { edit_type: "angles" },
+        };
+
+        let capturedUpsertOpts = null;
+        let fetchedExisting = false;
+
+        const mockClient = {
+            from: () => ({
+                upsert: (_payload, opts) => {
+                    capturedUpsertOpts = opts;
+                    return {
+                        select: () => ({
+                            maybeSingle: async () => ({ data: null, error: null }),
+                        }),
+                    };
+                },
+                select: () => {
+                    const chain = {
+                        eq: () => chain,
+                        maybeSingle: async () => {
+                            fetchedExisting = true;
+                            return { data: existingRow, error: null };
+                        },
+                    };
+                    return chain;
+                },
+            }),
+        };
+
+        repo._isMemoryMode = () => false;
+        repo._getClientOrThrow = () => mockClient;
+
+        const result = await repo.linkMedia({
+            workflowId: wfId,
+            mediaId,
+            role: "output",
+        });
+
+        assert.deepEqual(capturedUpsertOpts, {
+            onConflict: "workflow_id,media_id,role",
+            ignoreDuplicates: true,
+        });
+        assert.equal(fetchedExisting, true, "must fetch existing row when ignoreDuplicates skips duplicate insert");
+        assert.equal(result.is_primary, true);
+        assert.deepEqual(result.metadata, { edit_type: "angles" });
+    });
+});

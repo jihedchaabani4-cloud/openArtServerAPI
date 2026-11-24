@@ -1,5 +1,6 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { AppError, ProviderError, ValidationError, BillingError, SystemError, InsufficientCreditsError, ReservationExpiredError, CrudServiceError, safePublicRouteError, ErrorSystem, ERROR_POLICY } from "../../src/shared/errors/index.js";
 import { createLogger, runWithContext, setContext, getContext, getCleanContext, LogEvents, LogErrorCodes, baseLogger } from "../../src/shared/logger/index.js";
 import { sanitizeData } from "../../src/shared/logger/redaction.js";
@@ -10,6 +11,7 @@ import {
   redisConnection,
   workerRedisConnection,
   rateLimitRedisConnection,
+  waitForRedis,
   waitForRateLimitRedis,
   RECONCILIATION_CACHE_KEY,
   RATE_LIMIT_POLICIES,
@@ -22,6 +24,7 @@ import {
 import { isProductionEnvironment, assertSecurityConfiguredForEnvironment, assertWalletConfiguredForEnvironment, assertRateLimitConfiguredForEnvironment, workflowService } from "../../src/container.js";
 import http from "node:http";
 import app from "../../index.js";
+import { _resetReadinessCacheForTest } from "../../src/api/probes/ready.js";
 import { supabase } from "#shared/db/supabase.js";
 
 // ─── Source: sharedErrors.test.js ───
@@ -622,6 +625,197 @@ describe("Boundary — global error handler never leaks internal 5xx messages", 
         assert.equal(body.ok, false);
         assert.match(body.message, /retry shortly/i);
         assert.equal(body.errorCode, "SERVICE_UNAVAILABLE");
+    });
+});
+}
+
+// ─── Source: readyProbeAndRedisWait.test.js ───
+{
+describe("P2-1 — /ready Probe (RATE_LIMIT_STORE modes) & waitForRedis startup readiness", () => {
+    let server;
+    let baseUrl;
+    let origRateLimitStore;
+
+    before(async () => {
+        server = http.createServer(app);
+        await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+        const { port } = server.address();
+        baseUrl = `http://127.0.0.1:${port}`;
+    });
+
+    beforeEach(() => {
+        _resetReadinessCacheForTest();
+        origRateLimitStore = process.env.RATE_LIMIT_STORE;
+    });
+
+    afterEach(() => {
+        _resetReadinessCacheForTest();
+        if (origRateLimitStore === undefined) {
+            delete process.env.RATE_LIMIT_STORE;
+        } else {
+            process.env.RATE_LIMIT_STORE = origRateLimitStore;
+        }
+    });
+
+    after(async () => {
+        if (server) {
+            await new Promise((resolve) => server.close(resolve));
+        }
+    });
+
+    it("GET /ready returns 200 in memory mode even when rateLimitRedisConnection is disconnected ('wait'/'close')", async () => {
+        process.env.RATE_LIMIT_STORE = "memory";
+
+        const origRLStatus = rateLimitRedisConnection.status;
+        const origQStatus = redisConnection.status;
+        const origRLPing = rateLimitRedisConnection.ping;
+        const origQPing = redisConnection.ping;
+
+        let rateLimitPingCalls = 0;
+        let queuePingCalls = 0;
+
+        rateLimitRedisConnection.ping = async () => {
+            rateLimitPingCalls += 1;
+            throw new Error("rateLimitRedisConnection.ping must not be called in memory mode");
+        };
+        redisConnection.status = "ready";
+        redisConnection.ping = async () => {
+            queuePingCalls += 1;
+            return "PONG";
+        };
+
+        try {
+            for (const disconnectedStatus of ["wait", "close"]) {
+                _resetReadinessCacheForTest();
+                rateLimitRedisConnection.status = disconnectedStatus;
+
+                const res = await fetch(`${baseUrl}/ready`);
+                assert.equal(res.status, 200, `Expected 200 in memory mode when rateLimitRedis status=${disconnectedStatus}`);
+                const body = await res.json();
+                assert.deepEqual(body, { ready: true });
+                assert.equal("rateLimitReady" in body, false, "Response must not expose rateLimitReady");
+            }
+            assert.equal(rateLimitPingCalls, 0, "rateLimitRedisConnection.ping must never be invoked in memory mode");
+            assert.equal(queuePingCalls, 2, "queue redisConnection.ping must be invoked for each uncached probe");
+        } finally {
+            rateLimitRedisConnection.status = origRLStatus;
+            redisConnection.status = origQStatus;
+            rateLimitRedisConnection.ping = origRLPing;
+            redisConnection.ping = origQPing;
+        }
+    });
+
+    it("GET /ready returns 503 in memory mode when queue redisConnection is not ready (without reporting rateLimitReady)", async () => {
+        process.env.RATE_LIMIT_STORE = "memory";
+
+        const origRLStatus = rateLimitRedisConnection.status;
+        const origQStatus = redisConnection.status;
+
+        rateLimitRedisConnection.status = "wait";
+        redisConnection.status = "connecting";
+
+        try {
+            const res = await fetch(`${baseUrl}/ready`);
+            assert.equal(res.status, 503);
+            const body = await res.json();
+            assert.deepEqual(body, { ready: false });
+            assert.equal("rateLimitReady" in body, false);
+        } finally {
+            rateLimitRedisConnection.status = origRLStatus;
+            redisConnection.status = origQStatus;
+        }
+    });
+
+    it("GET /ready in redis mode returns 503 when rateLimitRedisConnection is down and 200 when both are ready", async () => {
+        process.env.RATE_LIMIT_STORE = "redis";
+
+        const origRLStatus = rateLimitRedisConnection.status;
+        const origQStatus = redisConnection.status;
+        const origRLPing = rateLimitRedisConnection.ping;
+        const origQPing = redisConnection.ping;
+
+        let rateLimitPingCalls = 0;
+        let queuePingCalls = 0;
+
+        rateLimitRedisConnection.ping = async () => {
+            rateLimitPingCalls += 1;
+            return "PONG";
+        };
+        redisConnection.ping = async () => {
+            queuePingCalls += 1;
+            return "PONG";
+        };
+
+        try {
+            // Down rate-limit Redis -> 503 even if queue Redis is ready
+            rateLimitRedisConnection.status = "close";
+            redisConnection.status = "ready";
+
+            const downRes = await fetch(`${baseUrl}/ready`);
+            assert.equal(downRes.status, 503);
+            assert.deepEqual(await downRes.json(), { ready: false });
+            assert.equal(rateLimitPingCalls, 0);
+
+            // Both ready -> 200 and both pinged
+            _resetReadinessCacheForTest();
+            rateLimitRedisConnection.status = "ready";
+            redisConnection.status = "ready";
+
+            const upRes = await fetch(`${baseUrl}/ready`);
+            assert.equal(upRes.status, 200);
+            assert.deepEqual(await upRes.json(), { ready: true });
+            assert.equal(rateLimitPingCalls, 1);
+            assert.equal(queuePingCalls, 1);
+        } finally {
+            rateLimitRedisConnection.status = origRLStatus;
+            redisConnection.status = origQStatus;
+            rateLimitRedisConnection.ping = origRLPing;
+            redisConnection.ping = origQPing;
+        }
+    });
+
+    it("waitForRedis resolves fast when ready and times out cleanly without throwing", async () => {
+        // Default singleton in test env resolves true immediately
+        assert.equal(typeof waitForRedis, "function");
+        assert.equal(await waitForRedis(100), true);
+
+        // Already-ready connection resolves immediately
+        const readyConn = new EventEmitter();
+        readyConn.status = "ready";
+        const t0 = Date.now();
+        assert.equal(await waitForRedis(500, readyConn), true);
+        assert.ok(Date.now() - t0 < 100, "Already-ready connection must resolve immediately");
+
+        // Connecting -> emits 'ready' quickly -> resolves true and cleans up listeners
+        const fastConn = new EventEmitter();
+        fastConn.status = "connecting";
+        const t1 = Date.now();
+        setTimeout(() => {
+            fastConn.status = "ready";
+            fastConn.emit("ready");
+        }, 15);
+        assert.equal(await waitForRedis(500, fastConn), true);
+        assert.ok(Date.now() - t1 < 250, "Must resolve promptly on ready event");
+        assert.equal(fastConn.listenerCount("ready"), 0, "Must clean up ready listener");
+        assert.equal(fastConn.listenerCount("error"), 0, "Must clean up error listener");
+
+        // Unreachable connection in 'wait' state with failing connect() -> times out cleanly to false without throwing
+        const slowConn = new EventEmitter();
+        slowConn.status = "wait";
+        let connectCalls = 0;
+        slowConn.connect = async () => {
+            connectCalls += 1;
+            slowConn.emit("error", new Error("ECONNREFUSED"));
+            throw new Error("ECONNREFUSED");
+        };
+        const t2 = Date.now();
+        const timedOutResult = await waitForRedis(40, slowConn);
+        const elapsed = Date.now() - t2;
+        assert.equal(timedOutResult, false, "Must resolve false on timeout");
+        assert.equal(connectCalls, 1, "Must attempt connect() when status is wait");
+        assert.ok(elapsed >= 30 && elapsed < 400, `Expected bounded timeout near 40ms, got ${elapsed}ms`);
+        assert.equal(slowConn.listenerCount("ready"), 0, "Must clean up ready listener on timeout");
+        assert.equal(slowConn.listenerCount("error"), 0, "Must clean up error listener on timeout");
     });
 });
 }

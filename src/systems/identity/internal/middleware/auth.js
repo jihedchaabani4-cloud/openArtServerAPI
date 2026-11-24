@@ -1,6 +1,11 @@
 import { authClient } from "../db/authClient.js";
 import { AppError, setContext, createLogger, envConfig } from "#shared";
 import { safeCompareSecret } from "../services/secretComparison.js";
+import {
+    shouldVerifyTokenLocally,
+    verifySupabaseJwt,
+    warnUnconfiguredFallbackOnce,
+} from "../services/jwtVerifier.js";
 
 const authLogger = createLogger("auth");
 
@@ -103,7 +108,7 @@ export const requireAuth = async (req, res, next) => {
         // Allow Authorization: Bearer <token> header for API clients (preferred)
         const authHeader = req.headers?.authorization || req.headers?.Authorization;
         if (!token && authHeader && typeof authHeader === "string" && authHeader.toLowerCase().startsWith("bearer ")) {
-            token = authHeader.split(" ")[1].trim();
+            token = authHeader.slice(7).trim();
         }
 
         if (!token && !refreshToken) {
@@ -113,11 +118,24 @@ export const requireAuth = async (req, res, next) => {
 
         let user = null;
 
-        // Try using the access token first
+        // Try using the access token first (local JWT/JWKS verification on the hot path)
         if (token) {
-            const { data, error } = await authClient.getUser(token);
-            if (!error && data?.user) {
-                user = data.user;
+            if (shouldVerifyTokenLocally(token)) {
+                const verification = await verifySupabaseJwt(token);
+                if (verification.valid) {
+                    user = verification.user;
+                } else {
+                    authLogger.debug(
+                        { event: "auth.jwt_rejected", path: req.path, reason: verification.reason },
+                        "Local JWT verification rejected access token"
+                    );
+                }
+            } else {
+                warnUnconfiguredFallbackOnce();
+                const { data, error } = await authClient.getUser(token);
+                if (!error && data?.user) {
+                    user = data.user;
+                }
             }
         }
 
@@ -155,8 +173,14 @@ export const requireAuth = async (req, res, next) => {
             return next(new AppError("Invalid or expired authentication token.", 401));
         }
 
-        // Pass user ID in the request and bind to LogContext
-        req.user = { id: user.id };
+        // Populate canonical user shape on request and bind to LogContext
+        req.user = {
+            id: user.id,
+            email: user.email ?? null,
+            role: user.role ?? null,
+            app_metadata: user.app_metadata ?? {},
+            user_metadata: user.user_metadata ?? {},
+        };
         setContext({ userId: user.id });
         authLogger.debug({ event: "auth.verified", userId: user.id }, `User ${user.id} authenticated`);
         next();

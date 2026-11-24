@@ -1,6 +1,6 @@
 import Redis from "ioredis";
 import { createLogger } from "../logger/index.js";
-import { redisConfig } from "../config/index.js";
+import { redisConfig, envConfig } from "../config/index.js";
 
 const redisLogger = createLogger("redis");
 
@@ -45,21 +45,24 @@ export const workerRedisConnection = redisUrl
   : new Redis({ host: redisHost, port: Number(redisPort), password: redisPassword || undefined, ...BASE_OPTIONS });
 
 // ── Rate limiter connection (fail fast: no offline queue, strict command timeout) ─
+const isRedisRateLimitStore =
+  (envConfig.rateLimitStore || "").trim().toLowerCase() === "redis";
+
 const RATE_LIMIT_BASE_OPTIONS = {
   ...BASE_OPTIONS,
   enableOfflineQueue: false,
   commandTimeout: redisConfig.rateLimitCommandTimeoutMs,
   connectTimeout: 2000,
   maxRetriesPerRequest: 1,
-  lazyConnect: isTestEnv,
+  lazyConnect: isTestEnv || !isRedisRateLimitStore,
 };
 
 export const rateLimitRedisConnection = redisUrl
   ? new Redis(redisUrl, RATE_LIMIT_BASE_OPTIONS)
   : new Redis({ host: redisHost, port: Number(redisPort), password: redisPassword || undefined, ...RATE_LIMIT_BASE_OPTIONS });
 
-// Eagerly connect outside test environment to prevent 503 on boot
-if (!isTestEnv && rateLimitRedisConnection.status === "wait") {
+// Eagerly connect outside test environment only when Redis rate limiting is enabled
+if (!isTestEnv && isRedisRateLimitStore && rateLimitRedisConnection.status === "wait") {
   rateLimitRedisConnection.connect().catch((err) => {
     redisLogger.warn({ event: "redis.eager_connect_warning", err: err.message }, "[RateLimit Redis] Eager connection warning");
   });
@@ -84,55 +87,98 @@ rateLimitRedisConnection.on("error", (err) => {
   }
 });
 
-/**
- * Waits for the rate limit Redis connection to reach 'ready' status.
- *
- * @param {number} [timeoutMs=5000] - Maximum milliseconds to wait
- * @returns {Promise<boolean>} True if ready, false if timed out or in test env
- */
-export async function waitForRateLimitRedis(timeoutMs = 5000) {
-  if (isTestEnv) {
+async function waitForRedisConnection(connection, label, timeoutMs = 5000) {
+  if (!connection) {
+    return false;
+  }
+
+  if (connection.status === "ready") {
     return true;
   }
 
-  if (rateLimitRedisConnection.status === "ready") {
-    return true;
-  }
-
-  if (rateLimitRedisConnection.status === "wait") {
-    rateLimitRedisConnection.connect().catch((err) => {
-      redisLogger.warn({ event: "redis.wait_error", err: err.message }, "[RateLimit Redis] Connection error during waitForRateLimitRedis");
-    });
-  }
+  const effectiveTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 5000;
 
   return new Promise((resolve) => {
     let timer = null;
+    let settled = false;
+
+    const cleanup = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      connection.removeListener?.("ready", onReady);
+      connection.removeListener?.("error", onError);
+    };
+
+    const finish = (ready) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(ready);
+    };
 
     const onReady = () => {
-      cleanup();
-      redisLogger.info({ event: "redis.ready" }, "[RateLimit Redis] Connection ready.");
-      resolve(true);
+      redisLogger.info({ event: "redis.ready", connection: label }, `[${label}] Connection ready.`);
+      finish(true);
     };
 
     const onError = () => {
       // Keep waiting until timeout or ready
     };
 
-    const cleanup = () => {
-      if (timer) clearTimeout(timer);
-      rateLimitRedisConnection.removeListener("ready", onReady);
-      rateLimitRedisConnection.removeListener("error", onError);
-    };
-
     timer = setTimeout(() => {
-      cleanup();
-      redisLogger.error({ event: "redis.timeout", timeoutMs, status: rateLimitRedisConnection.status }, `[RateLimit Redis] Connection timed out after ${timeoutMs}ms. Proceeding with startup.`);
-      resolve(false);
-    }, timeoutMs);
+      redisLogger.error(
+        { event: "redis.timeout", connection: label, timeoutMs: effectiveTimeoutMs, status: connection.status },
+        `[${label}] Connection timed out after ${effectiveTimeoutMs}ms. Proceeding with startup.`
+      );
+      finish(false);
+    }, effectiveTimeoutMs);
 
-    rateLimitRedisConnection.once("ready", onReady);
-    rateLimitRedisConnection.on("error", onError);
+    connection.once?.("ready", onReady);
+    connection.on?.("error", onError);
+
+    if (connection.status === "wait" && typeof connection.connect === "function") {
+      Promise.resolve()
+        .then(() => connection.connect())
+        .catch((err) => {
+          redisLogger.warn(
+            { event: "redis.wait_error", connection: label, err: err?.message },
+            `[${label}] Connection error during readiness wait`
+          );
+        });
+    }
   });
+}
+
+/**
+ * Waits for the queue Redis connection to reach 'ready' status.
+ *
+ * @param {number} [timeoutMs=5000] - Maximum milliseconds to wait
+ * @param {object} [connection=redisConnection] - Optional connection override for testing
+ * @returns {Promise<boolean>} True if ready, false if timed out
+ */
+export async function waitForRedis(timeoutMs = 5000, connection = redisConnection) {
+  if (connection === redisConnection && redisConfig.isTestEnv) {
+    return true;
+  }
+
+  return waitForRedisConnection(connection, "Redis", timeoutMs);
+}
+
+/**
+ * Waits for the rate limit Redis connection to reach 'ready' status.
+ *
+ * @param {number} [timeoutMs=5000] - Maximum milliseconds to wait
+ * @param {object} [connection=rateLimitRedisConnection] - Optional connection override for testing
+ * @returns {Promise<boolean>} True if ready, false if timed out or in test env
+ */
+export async function waitForRateLimitRedis(timeoutMs = 5000, connection = rateLimitRedisConnection) {
+  if (connection === rateLimitRedisConnection && redisConfig.isTestEnv) {
+    return true;
+  }
+
+  return waitForRedisConnection(connection, "RateLimit Redis", timeoutMs);
 }
 
 export const RECONCILIATION_CACHE_KEY = "reconciliation:latest";
@@ -141,6 +187,7 @@ export default {
   redisConnection,
   workerRedisConnection,
   rateLimitRedisConnection,
+  waitForRedis,
   waitForRateLimitRedis,
   RECONCILIATION_CACHE_KEY,
 };

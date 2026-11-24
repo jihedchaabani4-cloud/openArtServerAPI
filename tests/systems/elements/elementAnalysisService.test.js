@@ -238,7 +238,7 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
     await assert.rejects(
       async () => {
         await LlmNode.execute(
-          { prompt: "A beautiful landscape", custom_instruction: "You are a prompt engineer." },
+          { prompt: "A beautiful landscape", skills: ["system-safety"] },
           { runId: "run-no-user", userId: null }
         );
       },
@@ -300,7 +300,7 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
     await LlmNode.execute(
       {
         prompt: "A landscape",
-        custom_instruction: "You are an assistant.",
+        skills: ["system-safety"],
         userId: "victim-attacker-spoofed-id", // Malicious spoof in input
       },
       {
@@ -322,7 +322,7 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
         await LlmNode.execute(
           {
             prompt: "A landscape",
-            custom_instruction: "You are an assistant.",
+            skills: ["system-safety"],
             userId: "victim-attacker-spoofed-id",
           },
           {

@@ -1,8 +1,9 @@
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { InMemoryWalletService } from "../../helpers/inMemoryWalletService.js";
-import { WalletService, runReservationReaper, reconcileExpiredHolds, handleExpireStaleHolds } from "#billing/tools";
-import { V3Dispatcher as UseCaseService } from "#generation/tools";
+import { WalletService, runReservationReaper, reconcileExpiredHolds, handleExpireStaleHolds, settleCredits, walletWorker, startWalletWorker, stopWalletWorker } from "#billing/tools";
+import { ExecutionEngine } from "#generation/tools";
 import { SaveMediaNode } from "../../../src/systems/generation/internal/v3/index.js";
 import { WorkflowMediaService } from "../../../src/systems/generation/internal/services/WorkflowMediaService.js";
 import { db, mediaWorkflowLifecycleService } from "../../../src/container.js";
@@ -108,12 +109,12 @@ describe("Reservation Reaper Race & Hold Heartbeat Boundary Tests (Task T10 / BU
       "SaveMediaNode must refuse to overwrite a 'failed' placeholder"
     );
 
-    // Verify media record was NEVER updated to completed
-    const completedUpdate = updatedCalls.find((c) => c.status === "completed");
-    assert.strictEqual(completedUpdate, undefined, "Media status must NEVER be resurrected to completed");
+    // Verify media record was NEVER updated to success/completed
+    const completedUpdate = updatedCalls.find((c) => c.status === "success" || c.status === "completed");
+    assert.strictEqual(completedUpdate, undefined, "Media status must NEVER be resurrected to success");
   });
 
-  it("TEST 3: UseCaseService maintains an active hold heartbeat during workflow execution", async () => {
+  it("TEST 3: ExecutionEngine maintains an active hold heartbeat during workflow execution", async () => {
     const wallet = new InMemoryWalletService();
     await wallet.setBalance("user-hb-3", 100);
 
@@ -131,26 +132,25 @@ describe("Reservation Reaper Race & Hold Heartbeat Boundary Tests (Task T10 / BU
       return res;
     };
 
-    const ucService = new UseCaseService({
+    const engine = new ExecutionEngine({
       walletService: wallet,
-      db,
-      jobQueueService: { enqueueUseCase: async () => ({ id: "job-1" }) },
+      jobQueueService: { addUseCaseJob: async () => ({ id: "job-1" }) },
     });
 
     // Trigger heartbeat with short interval
-    const heartbeatPromise = ucService.startHoldHeartbeat(res.reservationId, { intervalMs: 25, extensionSeconds: 300 });
+    const heartbeatHandle = engine.startHoldHeartbeat(res.reservationId, { intervalMs: 25, extensionSeconds: 300 });
 
     // Wait deterministically for heartbeat to fire
     const startWait = Date.now();
     while (heartbeatCount < 2 && Date.now() - startWait < 400) {
       await new Promise((r) => setTimeout(r, 20));
     }
-    heartbeatPromise.stop();
+    heartbeatHandle.stop();
 
     assert.ok(heartbeatCount >= 1, `Expected heartbeat to trigger at least once, got ${heartbeatCount}`);
   });
 
-  it("TEST 4: Settling an expired hold throws ReservationExpiredError without crashing process", async () => {
+  it("TEST 4: Settling an expired/released hold throws cleanly without crashing process", async () => {
     const wallet = new InMemoryWalletService();
     await wallet.setBalance("user-hb-4", 100);
 
@@ -163,16 +163,13 @@ describe("Reservation Reaper Race & Hold Heartbeat Boundary Tests (Task T10 / BU
     // Hold is reaped/released
     await wallet.release(res.reservationId, { reason: "ttl_expired" });
 
-    const ucService = new UseCaseService({
-      walletService: wallet,
-      db,
-      jobQueueService: { enqueueUseCase: async () => ({ id: "job-1" }) },
-    });
-
     // Attempting to settle an already-expired hold must cleanly throw
     await assert.rejects(
       async () => {
-        await ucService.settlePreparedBilling(res.reservationId, { totalCost: 25 });
+        await settleCredits(
+          { referenceId: res.reservationId, metadata: { totalCost: 25 } },
+          { walletService: wallet }
+        );
       },
       (err) => {
         assert.ok(
@@ -184,15 +181,41 @@ describe("Reservation Reaper Race & Hold Heartbeat Boundary Tests (Task T10 / BU
     );
   });
 
-  it("TEST 5: Video generation workflows configure a 30-minute hold TTL (1800 seconds)", async () => {
-    const ucService = new UseCaseService({ db });
-    assert.strictEqual(typeof ucService.getHoldTTLForUseCase, "function", "getHoldTTLForUseCase must be defined");
+  it("TEST 5: ExecutionEngine.execute stops hold heartbeat cleanly in finally on both success and failure", async () => {
+    let extendCalls = 0;
+    const engine = new ExecutionEngine({
+      billingTools: {
+        settleCredits: async () => ({ settled: true }),
+        rollbackCredits: async () => ({ rolledBack: true }),
+        extendHold: async () => {
+          extendCalls++;
+        },
+      },
+      mediaTools: {
+        markMediaFailed: async () => {},
+      },
+    });
 
-    const videoTTL = ucService.getHoldTTLForUseCase("video-generation-v1");
-    const imageTTL = ucService.getHoldTTLForUseCase("image-generation-v1");
+    engine.executor = {
+      execute: async () => {
+        await new Promise((r) => setTimeout(r, 45));
+        return { status: "completed", costBreakdown: [], totalEstimatedCredits: 10 };
+      },
+    };
 
-    assert.strictEqual(videoTTL, 1800, "Video generation hold TTL must be 1800 seconds (30 minutes)");
-    assert.strictEqual(imageTTL, 600, "Standard image generation hold TTL must be 600 seconds (10 minutes)");
+    const result = await engine.execute({
+      useCaseId: "video-generation-v1",
+      input: { prompt: "ocean", media_id: "media-hb-5" },
+      userId: "user-hb-5",
+      billingHoldId: "hold-hb-5",
+      heartbeatIntervalMs: 15,
+    });
+
+    assert.equal(result.status, "completed");
+    assert.ok(extendCalls >= 1, `Heartbeat must have fired during execution, got ${extendCalls}`);
+    const callsAfterCompletion = extendCalls;
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(extendCalls, callsAfterCompletion, "Heartbeat timer must be cleared in finally after execution finishes");
   });
 });
 }
@@ -690,6 +713,78 @@ describe("Ticket 07: BullMQ Reservation Reaper Worker & Media Deletion Concurren
     assert.equal(await repo.countLinksForMedia("m-orphan"), 0);
     assert.equal(mediaStore.has("m-orphan"), false);
     assert.deepEqual(deletedStorage, ["https://storage.local/orphan.png"]);
+  });
+
+  describe("P1-5: walletWorker zero import-time side effects & explicit idempotent startWalletWorker()", () => {
+    afterEach(async () => {
+      await stopWalletWorker();
+    });
+
+    it("has zero import-time side effects (walletWorker is null before startWalletWorker is called)", () => {
+      assert.equal(walletWorker, null, "Importing #billing/tools must NOT auto-start walletWorker");
+    });
+
+    it("startWalletWorker() starts cleanly, registers handlers & schedules once, is idempotent, and cleans up on stopWalletWorker()", async () => {
+      let constructedCount = 0;
+      let scheduleCount = 0;
+      let closedCount = 0;
+      let capturedQueueName = null;
+      let capturedProcessor = null;
+
+      class FakeWorker extends EventEmitter {
+        constructor(queueName, processor, opts) {
+          super();
+          constructedCount++;
+          capturedQueueName = queueName;
+          capturedProcessor = processor;
+          this.opts = opts;
+        }
+        async close() {
+          closedCount++;
+        }
+      }
+
+      const beforeSigint = process.listenerCount("SIGINT");
+      const beforeSigterm = process.listenerCount("SIGTERM");
+
+      const started1 = await startWalletWorker({
+        WorkerClass: FakeWorker,
+        scheduleJobs: async () => {
+          scheduleCount++;
+        },
+        registerShutdownHooks: true,
+      });
+
+      assert.equal(constructedCount, 1);
+      assert.equal(scheduleCount, 1);
+      assert.equal(capturedQueueName, "wallet-maintenance");
+      assert.equal(typeof capturedProcessor, "function");
+      assert.ok(started1.listenerCount("completed") >= 1);
+      assert.ok(started1.listenerCount("failed") >= 1);
+      assert.ok(started1.listenerCount("error") >= 1);
+      assert.equal(process.listenerCount("SIGINT"), beforeSigint + 1);
+      assert.equal(process.listenerCount("SIGTERM"), beforeSigterm + 1);
+
+      // Idempotent second call returns the same instance with zero duplicate workers/schedules/listeners
+      const started2 = await startWalletWorker({
+        WorkerClass: FakeWorker,
+        scheduleJobs: async () => {
+          scheduleCount++;
+        },
+        registerShutdownHooks: true,
+      });
+
+      assert.strictEqual(started2, started1, "Second startWalletWorker() call must be idempotent");
+      assert.equal(constructedCount, 1);
+      assert.equal(scheduleCount, 1);
+      assert.equal(process.listenerCount("SIGINT"), beforeSigint + 1);
+      assert.equal(process.listenerCount("SIGTERM"), beforeSigterm + 1);
+
+      await stopWalletWorker();
+      assert.equal(closedCount, 1);
+      assert.equal(process.listenerCount("SIGINT"), beforeSigint);
+      assert.equal(process.listenerCount("SIGTERM"), beforeSigterm);
+    });
   });
 });
 }

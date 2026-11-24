@@ -1,6 +1,26 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { identityTools, verifySession, getUserProfile, assertOwns, assertOwnsAny, toMediaIdList, setDb, IdentityAuthenticationError, IdentityForbiddenError, IdentityNotFoundError, IdentityValidationError, requireAuth, safeCompareSecret } from "#identity/tools";
+import crypto from "node:crypto";
+import {
+  identityTools,
+  verifySession,
+  getUserProfile,
+  assertOwns,
+  assertOwnsAny,
+  toMediaIdList,
+  setDb,
+  IdentityAuthenticationError,
+  IdentityForbiddenError,
+  IdentityNotFoundError,
+  IdentityValidationError,
+  requireAuth,
+  rateLimit,
+  resetLimitersForTest,
+  safeCompareSecret,
+  resetJwtVerifierForTest,
+  setJwksFetcherForTest,
+  setJwtClockForTest,
+} from "#identity/tools";
 import { identityRouter, signup, login } from "#identity/api";
 import healthRouter from "../../../src/api/probes/health.js";
 import readyRouter, { _resetReadinessCacheForTest } from "../../../src/api/probes/ready.js";
@@ -513,6 +533,21 @@ describe("D2.6 Security Hardening Boundary Tests", () => {
 
   // ── (b) Split /health and /ready (6 tests) ─────────────────────────────────
   describe("(b) Health and readiness split", () => {
+    let origRateLimitStore;
+
+    beforeEach(() => {
+      origRateLimitStore = process.env.RATE_LIMIT_STORE;
+      process.env.RATE_LIMIT_STORE = "redis";
+    });
+
+    afterEach(() => {
+      if (origRateLimitStore !== undefined) {
+        process.env.RATE_LIMIT_STORE = origRateLimitStore;
+      } else {
+        delete process.env.RATE_LIMIT_STORE;
+      }
+    });
+
     function invokeHandler(router, req) {
       return new Promise((resolve) => {
         let statusCode = 200;
@@ -1217,6 +1252,411 @@ describe("RC1.1-R1 — Internal Secret Security & Timing-Safe Enforcement", () =
       assert.equal(res.status, 401, `Expected 401, got ${res.status}: ${JSON.stringify(body)}`);
       assert.equal(body.ok, false);
     });
+  });
+});
+}
+
+// ─── Source: localJwtVerificationP11.test.js ───
+{
+describe("P1-1 — Local JWT / JWKS Verification in requireAuth (zero hot-path auth.getUser)", () => {
+  const TEST_SUPABASE_URL = "https://local-jwt-test.supabase.co";
+  const TEST_ISSUER = `${TEST_SUPABASE_URL}/auth/v1`;
+  const TEST_HS256_SECRET = "test-supabase-hs256-jwt-secret-min-32-chars-ok!!"; // gate:allow-secret
+
+  function b64urlJson(obj) {
+    return Buffer.from(JSON.stringify(obj), "utf8").toString("base64url");
+  }
+
+  function signHs256Jwt(payload, secret = TEST_HS256_SECRET, headerOverrides = {}) {
+    const header = { alg: "HS256", typ: "JWT", ...headerOverrides };
+    const encodedHeader = b64urlJson(header);
+    const encodedPayload = b64urlJson(payload);
+    const signingInput = `${encodedHeader}.${encodedPayload}`;
+    const signature = crypto.createHmac("sha256", secret).update(signingInput, "utf8").digest("base64url");
+    return `${signingInput}.${signature}`;
+  }
+
+  function signEs256Jwt(payload, privateKey, kid = "ec-key-1", headerOverrides = {}) {
+    const header = { alg: "ES256", typ: "JWT", ...(kid ? { kid } : {}), ...headerOverrides };
+    const encodedHeader = b64urlJson(header);
+    const encodedPayload = b64urlJson(payload);
+    const signingInput = `${encodedHeader}.${encodedPayload}`;
+    const sig = crypto.sign("sha256", Buffer.from(signingInput, "utf8"), {
+      key: privateKey,
+      dsaEncoding: "ieee-p1363",
+    });
+    return `${signingInput}.${sig.toString("base64url")}`;
+  }
+
+  function signRs256Jwt(payload, privateKey, kid = "rsa-key-1", headerOverrides = {}) {
+    const header = { alg: "RS256", typ: "JWT", ...(kid ? { kid } : {}), ...headerOverrides };
+    const encodedHeader = b64urlJson(header);
+    const encodedPayload = b64urlJson(payload);
+    const signingInput = `${encodedHeader}.${encodedPayload}`;
+    const sig = crypto.sign("sha256", Buffer.from(signingInput, "utf8"), privateKey);
+    return `${signingInput}.${sig.toString("base64url")}`;
+  }
+
+  function buildBaseClaims(overrides = {}) {
+    const nowSec = Math.floor(Date.now() / 1000);
+    return {
+      sub: "550e8400-e29b-41d4-a716-446655440000",
+      email: "alice@example.com",
+      role: "authenticated",
+      aud: "authenticated",
+      iss: TEST_ISSUER,
+      iat: nowSec - 10,
+      exp: nowSec + 3600,
+      app_metadata: { provider: "email", providers: ["email"], role: "member" },
+      user_metadata: { full_name: "Alice Example" },
+      ...overrides,
+    };
+  }
+
+  async function runRequireAuth(req) {
+    let nextErr = null;
+    let nextCalled = false;
+    await requireAuth(req, {}, (err) => {
+      nextCalled = true;
+      nextErr = err || null;
+    });
+    return { nextCalled, nextErr, req };
+  }
+
+  let origEnv;
+  let origGetUser;
+  let getUserCalls;
+
+  beforeEach(() => {
+    origEnv = { ...process.env };
+    origGetUser = supabase.auth.getUser;
+    getUserCalls = 0;
+    supabase.auth.getUser = async () => {
+      getUserCalls++;
+      return { data: { user: { id: "remote-fallback-user", email: "fallback@example.com", role: "authenticated" } }, error: null };
+    };
+    resetJwtVerifierForTest();
+    process.env.SUPABASE_URL = TEST_SUPABASE_URL;
+    delete process.env.SUPABASE_JWT_SECRET;
+    delete process.env.SUPABASE_JWKS_URL;
+    delete process.env.SUPABASE_JWT_ISSUER;
+    delete process.env.JWKS_CACHE_TTL_MS;
+    delete process.env.JWKS_REFRESH_COOLDOWN_MS;
+  });
+
+  afterEach(() => {
+    resetJwtVerifierForTest();
+    supabase.auth.getUser = origGetUser;
+    process.env = origEnv;
+  });
+
+  it("accepts valid HS256 JWT locally, populates full req.user shape, and calls auth.getUser 0 times", async () => {
+    process.env.SUPABASE_JWT_SECRET = TEST_HS256_SECRET;
+    const claims = buildBaseClaims({
+      iss: `${TEST_ISSUER}/`, // trailing slash normalized
+      aud: ["authenticated", "extra-aud"],
+    });
+    const token = signHs256Jwt(claims);
+
+    const { nextCalled, nextErr, req } = await runRequireAuth({
+      method: "GET",
+      path: "/api/projects",
+      headers: { authorization: `Bearer ${token}` },
+      cookies: {},
+    });
+
+    assert.equal(nextCalled, true);
+    assert.equal(nextErr, null);
+    assert.equal(getUserCalls, 0, "authClient.getUser must NOT be called for local HS256 JWT");
+    assert.deepEqual(req.user, {
+      id: claims.sub,
+      email: "alice@example.com",
+      role: "authenticated",
+      app_metadata: { provider: "email", providers: ["email"], role: "member" },
+      user_metadata: { full_name: "Alice Example" },
+    });
+  });
+
+  it("accepts valid HS256 JWT from access_token cookie with 0 auth.getUser calls", async () => {
+    process.env.SUPABASE_JWT_SECRET = TEST_HS256_SECRET;
+    const token = signHs256Jwt(buildBaseClaims({ sub: "cookie-user-123", email: undefined, role: undefined, app_metadata: undefined, user_metadata: undefined }));
+
+    const { nextCalled, nextErr, req } = await runRequireAuth({
+      method: "GET",
+      path: "/api/projects",
+      headers: {},
+      cookies: { access_token: token },
+    });
+
+    assert.equal(nextCalled, true);
+    assert.equal(nextErr, null);
+    assert.equal(getUserCalls, 0);
+    assert.deepEqual(req.user, {
+      id: "cookie-user-123",
+      email: null,
+      role: null,
+      app_metadata: {},
+      user_metadata: {},
+    });
+  });
+
+  it("verifySession validates Bearer JWT locally with 0 auth.getUser calls", async () => {
+    process.env.SUPABASE_JWT_SECRET = TEST_HS256_SECRET;
+    const token = signHs256Jwt(buildBaseClaims({ sub: "session-user-99", email: "sess@example.com", role: "authenticated" }));
+
+    const session = await verifySession({
+      headers: { authorization: `Bearer ${token}` },
+      cookies: {},
+    });
+
+    assert.equal(getUserCalls, 0);
+    assert.deepEqual(session, {
+      userId: "session-user-99",
+      email: "sess@example.com",
+      role: "authenticated",
+    });
+  });
+
+  it("rateLimit keys on req.user.id (sub), not raw JWT string (distinct JWTs for same sub share bucket and hit 429)", async () => {
+    process.env.SUPABASE_JWT_SECRET = TEST_HS256_SECRET;
+    process.env.RATE_LIMIT_STORE = "memory";
+    resetLimitersForTest();
+
+    const sub = "user-ratelimit-sub-42";
+    const otherSub = "user-ratelimit-sub-99";
+    const limiterMiddleware = rateLimit("videoGeneration"); // keyBy: "user", points: 5
+
+    const invokeRateLimit = async (req) => {
+      let statusCode = 200;
+      let passed = false;
+      const res = {
+        setHeader() {},
+        status(code) { statusCode = code; return this; },
+        json() { return this; },
+      };
+      await limiterMiddleware(req, res, () => { passed = true; });
+      return { passed, statusCode };
+    };
+
+    // 5 distinct JWTs for the same sub consume all 5 points
+    for (let i = 0; i < 5; i++) {
+      const token = signHs256Jwt(buildBaseClaims({ sub, jti: `tok-${i}` }));
+      const req = { method: "POST", path: "/api/video/generated", headers: { authorization: `Bearer ${token}` }, cookies: {} };
+      const authRes = await runRequireAuth(req);
+      assert.equal(authRes.nextErr, null);
+      assert.equal(req.user.id, sub);
+      const rlRes = await invokeRateLimit(req);
+      assert.equal(rlRes.passed, true, `Request ${i + 1} should pass`);
+    }
+
+    // 6th request with a brand-new JWT for the SAME sub must hit 429 (proving bucket keys on sub, not raw JWT)
+    const token6 = signHs256Jwt(buildBaseClaims({ sub, jti: "tok-6" }));
+    const req6 = { method: "POST", path: "/api/video/generated", headers: { authorization: `Bearer ${token6}` }, cookies: {} };
+    await runRequireAuth(req6);
+    const rl6 = await invokeRateLimit(req6);
+    assert.equal(rl6.passed, false);
+    assert.equal(rl6.statusCode, 429);
+
+    // Different sub has its own bucket and passes
+    const otherToken = signHs256Jwt(buildBaseClaims({ sub: otherSub, jti: "tok-other" }));
+    const reqOther = { method: "POST", path: "/api/video/generated", headers: { authorization: `Bearer ${otherToken}` }, cookies: {} };
+    await runRequireAuth(reqOther);
+    const rlOther = await invokeRateLimit(reqOther);
+    assert.equal(rlOther.passed, true);
+
+    assert.equal(getUserCalls, 0);
+    resetLimitersForTest();
+  });
+
+  it("verifies ES256 JWT via cached JWKS, enforces unknown-kid refresh cooldown, and handles key rotation", async () => {
+    const ecKey1 = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
+    const ecKey2 = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
+    const jwk1 = { ...ecKey1.publicKey.export({ format: "jwk" }), kid: "ec-k1", alg: "ES256", use: "sig" };
+    const jwk2 = { ...ecKey2.publicKey.export({ format: "jwk" }), kid: "ec-k2", alg: "ES256", use: "sig" };
+
+    let fakeNow = Date.now();
+    setJwtClockForTest(() => fakeNow);
+
+    let jwksFetchCount = 0;
+    let currentKeys = [jwk1];
+    setJwksFetcherForTest(async (url) => {
+      assert.equal(url, `${TEST_SUPABASE_URL}/auth/v1/.well-known/jwks.json`);
+      jwksFetchCount++;
+      return { keys: currentKeys };
+    });
+
+    process.env.JWKS_CACHE_TTL_MS = "600000";
+    process.env.JWKS_REFRESH_COOLDOWN_MS = "30000";
+
+    const claims = buildBaseClaims({
+      sub: "es256-user-1",
+      email: "es256@example.com",
+      iat: Math.floor(fakeNow / 1000) - 5,
+      exp: Math.floor(fakeNow / 1000) + 3600,
+    });
+    const token1 = signEs256Jwt(claims, ecKey1.privateKey, "ec-k1");
+
+    // 1) First request fetches JWKS once and authenticates
+    const res1 = await runRequireAuth({ headers: { authorization: `Bearer ${token1}` }, cookies: {}, path: "/api/test" });
+    assert.equal(res1.nextErr, null);
+    assert.equal(res1.req.user.id, "es256-user-1");
+    assert.equal(res1.req.user.email, "es256@example.com");
+    assert.equal(jwksFetchCount, 1);
+    assert.equal(getUserCalls, 0);
+
+    // 2) Subsequent requests hit in-memory JWKS cache (still 1 fetch)
+    const res2 = await runRequireAuth({ headers: { authorization: `Bearer ${token1}` }, cookies: {}, path: "/api/test" });
+    const res3 = await runRequireAuth({ headers: { authorization: `Bearer ${token1}` }, cookies: {}, path: "/api/test" });
+    assert.equal(res2.nextErr, null);
+    assert.equal(res3.nextErr, null);
+    assert.equal(jwksFetchCount, 1, "JWKS must be cached across requests");
+    assert.equal(getUserCalls, 0);
+
+    // 3) Key rotation happens on server, but unknown kid arrives WITHIN 30s cooldown -> no refetch (DoS guard), 401
+    currentKeys = [jwk1, jwk2];
+    const token2 = signEs256Jwt(claims, ecKey2.privateKey, "ec-k2");
+    fakeNow += 5000; // only 5s elapsed (< 30s cooldown)
+
+    const resCooldown = await runRequireAuth({ headers: { authorization: `Bearer ${token2}` }, cookies: {}, path: "/api/test" });
+    assert.ok(resCooldown.nextErr);
+    assert.equal(resCooldown.nextErr.statusCode, 401);
+    assert.equal(jwksFetchCount, 1, "Unknown kid within cooldown must NOT trigger JWKS refetch");
+    assert.equal(getUserCalls, 0);
+
+    // 4) After 30s cooldown elapses, unknown kid triggers 1 JWKS refresh and succeeds
+    fakeNow += 31000;
+    const resRotated = await runRequireAuth({ headers: { authorization: `Bearer ${token2}` }, cookies: {}, path: "/api/test" });
+    assert.equal(resRotated.nextErr, null);
+    assert.equal(resRotated.req.user.id, "es256-user-1");
+    assert.equal(jwksFetchCount, 2, "Unknown kid after cooldown must trigger JWKS refresh once");
+    assert.equal(getUserCalls, 0);
+
+    // 5) Further requests with rotated kid hit cache (still 2 fetches)
+    const resRotatedCached = await runRequireAuth({ headers: { authorization: `Bearer ${token2}` }, cookies: {}, path: "/api/test" });
+    assert.equal(resRotatedCached.nextErr, null);
+    assert.equal(jwksFetchCount, 2);
+    assert.equal(getUserCalls, 0);
+  });
+
+  it("verifies RS256 JWT over live local HTTP JWKS endpoint with caching and 0 auth.getUser calls", async () => {
+    const rsaKey = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const rsaJwk = { ...rsaKey.publicKey.export({ format: "jwk" }), kid: "rsa-live-1", alg: "RS256", use: "sig" };
+
+    let httpHits = 0;
+    const jwksServer = http.createServer((req, res) => {
+      if (req.url === "/auth/v1/.well-known/jwks.json") {
+        httpHits++;
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ keys: [rsaJwk] }));
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+
+    await new Promise((resolve) => jwksServer.listen(0, "127.0.0.1", resolve));
+    const { port } = jwksServer.address();
+    const localBaseUrl = `http://127.0.0.1:${port}`;
+
+    try {
+      process.env.SUPABASE_URL = localBaseUrl;
+      const claims = buildBaseClaims({
+        sub: "rs256-user-7",
+        iss: `${localBaseUrl}/auth/v1`,
+      });
+      const token = signRs256Jwt(claims, rsaKey.privateKey, "rsa-live-1");
+
+      const r1 = await runRequireAuth({ headers: { authorization: `Bearer ${token}` }, cookies: {}, path: "/api/test" });
+      const r2 = await runRequireAuth({ headers: { authorization: `Bearer ${token}` }, cookies: {}, path: "/api/test" });
+
+      assert.equal(r1.nextErr, null);
+      assert.equal(r1.req.user.id, "rs256-user-7");
+      assert.equal(r2.nextErr, null);
+      assert.equal(httpHits, 1, "HTTP JWKS endpoint must only be fetched once within TTL");
+      assert.equal(getUserCalls, 0);
+    } finally {
+      await new Promise((resolve) => jwksServer.close(resolve));
+    }
+  });
+
+  it("rejects expired, future nbf, tampered payload, wrong signature, alg:none, wrong aud/iss, missing sub, and alg confusion with 401 and 0 auth.getUser calls", async () => {
+    process.env.SUPABASE_JWT_SECRET = TEST_HS256_SECRET;
+    const ecKey = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
+    const ecOther = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
+    const ecJwk = { ...ecKey.publicKey.export({ format: "jwk" }), kid: "ec-sec-1", alg: "ES256", use: "sig" };
+    setJwksFetcherForTest(async () => ({ keys: [ecJwk] }));
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const validHs = signHs256Jwt(buildBaseClaims());
+    const [validHdr, , validSig] = validHs.split(".");
+    const tamperedPayload = b64urlJson(buildBaseClaims({ sub: "attacker-escalated-id" }));
+
+    const badTokens = [
+      { name: "expired exp", token: signHs256Jwt(buildBaseClaims({ exp: nowSec - 5 })) },
+      { name: "missing exp", token: signHs256Jwt(buildBaseClaims({ exp: undefined })) },
+      { name: "future nbf", token: signHs256Jwt(buildBaseClaims({ nbf: nowSec + 300 })) },
+      { name: "tampered payload", token: `${validHdr}.${tamperedPayload}.${validSig}` },
+      { name: "wrong HS256 secret", token: signHs256Jwt(buildBaseClaims(), "completely-different-secret-key-32-chars!!") }, // gate:allow-secret
+      { name: "wrong ES256 key", token: signEs256Jwt(buildBaseClaims(), ecOther.privateKey, "ec-sec-1") },
+      { name: "alg:none empty sig", token: `${b64urlJson({ alg: "none", typ: "JWT" })}.${b64urlJson(buildBaseClaims())}.` },
+      { name: "alg:none fake sig", token: `${b64urlJson({ alg: "none", typ: "JWT" })}.${b64urlJson(buildBaseClaims())}.ZmFrZQ` },
+      { name: "alg:None case variant", token: `${b64urlJson({ alg: "None", typ: "JWT" })}.${b64urlJson(buildBaseClaims())}.ZmFrZQ` },
+      { name: "wrong aud string", token: signHs256Jwt(buildBaseClaims({ aud: "anon" })) },
+      { name: "wrong aud array", token: signHs256Jwt(buildBaseClaims({ aud: ["anon", "service_role"] })) },
+      { name: "missing aud", token: signHs256Jwt(buildBaseClaims({ aud: undefined })) },
+      { name: "wrong iss", token: signHs256Jwt(buildBaseClaims({ iss: "https://evil-project.supabase.co/auth/v1" })) },
+      { name: "missing iss", token: signHs256Jwt(buildBaseClaims({ iss: undefined })) },
+      { name: "missing sub", token: signHs256Jwt(buildBaseClaims({ sub: undefined })) },
+      { name: "empty sub", token: signHs256Jwt(buildBaseClaims({ sub: "   " })) },
+      { name: "opaque non-JWT string when local auth configured", token: "not-even-a-jwt-token" }, // gate:allow-secret
+    ];
+
+    for (const tc of badTokens) {
+      const { nextCalled, nextErr, req } = await runRequireAuth({
+        method: "GET",
+        path: "/api/projects",
+        headers: { authorization: `Bearer ${tc.token}` },
+        cookies: {},
+      });
+      assert.equal(nextCalled, true, `${tc.name}: next must be called`);
+      assert.ok(nextErr, `${tc.name}: must reject with error`);
+      assert.equal(nextErr.statusCode, 401, `${tc.name}: must return 401, got ${nextErr.statusCode}`);
+      assert.equal(req.user, undefined, `${tc.name}: req.user must stay undefined`);
+    }
+
+    // Algorithm confusion: HS256 token rejected when ONLY JWKS is configured (no SUPABASE_JWT_SECRET)
+    delete process.env.SUPABASE_JWT_SECRET;
+    const hsWithPublicKey = signHs256Jwt(buildBaseClaims(), JSON.stringify(ecJwk));
+    const algConfRes = await runRequireAuth({
+      method: "GET",
+      path: "/api/projects",
+      headers: { authorization: `Bearer ${hsWithPublicKey}` },
+      cookies: {},
+    });
+    assert.ok(algConfRes.nextErr);
+    assert.equal(algConfRes.nextErr.statusCode, 401);
+    assert.equal(algConfRes.req.user, undefined);
+
+    assert.equal(getUserCalls, 0, "authClient.getUser must NEVER be called for any rejected JWT");
+  });
+
+  it("falls back to authClient.getUser ONLY when local JWT config (SUPABASE_URL/JWKS/SECRET) is completely missing", async () => {
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_JWT_SECRET;
+    delete process.env.SUPABASE_JWKS_URL;
+
+    const { nextCalled, nextErr, req } = await runRequireAuth({
+      method: "GET",
+      path: "/api/projects",
+      headers: { authorization: "Bearer legacy-fallback-token" },
+      cookies: {},
+    });
+
+    assert.equal(nextCalled, true);
+    assert.equal(nextErr, null);
+    assert.equal(getUserCalls, 1, "Fallback to authClient.getUser should run once when local config is missing");
+    assert.equal(req.user.id, "remote-fallback-user");
+    assert.equal(req.user.email, "fallback@example.com");
   });
 });
 }

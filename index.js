@@ -6,15 +6,15 @@ import {
     requestLogger,
     createLogger,
     LogErrorCodes,
+    waitForRedis,
     waitForRateLimitRedis,
     envConfig,
 } from "#shared";
 import { requireAuth, rateLimit } from "#identity/tools";
-import { reconcileExpiredHolds } from "#billing/tools";
 import apiRouter from "./src/api/routes.js";
 import healthRouter from "./src/api/probes/health.js";
 import readyRouter from "./src/api/probes/ready.js";
-import { walletService, mediaWorkflowLifecycleService } from "./src/container.js";
+import "./src/container.js";
 
 const systemLogger = createLogger("system");
 
@@ -235,30 +235,32 @@ app.use((err, req, res, next) => {
 // ── Start server ─────────────────────────────────────────────
 if (!envConfig.isTest) {
     const isRedisLimiter = (envConfig.rateLimitStore || "").trim().toLowerCase() === "redis";
-    if (isRedisLimiter) {
-        systemLogger.info({ event: "boot.redis_wait" }, "Waiting for rate-limit Redis connection to become ready...");
-        await waitForRateLimitRedis(5000);
+    systemLogger.info(
+        { event: "boot.redis_wait", rateLimitStore: isRedisLimiter ? "redis" : "memory" },
+        isRedisLimiter
+            ? "Waiting for queue and rate-limit Redis connections to become ready..."
+            : "Waiting for queue Redis connection to become ready..."
+    );
+
+    const [queueRedisReady, rateLimitRedisReady] = await Promise.all([
+        waitForRedis(5000),
+        isRedisLimiter ? waitForRateLimitRedis(5000) : Promise.resolve(true),
+    ]);
+
+    if (!queueRedisReady || !rateLimitRedisReady) {
+        systemLogger.warn(
+            {
+                event: "boot.redis_wait_timeout",
+                queueRedisReady,
+                ...(isRedisLimiter ? { rateLimitRedisReady } : {}),
+            },
+            "Redis readiness wait timed out during startup; proceeding with server start"
+        );
     }
 
     app.listen(PORT, () => {
-    const appName = envConfig.appName;
-    systemLogger.info({ port: PORT, appName }, `${appName} API running on http://localhost:${PORT}`);
-
-    // ── Start Cron Jobs ──────────────────────────────────────────
-        if (walletService) {
-            setInterval(async () => {
-                try {
-                    await reconcileExpiredHolds({
-                        walletService,
-                        lifecycleService: mediaWorkflowLifecycleService,
-                        logger: systemLogger,
-                    });
-                } catch (err) {
-                    systemLogger.error({ err, event: "cron.error" }, `Failed to expire stale holds: ${err.message}`);
-                }
-            }, 10 * 60 * 1000); // Every 10 minutes
-            systemLogger.info({ intervalMinutes: 10 }, "Started Stale Holds expiration cron job (runs every 10m)");
-        }
+        const appName = envConfig.appName;
+        systemLogger.info({ port: PORT, appName }, `${appName} API running on http://localhost:${PORT}`);
     });
 }
 

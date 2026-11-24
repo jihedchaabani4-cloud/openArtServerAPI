@@ -5,6 +5,7 @@
  * linking, URL resolution, asset upload, and storage management.
  */
 
+import { createLogger } from "#shared";
 import { saveTypeRegistry, SAVE_TYPES, RETENTION_POLICIES } from "../internal/services/saveTypes.js";
 import { MediaRepository } from "../internal/db/MediaRepository.js";
 import { WorkflowMediaRepository } from "../internal/db/WorkflowMediaRepository.js";
@@ -17,6 +18,7 @@ import {
     markMediaFailed as internalMarkMediaFailed,
     createWorkflowWithMedia,
     createWorkflowWithMediaAtomic,
+    createGenerationPlaceholderAtomic,
     appendMediaToWorkflow,
 } from "../internal/db/workflowMediaOps.js";
 import {
@@ -104,6 +106,8 @@ import {
     isWorkflowReferenceQuotaError,
     createPayloadTooLargeError,
 } from "../internal/errors.js";
+
+const mediaToolsLogger = createLogger("media-tools");
 
 // Singletons managed by the media system
 let _workflowMediaRepo = null;
@@ -280,6 +284,155 @@ export async function persistExternalMedia({
 }
 
 /**
+ * Completes a pending placeholder media record with its final asset URL and metadata,
+ * enforces fail-closed protection against terminal failed/expired placeholders, and
+ * ensures the canonical workflow_media role link exists.
+ *
+ * @param {Object} params
+ * @param {string} params.mediaId
+ * @param {string} params.url
+ * @param {string|null} [params.finalPrompt=null]
+ * @param {string|null} [params.characterDescription=null]
+ * @param {Object} [params.metadata={}]
+ * @param {string} [params.role="output"]
+ * @param {string} [params.saveType="default"]
+ * @param {string|null} [params.workflowId=null]
+ * @param {string|null} [params.stepId=null]
+ * @param {Object|null} [params.mediaRepository=null]
+ * @param {Object|null} [params.workflowMediaRepository=null]
+ * @returns {Promise<Object>} Plain completed media DTO
+ */
+export async function completeMedia({
+    mediaId,
+    url,
+    finalPrompt = null,
+    characterDescription = null,
+    metadata = {},
+    role = "output",
+    saveType = "default",
+    workflowId = null,
+    stepId = null,
+    mediaRepository = null,
+    workflowMediaRepository = null,
+} = {}) {
+    if (!mediaId) throw new MediaValidationError("mediaId is required for completeMedia");
+    if (!url) throw new MediaValidationError("url is required for completeMedia");
+
+    const repo = mediaRepository || getMediaRepository();
+    const updateFn =
+        typeof repo?.updateMedia === "function"
+            ? repo.updateMedia.bind(repo)
+            : typeof repo?.updateFields === "function"
+                ? repo.updateFields.bind(repo)
+                : null;
+
+    if (!updateFn) {
+        throw new MediaValidationError("MediaRepository is not configured in #media/tools for completeMedia");
+    }
+
+    let existingMedia = null;
+    if (typeof repo?.findById === "function") {
+        existingMedia = await repo.findById(mediaId).catch(() => null);
+    }
+
+    if (existingMedia?.status === MEDIA_WORKFLOW_STATUS.FAILED || existingMedia?.hold_expired === true) {
+        throw new MediaConflictError(
+            `Cannot complete media "${mediaId}" because its placeholder is already in terminal "failed" status (hold expired or reaped)`,
+            {
+                code: "HOLD_EXPIRED",
+                statusCode: 409,
+                context: { mediaId },
+            }
+        );
+    }
+
+    const meta = metadata && typeof metadata === "object" ? metadata : {};
+    let mergedConfig;
+    if (existingMedia?.generation_config && typeof existingMedia.generation_config === "object") {
+        const baseConfig = { ...existingMedia.generation_config };
+        if (finalPrompt && baseConfig.prompt && finalPrompt !== baseConfig.prompt) {
+            baseConfig.prompt_optimized = finalPrompt;
+        } else {
+            delete baseConfig.prompt_optimized;
+        }
+        if (characterDescription) {
+            baseConfig.character_description = characterDescription;
+        }
+        if (meta.provider) {
+            baseConfig.provider = meta.provider;
+        }
+        if (meta.model && !baseConfig.model) {
+            baseConfig.model = meta.model;
+        }
+        mergedConfig = baseConfig;
+    } else if (characterDescription || meta.provider || meta.model) {
+        mergedConfig = {
+            ...(finalPrompt ? { prompt_optimized: finalPrompt } : {}),
+            ...(characterDescription ? { character_description: characterDescription } : {}),
+            ...(meta.provider ? { provider: meta.provider } : {}),
+            ...(meta.model ? { model: meta.model } : {}),
+        };
+    }
+
+    const updated = await updateFn(mediaId, {
+        url,
+        status: MEDIA_WORKFLOW_STATUS.SUCCESS,
+        error_message: null,
+        ...(meta.width || existingMedia?.width ? { width: meta.width || existingMedia.width } : {}),
+        ...(meta.height || existingMedia?.height ? { height: meta.height || existingMedia.height } : {}),
+        ...(mergedConfig && Object.keys(mergedConfig).length > 0 ? { generation_config: mergedConfig } : {}),
+    });
+
+    const parentWorkflowId = workflowId || existingMedia?.workflow_id || null;
+    if (parentWorkflowId && role) {
+        const wfRepo = workflowMediaRepository || getWorkflowMediaRepository();
+        if (wfRepo && typeof wfRepo.linkMedia === "function") {
+            try {
+                const alreadyLinked =
+                    typeof wfRepo.isMediaLinkedToWorkflow === "function"
+                        ? await wfRepo.isMediaLinkedToWorkflow({
+                              workflowId: parentWorkflowId,
+                              mediaId,
+                          })
+                        : false;
+
+                if (!alreadyLinked) {
+                    await wfRepo.linkMedia({
+                        workflowId: parentWorkflowId,
+                        mediaId,
+                        role,
+                        stepId: stepId || parentWorkflowId || "save_media",
+                    });
+                }
+            } catch (linkErr) {
+                mediaToolsLogger.warn(
+                    {
+                        event: "media.complete_media.link_failed",
+                        mediaId,
+                        workflowId: parentWorkflowId,
+                        role,
+                        err: linkErr?.message,
+                    },
+                    "[MediaTools] Non-fatal workflow_media link failure after completing media"
+                );
+            }
+        }
+    }
+
+    return {
+        mediaId: updated?.id || mediaId,
+        id: updated?.id || mediaId,
+        url: updated?.url || url,
+        prompt: finalPrompt || null,
+        role,
+        save_type: saveType,
+        ...(characterDescription ? { character_description: characterDescription } : {}),
+        status: updated?.status || MEDIA_WORKFLOW_STATUS.SUCCESS,
+        metadata: meta,
+    };
+}
+
+/**
  * Marks a media record as failed.
  *
  * @param {Object} params
@@ -321,6 +474,7 @@ export async function markMediaFailed(firstArg = {}, secondArg, thirdArg) {
  * @param {string} params.mediaId
  * @param {string} params.workflowId
  * @param {string} [params.role="output"]
+ * @param {string|null} [params.stepId=null]
  * @param {boolean} [params.isPrimary=false]
  * @param {Object} [params.metadata]
  * @returns {Promise<Object>} Plain link record
@@ -329,6 +483,7 @@ export async function linkMediaToEntity({
     mediaId,
     workflowId,
     role = "output",
+    stepId = null,
     isPrimary = false,
     metadata = {},
 } = {}) {
@@ -341,6 +496,7 @@ export async function linkMediaToEntity({
         workflowId,
         mediaId,
         role,
+        ...(stepId ? { stepId } : {}),
         is_primary: isPrimary,
         metadata,
     });
@@ -452,6 +608,7 @@ export {
     markMediaStatus,
     createWorkflowWithMedia,
     createWorkflowWithMediaAtomic,
+    createGenerationPlaceholderAtomic,
     appendMediaToWorkflow,
     WORKFLOW_MEDIA_ROLES,
     normalizeWorkflowMediaRole,
@@ -516,6 +673,7 @@ export {
 export default {
     createPendingMedia,
     persistExternalMedia,
+    completeMedia,
     markMediaFailed,
     linkMediaToEntity,
     getMediaUrls,

@@ -2,7 +2,7 @@
  * @owns System 6: Characters
  * CharacterGenerationService
  * Dedicated Domain Service owning character AI generation orchestration:
- * - UseCase job dispatching for character 3-view turnaround sheet ("character-sheet-v1")
+ * - ExecutionEngine job dispatching for character 3-view turnaround sheet ("character-sheet-v1")
  * - LLM prompt generation for Haute-Couture character concepts
  */
 
@@ -35,12 +35,19 @@ Do NOT include any markdown code blocks or extra text outside the JSON object.
 export class CharacterGenerationService {
     /**
      * @param {Object} deps
-     * @param {Object} deps.db              - Repository map (db.workflows, db.characters, db.media)
-     * @param {Object} deps.useCaseService  - UseCaseService instance for credit check & job queuing
+     * @param {Object} deps.db                - Repository map (db.workflows, db.characters, db.media)
+     * @param {Object} [deps.executionEngine] - ExecutionEngine instance for credit check & job queuing
      */
-    constructor({ db, useCaseService }) {
+    constructor({ db, executionEngine, useCaseService } = {}) {
         this.db = db;
-        this.useCaseService = useCaseService;
+        this.executionEngine = executionEngine || useCaseService || null;
+    }
+
+    /**
+     * Allows setting/updating executionEngine after initialization
+     */
+    setExecutionEngine(executionEngine) {
+        this.executionEngine = executionEngine;
     }
 
     /**
@@ -143,19 +150,21 @@ export class CharacterGenerationService {
                 characters: [{ name: charName, description: charPrompt }],
             };
 
-            // 3. Dispatch UseCase job with credit reservation
+            // 3. Dispatch ExecutionEngine job with credit reservation
             let taskId = null;
             let hasSufficientCredits = true;
             let creditErrorMsg = null;
 
-            if (this.useCaseService) {
+            if (this.executionEngine) {
+                const executionId = randomUUID();
                 try {
-                    const prepared = await this.useCaseService.prepareAndEnqueue({
+                    const prepared = await this.executionEngine.launch({
                         useCaseId: "character-sheet-v1",
                         input: runtimeInput,
                         userId,
-                        executionId: characterId,
-                        traceId: characterId,
+                        executionId,
+                        traceId,
+                        projectId,
                         serverContext: {
                             workflowId: resolvedWorkflowId,
                             v1_workflow_id: resolvedWorkflowId,
@@ -164,9 +173,14 @@ export class CharacterGenerationService {
                             projectId,
                         },
                     });
-                    taskId = prepared.executionId || prepared.workflowRunId || characterId;
+                    taskId = prepared?.executionId || prepared?.runId || prepared?.workflowRunId || executionId;
                 } catch (serviceErr) {
-                    if (serviceErr.code === "INSUFFICIENT_CREDITS" || serviceErr.code === "BILLING_HOLD_REQUIRED") {
+                    const isInsufficientCredits =
+                        serviceErr?.code === "INSUFFICIENT_FUNDS" ||
+                        serviceErr?.code === "INSUFFICIENT_CREDITS" ||
+                        serviceErr?.code === "BILLING_HOLD_REQUIRED";
+
+                    if (isInsufficientCredits) {
                         crudOperationLog({
                             traceId,
                             operation: "enqueueSheetGeneration:credit",
@@ -183,7 +197,7 @@ export class CharacterGenerationService {
                             }).catch(() => {});
                         }
                     } else {
-                        // Queue dispatch failure or unexpected prepare error: fail closed
+                        // Queue dispatch failure or unexpected launch error: fail closed
                         if (placeholderMedia?.id && this.db?.media) {
                             await this.db.media.updateMedia(placeholderMedia.id, {
                                 status: "failed",
@@ -205,7 +219,9 @@ export class CharacterGenerationService {
             });
 
             return {
+                ok: true,
                 taskId,
+                executionId: taskId,
                 status: hasSufficientCredits ? "processing" : "saved",
                 needsCredits: !hasSufficientCredits,
                 message: hasSufficientCredits

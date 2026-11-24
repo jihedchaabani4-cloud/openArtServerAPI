@@ -2,7 +2,9 @@ import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
 import { CharacterMediaService, CHARACTER_MAX_DETAIL_MEDIA, CharacterGenerationService } from "#characters/tools";
 import { CrudServiceError } from "#shared";
-import { CHARACTER_SHEET_UPLOAD_POLICY, CHARACTER_DETAIL_UPLOAD_POLICY, createWorkflowWithMediaAtomic, failWorkflowPendingMedia, WorkflowMediaRepository } from "#media/tools";
+import { CHARACTER_SHEET_UPLOAD_POLICY, CHARACTER_DETAIL_UPLOAD_POLICY, createWorkflowWithMediaAtomic, failWorkflowPendingMedia, WorkflowMediaRepository, configureMedia, getMediaRepository } from "#media/tools";
+import { ExecutionEngine } from "#generation/tools";
+import { InMemoryWalletService } from "../../helpers/inMemoryWalletService.js";
 import { WorkflowMediaService } from "../../../src/systems/generation/internal/services/WorkflowMediaService.js";
 import { ElementMediaService, ElementService } from "#elements/tools";
 import { supabase } from "#shared/db/supabase.js";
@@ -1337,14 +1339,14 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
       },
     };
 
-    const mockUseCaseService = {
-      prepareAndEnqueue: async ({ executionId }) => ({ executionId, workflowRunId: executionId }),
+    const mockExecutionEngine = {
+      launch: async ({ executionId }) => ({ executionId, workflowRunId: executionId }),
     };
 
     // A. Success path: verify placeholder media and workflow_media link are created
     const charGenService = new CharacterGenerationService({
       db: realDb,
-      useCaseService: mockUseCaseService,
+      executionEngine: mockExecutionEngine,
     });
 
     const res = await charGenService.enqueueSheetGeneration({
@@ -1379,7 +1381,7 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
 
     const failingCharGenService = new CharacterGenerationService({
       db: failingDb,
-      useCaseService: mockUseCaseService,
+      executionEngine: mockExecutionEngine,
     });
 
     await assert.rejects(
@@ -1399,8 +1401,8 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
     // C. Fail-closed on linkMedia returning null:
     // createMediaInWorkflow must NOT mask null with a synthetic object.
     let enqueueCallCount = 0;
-    const trackedUseCaseService = {
-      prepareAndEnqueue: async ({ executionId }) => {
+    const trackedExecutionEngine = {
+      launch: async ({ executionId }) => {
         enqueueCallCount++;
         return { executionId, workflowRunId: executionId };
       },
@@ -1415,7 +1417,7 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
 
     const nullLinkCharGenService = new CharacterGenerationService({
       db: nullLinkDb,
-      useCaseService: trackedUseCaseService,
+      executionEngine: trackedExecutionEngine,
     });
 
     await assert.rejects(
@@ -1690,15 +1692,14 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
   it("5. Worker crash handler: refunds credits idempotently (exactly once on double failure / retry / timeout) and marks direct media failed", async () => {
     process.env.NODE_ENV = "test";
     const { handleUseCaseWorkerFailure, useCaseWorker } = await import("../../../src/systems/generation/internal/workers/useCaseWorker.js");
-    const { v3Dispatcher: useCaseService, db } = await import("../../../src/container.js");
+    const { executionEngine } = await import("../../../src/container.js");
     const { redisConnection, workerRedisConnection, rateLimitRedisConnection } = await import("#shared");
 
-    let actualRefundCount = 0;
     const mediaTable = new Map();
     const targetMediaId = "media-crash-idem-1";
     mediaTable.set(targetMediaId, { id: targetMediaId, status: "processing" });
 
-    const origRollbackPreparedBilling = useCaseService.rollbackPreparedBilling;
+    const origRollbackHold = executionEngine.rollbackHold;
     const { WalletService } = await import("#billing/tools");
 
     // Part A: Real WalletService rollbackFallback and rollbackHoldIdempotent tests
@@ -1808,20 +1809,26 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
     // 3. Balance must remain untouched (50 credits, not refunded non-atomically)
     assert.equal(walletsTable.get(walletId).balance, 50, "Balance must remain unchanged when RPC fails closed");
 
-    // Part B: Worker crash handler failure recovery marks ALL direct media failed
+    // Part B: Worker crash handler failure recovery marks ALL direct media failed via #media/tools markMediaFailed
     const targetMediaId2 = "media-crash-idem-2";
     mediaTable.set(targetMediaId, { id: targetMediaId, status: "processing" });
     mediaTable.set(targetMediaId2, { id: targetMediaId2, status: "processing" });
 
-    const origDbMedia = db.media;
-    db.media = {
-      updateMedia: async (id, patch) => {
+    const origMediaRepo = getMediaRepository();
+    const mockMediaRepo = {
+      updateFields: async (id, patch) => {
         const existing = mediaTable.get(id) || { id };
         const updated = { ...existing, ...patch };
         mediaTable.set(id, updated);
         return updated;
       },
-      findByWorkflow: async () => [],
+    };
+    configureMedia({ mediaRepo: mockMediaRepo });
+
+    const rollbackCalls = [];
+    executionEngine.rollbackHold = async (holdId, meta) => {
+      rollbackCalls.push({ holdId, meta });
+      return { rolledBack: true, referenceId: holdId };
     };
 
     const mockMultiMediaJob = {
@@ -1837,15 +1844,203 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
 
     try {
       await handleUseCaseWorkerFailure(mockMultiMediaJob, new Error("Crash"));
+      assert.equal(rollbackCalls.length, 1, "rollbackHold must be invoked for crashed job hold");
+      assert.equal(rollbackCalls[0].holdId, refId);
       assert.equal(mediaTable.get(targetMediaId).status, "failed", "First media must be marked failed");
-      assert.equal(mediaTable.get(targetMediaId2).status, "failed", "ALL media in mediaIds must be marked failed");
+      assert.equal(mediaTable.get(targetMediaId2).status, "failed", "ALL direct media in mediaIds must be marked failed");
     } finally {
-      db.media = origDbMedia;
+      executionEngine.rollbackHold = origRollbackHold;
+      configureMedia({ mediaRepo: origMediaRepo });
       await useCaseWorker?.close?.().catch(() => {});
       await redisConnection?.quit().catch(() => redisConnection?.disconnect());
       await workerRedisConnection?.quit().catch(() => workerRedisConnection?.disconnect());
       await rateLimitRedisConnection?.quit().catch(() => rateLimitRedisConnection?.disconnect());
     }
+  });
+
+  it("6. Scenario E (H9): Same user submits 2 character-sheet generations on the same Character -> 2 unique executionId/jobId/referenceId (no 409 DUPLICATE_TRANSACTION) & independent outputs", async () => {
+    const wallet = new InMemoryWalletService();
+    await wallet.setBalance("user-scenario-e", 200);
+
+    let mediaSeq = 0;
+    const mediaRows = new Map();
+    const queuedJobs = [];
+    let providerCalls = 0;
+
+    const mockDb = {
+      media: {
+        createMedia: async (data) => {
+          const id = `media-char-e-${++mediaSeq}`;
+          const row = { id, ...data };
+          mediaRows.set(id, row);
+          return row;
+        },
+        updateMedia: async (id, patch) => {
+          const updated = { ...(mediaRows.get(id) || { id }), ...patch };
+          mediaRows.set(id, updated);
+          return updated;
+        },
+        updateFields: async (id, patch) => {
+          const updated = { ...(mediaRows.get(id) || { id }), ...patch };
+          mediaRows.set(id, updated);
+          return updated;
+        },
+      },
+      workflowMedia: {
+        linkMedia: async ({ workflowId, mediaId, role }) => ({ workflow_id: workflowId, media_id: mediaId, role }),
+      },
+      characters: {
+        updateCharacterFields: async () => ({}),
+      },
+      workflows: {
+        updatePrimaryMedia: async () => ({}),
+      },
+    };
+
+    const engine = new ExecutionEngine({
+      walletService: wallet,
+      identityTools: { assertOwns: async () => true, assertOwnsAny: async () => true },
+      mediaTools: {
+        createPendingMedia: async () => {
+          throw new Error("should reuse placeholder media created by CharacterGenerationService");
+        },
+        markMediaFailed: async ({ mediaId, errorMessage }) => {
+          await mockDb.media.updateMedia(mediaId, { status: "failed", error_message: errorMessage });
+        },
+      },
+      jobQueueService: {
+        addUseCaseJob: async (payload) => {
+          const job = { id: `usecase-${payload.executionId}`, data: payload };
+          queuedJobs.push(job);
+          return job;
+        },
+      },
+    });
+
+    const charGenService = new CharacterGenerationService({
+      db: mockDb,
+      executionEngine: engine,
+    });
+
+    // Submit 2 character-sheet generations on the EXACT same characterId
+    const [sheet1, sheet2] = await Promise.all([
+      charGenService.enqueueSheetGeneration({
+        characterId: "char-same-e-1",
+        prompt: "Cyberpunk samurai version 1",
+        projectId: "proj-e",
+        userId: "user-scenario-e",
+        name: "Kuro",
+      }),
+      charGenService.enqueueSheetGeneration({
+        characterId: "char-same-e-1",
+        prompt: "Cyberpunk samurai version 2",
+        projectId: "proj-e",
+        userId: "user-scenario-e",
+        name: "Kuro",
+      }),
+    ]);
+
+    assert.equal(sheet1.ok, true);
+    assert.equal(sheet2.ok, true);
+    assert.equal(sheet1.status, "processing");
+    assert.equal(sheet2.status, "processing");
+    assert.notEqual(sheet1.executionId, "char-same-e-1", "H9: executionId must be fresh UUID, never characterId");
+    assert.notEqual(sheet2.executionId, "char-same-e-1", "H9: executionId must be fresh UUID, never characterId");
+    assert.notEqual(sheet1.executionId, sheet2.executionId, "2 sheets on same character must have distinct executionIds");
+    assert.equal(queuedJobs.length, 2);
+    assert.notEqual(queuedJobs[0].id, queuedJobs[1].id, "2 distinct BullMQ jobIds");
+    assert.notEqual(queuedJobs[0].data.billingHoldId, queuedJobs[1].data.billingHoldId, "2 distinct billing referenceIds");
+    assert.notEqual(sheet1.placeholderMedia.id, sheet2.placeholderMedia.id, "2 distinct placeholder mediaIds");
+
+    // Execute both jobs concurrently and verify independent outputs
+    const execResults = await Promise.all(
+      queuedJobs.map((job) =>
+        engine.execute({
+          useCaseId: job.data.useCaseId,
+          input: job.data.input,
+          userId: job.data.userId,
+          billingHoldId: job.data.billingHoldId,
+          executionId: job.data.executionId,
+          runId: job.data.workflowRunId,
+          jobId: job.id,
+          nodeContext: {
+            db: mockDb,
+            mediaRepository: mockDb.media,
+            executeLLM: async ({ prompt }) => ({
+              content: prompt,
+              json: { is_safe: true, sanitized_prompt: prompt, prompt, description: prompt, character_description: prompt },
+            }),
+            executeProvider: async () => {
+              const n = ++providerCalls;
+              return {
+                assets: [{ url: `https://cdn.example.com/sheets/char-same-e-1-sheet-${n}.png`, width: 1344, height: 768 }],
+              };
+            },
+          },
+        })
+      )
+    );
+
+    assert.equal(execResults.length, 2);
+    assert.equal(execResults[0].status, "completed");
+    assert.equal(execResults[1].status, "completed");
+    assert.equal(providerCalls, 2);
+    const out1 = mediaRows.get(sheet1.placeholderMedia.id);
+    const out2 = mediaRows.get(sheet2.placeholderMedia.id);
+    assert.equal(out1.status, "success");
+    assert.equal(out2.status, "success");
+    assert.notEqual(out1.url, out2.url, "Each character sheet run produces an independent output URL");
+  });
+
+  it("7. H10: CharacterGenerationService handles INSUFFICIENT_FUNDS gracefully (status='saved', needsCredits=true)", async () => {
+    const wallet = new InMemoryWalletService();
+    await wallet.setBalance("user-broke-h10", 0);
+
+    const mediaRows = new Map();
+    const mockDb = {
+      media: {
+        createMedia: async (data) => {
+          const row = { id: "media-h10-1", ...data };
+          mediaRows.set(row.id, row);
+          return row;
+        },
+        updateMedia: async (id, patch) => {
+          const updated = { ...(mediaRows.get(id) || { id }), ...patch };
+          mediaRows.set(id, updated);
+          return updated;
+        },
+      },
+      workflowMedia: {
+        linkMedia: async ({ workflowId, mediaId, role }) => ({ workflow_id: workflowId, media_id: mediaId, role }),
+      },
+      characters: { updateCharacterFields: async () => ({}) },
+      workflows: { updatePrimaryMedia: async () => ({}) },
+    };
+
+    const engine = new ExecutionEngine({
+      walletService: wallet,
+      identityTools: { assertOwns: async () => true, assertOwnsAny: async () => true },
+      mediaTools: { markMediaFailed: async () => {} },
+      jobQueueService: { addUseCaseJob: async () => ({ id: "should-not-enqueue" }) },
+    });
+
+    const charGenService = new CharacterGenerationService({
+      db: mockDb,
+      executionEngine: engine,
+    });
+
+    const result = await charGenService.enqueueSheetGeneration({
+      characterId: "char-h10-1",
+      prompt: "Golden knight",
+      projectId: "proj-h10",
+      userId: "user-broke-h10",
+      name: "Aurelius",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.status, "saved");
+    assert.equal(result.needsCredits, true);
+    assert.equal(mediaRows.get("media-h10-1").status, "saved");
   });
 });
 }

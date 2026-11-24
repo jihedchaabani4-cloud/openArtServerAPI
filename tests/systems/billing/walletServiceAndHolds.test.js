@@ -973,6 +973,190 @@ describe("Billing Business System — Private Repositories (Phase 2.2 & 2.4)", (
             assert.equal(repos.txRepo, repos.transactionRepo, "txRepo alias must strictly match transactionRepo");
         });
     });
+
+    describe("P1-6 & P1-1: Atomic commit/rollback metadata & single-hop hold_credits_for_user", () => {
+        it("commit() and rollback() pass p_extra_metadata atomically into RPC with ZERO extra SELECT/UPDATE hops", async () => {
+            const rpcCalls = [];
+            const fromCalls = [];
+            const mockSupabase = {
+                rpc: async (fnName, params) => {
+                    rpcCalls.push({ fnName, params });
+                    return {
+                        data: {
+                            reference_id: params.p_reference_id,
+                            status: fnName === "commit_transaction" ? "COMPLETED" : "FAILED",
+                            metadata: params.p_extra_metadata || {},
+                        },
+                        error: null,
+                    };
+                },
+                from: (table) => {
+                    fromCalls.push(table);
+                    throw new Error(`Unexpected extra PostgREST hop on table "${table}"`);
+                },
+            };
+
+            const wallet = createWalletService({ supabase: mockSupabase });
+
+            const committed = await wallet.commit("ref-atomic-commit", { totalCost: 12, runId: "run-1" });
+            assert.equal(committed.status, "COMPLETED");
+
+            const rolledBack = await wallet.rollback("ref-atomic-rollback", { reason: "provider_timeout" });
+            assert.equal(rolledBack.status, "FAILED");
+
+            assert.equal(fromCalls.length, 0, "Must NOT perform any extra SELECT or UPDATE table queries");
+            assert.deepEqual(rpcCalls, [
+                {
+                    fnName: "commit_transaction",
+                    params: { p_reference_id: "ref-atomic-commit", p_extra_metadata: { totalCost: 12, runId: "run-1" } },
+                },
+                {
+                    fnName: "rollback_transaction",
+                    params: { p_reference_id: "ref-atomic-rollback", p_extra_metadata: { reason: "provider_timeout" } },
+                },
+            ]);
+        });
+
+        it("commit() falls back cleanly to 1-arg RPC + mergeMetadata if DB schema cache returns PGRST202", async () => {
+            const rpcCalls = [];
+            let mergeUpdated = null;
+            const mockSupabase = {
+                rpc: async (fnName, params) => {
+                    rpcCalls.push({ fnName, params });
+                    if ("p_extra_metadata" in params) {
+                        return { data: null, error: { code: "PGRST202", message: "Could not find function in schema cache" } };
+                    }
+                    return { data: { reference_id: params.p_reference_id, status: "COMPLETED" }, error: null };
+                },
+                from: () => ({
+                    select: () => ({
+                        eq: () => ({
+                            maybeSingle: async () => ({ data: { metadata: { existing: true } }, error: null }),
+                        }),
+                    }),
+                    update: (fields) => {
+                        mergeUpdated = fields;
+                        return { eq: async () => ({ error: null }) };
+                    },
+                }),
+            };
+
+            const wallet = createWalletService({ supabase: mockSupabase });
+            const res = await wallet.commit("ref-legacy-rpc", { settledBy: "worker" });
+
+            assert.equal(res.status, "COMPLETED");
+            assert.equal(rpcCalls.length, 2);
+            assert.deepEqual(rpcCalls[1].params, { p_reference_id: "ref-legacy-rpc" });
+            assert.deepEqual(mergeUpdated, { metadata: { existing: true, settledBy: "worker" } });
+        });
+
+        it("reserve() uses single-hop hold_credits_for_user RPC without redundant wallet SELECT", async () => {
+            const rpcCalls = [];
+            let walletSelectCalled = false;
+
+            const mockSupabase = {
+                rpc: async (fnName, params) => {
+                    rpcCalls.push({ fnName, params });
+                    if (fnName === "hold_credits_for_user") {
+                        return {
+                            data: {
+                                id: "tx-1hop-1",
+                                wallet_id: "wallet-u1",
+                                amount: params.p_amount,
+                                reference_id: params.p_reference_id,
+                                status: "PENDING",
+                                metadata: params.p_metadata,
+                            },
+                            error: null,
+                        };
+                    }
+                    return { data: null, error: { message: `unexpected rpc ${fnName}` } };
+                },
+                from: () => {
+                    walletSelectCalled = true;
+                    throw new Error("Should not SELECT from wallets on single-hop hold_credits_for_user");
+                },
+            };
+
+            const wallet = createWalletService({ supabase: mockSupabase });
+            const res = await wallet.reserve({
+                userId: "user-1hop",
+                amount: 15,
+                referenceId: "ref-1hop-1",
+                metadata: { workflowId: "wf-1hop" },
+            });
+
+            assert.equal(walletSelectCalled, false, "getWalletOrThrow SELECT must be bypassed on single-hop RPC");
+            assert.equal(rpcCalls.length, 1);
+            assert.equal(rpcCalls[0].fnName, "hold_credits_for_user");
+            assert.equal(rpcCalls[0].params.p_user_id, "user-1hop");
+            assert.equal(rpcCalls[0].params.p_amount, 15);
+            assert.equal(rpcCalls[0].params.p_reference_id, "ref-1hop-1");
+            assert.equal(res.kind, "CHARGEABLE");
+            assert.equal(res.status, "HELD");
+            assert.equal(res.walletId, "wallet-u1");
+            assert.equal(res.amount, 15);
+        });
+
+        it("hold_credits_for_user maps insufficient funds and missing wallet errors to typed WalletError codes", async () => {
+            const mockInsufficient = {
+                rpc: async () => ({
+                    data: null,
+                    error: { message: "Insufficient funds: need 50, have 12" },
+                }),
+            };
+            const wallet1 = createWalletService({ supabase: mockInsufficient });
+            await assert.rejects(
+                () => wallet1.reserve({ userId: "u-poor", amount: 50, referenceId: "ref-poor" }),
+                (err) => err instanceof WalletError && err.code === "INSUFFICIENT_FUNDS" && err.available === 12
+            );
+
+            const mockMissing = {
+                rpc: async () => ({
+                    data: null,
+                    error: { message: "Wallet not found for user u-ghost" },
+                }),
+            };
+            const wallet2 = createWalletService({ supabase: mockMissing });
+            await assert.rejects(
+                () => wallet2.reserve({ userId: "u-ghost", amount: 10, referenceId: "ref-ghost" }),
+                (err) => err instanceof WalletError && err.code === "WALLET_NOT_FOUND"
+            );
+        });
+
+        it("reserve() falls back to 2-hop getWalletOrThrow + hold_credits when hold_credits_for_user returns PGRST202", async () => {
+            const rpcCalls = [];
+            let findByUserCalled = false;
+
+            const mockWalletRepo = {
+                findByUserId: async (userId) => {
+                    findByUserCalled = true;
+                    return { id: "wallet-fb-1", user_id: userId, balance: 100 };
+                },
+            };
+            const mockTxRepo = {
+                holdCreditsForUserRpc: async () => {
+                    rpcCalls.push("hold_credits_for_user");
+                    return { tx: null, error: { code: "PGRST202", message: "schema cache miss" } };
+                },
+                holdCreditsRpc: async ({ walletId, amount, referenceId }) => {
+                    rpcCalls.push("hold_credits");
+                    return {
+                        tx: { id: "tx-fb-1", wallet_id: walletId, amount, reference_id: referenceId, status: "PENDING" },
+                        error: null,
+                    };
+                },
+            };
+
+            const wallet = new WalletService({ walletRepo: mockWalletRepo, txRepo: mockTxRepo });
+            const res = await wallet.reserve({ userId: "u-fb", amount: 25, referenceId: "ref-fb-1" });
+
+            assert.equal(findByUserCalled, true);
+            assert.deepEqual(rpcCalls, ["hold_credits_for_user", "hold_credits"]);
+            assert.equal(res.walletId, "wallet-fb-1");
+            assert.equal(res.status, "HELD");
+        });
+    });
 });
 }
 after(() => {

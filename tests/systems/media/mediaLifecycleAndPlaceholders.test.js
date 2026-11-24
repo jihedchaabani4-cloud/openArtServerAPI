@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   NodeRegistry,
   ALL_V3_NODES,
-  V3Dispatcher,
+  ExecutionEngine,
   WorkflowExecutor,
   GraphCompiler,
   SaveMediaNode,
@@ -192,7 +192,7 @@ describe("Media Persistence Failure Boundary Tests (V3 Nodes & Executor)", () =>
 
 // ─── Source: siblingMediaCleanupBoundary.test.js ───
 {
-describe("Sibling Media Cleanup & Cycle Boundary Tests (V3Dispatcher & GraphCompiler)", () => {
+describe("Per-Run Media Cleanup & Cycle Boundary Tests (ExecutionEngine & GraphCompiler)", () => {
   let originalFindByWorkflow;
   let originalUpdateMedia;
   let originalFailPendingMediaByWorkflow;
@@ -217,7 +217,7 @@ describe("Sibling Media Cleanup & Cycle Boundary Tests (V3Dispatcher & GraphComp
     }
   });
 
-  it("TEST 1: V3Dispatcher failure fails ALL sibling processing/pending media and preserves completed media", async () => {
+  it("TEST 1: ExecutionEngine failure fails ONLY this run's target mediaId and leaves sibling processing/pending & completed media untouched", async () => {
     const workflowId = "wf-sibling-test-1";
 
     mediaRecords = [
@@ -227,26 +227,20 @@ describe("Sibling Media Cleanup & Cycle Boundary Tests (V3Dispatcher & GraphComp
       { id: "media-4", workflow_id: workflowId, step_id: "step-4", status: "completed", url: "https://example.com/ok.png" },
     ];
 
-    const mockMediaDb = {
-      findByWorkflow: async (wfId) => mediaRecords.filter((m) => m.workflow_id === wfId),
-      updateMedia: async (id, patch) => {
-        const record = mediaRecords.find((m) => m.id === id);
-        if (record) {
-          Object.assign(record, patch);
-        }
-        updatedCalls.push({ id, ...patch });
-        return record;
-      },
-    };
-
-    const dispatcher = new V3Dispatcher({
-      db: { media: mockMediaDb },
+    const engine = new ExecutionEngine({
       billingTools: {
-        releaseHold: async () => ({ rolledBack: true }),
-        settleHold: async () => ({ settled: true }),
+        rollbackCredits: async () => ({ rolledBack: true }),
+        settleCredits: async () => ({ settled: true }),
       },
       mediaTools: {
-        markMediaFailed: async () => {},
+        markMediaFailed: async ({ mediaId, errorMessage }) => {
+          const record = mediaRecords.find((m) => m.id === mediaId);
+          if (record) {
+            Object.assign(record, { status: "failed", error_message: errorMessage });
+          }
+          updatedCalls.push({ id: mediaId, status: "failed", error_message: errorMessage });
+          return { mediaId, status: "failed" };
+        },
       },
     });
 
@@ -266,7 +260,7 @@ describe("Sibling Media Cleanup & Cycle Boundary Tests (V3Dispatcher & GraphComp
 
     await assert.rejects(
       async () => {
-        await dispatcher.executeQueuedV3Run({
+        await engine.execute({
           workflow: failingWorkflow,
           input: {
             workflow_id: workflowId,
@@ -284,13 +278,13 @@ describe("Sibling Media Cleanup & Cycle Boundary Tests (V3Dispatcher & GraphComp
     const m3 = mediaRecords.find((m) => m.id === "media-3");
     const m4 = mediaRecords.find((m) => m.id === "media-4");
 
-    assert.strictEqual(m1.status, "failed", "media-1 (processing) must be failed");
-    assert.strictEqual(m2.status, "failed", "media-2 (pending) must be failed");
-    assert.strictEqual(m3.status, "failed", "media-3 (processing) must be failed");
+    assert.strictEqual(m1.status, "failed", "media-1 (this run's target) must be failed");
+    assert.strictEqual(m2.status, "pending", "sibling media-2 on shared workflow must remain untouched");
+    assert.strictEqual(m3.status, "processing", "sibling media-3 on shared workflow must remain untouched");
     assert.strictEqual(m4.status, "completed", "CRITICAL: media-4 (completed) must NOT be overwritten!");
   });
 
-  it("TEST 2: V3Dispatcher executeQueuedUseCase failure fails ALL sibling processing media and preserves completed media", async () => {
+  it("TEST 2: ExecutionEngine.execute failure fails ONLY this run's serverMediaIds and preserves sibling processing & completed media", async () => {
     const workflowId = "wf-sibling-usecase-1";
     mediaRecords = [
       { id: "m-proc-1", workflow_id: workflowId, status: "processing" },
@@ -299,27 +293,21 @@ describe("Sibling Media Cleanup & Cycle Boundary Tests (V3Dispatcher & GraphComp
       { id: "m-succ-4", workflow_id: workflowId, status: "completed", url: "https://example.com/done.png" },
     ];
 
-    const mockMediaDb = {
-      findByWorkflow: async (wfId) => mediaRecords.filter((m) => m.workflow_id === wfId),
-      updateMedia: async (id, patch) => {
-        const item = mediaRecords.find((m) => m.id === id);
-        if (item) Object.assign(item, patch);
-        return item;
-      },
-    };
-
-    const dispatcher = new V3Dispatcher({
-      db: { media: mockMediaDb },
+    const engine = new ExecutionEngine({
       billingTools: {
-        releaseHold: async () => ({ rolledBack: true }),
-        settleHold: async () => ({ settled: true }),
+        rollbackCredits: async () => ({ rolledBack: true }),
+        settleCredits: async () => ({ settled: true }),
       },
       mediaTools: {
-        markMediaFailed: async () => {},
+        markMediaFailed: async ({ mediaId, errorMessage }) => {
+          const item = mediaRecords.find((m) => m.id === mediaId);
+          if (item) Object.assign(item, { status: "failed", error_message: errorMessage });
+          return { mediaId, status: "failed" };
+        },
       },
     });
 
-    dispatcher.executor = {
+    engine.executor = {
       execute: async () => {
         const err = new Error("Pipeline crashed unexpectedly");
         err.code = "CRASH";
@@ -329,10 +317,12 @@ describe("Sibling Media Cleanup & Cycle Boundary Tests (V3Dispatcher & GraphComp
 
     await assert.rejects(
       async () => {
-        await dispatcher.executeQueuedUseCase({
+        await engine.execute({
           useCaseId: "image-generation-v1",
           input: {
             workflow_id: workflowId,
+            media_id: "m-proc-1",
+            serverMediaIds: ["m-proc-1"],
             billing_hold_id: "hold-sibling-1",
             billing_status: "reserved",
             reserved_credits: 10,
@@ -345,12 +335,12 @@ describe("Sibling Media Cleanup & Cycle Boundary Tests (V3Dispatcher & GraphComp
     );
 
     assert.strictEqual(mediaRecords.find((m) => m.id === "m-proc-1").status, "failed");
-    assert.strictEqual(mediaRecords.find((m) => m.id === "m-proc-2").status, "failed");
-    assert.strictEqual(mediaRecords.find((m) => m.id === "m-pend-3").status, "failed");
+    assert.strictEqual(mediaRecords.find((m) => m.id === "m-proc-2").status, "processing", "Sibling execution media must not be wiped");
+    assert.strictEqual(mediaRecords.find((m) => m.id === "m-pend-3").status, "pending", "Sibling pending media must not be wiped");
     assert.strictEqual(mediaRecords.find((m) => m.id === "m-succ-4").status, "completed", "Terminal completed status must not be modified");
   });
 
-  it("TEST 3: GraphCompiler cycle detection in V3Dispatcher fails pending media placeholders and releases hold", async () => {
+  it("TEST 3: GraphCompiler cycle detection in ExecutionEngine fails this run's placeholder media and releases hold", async () => {
     const workflowId = "wf-deadlock-1";
 
     mediaRecords = [
@@ -359,27 +349,21 @@ describe("Sibling Media Cleanup & Cycle Boundary Tests (V3Dispatcher & GraphComp
       { id: "deadlock-m-3", workflow_id: workflowId, status: "completed", url: "https://example.com/ok.png" },
     ];
 
-    const mockMediaDb = {
-      findByWorkflow: async (wfId) => mediaRecords.filter((m) => m.workflow_id === wfId),
-      updateMedia: async (id, patch) => {
-        const r = mediaRecords.find((m) => m.id === id);
-        if (r) Object.assign(r, patch);
-        return r;
-      },
-    };
-
     let holdReleased = false;
-    const dispatcher = new V3Dispatcher({
-      db: { media: mockMediaDb },
+    const engine = new ExecutionEngine({
       billingTools: {
-        releaseHold: async () => {
+        rollbackCredits: async () => {
           holdReleased = true;
           return { rolledBack: true };
         },
-        settleHold: async () => ({ settled: true }),
+        settleCredits: async () => ({ settled: true }),
       },
       mediaTools: {
-        markMediaFailed: async () => {},
+        markMediaFailed: async ({ mediaId, errorMessage }) => {
+          const r = mediaRecords.find((m) => m.id === mediaId);
+          if (r) Object.assign(r, { status: "failed", error_message: errorMessage });
+          return { mediaId, status: "failed" };
+        },
       },
     });
 
@@ -414,7 +398,7 @@ describe("Sibling Media Cleanup & Cycle Boundary Tests (V3Dispatcher & GraphComp
 
     await assert.rejects(
       async () => {
-        await dispatcher.executeQueuedV3Run({
+        await engine.execute({
           workflow: cyclicWorkflow,
           input: {
             workflow_id: workflowId,
@@ -434,8 +418,8 @@ describe("Sibling Media Cleanup & Cycle Boundary Tests (V3Dispatcher & GraphComp
     const m2 = mediaRecords.find((m) => m.id === "deadlock-m-2");
     const m3 = mediaRecords.find((m) => m.id === "deadlock-m-3");
 
-    assert.strictEqual(m1.status, "failed", "Cyclic graph failure must fail processing media");
-    assert.strictEqual(m2.status, "failed", "Cyclic graph failure must fail pending media");
+    assert.strictEqual(m1.status, "failed", "Cyclic graph failure must fail this run's target media");
+    assert.strictEqual(m2.status, "pending", "Sibling pending media on shared workflow must stay isolated");
     assert.strictEqual(m3.status, "completed", "Cyclic graph failure must NOT modify completed media");
   });
 

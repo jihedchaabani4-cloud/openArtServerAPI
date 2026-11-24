@@ -115,6 +115,38 @@ export const envConfig = {
   get supabaseServiceRoleKey() {
     return process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || "";
   },
+  get supabaseJwtSecret() {
+    return process.env.SUPABASE_JWT_SECRET || "";
+  },
+  get rawSupabaseJwksUrl() {
+    return (process.env.SUPABASE_JWKS_URL || "").trim();
+  },
+  get supabaseJwksUrl() {
+    if (process.env.SUPABASE_JWKS_URL) {
+      return process.env.SUPABASE_JWKS_URL.trim();
+    }
+    const base = (this.rawSupabaseUrl || "").trim().replace(/\/+$/, "");
+    return base ? `${base}/auth/v1/.well-known/jwks.json` : "";
+  },
+  get supabaseJwtIssuer() {
+    if (process.env.SUPABASE_JWT_ISSUER) {
+      return process.env.SUPABASE_JWT_ISSUER.trim().replace(/\/+$/, "");
+    }
+    const base = (this.rawSupabaseUrl || "").trim().replace(/\/+$/, "");
+    return base ? `${base}/auth/v1` : "";
+  },
+  get jwksCacheTtlMs() {
+    const parsed = parseInt(process.env.JWKS_CACHE_TTL_MS, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 10 * 60 * 1000;
+  },
+  get jwksRefreshCooldownMs() {
+    const parsed = parseInt(process.env.JWKS_REFRESH_COOLDOWN_MS, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 30 * 1000;
+  },
+  get jwksFetchTimeoutMs() {
+    const parsed = parseInt(process.env.JWKS_FETCH_TIMEOUT_MS, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 5000;
+  },
   get readinessTimeoutMs() {
     return parseInt(process.env.READINESS_TIMEOUT_MS, 10) || 1500;
   },

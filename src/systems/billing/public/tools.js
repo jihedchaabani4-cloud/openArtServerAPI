@@ -43,6 +43,8 @@ import {
 
 import {
     walletWorker,
+    startWalletWorker,
+    stopWalletWorker,
     handleRetryFailedOps,
     replayOperation,
     handleReconcileWallets,
@@ -158,34 +160,92 @@ export async function reserveCredits(input, ctx = {}) {
     }
 }
 
+function _normalizeHoldTarget(inputOrRef) {
+    if (typeof inputOrRef === "string") {
+        const trimmed = inputOrRef.trim();
+        if (!trimmed) return null;
+        return {
+            referenceId: trimmed,
+            reservation: { referenceId: trimmed },
+            extraMetadata: null,
+        };
+    }
+
+    if (!inputOrRef || typeof inputOrRef !== "object") {
+        return null;
+    }
+
+    const extraMetadata = inputOrRef.metadata && typeof inputOrRef.metadata === "object"
+        ? inputOrRef.metadata
+        : null;
+
+    if (inputOrRef.reservation) {
+        if (typeof inputOrRef.reservation === "string") {
+            const trimmed = inputOrRef.reservation.trim();
+            if (!trimmed) return null;
+            return {
+                referenceId: trimmed,
+                reservation: { referenceId: trimmed },
+                extraMetadata,
+            };
+        }
+        if (typeof inputOrRef.reservation === "object") {
+            const refId = inputOrRef.reservation.referenceId || inputOrRef.reservation.reservationId;
+            if (!refId || typeof refId !== "string" || !refId.trim()) return null;
+            const trimmed = refId.trim();
+            return {
+                referenceId: trimmed,
+                reservation: { ...inputOrRef.reservation, referenceId: trimmed },
+                extraMetadata,
+            };
+        }
+    }
+
+    const refId = inputOrRef.referenceId || inputOrRef.reservationId;
+    if (!refId || typeof refId !== "string" || !refId.trim()) {
+        return null;
+    }
+    const trimmed = refId.trim();
+    return {
+        referenceId: trimmed,
+        reservation: { ...inputOrRef, referenceId: trimmed },
+        extraMetadata,
+    };
+}
+
 /**
  * Settles a reservation after successful completion (commits debit).
  *
  * @param {string|object} inputOrRef
  * @param {{ walletService?: any }} [ctx]
- * @returns {Promise<{ status: string, referenceId?: string }>}
+ * @returns {Promise<{ settled: boolean, referenceId: string, status?: string }>}
  */
 export async function settleCredits(inputOrRef, ctx = {}) {
     const service = _resolveWalletService(ctx);
+    const normalized = _normalizeHoldTarget(inputOrRef);
 
-    const target = (typeof inputOrRef === "string" || (inputOrRef && typeof inputOrRef === "object" && inputOrRef.kind))
-        ? inputOrRef
-        : (inputOrRef?.reservation || inputOrRef?.referenceId);
-
-    const extraMetadata = (inputOrRef && typeof inputOrRef === "object") ? (inputOrRef.metadata || null) : null;
-
-    if (!target) {
+    if (!normalized) {
         throw new BillingValidationError("referenceId or reservation object is required to settle credits");
     }
 
+    const { referenceId, reservation, extraMetadata } = normalized;
+    let result;
+
     if (typeof service.settle === "function") {
-        return service.settle(target, extraMetadata);
+        result = await service.settle(reservation, extraMetadata);
+    } else if (typeof service.commitHoldIdempotent === "function") {
+        result = await service.commitHoldIdempotent(referenceId, extraMetadata);
+    } else if (typeof service.commit === "function") {
+        result = await service.commit(referenceId, extraMetadata || undefined);
+    } else {
+        throw new BillingConfigurationError("WalletService does not implement settle or commit");
     }
 
-    const refId = typeof target === "string" ? target : target.referenceId;
-    return service.commitHoldIdempotent
-        ? service.commitHoldIdempotent(refId, extraMetadata)
-        : service.commit(refId, extraMetadata);
+    return {
+        ...(result && typeof result === "object" ? result : {}),
+        settled: true,
+        referenceId: result?.referenceId || referenceId,
+    };
 }
 
 /**
@@ -193,29 +253,36 @@ export async function settleCredits(inputOrRef, ctx = {}) {
  *
  * @param {string|object} inputOrRef
  * @param {{ walletService?: any }} [ctx]
- * @returns {Promise<{ status: string, referenceId?: string }>}
+ * @returns {Promise<{ rolledBack: boolean, referenceId: string, status?: string }>}
  */
 export async function rollbackCredits(inputOrRef, ctx = {}) {
     const service = _resolveWalletService(ctx);
+    const normalized = _normalizeHoldTarget(inputOrRef);
 
-    const target = (typeof inputOrRef === "string" || (inputOrRef && typeof inputOrRef === "object" && inputOrRef.kind))
-        ? inputOrRef
-        : (inputOrRef?.reservation || inputOrRef?.referenceId);
-
-    const extraMetadata = (inputOrRef && typeof inputOrRef === "object") ? (inputOrRef.metadata || null) : null;
-
-    if (!target) {
+    if (!normalized) {
         throw new BillingValidationError("referenceId or reservation object is required to rollback credits");
     }
 
-    if (typeof service.release === "function") {
-        return service.release(target, extraMetadata);
+    const { referenceId, reservation, extraMetadata } = normalized;
+    let result;
+
+    if (typeof service.settle === "function" && typeof service.release === "function") {
+        result = await service.release(reservation, extraMetadata);
+    } else if (typeof service.rollbackHoldIdempotent === "function") {
+        result = await service.rollbackHoldIdempotent(referenceId, extraMetadata);
+    } else if (typeof service.rollback === "function") {
+        result = await service.rollback(referenceId, extraMetadata || undefined);
+    } else if (typeof service.release === "function") {
+        result = await service.release(reservation, extraMetadata);
+    } else {
+        throw new BillingConfigurationError("WalletService does not implement release or rollback");
     }
 
-    const refId = typeof target === "string" ? target : target.referenceId;
-    return service.rollbackHoldIdempotent
-        ? service.rollbackHoldIdempotent(refId, extraMetadata)
-        : service.rollback(refId, extraMetadata);
+    return {
+        ...(result && typeof result === "object" ? result : {}),
+        rolledBack: true,
+        referenceId: result?.referenceId || referenceId,
+    };
 }
 
 /**
@@ -341,6 +408,8 @@ export {
     WALLET_QUEUE_NAME,
     scheduleWalletJobs,
     walletWorker,
+    startWalletWorker,
+    stopWalletWorker,
     handleRetryFailedOps,
     replayOperation,
     handleReconcileWallets,
@@ -383,4 +452,6 @@ export default {
     createBillingRepositories,
     createWalletService,
     createFailedOpsService,
+    startWalletWorker,
+    stopWalletWorker,
 };

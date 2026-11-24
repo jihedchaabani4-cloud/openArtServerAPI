@@ -7,6 +7,11 @@ import { ProfileRepository } from "../internal/db/ProfileRepository.js";
 import { OwnershipService } from "../internal/services/OwnershipService.js";
 import { authClient } from "../internal/db/authClient.js";
 import {
+  shouldVerifyTokenLocally,
+  verifySupabaseJwt,
+  warnUnconfiguredFallbackOnce,
+} from "../internal/services/jwtVerifier.js";
+import {
   IdentityError,
   IdentityAuthenticationError,
   IdentityForbiddenError,
@@ -31,6 +36,11 @@ export {
 export { RATE_LIMIT_POLICIES } from "#shared";
 export { walletRateLimit } from "../internal/middleware/walletRateLimit.js";
 export { safeCompareSecret } from "../internal/services/secretComparison.js";
+export {
+  resetJwtVerifierForTest,
+  setJwksFetcherForTest,
+  setJwtClockForTest,
+} from "../internal/services/jwtVerifier.js";
 
 
 export {
@@ -62,16 +72,30 @@ export const identityTools = {
     }
 
     // Check Bearer token in headers
-    const authHeader = req.headers?.authorization;
-    if (authHeader && authHeader.startsWith("Bearer ")) {
+    const authHeader = req.headers?.authorization || req.headers?.Authorization;
+    if (authHeader && typeof authHeader === "string" && authHeader.toLowerCase().startsWith("bearer ")) {
       const token = authHeader.slice(7).trim();
-      const { data, error } = await authClient.getUser(token);
-      if (!error && data?.user?.id) {
-        return {
-          userId: data.user.id,
-          email: data.user.email || null,
-          role: data.user.role || "user",
-        };
+      if (token) {
+        if (shouldVerifyTokenLocally(token)) {
+          const verification = await verifySupabaseJwt(token);
+          if (verification.valid && verification.user?.id) {
+            return {
+              userId: verification.user.id,
+              email: verification.user.email || null,
+              role: verification.user.role || "user",
+            };
+          }
+        } else {
+          warnUnconfiguredFallbackOnce();
+          const { data, error } = await authClient.getUser(token);
+          if (!error && data?.user?.id) {
+            return {
+              userId: data.user.id,
+              email: data.user.email || null,
+              role: data.user.role || "user",
+            };
+          }
+        }
       }
     }
 

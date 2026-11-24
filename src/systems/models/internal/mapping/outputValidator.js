@@ -29,6 +29,7 @@ export function validateOutput(normalizedOutput, binding, domain) {
   switch (domain) {
     case "image":
     case "upscale":
+    case "remove_background":
       _requireImageUrl(normalizedOutput, binding, domain);
       break;
 

@@ -11,9 +11,15 @@ import { envConfig } from "#shared";
  * Export shape:
  *   export async function run({ binding, payload, credential, options }) → rawResponse
  */
-export async function run({ binding, payload = {}, credential, options = {} }) {
+export async function run({ binding, payload = {}, credential, timeoutMs, options = {} }) {
   const providerModelId = binding.providerModelId;
   const apiKey = credential || envConfig.geminiApiKey;
+
+  const rawTimeoutMs = timeoutMs ?? options.timeoutMs;
+  const resolvedTimeoutMs =
+    typeof rawTimeoutMs === "number" && Number.isFinite(rawTimeoutMs) && rawTimeoutMs > 0
+      ? rawTimeoutMs
+      : null;
 
   const ai =
     options.sdkClient ||
@@ -51,16 +57,68 @@ export async function run({ binding, payload = {}, credential, options = {} }) {
     });
   }
 
+  const controller = resolvedTimeoutMs ? new AbortController() : null;
+  if (controller) {
+    sdkPayload.config = {
+      ...(sdkPayload.config || {}),
+      abortSignal: controller.signal,
+    };
+  }
+
+  const runWithOptionalTimeout = async (workFn) => {
+    if (!resolvedTimeoutMs) {
+      return await workFn();
+    }
+    let timer = null;
+    let timedOut = false;
+    const workPromise = Promise.resolve().then(workFn);
+    workPromise.catch(() => {});
+
+    const timeoutPromise = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        controller?.abort();
+        const timeoutErr = new ProviderTransientError(
+          `Google GenAI request for "${providerModelId}" timed out after ${resolvedTimeoutMs}ms`
+        );
+        timeoutErr.code = "PROVIDER_TIMEOUT";
+        timeoutErr.statusCode = 504;
+        timeoutErr.retryable = true;
+        reject(timeoutErr);
+      }, resolvedTimeoutMs);
+      if (typeof timer.unref === "function") timer.unref();
+    });
+
+    try {
+      return await Promise.race([workPromise, timeoutPromise]);
+    } catch (err) {
+      if (timedOut && err.code !== "PROVIDER_TIMEOUT") {
+        const timeoutErr = new ProviderTransientError(
+          `Google GenAI request for "${providerModelId}" timed out after ${resolvedTimeoutMs}ms`
+        );
+        timeoutErr.code = "PROVIDER_TIMEOUT";
+        timeoutErr.statusCode = 504;
+        timeoutErr.retryable = true;
+        throw timeoutErr;
+      }
+      throw err;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+
   // Stream execution if requested and supported
   if (options.onStreamChunk && typeof ai.models[`${method}Stream`] === "function") {
-    const stream = await ai.models[`${method}Stream`](sdkPayload);
-    let fullText = "";
-    for await (const chunk of stream) {
-      const text = chunk.text || "";
-      fullText += text;
-      options.onStreamChunk({ text, raw: chunk });
-    }
-    return { text: fullText, content: fullText, outputs: [fullText] };
+    return await runWithOptionalTimeout(async () => {
+      const stream = await ai.models[`${method}Stream`](sdkPayload);
+      let fullText = "";
+      for await (const chunk of stream) {
+        const text = chunk.text || "";
+        fullText += text;
+        options.onStreamChunk({ text, raw: chunk });
+      }
+      return { text: fullText, content: fullText, outputs: [fullText] };
+    });
   }
 
   // Direct SDK Call
@@ -69,7 +127,7 @@ export async function run({ binding, payload = {}, credential, options = {} }) {
     throw new Error(`Google GenAI SDK method "${method}" is not supported`);
   }
 
-  const response = await sdkFn.call(ai.models, sdkPayload);
+  const response = await runWithOptionalTimeout(() => sdkFn.call(ai.models, sdkPayload));
 
   // Return standardized raw response (parameterMapper applies outputMap downstream)
   if (response?.generatedImages) {

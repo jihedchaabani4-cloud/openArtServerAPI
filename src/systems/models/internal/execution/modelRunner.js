@@ -5,7 +5,7 @@ import { mapToProviderPayload, mapFromProviderResponse } from "../mapping/parame
 import { validateOutput } from "../mapping/outputValidator.js";
 import { calculateRetailCredits, calculateWholesaleCostUsd, calculateMargin } from "../pricing/pricingEngine.js";
 import { circuitBreakerRegistry } from "./circuitBreaker.js";
-import { normalizeError } from "./errorNormalizer.js";
+import { normalizeError, StandardErrorCodes } from "./errorNormalizer.js";
 import { defaultRuntimeExecutor } from "./runtimeExecutor.js";
 import { getCustomAdapter } from "../runtime/adapters/adapterLoader.js";
 import { resolveCredential } from "../services/credentialResolver.js";
@@ -14,6 +14,26 @@ import { MissingUserIdError, ProviderTransientError, ConfigIntegrityError } from
 import { createLogger } from "#shared";
 
 const logger = createLogger("models");
+
+const CIRCUIT_BREAKER_TRIP_CODES = new Set([
+  StandardErrorCodes.PROVIDER_UNAVAILABLE,
+  StandardErrorCodes.PROVIDER_TIMEOUT,
+  StandardErrorCodes.RATE_LIMITED,
+  StandardErrorCodes.PROVIDER_QUOTA_EXCEEDED,
+  "PROVIDER_TRANSIENT_ERROR",
+]);
+
+/**
+ * Only upstream availability / 5xx / timeout / rate-limit / quota faults should trip
+ * the circuit breaker. 4xx bad user input, validation, or content-policy rejections
+ * must NOT trip the circuit breaker for healthy providers.
+ */
+function shouldTripCircuitBreaker(normalized) {
+  if (!normalized) return false;
+  if (CIRCUIT_BREAKER_TRIP_CODES.has(normalized.code)) return true;
+  const status = Number(normalized.statusCode || normalized.status || 0);
+  return status === 429 || status >= 500;
+}
 
 /**
  * Universal Model Runner (Model-First Provider-Owned Architecture)
@@ -136,9 +156,15 @@ export async function run(modelId, rawInput = {}, options = {}) {
 
     // 11. Check Circuit Breaker (Route-Level Execution Identity)
     if (!circuitBreakerRegistry.isAvailable(circuitKey)) {
-      throw new ProviderTransientError(
+      const cbErr = new ProviderTransientError(
         `Provider route "${circuitKey}" is temporarily unavailable (circuit breaker OPEN)`
       );
+      cbErr.code = StandardErrorCodes.CIRCUIT_BREAKER_OPEN;
+      cbErr.retryable = false;
+      cbErr.statusCode = 503;
+      cbErr.category = "UPSTREAM_FAULT";
+      cbErr.safeMessage = "The model provider is temporarily unavailable. Please try again shortly.";
+      throw cbErr;
     }
 
     // 12. Execute Provider via RuntimeExecutor
@@ -154,8 +180,10 @@ export async function run(modelId, rawInput = {}, options = {}) {
         options,
       });
     } catch (err) {
-      circuitBreakerRegistry.recordFailure(circuitKey);
       const normalized = normalizeError(err, { binding: route, provider });
+      if (shouldTripCircuitBreaker(normalized)) {
+        circuitBreakerRegistry.recordFailure(circuitKey);
+      }
       if (normalized.code === "PROVIDER_QUOTA_EXCEEDED") {
         logger.error(
           {

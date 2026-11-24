@@ -1082,18 +1082,18 @@ describe("Sealed Models Subsystem Architecture", () => {
   describe("11. WaveSpeed Provider-Owned Execution Topology & Isolation", () => {
 
     // TEST 1 — Model domain
-    it("TEST 1: Every logical model explicitly declares a valid domain (image, video, llm, upscale) without provider route taxonomy", () => {
+    it("TEST 1: Every logical model explicitly declares a valid domain (image, video, llm, upscale, remove_background) without provider route taxonomy", () => {
       const catalog = models.getCatalog({ includeSystem: true });
       assert.ok(catalog.length >= 9, "Expected at least 9 models in catalog");
 
-      const validDomains = new Set(["image", "video", "llm", "upscale"]);
+      const validDomains = new Set(["image", "video", "llm", "upscale", "remove_background"]);
       const forbiddenRouteNames = /^(?:text_to_image|image_to_image|inpaint|edit|text_to_video|image_to_video|wavespeed)/;
 
       for (const m of catalog) {
         assert.ok(m.domain, `Model "${m.modelId}" must declare a domain`);
         assert.ok(
           validDomains.has(m.domain),
-          `Model "${m.modelId}" domain "${m.domain}" must be one of [image, video, llm, upscale]`
+          `Model "${m.modelId}" domain "${m.domain}" must be one of [image, video, llm, upscale, remove_background]`
         );
         assert.strictEqual(
           forbiddenRouteNames.test(m.domain),
@@ -1109,7 +1109,7 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.ok(catalog.length > 0);
       for (const entry of catalog) {
         assert.ok(entry.domain, `Catalog entry for ${entry.modelId} must include domain`);
-        assert.ok(["image", "video", "llm", "upscale"].includes(entry.domain));
+        assert.ok(["image", "video", "llm", "upscale", "remove_background"].includes(entry.domain));
       }
     });
 

@@ -93,6 +93,10 @@ export async function run({ provider, binding, payload, credential, timeoutMs, o
       rateLimitErr.statusCode = 429;
       rateLimitErr.code = "RATE_LIMITED";
       rateLimitErr.raw = data;
+      const retryAfter = response.headers?.get?.("retry-after");
+      if (retryAfter) {
+        rateLimitErr.headers = { "retry-after": retryAfter };
+      }
       throw rateLimitErr;
     }
     if (response.status >= 500) {

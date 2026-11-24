@@ -20,9 +20,15 @@ export function getModelConfig(options = {}) {
 
     const catalog = getCatalog();
     const models = catalog.map((m) => {
+        const defaultInput =
+            m.domain === "video"
+                ? { duration: 5, resolution: "720p" }
+                : m.parameters?.quality
+                    ? { quality: m.parameters.quality.default || "standard" }
+                    : {};
         const defaultCost = safeCalculateCost(
             m.modelFamily || m.id,
-            m.domain === "video" ? { duration: 5, resolution: "720p" } : { quality: "standard" }
+            defaultInput
         );
 
         return {

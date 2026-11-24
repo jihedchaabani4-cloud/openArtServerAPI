@@ -1,0 +1,50 @@
+{
+  "id": "bria_remove_background_3_0",
+  "domain": "remove_background",
+  "displayName": "Bria RMB 3.0",
+  "description": "High-precision AI background removal (RMBG 3.0) by Bria with fine hair, fur, and semi-transparent alpha matting.",
+  "status": "active",
+  "aliases": [
+    "bria-remove-background-3.0",
+    "bria-remove-background-3-0",
+    "bria/remove-background-3.0",
+    "remove_background_3_0",
+    "rmbg_3_0"
+  ],
+  "capabilities": {
+    "input_image": true,
+    "preserve_alpha": true
+  },
+  "canonicalInputs": {
+    "input_image": {
+      "type": "string",
+      "required": true,
+      "max": 1,
+      "description": "Source image URL to remove the background from (JPEG, PNG, WEBP)."
+    },
+    "preserve_alpha": {
+      "type": "boolean",
+      "required": false,
+      "default": true,
+      "description": "Preserve the alpha channel in the returned asset for direct compositing."
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "default": 3
+    }
+  },
+  "operations": {
+    "remove_background": {
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "default": 3
+        }
+      }
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/bria.svg"
+}

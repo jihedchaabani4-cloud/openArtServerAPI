@@ -35,6 +35,7 @@ export function resolveWaveSpeedRoute(binding, semanticInput = {}, context = {})
 
   switch (domain) {
     case "image":
+    case "remove_background":
       return resolveImageRoute(binding, semanticInput, context);
     case "video":
       return resolveVideoRoute(binding, semanticInput, context);

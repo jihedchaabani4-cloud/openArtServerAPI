@@ -1,0 +1,44 @@
+{
+  "modelId": "bria_remove_background_3_0",
+  "operation": "remove_background",
+  "providerId": "wavespeed",
+  "providerModelId": "bria/remove-background-3.0",
+  "endpoint": "/api/v3/bria/remove-background-3.0",
+  "priority": 1,
+  "status": "active",
+  "parameters": {
+    "input_image": {
+      "providerField": "image",
+      "type": "string"
+    },
+    "preserve_alpha": {
+      "providerField": "preserve_alpha",
+      "type": "boolean"
+    }
+  },
+  "parameterMap": {
+    "input_image": {
+      "providerField": "image"
+    },
+    "preserve_alpha": {
+      "providerField": "preserve_alpha"
+    }
+  },
+  "pricing": {
+    "base_cost_usd": 0.018
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "default": 3
+    }
+  },
+  "outputMap": {
+    "images": "outputs"
+  },
+  "pollingConfig": {
+    "pollInterval": 2,
+    "timeout": 600
+  },
+  "version": "1.0.0"
+}

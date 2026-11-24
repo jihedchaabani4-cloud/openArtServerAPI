@@ -77,9 +77,22 @@ try {
 export function getModelConfig(modelIdOrOptions = {}) {
   if (typeof modelIdOrOptions === "string") {
     const config = getInternalModelConfig();
-    const found = config.models.find(
+    let found = config.models.find(
       (m) => m.key === modelIdOrOptions || m.modelFamily === modelIdOrOptions || m.id === modelIdOrOptions
     );
+    if (!found) {
+      let resolved = null;
+      try {
+        resolved = getModel(modelIdOrOptions);
+      } catch {
+        resolved = null;
+      }
+      if (resolved?.id) {
+        found = config.models.find(
+          (m) => m.key === resolved.id || m.modelFamily === resolved.id || m.id === resolved.id
+        );
+      }
+    }
     if (!found) {
       throw new ModelsNotFoundError(`Model "${modelIdOrOptions}" not found in catalog configuration`, {
         modelFamily: modelIdOrOptions,
@@ -183,6 +196,7 @@ export async function executeGeneration({
  * @param {boolean} [input.jsonMode=false] - Whether output should parse to JSON
  * @param {object} [input.schema] - Optional schema for structured output
  * @param {string} [input.userId] - Calling user ID
+ * @param {number} [input.timeoutMs] - Optional per-call timeout in milliseconds
  * @param {object} [options={}] - Extra runner options
  * @returns {Promise<{ raw: string, content: string, json?: object, model: string, durationMs: number }>}
  */
@@ -194,8 +208,10 @@ export async function executeLLM({
   jsonMode = false,
   schema = null,
   userId = null,
+  timeoutMs = null,
   ...options
 } = {}) {
+  const mergedOptions = timeoutMs != null ? { ...options, timeoutMs } : options;
   return llmService.generate({
     prompt,
     systemInstruction,
@@ -204,7 +220,8 @@ export async function executeLLM({
     model,
     userId,
     schema,
-    options,
+    timeoutMs,
+    options: mergedOptions,
   });
 }
 

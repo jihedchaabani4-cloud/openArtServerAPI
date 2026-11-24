@@ -107,25 +107,33 @@ function mapParameters(binding, payload) {
 // LTX is always async: POST → 202 { id } → poll GET /{endpoint}/{id}
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function pollJob({ baseUrl, statusEndpoint, jobId, credential, pollingConfig }) {
-  const pollIntervalMs = (pollingConfig?.pollInterval ?? 5) * 1000;
-  const timeoutMs      = (pollingConfig?.timeout      ?? 600) * 1000;
-  const completedSet   = new Set(pollingConfig?.completedStatuses ?? ["completed"]);
-  const failedSet      = new Set(pollingConfig?.failedStatuses    ?? ["failed"]);
+const DEFAULT_INITIAL_POLL_DELAY_MS = 1200;
 
-  const url     = `${baseUrl}${statusEndpoint.replace(":id", jobId)}`;
+async function pollJob({ baseUrl, statusEndpoint, providerJobId, credential, pollingConfig, sleeper, fetchFn }) {
+  const pollIntervalMs     = (pollingConfig?.pollInterval ?? 5) * 1000;
+  const initialPollDelayMs = pollingConfig?.initialPollDelayMs ?? Math.min(DEFAULT_INITIAL_POLL_DELAY_MS, pollIntervalMs);
+  const timeoutMs          = (pollingConfig?.timeout      ?? 600) * 1000;
+  const completedSet       = new Set(pollingConfig?.completedStatuses ?? ["completed"]);
+  const failedSet          = new Set(pollingConfig?.failedStatuses    ?? ["failed"]);
+  const sleep              = sleeper || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const doFetch            = fetchFn || fetch;
+
+  const url     = `${baseUrl}${statusEndpoint.replace(":id", providerJobId)}`;
   const headers = { Authorization: `Bearer ${credential}`, "Content-Type": "application/json" };
 
   const deadline = Date.now() + timeoutMs;
+  let pollAttempt = 0;
 
   while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, pollIntervalMs));
+    const delayMs = pollAttempt === 0 ? initialPollDelayMs : pollIntervalMs;
+    pollAttempt += 1;
+    await sleep(delayMs);
 
     let res;
     try {
-      res = await fetch(url, { headers });
+      res = await doFetch(url, { headers });
     } catch (err) {
-      logger.warn({ jobId, err: err.message }, "[LTX] Poll network error — retrying");
+      logger.warn({ providerJobId, err: err.message }, "[LTX] Poll network error — retrying");
       continue;
     }
 
@@ -133,7 +141,7 @@ async function pollJob({ baseUrl, statusEndpoint, jobId, credential, pollingConf
       const errData = await res.json().catch(() => ({}));
       const msg     = errData?.error?.message ?? `LTX poll returned HTTP ${res.status}`;
       if (res.status >= 500) {
-        logger.warn({ jobId, status: res.status }, "[LTX] Poll server error — retrying");
+        logger.warn({ providerJobId, status: res.status }, "[LTX] Poll server error — retrying");
         continue;
       }
       const err = new ProviderRequestError(msg);
@@ -146,7 +154,7 @@ async function pollJob({ baseUrl, statusEndpoint, jobId, credential, pollingConf
     const status = data.status;
 
     if (completedSet.has(status)) {
-      logger.info({ jobId }, "[LTX] Job completed");
+      logger.info({ providerJobId }, "[LTX] Job completed");
       return data;
     }
 
@@ -166,11 +174,11 @@ async function pollJob({ baseUrl, statusEndpoint, jobId, credential, pollingConf
       throw err;
     }
 
-    logger.debug({ jobId, status }, "[LTX] Polling…");
+    logger.debug({ providerJobId, status }, "[LTX] Polling…");
   }
 
   const timeoutErr = new ProviderTransientError(
-    `[LTX] Job ${jobId} did not complete within ${timeoutMs / 1000}s`
+    `[LTX] Job ${providerJobId} did not complete within ${timeoutMs / 1000}s`
   );
   timeoutErr.statusCode = 504;
   timeoutErr.code       = "PROVIDER_TIMEOUT";
@@ -223,9 +231,11 @@ export async function run({ provider, binding, payload, credential, timeoutMs, o
     Accept: "application/json",
   };
 
+  const doFetch = options.fetchFn || fetch;
+
   let submitRes;
   try {
-    submitRes = await fetch(`${baseUrl}${endpoint}`, {
+    submitRes = await doFetch(`${baseUrl}${endpoint}`, {
       method: "POST",
       headers,
       body: JSON.stringify(ltxBody),
@@ -260,6 +270,11 @@ export async function run({ provider, binding, payload, credential, timeoutMs, o
       const rateLimitErr = new ProviderTransientError(msg);
       rateLimitErr.statusCode = 429;
       rateLimitErr.code = "RATE_LIMITED";
+      rateLimitErr.raw = submitData;
+      const retryAfter = submitRes.headers?.get?.("retry-after");
+      if (retryAfter) {
+        rateLimitErr.headers = { "retry-after": retryAfter };
+      }
       throw rateLimitErr;
     }
     if (submitRes.status >= 500) {
@@ -275,20 +290,22 @@ export async function run({ provider, binding, payload, credential, timeoutMs, o
     throw clientErr;
   }
 
-  const jobId = submitData.id;
-  if (!jobId) {
+  const providerJobId = submitData.id;
+  if (!providerJobId) {
     throw new ProviderRequestError(`[LTX] Submit response missing job id: ${JSON.stringify(submitData)}`);
   }
 
-  logger.info({ jobId, operation: operation.id }, "[LTX] Job submitted — polling");
+  logger.info({ providerJobId, operation: operation.id }, "[LTX] Job submitted — polling");
 
   // 4. Poll until complete
   const result = await pollJob({
     baseUrl,
     statusEndpoint,
-    jobId,
+    providerJobId,
     credential: apiKey,
     pollingConfig: binding.pollingConfig,
+    sleeper: options.sleeper,
+    fetchFn: doFetch,
   });
 
   return result;

@@ -70,17 +70,45 @@ export class RuntimeExecutor {
       } catch (err) {
         lastErr = err;
         const normalized = normalizeError(err, { binding, provider });
+        if (
+          typeof normalized.retryAfterMs === "number" &&
+          lastErr &&
+          typeof lastErr === "object" &&
+          lastErr.retryAfterMs === undefined
+        ) {
+          lastErr.retryAfterMs = normalized.retryAfterMs;
+        }
         if (normalized.retryable && !err.terminal && !normalized.terminal && attempt < attemptsTotal) {
           const maxBackoffMs = options.maxBackoffMs ?? 2000;
+          if (typeof normalized.retryAfterMs === "number" && normalized.retryAfterMs > maxBackoffMs) {
+            logger.warn(
+              {
+                modelId,
+                bindingId,
+                attempt,
+                retryAfterMs: normalized.retryAfterMs,
+                maxBackoffMs,
+                error: normalized.message,
+                providerRaw: normalized.providerRaw,
+              },
+              `[RuntimeExecutor] Provider requested retryAfterMs=${normalized.retryAfterMs}ms exceeding maxBackoffMs=${maxBackoffMs}ms. Failing fast without futile retries.`
+            );
+            throw lastErr;
+          }
           const randomFn = options.randomFn || Math.random;
           const expCeiling = Math.min(maxBackoffMs, initialBackoffMs * Math.pow(2, attempt - 1));
-          const backoffMs = Math.max(1, Math.round(randomFn() * expCeiling));
+          const computedBackoffMs = Math.max(1, Math.round(randomFn() * expCeiling));
+          const backoffMs =
+            typeof normalized.retryAfterMs === "number" && normalized.retryAfterMs > 0
+              ? Math.min(maxBackoffMs, Math.max(computedBackoffMs, normalized.retryAfterMs))
+              : computedBackoffMs;
           logger.warn(
             {
               modelId,
               bindingId,
               attempt,
               nextAttemptInMs: backoffMs,
+              retryAfterMs: normalized.retryAfterMs ?? null,
               error: normalized.message,
               providerRaw: normalized.providerRaw,
             },

@@ -119,6 +119,20 @@
             "high": 3.2857
           }
         }
+      },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "1k:low": 10,
+          "1k:medium": 14,
+          "1k:high": 26,
+          "2k:low": 14,
+          "2k:medium": 22,
+          "2k:high": 38,
+          "4k:low": 20,
+          "4k:medium": 34,
+          "4k:high": 52
+        }
       }
     },
     {
@@ -147,6 +161,20 @@
             "medium": 1,
             "high": 3.2857
           }
+        }
+      },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "1k:low": 10,
+          "1k:medium": 14,
+          "1k:high": 26,
+          "2k:low": 14,
+          "2k:medium": 22,
+          "2k:high": 38,
+          "4k:low": 20,
+          "4k:medium": 34,
+          "4k:high": 52
         }
       }
     },
@@ -208,6 +236,20 @@
             "high": 3.2857
           }
         }
+      },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "1k:low": 10,
+          "1k:medium": 14,
+          "1k:high": 26,
+          "2k:low": 14,
+          "2k:medium": 22,
+          "2k:high": 38,
+          "4k:low": 20,
+          "4k:medium": 34,
+          "4k:high": 52
+        }
       }
     },
     {
@@ -236,6 +278,20 @@
             "medium": 1,
             "high": 3.2857
           }
+        }
+      },
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "1k:low": 10,
+          "1k:medium": 14,
+          "1k:high": 26,
+          "2k:low": 14,
+          "2k:medium": 22,
+          "2k:high": 38,
+          "4k:low": 20,
+          "4k:medium": 34,
+          "4k:high": 52
         }
       }
     },

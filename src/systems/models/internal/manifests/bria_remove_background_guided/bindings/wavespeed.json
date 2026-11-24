@@ -1,0 +1,51 @@
+{
+  "modelId": "bria_remove_background_guided",
+  "operation": "remove_background",
+  "providerId": "wavespeed",
+  "providerModelId": "bria/remove-background-guided",
+  "endpoint": "/api/v3/bria/remove-background-guided",
+  "priority": 1,
+  "status": "active",
+  "parameters": {
+    "input_image": {
+      "providerField": "image",
+      "type": "string"
+    },
+    "prompt": {
+      "providerField": "prompt",
+      "type": "string"
+    },
+    "preserve_alpha": {
+      "providerField": "preserve_alpha",
+      "type": "boolean"
+    }
+  },
+  "parameterMap": {
+    "input_image": {
+      "providerField": "image"
+    },
+    "prompt": {
+      "providerField": "prompt"
+    },
+    "preserve_alpha": {
+      "providerField": "preserve_alpha"
+    }
+  },
+  "pricing": {
+    "base_cost_usd": 0.03
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "default": 4
+    }
+  },
+  "outputMap": {
+    "images": "outputs"
+  },
+  "pollingConfig": {
+    "pollInterval": 2,
+    "timeout": 600
+  },
+  "version": "1.0.0"
+}

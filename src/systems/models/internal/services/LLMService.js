@@ -9,11 +9,40 @@
  */
 import { getModel } from "../registry/modelRegistry.js";
 import { run as runInternal } from "../execution/modelRunner.js";
+import { ProviderTransientError } from "../errors.js";
 import { createLogger, LogEvents } from "#shared";
 
 function run(modelFamily, semanticParams = {}, options = {}) {
   const model = getModel(modelFamily);
   return runInternal(modelFamily, semanticParams, { ...options, model });
+}
+
+async function runWithTimeout(promiseFactory, timeoutMs, model) {
+  if (!(typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0)) {
+    return await promiseFactory();
+  }
+  let timer = null;
+  const workPromise = Promise.resolve().then(promiseFactory);
+  workPromise.catch(() => {});
+
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new ProviderTransientError(
+        `LLM request for model "${model}" timed out after ${timeoutMs}ms`
+      );
+      err.code = "PROVIDER_TIMEOUT";
+      err.statusCode = 504;
+      err.retryable = true;
+      reject(err);
+    }, timeoutMs);
+    if (typeof timer.unref === "function") timer.unref();
+  });
+
+  try {
+    return await Promise.race([workPromise, timeoutPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 const logger = createLogger("llm");
@@ -63,6 +92,7 @@ export class LLMService {
     model = this.defaultModel,
     temperature = 0.4,
     userId = null,
+    timeoutMs = null,
     options = {},
   }) {
     const startTime = performance.now();
@@ -70,6 +100,11 @@ export class LLMService {
     const resolvedUserId = userId || options.userId || null;
     const isInternal = Boolean(options.internal || options.isInternal);
     const internalReason = options.reason || null;
+    const rawTimeoutMs = timeoutMs ?? options.timeoutMs ?? null;
+    const resolvedTimeoutMs =
+      typeof rawTimeoutMs === "number" && Number.isFinite(rawTimeoutMs) && rawTimeoutMs > 0
+        ? rawTimeoutMs
+        : null;
 
     // Enforce billing identity: require userId unless caller provides an explicit, approved internal platform flag
     if (!resolvedUserId) {
@@ -122,23 +157,30 @@ export class LLMService {
       const runOptions = resolvedUserId
         ? {
             ...cleanOptions,
+            ...(resolvedTimeoutMs !== null ? { timeoutMs: resolvedTimeoutMs } : {}),
             userId: resolvedUserId,
             noCharge: false,
           }
         : {
             ...cleanOptions,
+            ...(resolvedTimeoutMs !== null ? { timeoutMs: resolvedTimeoutMs } : {}),
             noCharge: true,
             reason: internalReason,
           };
 
-      result = await run(
-        model,
-        {
-          messages,
-          images,
-          temperature,
-        },
-        runOptions
+      result = await runWithTimeout(
+        () =>
+          run(
+            model,
+            {
+              messages,
+              images,
+              temperature,
+            },
+            runOptions
+          ),
+        resolvedTimeoutMs,
+        model
       );
     } catch (err) {
       const durationMs = Math.round(performance.now() - startTime);

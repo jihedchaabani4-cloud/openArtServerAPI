@@ -11,6 +11,15 @@
       "providerField": "prompt",
       "type": "string"
     },
+    "input_image": {
+      "providerField": "images",
+      "type": "string",
+      "transform": "wrap_array"
+    },
+    "images": {
+      "providerField": "images",
+      "type": "array"
+    },
     "aspect_ratio": {
       "providerField": "aspect_ratio",
       "type": "string"
@@ -32,6 +41,13 @@
   "parameterMap": {
     "prompt": {
       "providerField": "prompt"
+    },
+    "input_image": {
+      "providerField": "images",
+      "transform": "wrap_array"
+    },
+    "images": {
+      "providerField": "images"
     },
     "aspect_ratio": {
       "providerField": "aspect_ratio"
@@ -75,47 +91,6 @@
       ],
       "endpoint": "/api/v3/google/nano-banana-pro/edit",
       "providerModelId": "google/nano-banana-pro/edit",
-      "parameters": {
-        "prompt": {
-          "providerField": "prompt",
-          "type": "string"
-        },
-        "input_image": {
-          "providerField": "images",
-          "type": "string",
-          "transform": "wrap_array"
-        },
-        "aspect_ratio": {
-          "providerField": "aspect_ratio",
-          "type": "string"
-        },
-        "resolution": {
-          "providerField": "resolution",
-          "type": "string"
-        },
-        "output_format": {
-          "providerField": "output_format",
-          "type": "string"
-        }
-      },
-      "parameterMap": {
-        "prompt": {
-          "providerField": "prompt"
-        },
-        "input_image": {
-          "providerField": "images",
-          "transform": "wrap_array"
-        },
-        "aspect_ratio": {
-          "providerField": "aspect_ratio"
-        },
-        "resolution": {
-          "providerField": "resolution"
-        },
-        "output_format": {
-          "providerField": "output_format"
-        }
-      },
       "pricing": {
         "base_cost_usd": 0.14,
         "modifiers": {
@@ -130,16 +105,50 @@
         "table": {
           "1k": 18,
           "2k": 18,
-          "4k": 30
+          "4k": 30,
+          "default": 18
+        }
+      }
+    },
+    {
+      "id": "edit_multi",
+      "operation": "edit",
+      "priority": 2,
+      "when": {
+        "images": "present"
+      },
+      "requiredInputs": [
+        "prompt",
+        "images"
+      ],
+      "endpoint": "/api/v3/google/nano-banana-pro/edit",
+      "providerModelId": "google/nano-banana-pro/edit",
+      "pricing": {
+        "base_cost_usd": 0.14,
+        "modifiers": {
+          "resolution": {
+            "1k": 1,
+            "2k": 1,
+            "4k": 1.714
+          }
+        }
+      },
+      "retailPricing": {
+        "table": {
+          "1k": 18,
+          "2k": 18,
+          "4k": 30,
+          "default": 18
         }
       }
     },
     {
       "id": "generation",
       "operation": "text_to_image",
-      "priority": 2,
+      "priority": 3,
       "when": {
-        "input_image": "absent"
+        "input_image": "absent",
+        "images": "absent"
       },
       "requiredInputs": [
         "prompt"
@@ -176,16 +185,50 @@
         "table": {
           "1k": 18,
           "2k": 18,
-          "4k": 30
+          "4k": 30,
+          "default": 18
+        }
+      }
+    },
+    {
+      "id": "edit_multi",
+      "operation": "edit",
+      "priority": 2,
+      "when": {
+        "images": "present"
+      },
+      "requiredInputs": [
+        "prompt",
+        "images"
+      ],
+      "endpoint": "/api/v3/google/nano-banana-pro/edit",
+      "providerModelId": "google/nano-banana-pro/edit",
+      "pricing": {
+        "base_cost_usd": 0.14,
+        "modifiers": {
+          "resolution": {
+            "1k": 1,
+            "2k": 1,
+            "4k": 1.714
+          }
+        }
+      },
+      "retailPricing": {
+        "table": {
+          "1k": 18,
+          "2k": 18,
+          "4k": 30,
+          "default": 18
         }
       }
     },
     {
       "id": "generation",
       "operation": "text_to_image",
-      "priority": 2,
+      "priority": 3,
       "when": {
-        "input_image": "absent"
+        "input_image": "absent",
+        "images": "absent"
       },
       "requiredInputs": [
         "prompt"

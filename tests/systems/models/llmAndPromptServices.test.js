@@ -1,8 +1,9 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { llmService, ALLOWED_INTERNAL_REASONS } from "#models/tools";
+import { llmService, executeLLM, ALLOWED_INTERNAL_REASONS } from "#models/tools";
 import { LLMService } from "../../../src/systems/models/internal/services/LLMService.js";
 import { PromptService } from "../../../src/systems/models/internal/services/PromptService.js";
+import { run as runGoogle } from "../../../src/systems/models/internal/runtime/google/runner.js";
 import { LlmNode } from "../../../src/systems/generation/internal/v3/index.js";
 import { ElementAnalysisService } from "#elements/tools";
 
@@ -140,7 +141,7 @@ describe("LLMService NoCharge Defense & UserId Enforcement (Task T5)", () => {
 
     try {
       await LlmNode.execute(
-        { prompt: "A futuristic city", custom_instruction: "Enrich prompt" },
+        { prompt: "A futuristic city", skills: ["system-safety", "translate"] },
         { runId: "run-abc-123", userId: "user-node-caller-888" }
       );
 
@@ -197,6 +198,88 @@ describe("LLMService NoCharge Defense & UserId Enforcement (Task T5)", () => {
       /(userId is required|authenticated)/i,
       "Expected optimizePrompt without userId to throw"
     );
+  });
+
+  // ── TEST 9: executeLLM forwards timeoutMs and enforces a real per-call timeout ──
+  it("TEST 9: executeLLM forwards timeoutMs to runtimeExecutor options", async () => {
+    const res = await executeLLM({
+      prompt: "Quick prompt",
+      userId: "user-timeout-forward",
+      timeoutMs: 15000,
+      runtimeExecutor: mockExecutor,
+    });
+
+    assert.ok(res);
+    assert.strictEqual(capturedRunOptions.length, 1);
+    assert.strictEqual(capturedRunOptions[0].timeoutMs, 15000);
+  });
+
+  it("TEST 10: executeLLM rejects cleanly with transient PROVIDER_TIMEOUT when timeoutMs expires", async () => {
+    let timerHandle = null;
+    const hangingExecutor = {
+      execute: () =>
+        new Promise((resolve) => {
+          timerHandle = setTimeout(() => resolve({ content: "too late" }), 5000);
+          if (typeof timerHandle.unref === "function") timerHandle.unref();
+        }),
+    };
+
+    try {
+      await assert.rejects(
+        async () => {
+          await executeLLM({
+            prompt: "Hanging prompt",
+            userId: "user-timeout-expire",
+            timeoutMs: 35,
+            runtimeExecutor: hangingExecutor,
+          });
+        },
+        (err) =>
+          err.code === "PROVIDER_TIMEOUT" &&
+          err.statusCode === 504 &&
+          err.retryable === true
+      );
+    } finally {
+      if (timerHandle) clearTimeout(timerHandle);
+    }
+  });
+
+  it("TEST 11: Google runner aborts and rejects with transient PROVIDER_TIMEOUT on timeoutMs expiry", async () => {
+    let capturedSignal = null;
+    let timerHandle = null;
+    const hangingSdkClient = {
+      models: {
+        generateContent: (sdkPayload) => {
+          capturedSignal = sdkPayload.config?.abortSignal || null;
+          return new Promise((resolve) => {
+            timerHandle = setTimeout(() => resolve({ text: "late" }), 5000);
+            if (typeof timerHandle.unref === "function") timerHandle.unref();
+          });
+        },
+      },
+    };
+
+    try {
+      await assert.rejects(
+        async () => {
+          await runGoogle({
+            binding: { providerModelId: "gemini-3.1-flash-lite", sdkMethod: "generateContent" },
+            payload: { prompt: "Test timeout" },
+            credential: "test-key",
+            timeoutMs: 35,
+            options: { sdkClient: hangingSdkClient },
+          });
+        },
+        (err) =>
+          err.code === "PROVIDER_TIMEOUT" &&
+          err.statusCode === 504 &&
+          err.retryable === true
+      );
+      assert.ok(capturedSignal, "Expected AbortSignal to be passed into Google SDK config");
+      assert.strictEqual(capturedSignal.aborted, true, "Expected AbortSignal to be aborted on timeout");
+    } finally {
+      if (timerHandle) clearTimeout(timerHandle);
+    }
   });
 });
 }

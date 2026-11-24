@@ -1,0 +1,55 @@
+{
+  "id": "bria_remove_background_guided",
+  "domain": "remove_background",
+  "displayName": "Bria RMB Guided",
+  "description": "Text-guided AI background removal by Bria — keep or drop specific subjects cleanly with alpha channel preservation.",
+  "status": "active",
+  "aliases": [
+    "bria-remove-background-guided",
+    "bria/remove-background-guided",
+    "remove_background_guided",
+    "remove-background-guided"
+  ],
+  "capabilities": {
+    "input_image": true,
+    "prompt": true,
+    "preserve_alpha": true
+  },
+  "canonicalInputs": {
+    "input_image": {
+      "type": "string",
+      "required": true,
+      "max": 1,
+      "description": "Source image URL to remove the background from (JPEG, PNG, WEBP)."
+    },
+    "prompt": {
+      "type": "string",
+      "required": false,
+      "description": "Optional text instructions specifying which subjects or elements to keep or drop. Omit for automatic background removal."
+    },
+    "preserve_alpha": {
+      "type": "boolean",
+      "required": false,
+      "default": true,
+      "description": "Preserve existing transparency/alpha channel in the output image."
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "default": 4
+    }
+  },
+  "operations": {
+    "remove_background": {
+      "retailPricing": {
+        "currency": "credits",
+        "table": {
+          "default": 4
+        }
+      }
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/bria.svg"
+}

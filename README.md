@@ -14,7 +14,7 @@ Start with these unified reference documents before modifying any code:
 ## Worker Processes
 
 The system runs two separate queue workers:
-- **AI Generation Worker**: `npm run start:worker` (or `npm run dev:worker` in development). Entry point: `src/systems/generation/internal/workers/worker.js`.
+- **AI Generation Worker**: `npm run start:worker` (or `npm run dev:worker` in development). Entry point: `worker.js` (bootstraps `src/container.js` then starts `src/systems/generation/internal/workers/worker.js`).
 - **Wallet Maintenance Worker**: `npm run start:wallet-worker` (or `npm run dev:wallet-worker` in development). Entry point: `src/systems/billing/internal/workers/walletWorker.js`.
 
 ## Environment Variables

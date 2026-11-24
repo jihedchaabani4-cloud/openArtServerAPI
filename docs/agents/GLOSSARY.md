@@ -30,10 +30,10 @@ The single HTTP entry point mounting all 8 `#<system>/api` routers plus health/r
 ## 2. Domain & Operational Concepts
 
 ### Two-Phase Credit Hold
-The mandatory financial safety protocol for billable AI operations managed between `src/systems/generation/internal/v3/core/V3Dispatcher.js` and `#billing/tools`:
+The mandatory financial safety protocol for billable AI operations managed between `src/systems/generation/internal/v3/core/ExecutionEngine.js` and `#billing/tools`:
 1. **Reserve**: Upfront credit hold (`reserveCredits`) before queueing the BullMQ job.
 2. **Protected Dispatch**: Enqueue the job via `jobQueueService.js`; if enqueueing throws, immediately release the hold (`rollbackCredits`) and mark the placeholder media as `failed` (`markMediaFailed`).
-3. **Settle / Rollback**: Worker (`useCaseWorker.js`) finalizes the hold on completion (`settleCredits`) or refunds on failure (`rollbackCredits`), backed by `ReservationReaperService.js` for stale holds.
+3. **Settle / Rollback**: Worker (`useCaseWorker.js`) executes the job inside an isolated `JobExecutionContext.js` and finalizes the hold on completion (`settleCredits`) or refunds on failure (`rollbackCredits`), backed by `ReservationReaperService.js` for stale holds.
 
 ### Workflow & Workflow Run
 - **Workflow (`workflows` table)**: A persistent creative unit in a project owning generated or uploaded media via `workflow_media`.
@@ -41,6 +41,15 @@ The mandatory financial safety protocol for billable AI operations managed betwe
 
 ### Media & Save Types
 Assets stored and tracked by `src/systems/media/` (`media` and `workflow_media` tables) with declarative retention, quota, and storage bucket policies defined in `src/systems/media/internal/services/saveTypes.js`.
+
+### In-Place Image Edit (Relighting & Camera Angles)
+A single-output image transformation (`Relighting` or `Camera Angles`) targeting an existing `Workflow` by `workflow_id`:
+- **Server-Resolved Source Media**: The client sends only `workflow_id` (never `media_id`); the backend resolves the workflow's current primary `Media` (`is_primary = true`), validates ownership, completed status, and non-trashed workflow state, and records it as `source_media_id` in `generation_config`.
+- **Parent Ownership**: Appends a new `Media` row to the same `Workflow` (never creating a duplicate workflow) while preserving all prior media rows intact.
+- **Immediate Primary Selection**: The newly created edit placeholder immediately becomes the workflow's primary media (`is_primary = true`) upon creation, allowing successive edits on the same `workflow_id` to chain automatically.
+- **Server-Locked Model**: The underlying image-editing model is fixed on the server per edit use case and cannot be chosen or overridden by the client.
+- **Relighting**: Re-illuminates the workflow's primary image using explicit single-light controls (`light_type`, `brightness`, `color`, `size`, `rotation`, `tilt`, optional `distance`) while preserving subject identity and composition.
+- **Camera Angles**: Re-renders the workflow's primary image from a new virtual camera pose defined by `rotation`, `tilt`, and `zoom` while preserving subject, scene, and lighting continuity.
 
 ### Character
 A persistent AI influencer persona managed by `src/systems/characters/` with canonical traits, turnaround sheets, and reference media.

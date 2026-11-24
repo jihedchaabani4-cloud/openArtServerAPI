@@ -56,20 +56,20 @@
 
 Every billable generation flow in `src/systems/generation/` must obey the **5-Step Pre-Queue Launch & 3-Step Worker Settlement Protocol**:
 
-### Phase 1: Synchronous Launch (`V3Dispatcher.js`)
-1. **Verify Ownership & Inputs:** Validate input schema and verify user ownership of any referenced characters, elements, or media via `#identity/tools` (`assertOwns`).
-2. **Calculate Deterministic Cost:** Query `#models/tools` (`calculateOperationCost`) for the exact credit cost.
+### Phase 1: Synchronous Launch (`ExecutionEngine.js`)
+1. **Verify Ownership & Inputs:** Validate input schema and verify user ownership of any referenced characters, elements, media, and inline prompt tags via `#identity/tools` (`assertOwns` / `assertOwnsAny`).
+2. **Calculate Deterministic Cost:** Compile the active DAG via `GraphCompiler.js` and `#models/tools` (`calculateCost`) with strict fail-closed pricing.
 3. **Reserve Credits (Hold):** Call `#billing/tools` (`reserveCredits`) with an idempotency key to lock the user's credits before touching the queue.
-4. **Create Pending Media Placeholder:** Call `#media/tools` (`createMediaInWorkflow`) to create a trackable `pending` media record (`pendingMediaId`).
-5. **Protected Queue Dispatch:** Enqueue the job in BullMQ (`jobQueueService.addUseCaseJob`).
-   - **Mandatory Rollback on Dispatch Failure:** If `addUseCaseJob` throws an error, the `catch` block **must** immediately call `#billing/tools` (`rollbackCredits`) AND `#media/tools` (`markMediaFailed` / `failWorkflowPendingMedia`) so neither the user's credits nor the pending media row are left dangling.
+4. **Create Pending Media Placeholder:** Reuse a caller-supplied `media_id` or call `#media/tools` (`createPendingMedia`) to create 1 trackable `processing` media record.
+5. **Protected Queue Dispatch:** Enqueue 1 independent job in BullMQ (`jobQueueService.addUseCaseJob`).
+   - **Mandatory Rollback on Dispatch Failure:** If `addUseCaseJob` throws an error, the `catch` block **must** immediately call `#billing/tools` (`rollbackCredits`) AND `#media/tools` (`markMediaFailed`) for this run's media so neither the user's credits nor the pending media row are left dangling.
 
-### Phase 2: Asynchronous Worker Execution (`useCaseWorker.js`)
-1. **Execute DAG / Provider:** Run the workflow steps calling `#models/tools` (`executeProvider`).
+### Phase 2: Asynchronous Worker Execution (`useCaseWorker.js` & `ExecutionEngine.js`)
+1. **Execute DAG / Provider:** Construct an isolated per-job `JobExecutionContext.js` (per-job cache disposed in `finally`) and run the workflow waves via `WorkflowExecutor.js` calling `#models/tools` (`executeGeneration` / `executeLLM`).
 2. **On Success:**
    - Persist output media from the provider's temporary URL into permanent storage via `#media/tools`.
    - Finalize the credit deduction via `#billing/tools` (`settleCredits`).
 3. **On Error or Crash:**
    - Refund the user's credits immediately via `#billing/tools` (`rollbackCredits`).
-   - Mark the `pendingMediaId` (both workflow-linked and standalone media) as `failed` via `#media/tools` (`markMediaFailed`).
+   - Mark ONLY this run's `pendingMediaId` as `failed` via `#media/tools` (`markMediaFailed`).
    - If a worker process dies unexpectedly (OOM/SIGKILL), `ReservationReaperService.js` in `billing` automatically releases expired holds.

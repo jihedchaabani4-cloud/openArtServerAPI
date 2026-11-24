@@ -21,6 +21,10 @@ import { requireAuth, rateLimit } from "#identity/tools";
 // ── Images Router ──────────────────────────────────────────────────
 export const imagesRouter = express.Router();
 imagesRouter.post("/generated", requireAuth, rateLimit("imageGeneration"), imageController.generateImage);
+imagesRouter.post("/relight", requireAuth, rateLimit("imageGeneration"), imageController.relightImage);
+imagesRouter.post("/angles", requireAuth, rateLimit("imageGeneration"), imageController.changeImageAngle);
+imagesRouter.post("/remove-background", requireAuth, rateLimit("imageGeneration"), imageController.removeImageBackground);
+imagesRouter.post("/edit", requireAuth, rateLimit("imageGeneration"), imageController.editImage);
 
 // ── Video Router ───────────────────────────────────────────────────
 export const videoRouter = express.Router();
@@ -77,7 +81,7 @@ export {
     generationsMutation,
     workflowsController,
 };
-export const { generateImage } = imageController;
+export const { generateImage, relightImage, changeImageAngle, removeImageBackground, editImage } = imageController;
 export const { generateVideo } = videoController;
 export const { getAssets, getUserLibrary, getLibraryWorkflowDetail } = generationsQuery;
 export const { getProjectData } = projectController;

@@ -2,16 +2,11 @@ import { describe, it, beforeEach, afterEach, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { WorkflowRepository } from "#generation/tools";
 import { WorkflowAuthorizationService } from "../../../src/systems/generation/internal/services/WorkflowAuthorizationService.js";
-import {
-  resolveWorkflowReference,
-  resolveWorkflowReferences,
-  resolvePrimaryMediaUrl,
-} from "../../../src/systems/generation/internal/resolvers/WorkflowReferenceResolver.js";
 import { ResolveRefsNode } from "../../../src/systems/generation/internal/v3/index.js";
 import express from "express";
 import http from "node:http";
 import { workflowsRouter, imagesRouter, videoRouter } from "#generation/api";
-import { db, useCaseService, elementService, workflowMediaService } from "../../../src/container.js";
+import { db, executionEngine, elementService, workflowMediaService } from "../../../src/container.js";
 import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared";
 import { supabase } from "#shared/db/supabase.js";
 import { resetLimitersForTest, toMediaIdList } from "#identity/tools";
@@ -318,7 +313,7 @@ describe("Reference and Media Ownership Security & Boundary Tests (Task T2c)", (
   let originalFindByWorkflow;
   let originalFindByCharacterId;
   let originalResolveRecord;
-  let originalPrepareAndEnqueue;
+  let originalLaunch;
 
   let workflowCreationCalls = [];
   let mediaCreationCalls = [];
@@ -375,7 +370,7 @@ describe("Reference and Media Ownership Security & Boundary Tests (Task T2c)", (
     originalFindByWorkflow = db.media?.findByWorkflow;
     originalFindByCharacterId = db.characters?.findByCharacterId;
     originalResolveRecord = db.elements?.resolveRecord;
-    originalPrepareAndEnqueue = useCaseService?.prepareAndEnqueue;
+    originalLaunch = executionEngine?.launch;
 
     workflowCreationCalls = [];
     mediaCreationCalls = [];
@@ -486,8 +481,8 @@ describe("Reference and Media Ownership Security & Boundary Tests (Task T2c)", (
       };
     }
 
-    if (useCaseService) {
-      useCaseService.prepareAndEnqueue = async (params) => {
+    if (executionEngine) {
+      executionEngine.launch = async (params) => {
         enqueueCalls.push(params);
         return {
           jobId: "mock-job-t2c",
@@ -515,7 +510,7 @@ describe("Reference and Media Ownership Security & Boundary Tests (Task T2c)", (
     }
     if (db.characters) db.characters.findByCharacterId = originalFindByCharacterId;
     if (db.elements) db.elements.resolveRecord = originalResolveRecord;
-    if (useCaseService) useCaseService.prepareAndEnqueue = originalPrepareAndEnqueue;
+    if (executionEngine) executionEngine.launch = originalLaunch;
   });
 
   // ── TEST 1: Image Generation Controller - Cross-Tenant Reference in references[] ──
@@ -589,23 +584,6 @@ describe("Reference and Media Ownership Security & Boundary Tests (Task T2c)", (
     assert.strictEqual(enqueueCalls.length, 0, "No job should be enqueued");
   });
 
-  // ── TEST 4: WorkflowReferenceResolver.resolveWorkflowReference rejects unowned entity ──
-  it("TEST 4: WorkflowReferenceResolver: resolveWorkflowReference returns null when userId does not own entity", async () => {
-    // User B tries to resolve User A's character workflow
-    const resultChar = await resolveWorkflowReference("wf-char-user-A", "user-B");
-    assert.strictEqual(resultChar, null, "Unowned character workflow must resolve to null for User B");
-
-    // User B tries to resolve User A's generation workflow
-    const resultGen = await resolveWorkflowReference("wf-user-A", "user-B");
-    assert.strictEqual(resultGen, null, "Unowned generation workflow must resolve to null for User B");
-  });
-
-  // ── TEST 5: WorkflowReferenceResolver.resolvePrimaryMediaUrl rejects unowned workflow ──
-  it("TEST 5: WorkflowReferenceResolver: resolvePrimaryMediaUrl returns null when userId does not own media/workflow", async () => {
-    const unownedUrl = await resolvePrimaryMediaUrl("wf-user-A", "user-B");
-    assert.strictEqual(unownedUrl, null, "Unowned primary media URL must resolve to null for User B");
-  });
-
   // ── TEST 6: V3 ResolveRefsNode ignores unowned references ──
   it("TEST 6: V3 ResolveRefsNode: unowned references are discarded and not injected into prepared_prompt", async () => {
     const resolvedRefs = await ResolveRefsNode.execute(
@@ -629,15 +607,7 @@ describe("Reference and Media Ownership Security & Boundary Tests (Task T2c)", (
 
   // ── TEST 7: Legitimate owner (User A) operations succeed ──
   it("TEST 7: Legitimate Owner: User A referencing own character and media succeeds", async () => {
-    // 7a. Resolver succeeds for owner
-    const charResolved = await resolveWorkflowReference("char-user-A", "user-A");
-    assert.ok(charResolved, "User A should resolve own character");
-    assert.strictEqual(charResolved.name, "Alice Secret");
-
-    const mediaUrlResolved = await resolvePrimaryMediaUrl("wf-user-A", "user-A");
-    assert.ok(mediaUrlResolved, "User A should resolve own primary media URL");
-
-    // 7b. Image Gen HTTP request succeeds for owner
+    // Image Gen HTTP request succeeds for owner
     const res = await fetch(`${baseUrl}/api/images/generated`, {
       method: "POST",
       headers: {

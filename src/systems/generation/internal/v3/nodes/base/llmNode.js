@@ -6,152 +6,61 @@ import {
   GenerationSafetyError,
 } from "../../../errors.js";
 import { extractNodeCostAmount } from "./mediaNodeHelpers.js";
+import {
+  LLM_SKILLS_REGISTRY,
+  buildUnifiedLlmInstruction,
+} from "../../skills/index.js";
 
-/**
- * Canonical Skills Registry for `base.llm`
- *
- * Combines multiple prompt intelligence tasks into a single LLM invocation
- * to minimize latency and token cost while guaranteeing fail-closed safety.
- */
-export const LLM_SKILLS_REGISTRY = Object.freeze({
-  "system-safety": {
-    id: "system-safety",
-    requiresSafetyCheck: true,
-    requiresJson: true,
-    instruction: `1. [SAFETY GUARD (FAIL-CLOSED)]:
-   - Inspect the user prompt and any attached reference context/images for NSFW, explicit nudity, non-consensual sexual content, child exploitation, self-harm, or extreme gore.
-   - Set "is_safe": true if safe, or "is_safe": false with a clear "safety_reason" if it violates policy.`,
-  },
-  translate: {
-    id: "translate",
-    requiresSafetyCheck: false,
-    requiresJson: true,
-    instruction: `2. [FAITHFUL TRANSLATION & TAG PRESERVATION]:
-   - Translate the user prompt from Arabic dialect (Tunisian/Darija), French, or any other language into clear, faithful English suitable for AI media generation without adding unrequested objects.
-   - CRITICAL: Preserve all @Name character/element tags and @image1..@imageN visual reference tags EXACTLY as written.`,
-  },
-  translation: {
-    id: "translation",
-    requiresSafetyCheck: false,
-    requiresJson: true,
-    instruction: `2. [FAITHFUL TRANSLATION & TAG PRESERVATION]:
-   - Translate the user prompt from Arabic dialect (Tunisian/Darija), French, or any other language into clear, faithful English suitable for AI media generation without adding unrequested objects.
-   - CRITICAL: Preserve all @Name character/element tags and @image1..@imageN visual reference tags EXACTLY as written.`,
-  },
-  "character-description": {
-    id: "character-description",
-    requiresSafetyCheck: false,
-    requiresJson: true,
-    instruction: `3. [CHARACTER TURNAROUND SHEET ENGINEERING]:
-   - Engineer a consistent 3-view studio character turnaround sheet prompt (front view, side profile view, and back view on a neutral studio background) preserving all anatomical, facial, and outfit traits.
-   - Populate "character_description" with the detailed character visual description and "character_title" with a short character title.`,
-  },
-  "json-output": {
-    id: "json-output",
-    requiresSafetyCheck: false,
-    requiresJson: true,
-    instruction: `4. [STRUCTURED JSON OUTPUT]:
-   - Return ONLY a valid JSON object matching the requested schema.`,
-  },
-});
+const DEFAULT_LLM_MODEL = "gemini-3.1-flash-lite";
+const DEFAULT_EMPTY_PROMPT_FALLBACK = "Process the attached images using the active skills.";
 
-function normalizeSkillName(skill) {
-  if (!skill || typeof skill !== "string") return "";
-  const trimmed = skill.trim().toLowerCase().replace(/^llm\//, "");
-  return trimmed;
-}
-
-/**
- * Builds a single unified system instruction from the active skills and optional custom_instruction.
- */
-export function buildUnifiedLlmInstruction(skills = [], customInstruction = "") {
-  const normalizedSkills = Array.isArray(skills)
-    ? skills.map(normalizeSkillName).filter(Boolean)
-    : [];
-
-  const activeSpecs = [];
+function normalizeImages(rawImages) {
+  const items = Array.isArray(rawImages)
+    ? rawImages
+    : rawImages !== undefined && rawImages !== null
+      ? [rawImages]
+      : [];
+  const urls = [];
   const seen = new Set();
-
-  for (const s of normalizedSkills) {
-    const spec = LLM_SKILLS_REGISTRY[s];
-    if (spec && !seen.has(spec.instruction)) {
-      seen.add(spec.instruction);
-      activeSpecs.push(spec);
+  for (const item of items) {
+    const raw = typeof item === "string" ? item : item?.url;
+    if (typeof raw === "string") {
+      const trimmed = raw.trim();
+      if (trimmed && !seen.has(trimmed)) {
+        seen.add(trimmed);
+        urls.push(trimmed);
+      }
     }
   }
-
-  const requiresSafety = activeSpecs.some((s) => s.requiresSafetyCheck);
-  const hasCharacterDesc = normalizedSkills.includes("character-description");
-
-  const blocks = [
-    "You are an AI Generation & Content Moderation Engine executing a unified single-call pipeline.",
-  ];
-
-  for (const spec of activeSpecs) {
-    blocks.push(spec.instruction);
-  }
-
-  if (customInstruction && typeof customInstruction === "string" && customInstruction.trim()) {
-    blocks.push(`[CUSTOM INSTRUCTION]:\n${customInstruction.trim()}`);
-  }
-
-  if (activeSpecs.length > 0 || requiresSafety) {
-    blocks.push(
-      `Return ONLY a valid JSON object with the following fields:
-{
-  "is_safe": true,
-  "safety_reason": null,
-  "prompt": "Translated and refined English prompt preserving all @Name and @imageN tags",
-  "description": "${hasCharacterDesc ? "Detailed 3-view character turnaround sheet description" : "Translated and refined English prompt"}",
-  "title": "Short descriptive title"
-}`
-    );
-  }
-
-  return {
-    systemInstruction: blocks.join("\n\n"),
-    requiresSafety,
-    hasCharacterDesc,
-    useJsonMode: activeSpecs.some((s) => s.requiresJson) || requiresSafety,
-  };
+  return urls;
 }
 
 /**
  * LlmNode (`base.llm`)
  *
- * Unified single-call LLM & Vision node with composable Skills (`system-safety`,
- * `translate` / `translation`, `character-description`, `json-output`).
+ * Generic single-call LLM & Vision node driven exclusively by composable
+ * `SKILL.md` skills with fail-closed safety guard enforcement.
  */
 export const LlmNode = {
   type: "base.llm",
   category: "llm",
   OUTPUT_NODE: false,
+  CACHEABLE: false,
 
   INPUT_TYPES: {
-    required: {
-      prompt: { type: "STRING" },
-    },
+    required: {},
     optional: {
-      model: { type: "STRING", default: "gemini-3.1-flash-lite" },
+      model: { type: "STRING", default: DEFAULT_LLM_MODEL },
+      prompt: { type: "STRING", default: "" },
       images: { type: "ARRAY", default: [] },
-      image_url: { type: "IMAGE_URL" },
-      skills: { type: "ARRAY", default: ["system-safety", "translate"] },
-      reference_guide: { type: "STRING", default: "" },
-      custom_instruction: { type: "STRING", default: "" },
-      system_instruction: { type: "STRING", default: "" },
-      json_mode: { type: "BOOLEAN", default: true },
-      schema: { type: "JSON" },
+      skills: { type: "ARRAY", default: [] },
     },
   },
 
   RETURN_TYPES: {
-    final_prompt: "STRING",
-    safe_prompt: "STRING",
+    status: "STRING",
     text: "STRING",
-    is_safe: "BOOLEAN",
     json: "JSON",
-    character_description: "STRING",
-    character_title: "STRING",
     metadata: "JSON",
   },
 
@@ -162,72 +71,59 @@ export const LlmNode = {
   },
 
   estimateCost(plannedInputs = {}) {
-    const model = plannedInputs.model || "gemini-3.1-flash-lite";
-    const res = calculateCost(model, { prompt: plannedInputs.prompt || "translate" });
+    const model =
+      (typeof plannedInputs.model === "string" && plannedInputs.model.trim()) ||
+      DEFAULT_LLM_MODEL;
+    const res = calculateCost(model, { prompt: plannedInputs.prompt || "llm" });
     return extractNodeCostAmount(res, model, "base.llm");
   },
 
-  async execute(inputs, ctx = {}) {
-    const rawPrompt = typeof inputs.prompt === "string" ? inputs.prompt.trim() : "";
-    if (!rawPrompt) {
-      throw new GenerationValidationError("prompt is required for base.llm", { field: "prompt" });
+  async execute(inputs = {}, ctx = {}) {
+    const safeInputs = inputs && typeof inputs === "object" ? inputs : {};
+    const rawPrompt = typeof safeInputs.prompt === "string" ? safeInputs.prompt.trim() : "";
+    const images = normalizeImages(safeInputs.images);
+    const skills = safeInputs.skills === undefined ? [] : safeInputs.skills;
+
+    if (!rawPrompt && images.length === 0) {
+      throw new GenerationValidationError(
+        "At least one of prompt or images is required for base.llm",
+        { field: "prompt" }
+      );
     }
 
-    // Separate embedded [Reference Guide] from the prompt if present so we can cleanly re-attach it
-    let promptBody = rawPrompt;
-    let extractedGuide = typeof inputs.reference_guide === "string" ? inputs.reference_guide.trim() : "";
-    const guideIdx = rawPrompt.indexOf("[Reference Guide]");
-    if (guideIdx !== -1) {
-      if (!extractedGuide) {
-        extractedGuide = rawPrompt.slice(guideIdx).trim();
-      }
-      promptBody = rawPrompt.slice(0, guideIdx).trim() || rawPrompt;
-    }
-
-    const images = [];
-    if (typeof inputs.image_url === "string" && inputs.image_url.trim()) {
-      images.push(inputs.image_url.trim());
-    }
-    if (Array.isArray(inputs.images)) {
-      for (const img of inputs.images) {
-        const url = typeof img === "string" ? img.trim() : img?.url;
-        if (url && !images.includes(url)) {
-          images.push(url);
-        }
-      }
-    }
-
-    const skills = Array.isArray(inputs.skills) ? inputs.skills : ["system-safety", "translate"];
-    const customInst =
-      (typeof inputs.custom_instruction === "string" && inputs.custom_instruction.trim()) ||
-      (typeof inputs.system_instruction === "string" && inputs.system_instruction.trim()) ||
-      "";
-
-    const { systemInstruction, requiresSafety, useJsonMode } = buildUnifiedLlmInstruction(skills, customInst);
-    const jsonMode = inputs.json_mode !== undefined ? Boolean(inputs.json_mode) || requiresSafety : useJsonMode;
+    const { systemInstruction, requiresSafety, useJsonMode } =
+      buildUnifiedLlmInstruction(skills);
 
     const llmFn = ctx.executeLLM || executeLLM;
+    const model =
+      (typeof safeInputs.model === "string" && safeInputs.model.trim()) ||
+      DEFAULT_LLM_MODEL;
+    const rawTimeoutMs = safeInputs.timeout_ms ?? safeInputs.timeoutMs;
+    const timeoutMs =
+      typeof rawTimeoutMs === "number" && Number.isFinite(rawTimeoutMs) && rawTimeoutMs > 0
+        ? Math.floor(rawTimeoutMs)
+        : undefined;
 
     let res;
     try {
       res = await llmFn({
-        model: inputs.model || "gemini-3.1-flash-lite",
-        prompt: rawPrompt,
+        model,
+        prompt: rawPrompt || DEFAULT_EMPTY_PROMPT_FALLBACK,
         systemInstruction,
         images,
-        jsonMode,
-        schema: inputs.schema || null,
+        jsonMode: useJsonMode,
         userId: ctx.userId || null,
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       });
     } catch (err) {
-      if (err.code === "BILLING_CONTEXT_MISSING") {
+      if (err?.code === "BILLING_CONTEXT_MISSING") {
         throw err;
       }
       if (
-        err.code === "CONTENT_SAFETY_VIOLATION" ||
-        err.code === "PROVIDER_CONTENT_POLICY_ERROR" ||
-        err.is_safe === false ||
-        /safety violation|content policy|nsfw/i.test(err.message || "")
+        err?.code === "CONTENT_SAFETY_VIOLATION" ||
+        err?.code === "PROVIDER_CONTENT_POLICY_ERROR" ||
+        err?.is_safe === false ||
+        /safety violation|content policy|nsfw/i.test(err?.message || "")
       ) {
         if (err instanceof GenerationError && err.code === "CONTENT_SAFETY_VIOLATION") {
           err.retryable = false;
@@ -235,51 +131,113 @@ export const LlmNode = {
           throw err;
         }
         throw new GenerationSafetyError(
-          err.message || "Prompt violates content safety policy",
+          err?.message || "Prompt violates content safety policy",
           { field: "prompt" }
         );
       }
+
+      const rawCode = String(err?.code || err?.errorCode || "").toUpperCase();
+      const status = Number(err?.statusCode || err?.status || 0);
+      const msg = err?.message || "";
+      const isCircuitBreakerOpen = rawCode === "CIRCUIT_BREAKER_OPEN";
+      const isProviderQuota = rawCode === "PROVIDER_QUOTA_EXCEEDED";
+      const isRateLimit =
+        !isProviderQuota &&
+        (status === 429 ||
+          err?.category === "RATE_LIMIT" ||
+          rawCode === "RATE_LIMITED" ||
+          rawCode === "RATE_LIMIT_EXCEEDED" ||
+          rawCode === "PROVIDER_RATE_LIMITED" ||
+          /rate limit|429/i.test(msg));
+      const isTimeout =
+        status === 504 ||
+        status === 408 ||
+        /TIMEOUT/i.test(rawCode) ||
+        /timed out|timeout/i.test(msg);
+
       if (requiresSafety) {
         const isTransient =
+          isCircuitBreakerOpen ||
+          isRateLimit ||
+          isTimeout ||
+          isProviderQuota ||
           err?.retryable === true ||
-          err?.category === "RATE_LIMIT" ||
-          err?.statusCode === 429 ||
-          err?.statusCode === 502 ||
-          err?.statusCode === 503;
+          err?.category === "UPSTREAM_FAULT" ||
+          rawCode === "PROVIDER_TRANSIENT_ERROR" ||
+          rawCode === "PROVIDER_UNAVAILABLE" ||
+          status === 502 ||
+          status === 503;
+
+        if (isTransient) {
+          const category = isRateLimit ? "RATE_LIMIT" : "UPSTREAM_FAULT";
+          const statusCode = isRateLimit
+            ? 429
+            : status === 503 || isCircuitBreakerOpen || isProviderQuota
+              ? 503
+              : 502;
+          const unavailableErr = new GenerationUpstreamError(
+            `Safety verification temporarily unavailable (fail-closed): ${msg}`,
+            {
+              code: "SAFETY_CHECK_UNAVAILABLE",
+              category,
+              statusCode,
+              retryable: !isCircuitBreakerOpen && !isProviderQuota,
+              context: {
+                cause: msg,
+                ...(rawCode ? { upstreamCode: rawCode } : {}),
+              },
+            }
+          );
+          unavailableErr.code = "SAFETY_CHECK_UNAVAILABLE";
+          throw unavailableErr;
+        }
+
         const failErr = new GenerationUpstreamError(
-          `Safety verification failed (fail-closed): ${err.message}`,
+          `Safety verification failed (fail-closed): ${msg}`,
           {
             code: "SAFETY_CHECK_FAILED",
-            category: err?.category === "RATE_LIMIT" ? "RATE_LIMIT" : "UPSTREAM_FAULT",
-            statusCode: err?.statusCode === 429 ? 429 : 502,
-            retryable: isTransient,
-            context: { cause: err.message },
+            category: "UPSTREAM_FAULT",
+            statusCode: 502,
+            retryable: false,
+            context: { cause: msg },
           }
         );
         failErr.code = "SAFETY_CHECK_FAILED";
         failErr.is_safe = false;
         throw failErr;
       }
+
       const category =
-        err?.category === "RATE_LIMIT" || err?.statusCode === 429 || /rate limit|quota|429/i.test(err?.message || "")
+        !isProviderQuota &&
+        (isRateLimit || /quota/i.test(msg))
           ? "RATE_LIMIT"
           : "UPSTREAM_FAULT";
-      throw new GenerationUpstreamError(`LLM execution failed: ${err.message}`, {
-        code: category === "RATE_LIMIT" ? "RATE_LIMIT_EXCEEDED" : (err?.code || "GENERATION_UPSTREAM_ERROR"),
+      throw new GenerationUpstreamError(`LLM execution failed: ${msg}`, {
+        code:
+          category === "RATE_LIMIT"
+            ? "RATE_LIMIT_EXCEEDED"
+            : err?.code || "GENERATION_UPSTREAM_ERROR",
         category,
-        statusCode: category === "RATE_LIMIT" ? 429 : 502,
-        retryable: true,
-        context: { model: inputs.model, cause: err.message },
+        statusCode:
+          category === "RATE_LIMIT"
+            ? 429
+            : status === 503 || isCircuitBreakerOpen || isProviderQuota
+              ? 503
+              : 502,
+        retryable: !isCircuitBreakerOpen && !isProviderQuota,
+        context: { model, cause: msg },
       });
     }
 
-    const parsed = res?.json;
+    const parsed = res?.json && typeof res.json === "object" ? res.json : null;
 
-    // Strict Fail-Closed Safety Enforcement when "system-safety" skill is active
+    // Safety Enforcement when a safety guard skill is active:
+    // - Unparseable/non-JSON response still fails closed (`SAFETY_CHECK_FAILED`).
+    // - Valid JSON defaults `is_safe` to `true` when omitted; blocks only on explicit `is_safe === false`.
     if (requiresSafety) {
-      if (!parsed || typeof parsed !== "object" || typeof parsed.is_safe !== "boolean") {
+      if (!parsed) {
         const contractErr = new GenerationUpstreamError(
-          "Safety check contract violation (fail-closed): missing boolean 'is_safe' in LLM response",
+          "Safety check contract violation (fail-closed): unparseable JSON response from LLM",
           {
             code: "SAFETY_CHECK_FAILED",
             category: "UPSTREAM_FAULT",
@@ -291,7 +249,7 @@ export const LlmNode = {
         throw contractErr;
       }
 
-      if (parsed.is_safe !== true) {
+      if (parsed.is_safe === false) {
         const reason = parsed.safety_reason || "Prompt violates content safety policy";
         throw new GenerationSafetyError(reason, {
           field: "prompt",
@@ -300,58 +258,22 @@ export const LlmNode = {
       }
     }
 
-    const translatedText =
-      (typeof parsed?.final_prompt === "string" && parsed.final_prompt.trim()) ||
+    const text =
       (typeof parsed?.prompt === "string" && parsed.prompt.trim()) ||
-      (typeof parsed?.sanitized_prompt === "string" && parsed.sanitized_prompt.trim()) ||
-      (typeof parsed?.description === "string" && parsed.description.trim()) ||
-      (typeof parsed?.character_description === "string" && parsed.character_description.trim()) ||
+      (typeof parsed?.final_prompt === "string" && parsed.final_prompt.trim()) ||
+      (typeof parsed?.text === "string" && parsed.text.trim()) ||
       (typeof res?.content === "string" && res.content.trim()) ||
       (typeof res?.raw === "string" && res.raw.trim()) ||
-      promptBody;
+      rawPrompt;
 
-    // Ensure [Reference Guide] is preserved in final_prompt if it was supplied or embedded
-    let finalPrompt = translatedText;
-    if (extractedGuide && !finalPrompt.includes("[Reference Guide]")) {
-      finalPrompt = `${finalPrompt}\n\n${extractedGuide}`.trim();
-    }
-
-    const characterDescription =
-      (typeof parsed?.character_description === "string" && parsed.character_description.trim()) ||
-      (typeof parsed?.description === "string" && parsed.description.trim()) ||
-      translatedText;
-
-    const characterTitle =
-      (typeof parsed?.character_title === "string" && parsed.character_title.trim()) ||
-      (typeof parsed?.title === "string" && parsed.title.trim()) ||
-      "Character";
-
-    const jsonOutput =
-      parsed && typeof parsed === "object"
-        ? {
-            is_safe: parsed.is_safe ?? true,
-            prompt: finalPrompt,
-            description: characterDescription,
-            title: characterTitle,
-            ...parsed,
-          }
-        : {
-            is_safe: true,
-            prompt: finalPrompt,
-            description: characterDescription,
-            title: characterTitle,
-          };
+    const json = parsed || {};
 
     return {
-      final_prompt: finalPrompt,
-      safe_prompt: finalPrompt,
-      text: finalPrompt,
-      is_safe: true,
-      json: jsonOutput,
-      character_description: characterDescription,
-      character_title: characterTitle,
+      status: "success",
+      text,
+      json,
       metadata: {
-        model: res?.model || inputs.model || "gemini-3.1-flash-lite",
+        model: res?.model || model,
         skills,
         imagesCount: images.length,
         durationMs: res?.durationMs || 0,
@@ -360,4 +282,5 @@ export const LlmNode = {
   },
 };
 
+export { LLM_SKILLS_REGISTRY, buildUnifiedLlmInstruction };
 export default LlmNode;

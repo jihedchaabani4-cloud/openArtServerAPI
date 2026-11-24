@@ -1,4 +1,4 @@
-import { executeGeneration, getModelConfig } from "#models/tools";
+import { executeGeneration, getModelSchema } from "#models/tools";
 import {
   GenerationError,
   GenerationValidationError,
@@ -68,11 +68,26 @@ function normalizeModelInvocationError(err, model) {
     return valErr;
   }
 
+  if (code === "PROVIDER_QUOTA_EXCEEDED" || code === "CIRCUIT_BREAKER_OPEN") {
+    const upstreamErr = new GenerationUpstreamError(msg, {
+      code,
+      category: "UPSTREAM_FAULT",
+      statusCode: 503,
+      retryable: false,
+      context: { model },
+    });
+    if (err?.safeMessage) {
+      upstreamErr.safeMessage = err.safeMessage;
+    }
+    return upstreamErr;
+  }
+
   if (
-    err?.category === "RATE_LIMIT" ||
-    status === 429 ||
-    /rate limit|quota|429/i.test(msg) ||
-    /RATE_LIMIT|QUOTA/i.test(code)
+    code !== "PROVIDER_QUOTA_EXCEEDED" &&
+    (err?.category === "RATE_LIMIT" ||
+      status === 429 ||
+      /rate limit|quota|429/i.test(msg) ||
+      /RATE_LIMIT|QUOTA/i.test(code))
   ) {
     return new GenerationUpstreamError(msg, {
       code: code || "RATE_LIMIT_EXCEEDED",
@@ -129,7 +144,7 @@ export async function invokeModelGeneration({
         userId: ctx.userId || null,
       });
     }
-    getModelConfig(model);
+    getModelSchema(model);
     return await executeGeneration({
       modelId: model,
       ...(prompt !== undefined ? { prompt } : {}),
@@ -166,24 +181,56 @@ export function extractImageOutput(res, model, errorMessage = "Provider returned
   return { url, assets };
 }
 
+function normalizeVideoAssetList(list) {
+  if (!Array.isArray(list)) {
+    return [];
+  }
+  const normalized = [];
+  for (const item of list) {
+    if (typeof item === "string") {
+      const trimmed = item.trim();
+      if (trimmed) {
+        normalized.push({ url: trimmed });
+      }
+    } else if (item && typeof item === "object" && typeof item.url === "string") {
+      const trimmed = item.url.trim();
+      if (trimmed) {
+        normalized.push(trimmed === item.url ? item : { ...item, url: trimmed });
+      }
+    }
+  }
+  return normalized;
+}
+
 /**
- * Extracts primary video URL from a provider response.
+ * Extracts normalized video asset list and primary URL from a provider response.
  */
 export function extractVideoOutput(res, model, errorMessage = "Provider returned no video URL") {
-  const url =
-    res?.assets?.[0]?.url ||
-    res?.videos?.[0]?.url ||
-    (typeof res?.videos?.[0] === "string" ? res.videos[0] : null) ||
-    (typeof res?.data?.videos?.[0] === "string" ? res.data.videos[0] : res?.data?.videos?.[0]?.url) ||
-    (typeof res?.images?.[0] === "string" ? res.images[0] : res?.images?.[0]?.url) ||
-    res?.url ||
-    res?.videoUrl ||
-    null;
+  const candidates = [
+    normalizeVideoAssetList(res?.assets),
+    normalizeVideoAssetList(res?.videos),
+    normalizeVideoAssetList(res?.data?.videos),
+    normalizeVideoAssetList(res?.images),
+  ];
 
+  let assets = candidates.find((list) => list.length > 0) || [];
+  if (assets.length === 0) {
+    const directUrl =
+      typeof res?.url === "string" && res.url.trim()
+        ? res.url.trim()
+        : typeof res?.videoUrl === "string" && res.videoUrl.trim()
+          ? res.videoUrl.trim()
+          : null;
+    if (directUrl) {
+      assets = [{ url: directUrl }];
+    }
+  }
+
+  const url = assets[0]?.url || null;
   if (!url) {
     throw new GenerationUpstreamError(errorMessage, {
       context: { model },
     });
   }
-  return { url };
+  return { url, assets };
 }

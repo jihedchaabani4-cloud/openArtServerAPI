@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { createLogger } from "#shared";
 import { GraphCompiler, getValueByPath } from "./GraphCompiler.js";
+import { createJobExecutionContext } from "./JobExecutionContext.js";
 import { GenerationValidationError } from "../../errors.js";
 
 const v3ExecutorLogger = createLogger("v3-executor");
@@ -23,14 +24,20 @@ function canonicalize(value) {
 }
 
 /**
- * Computes a deterministic SHA-256 signature for a node type and its resolved inputs.
+ * Computes a deterministic SHA-256 signature for a node type, resolved inputs, and optional scope.
+ * Including `scope` (`{ runId, userId }`) makes cross-tenant or cross-run collisions structurally impossible.
  *
  * @param {string} nodeType
  * @param {Object} resolvedInputs
+ * @param {Object|string|null} [scope=null]
  * @returns {string}
  */
-export function computeNodeSignature(nodeType, resolvedInputs) {
-  const payload = canonicalize({ type: nodeType, inputs: resolvedInputs || {} });
+export function computeNodeSignature(nodeType, resolvedInputs, scope = null) {
+  const payload = canonicalize({
+    type: nodeType,
+    inputs: resolvedInputs || {},
+    ...(scope ? { scope } : {}),
+  });
   return createHash("sha256").update(payload).digest("hex");
 }
 
@@ -46,6 +53,7 @@ const NON_RETRYABLE_CODES = new Set([
   "PROMPT_VIOLATION",
   "PROVIDER_CONTENT_POLICY_ERROR",
   "SAFETY_CHECK_FAILED",
+  "CIRCUIT_BREAKER_OPEN",
   "HOLD_EXPIRED",
   "GENERATION_VALIDATION_ERROR",
   "GENERATION_NOT_FOUND",
@@ -97,105 +105,151 @@ export function isErrorRetryable(err, retryPolicy) {
 }
 
 /**
- * WorkflowExecutor (ComfyUI-Style Node Engine V3)
+ * WorkflowExecutor (V3 Execution Core)
  *
- * 100% database-agnostic parallel wave executor with:
+ * Stateless, database-agnostic parallel wave executor with:
+ * - Zero process-global mutable cache state (per-job isolated cache cleared in `finally`)
+ * - Scoped SHA-256 signature caching strictly for non-output cacheable nodes (`!OUTPUT_NODE && CACHEABLE !== false`)
  * - Parallel wave execution (`Promise.all`)
- * - SHA-256 signature caching for non-output nodes (`OUTPUT_NODE: false`)
  * - Per-node retry with configurable backoff (`retryPolicy`)
  */
 export class WorkflowExecutor {
-  constructor(registry, { cache = null, sleepFn = null } = {}) {
+  constructor(registry, { sleepFn = null } = {}) {
     if (!registry) {
       throw new GenerationValidationError("WorkflowExecutor requires a NodeRegistry instance");
     }
     this.registry = registry;
     this.compiler = new GraphCompiler(registry);
-    this.cache = cache instanceof Map ? cache : new Map();
     this.sleepFn =
       sleepFn || ((ms) => (ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve()));
   }
 
   /**
-   * Executes a workflow definition or pre-compiled plan.
+   * Executes a workflow definition inside an isolated per-run `JobExecutionContext`.
    *
    * @param {Object} params
    * @param {Object} params.workflow - Workflow blueprint `{ id, nodes: [...] }`
    * @param {Object} [params.input={}] - Runtime workflow inputs
-   * @param {Object} [params.context={}] - Execution context `{ runId, userId, traceId, ... }`
-   * @param {Map} [params.signatureCache] - Optional signature cache override
-   * @returns {Promise<{ workflowId: string, status: string, nodeOutputs: Object, terminalOutputs: Object, cacheHits: string[], wavesExecuted: number }>}
+   * @param {Object|null} [params.jobContext=null] - Optional pre-created `JobExecutionContext`
+   * @param {Object} [params.context={}] - Execution context overrides (`userId`, `runId`, node hooks, etc.)
+   * @param {Map|null} [params.signatureCache=null] - Optional explicit signature cache override
+   * @returns {Promise<Object>}
    */
-  async execute({ workflow, input = {}, context = {}, signatureCache = null } = {}) {
+  async execute({ workflow, input = {}, jobContext = null, context = {}, signatureCache = null } = {}) {
     const normalizedInput = {
       ...input,
       media_id: input.media_id || (Array.isArray(input.serverMediaIds) ? input.serverMediaIds[0] : input.media_id),
       workflow_id: input.workflow_id || input.serverWorkflowId || input.workflow_id,
     };
+
     const plan = this.compiler.compile(workflow, normalizedInput);
     const nodesMap = new Map(workflow.nodes.map((n) => [n.id, n]));
-    const activeCache = signatureCache instanceof Map ? signatureCache : this.cache;
+
+    const jobCtx =
+      jobContext && jobContext.cache instanceof Map
+        ? jobContext
+        : createJobExecutionContext({
+            executionId: context?.executionId || null,
+            runId: context?.runId || null,
+            jobId: context?.jobId || null,
+            userId: context?.userId || null,
+            blueprintId: workflow?.id || null,
+            workflowId: normalizedInput.workflow_id || context?.workflowId || null,
+            billingHoldId: context?.billingHoldId || null,
+            mediaId: normalizedInput.media_id || null,
+            mediaRole: context?.mediaRole || "output",
+            saveType: context?.saveType || "default",
+          });
+
+    const ownsCache = !(signatureCache instanceof Map);
+    const activeCache = ownsCache ? jobCtx.cache : signatureCache;
+
+    const executionContext = {
+      ...context,
+      executionId: jobCtx.identity.executionId,
+      runId: jobCtx.identity.runId,
+      jobId: jobCtx.identity.jobId,
+      userId: context?.userId ?? jobCtx.identity.userId,
+      workflowId: context?.workflowId ?? jobCtx.identity.workflowId,
+      mediaRole: context?.mediaRole ?? jobCtx.resources.mediaRole,
+      saveType: context?.saveType ?? jobCtx.resources.saveType,
+      jobContext: jobCtx,
+    };
+
+    const effectiveRunId = jobCtx.identity.runId || executionContext.runId || null;
+    const effectiveUserId = executionContext.userId || null;
+    const signatureScope =
+      effectiveRunId || effectiveUserId
+        ? {
+            ...(effectiveRunId ? { runId: effectiveRunId } : {}),
+            ...(effectiveUserId ? { userId: effectiveUserId } : {}),
+          }
+        : null;
 
     const nodeOutputs = {};
     const terminalOutputs = {};
     const cacheHits = [];
 
-    for (const wave of plan.waves) {
-      await Promise.all(
-        wave.map(async (nodeId) => {
-          const step = nodesMap.get(nodeId);
-          const def = this.registry.get(step.type);
-          const resolvedInputs = this.resolveNodeInputs(step, def, normalizedInput, nodeOutputs);
+    try {
+      for (const wave of plan.waves) {
+        await Promise.all(
+          wave.map(async (nodeId) => {
+            const step = nodesMap.get(nodeId);
+            const def = this.registry.get(step.type);
+            const resolvedInputs = this.resolveNodeInputs(step, def, normalizedInput, nodeOutputs);
 
-          // Check SHA-256 signature cache for non-terminal nodes
-          const isOutputNode = Boolean(def.OUTPUT_NODE);
-          const signature = !isOutputNode ? computeNodeSignature(step.type, resolvedInputs) : null;
+            const isOutputNode = Boolean(def.OUTPUT_NODE);
+            const isCacheable = !isOutputNode && def.CACHEABLE !== false;
+            const signature = isCacheable
+              ? computeNodeSignature(step.type, resolvedInputs, signatureScope)
+              : null;
 
-          if (!isOutputNode && signature && activeCache.has(signature)) {
-            const cachedOutput = activeCache.get(signature);
-            nodeOutputs[nodeId] = cachedOutput;
-            cacheHits.push(nodeId);
-            v3ExecutorLogger.debug(
-              { nodeId, type: step.type, signature: signature.slice(0, 12) },
-              `[V3Executor] Cache hit for node "${nodeId}" (${step.type})`
-            );
-            return;
-          }
+            if (isCacheable && signature && activeCache.has(signature)) {
+              const cachedOutput = activeCache.get(signature);
+              nodeOutputs[nodeId] = cachedOutput;
+              cacheHits.push(nodeId);
+              v3ExecutorLogger.debug(
+                { nodeId, type: step.type, runId: effectiveRunId, signature: signature.slice(0, 12) },
+                `[V3Executor] Cache hit for node "${nodeId}" (${step.type})`
+              );
+              return;
+            }
 
-          const output = await this.executeNodeWithRetry(step, def, resolvedInputs, context);
-          nodeOutputs[nodeId] = output;
+            const output = await this.executeNodeWithRetry(step, def, resolvedInputs, executionContext);
+            nodeOutputs[nodeId] = output;
 
-          if (!isOutputNode && signature) {
-            activeCache.set(signature, output);
-          }
+            if (isCacheable && signature) {
+              activeCache.set(signature, output);
+            }
 
-          if (isOutputNode) {
-            terminalOutputs[nodeId] = output;
-          }
-        })
-      );
+            if (isOutputNode) {
+              terminalOutputs[nodeId] = output;
+            }
+          })
+        );
+      }
+
+      return {
+        workflowId: workflow.id,
+        executionId: jobCtx.identity.executionId,
+        runId: jobCtx.identity.runId,
+        status: "completed",
+        nodeOutputs,
+        terminalOutputs,
+        cacheHits,
+        wavesExecuted: plan.waves.length,
+        totalEstimatedCredits: plan.totalEstimatedCredits,
+        costBreakdown: plan.costBreakdown,
+      };
+    } finally {
+      if (ownsCache) {
+        activeCache.clear();
+      }
     }
-
-    return {
-      workflowId: workflow.id,
-      status: "completed",
-      nodeOutputs,
-      terminalOutputs,
-      cacheHits,
-      wavesExecuted: plan.waves.length,
-      totalEstimatedCredits: plan.totalEstimatedCredits,
-      costBreakdown: plan.costBreakdown,
-    };
   }
 
   /**
    * Resolves all inputs for a single node from defaults, static literals, initial inputs, and upstream node outputs.
-   *
-   * @param {Object} step
-   * @param {Object} def
-   * @param {Object} initialInput
-   * @param {Object} nodeOutputs
-   * @returns {Object}
    */
   resolveNodeInputs(step, def, initialInput, nodeOutputs) {
     const resolved = {};
@@ -232,7 +286,6 @@ export class WorkflowExecutor {
       }
     }
 
-    // Validate required inputs at runtime after resolution
     for (const reqKey of Object.keys(def.INPUT_TYPES?.required || {})) {
       if (resolved[reqKey] === undefined || resolved[reqKey] === null) {
         throw new GenerationValidationError(
@@ -247,12 +300,6 @@ export class WorkflowExecutor {
 
   /**
    * Executes a single node with its declared `retryPolicy`.
-   *
-   * @param {Object} step
-   * @param {Object} def
-   * @param {Object} resolvedInputs
-   * @param {Object} context
-   * @returns {Promise<Object>}
    */
   async executeNodeWithRetry(step, def, resolvedInputs, context) {
     const policy = def.retryPolicy || { maxAttempts: 1, backoffMs: 0 };

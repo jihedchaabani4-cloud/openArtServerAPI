@@ -9,16 +9,70 @@ import {
   extractImageOutput,
 } from "./mediaNodeHelpers.js";
 
+function normalizeImages(rawImages) {
+  if (typeof rawImages === "string") {
+    const trimmed = rawImages.trim();
+    return trimmed ? [trimmed] : [];
+  }
+  if (rawImages && typeof rawImages === "object" && !Array.isArray(rawImages)) {
+    const trimmed = typeof rawImages.url === "string" ? rawImages.url.trim() : "";
+    return trimmed ? [trimmed] : [];
+  }
+  if (!Array.isArray(rawImages)) {
+    return [];
+  }
+  const urls = [];
+  for (const item of rawImages) {
+    const raw = typeof item === "string" ? item : item?.url;
+    if (typeof raw === "string") {
+      const trimmed = raw.trim();
+      if (trimmed) {
+        urls.push(trimmed);
+      }
+    }
+  }
+  return urls;
+}
+
+function normalizeParameters(rawParameters) {
+  return rawParameters && typeof rawParameters === "object" && !Array.isArray(rawParameters)
+    ? rawParameters
+    : {};
+}
+
+function isValidImageUrl(url) {
+  return typeof url === "string" && /^https?:\/\/\S+$/i.test(url.trim());
+}
+
+function hasImagesParam(params) {
+  return normalizeImages(params.images).length > 0;
+}
+
+function hasValidImagesParam(params) {
+  return normalizeImages(params.images).some(isValidImageUrl);
+}
+
+function hasValidInputImageParam(params) {
+  return isValidImageUrl(params.input_image);
+}
+
+function normalizeOperation(rawOperation) {
+  return typeof rawOperation === "string" ? rawOperation.trim().toLowerCase() : "";
+}
+
 /**
  * ImageGenerateNode (`base.image_generate`)
  *
- * Executes image generation via `#models/tools` (`executeGeneration` / `calculateCost`).
+ * Model-agnostic image generation runner via `#models/tools` (`executeGeneration` / `calculateCost`).
+ * Model-specific settings (e.g. `aspect_ratio`, `resolution`, `quality`, `output_format`) live in
+ * `parameters` and fall back to `#models/tools` model manifests.
  * Enforces fail-closed pricing: any pricing error throws immediately.
  */
 export const ImageGenerateNode = {
   type: "base.image_generate",
   category: "image",
   OUTPUT_NODE: false,
+  CACHEABLE: false,
 
   INPUT_TYPES: {
     required: {
@@ -26,17 +80,14 @@ export const ImageGenerateNode = {
       prompt: { type: "STRING" },
     },
     optional: {
-      aspect_ratio: { type: "STRING", default: "1:1" },
-      width: { type: "INT", default: 1024 },
-      height: { type: "INT", default: 1024 },
-      count: { type: "INT", default: 1 },
-      input_image_url: { type: "IMAGE_URL" },
-      reference_urls: { type: "ARRAY", default: [] },
+      images: { type: "ARRAY", default: [] },
+      operation: { type: "STRING" },
       parameters: { type: "JSON", default: {} },
     },
   },
 
   RETURN_TYPES: {
+    status: "STRING",
     image_url: "IMAGE_URL",
     assets: "ARRAY",
     metadata: "JSON",
@@ -52,47 +103,125 @@ export const ImageGenerateNode = {
     if (!plannedInputs.model) {
       throw new GenerationCompilationError("Missing required model for base.image_generate cost estimation");
     }
-    const { count: paramCount, ...cleanParams } = plannedInputs.parameters || {};
-    const count = Math.max(1, Number(plannedInputs.count ?? paramCount ?? 1) || 1);
-    const res = calculateCost(plannedInputs.model, {
+    const baseParams = normalizeParameters(plannedInputs.parameters);
+    const images = normalizeImages(plannedInputs.images);
+    const operation = normalizeOperation(plannedInputs.operation);
+
+    if (operation === "remove_background") {
+      const trimmedPrompt = typeof plannedInputs.prompt === "string" ? plannedInputs.prompt.trim() : "";
+      const sourceUrl =
+        images[0] ||
+        (typeof baseParams.input_image === "string" && baseParams.input_image.trim()) ||
+        "https://planned.edit/source.png";
+      const costInput = {
+        ...baseParams,
+        input_image: sourceUrl,
+        ...(trimmedPrompt ? { prompt: trimmedPrompt } : {}),
+      };
+      delete costInput.images;
+      const res = calculateCost(plannedInputs.model, costInput);
+      return extractNodeCostAmount(res, plannedInputs.model, "base.image_generate");
+    }
+
+    const costInput = {
       prompt: plannedInputs.prompt || "<planned>",
-      ...cleanParams,
-      ...(plannedInputs.aspect_ratio ? { aspect_ratio: plannedInputs.aspect_ratio } : {}),
-    });
-    return extractNodeCostAmount(res, plannedInputs.model, "base.image_generate") * count;
+      ...baseParams,
+      ...(images.length > 0 && !hasImagesParam(baseParams) ? { images } : {}),
+    };
+    if (operation === "edit") {
+      costInput.operation = "edit";
+      const hasPlannedSource =
+        images.length > 0 ||
+        hasImagesParam(baseParams) ||
+        (typeof baseParams.input_image === "string" && baseParams.input_image.trim().length > 0);
+      if (!hasPlannedSource) {
+        costInput.images = ["https://planned.edit/source.png"];
+      }
+    }
+    const res = calculateCost(plannedInputs.model, costInput);
+    return extractNodeCostAmount(res, plannedInputs.model, "base.image_generate");
   },
 
-  async execute(inputs, ctx = {}) {
-    if (!inputs.model) {
+  async execute(inputs = {}, ctx = {}) {
+    if (!inputs.model || (typeof inputs.model === "string" && !inputs.model.trim())) {
       throw new GenerationValidationError("model is required for base.image_generate", { field: "model" });
     }
-    if (!inputs.prompt) {
+
+    const operation = normalizeOperation(inputs.operation);
+    const images = normalizeImages(inputs.images);
+
+    if (operation === "remove_background") {
+      const baseParams = normalizeParameters(inputs.parameters);
+      const sourceUrl = images.find(isValidImageUrl) || (isValidImageUrl(baseParams.input_image) ? baseParams.input_image.trim() : null);
+      if (!sourceUrl) {
+        throw new GenerationValidationError("Background removal requires a source image URL", {
+          field: "images",
+        });
+      }
+      const trimmedPrompt = typeof inputs.prompt === "string" ? inputs.prompt.trim() : "";
+      const params = {
+        ...baseParams,
+        input_image: sourceUrl,
+        ...(trimmedPrompt ? { prompt: trimmedPrompt } : {}),
+      };
+      delete params.images;
+
+      const res = await invokeModelGeneration({
+        model: inputs.model,
+        ...(trimmedPrompt ? { prompt: trimmedPrompt } : {}),
+        params,
+        ctx,
+      });
+
+      const { url, assets } = extractImageOutput(res, inputs.model, "Provider returned no image URL");
+      return {
+        status: "success",
+        image_url: url,
+        assets,
+        metadata: {
+          model: inputs.model,
+          ...(res?._internal?.provider ? { provider: res._internal.provider } : {}),
+          ...(res?.metadata || {}),
+        },
+      };
+    }
+
+    if (!inputs.prompt || (typeof inputs.prompt === "string" && !inputs.prompt.trim())) {
       throw new GenerationValidationError("prompt is required for base.image_generate", { field: "prompt" });
     }
 
     const params = {
-      ...(inputs.parameters || {}),
+      ...normalizeParameters(inputs.parameters),
       prompt: inputs.prompt,
-      ...(inputs.aspect_ratio ? { aspect_ratio: inputs.aspect_ratio } : {}),
     };
-    if (inputs.input_image_url) {
-      params.input_image = inputs.input_image_url;
+    if (images.length > 0 && !hasImagesParam(params)) {
+      params.images = images;
     }
-    if (Array.isArray(inputs.reference_urls) && inputs.reference_urls.length > 0 && !params.images) {
-      params.images = inputs.reference_urls;
+
+    if (operation === "edit") {
+      const hasEditSource =
+        images.some(isValidImageUrl) ||
+        hasValidImagesParam(params) ||
+        hasValidInputImageParam(params);
+      if (!hasEditSource) {
+        throw new GenerationValidationError("Edit image generation requires a source image URL", {
+          field: "images",
+        });
+      }
     }
 
     const res = await invokeModelGeneration({
       model: inputs.model,
       prompt: inputs.prompt,
       params,
-      references: inputs.reference_urls || [],
+      references: images,
       ctx,
     });
 
     const { url, assets } = extractImageOutput(res, inputs.model, "Provider returned no image URL");
 
     return {
+      status: "success",
       image_url: url,
       assets,
       metadata: {

@@ -67,6 +67,7 @@ export class NodeRegistry {
       }),
       ...nodeDef,
       OUTPUT_NODE: Boolean(nodeDef.OUTPUT_NODE),
+      CACHEABLE: nodeDef.CACHEABLE !== undefined ? Boolean(nodeDef.CACHEABLE) : !Boolean(nodeDef.OUTPUT_NODE),
       INPUT_TYPES: Object.freeze({
         required: Object.freeze({ ...(nodeDef.INPUT_TYPES?.required || {}) }),
         optional: Object.freeze({ ...(nodeDef.INPUT_TYPES?.optional || {}) }),

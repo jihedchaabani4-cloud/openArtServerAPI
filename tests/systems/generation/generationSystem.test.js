@@ -1,7 +1,9 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import {
-    V3Dispatcher,
+    ExecutionEngine,
+    JobExecutionContext,
+    createJobExecutionContext,
     jobQueueService,
     GenerationService,
     GenerationRequestService,
@@ -47,7 +49,9 @@ import { execSync } from "node:child_process";
 
 describe("System 1: Generation & Workflows — Gateways & Public Tools Contract", () => {
     it("should export all expected V3 public tools and domain services", () => {
-        assert.equal(typeof V3Dispatcher, "function");
+        assert.equal(typeof ExecutionEngine, "function");
+        assert.equal(typeof JobExecutionContext, "function");
+        assert.equal(typeof createJobExecutionContext, "function");
         assert.equal(typeof WorkflowService, "function");
         assert.equal(typeof jobQueueService, "object");
         assert.equal(typeof GenerationService, "function");
@@ -151,7 +155,7 @@ describe("Generation API Boundary & Separation Tests", () => {
     assert.strictEqual(videoLayer.handle, videoRouter, "video router must be videoRouter");
   });
 
-  it("TEST 2: imagesRouter exposes ONLY /generated endpoint without aliases", () => {
+  it("TEST 2: imagesRouter exposes ONLY /generated, /relight, /angles, /remove-background, and /edit endpoints without legacy aliases", () => {
     const registeredRoutes = imagesRouter.stack
       .filter((layer) => layer.route)
       .map((layer) => ({
@@ -159,15 +163,23 @@ describe("Generation API Boundary & Separation Tests", () => {
         methods: Object.keys(layer.route.methods),
       }));
 
-    assert.strictEqual(registeredRoutes.length, 1, "imagesRouter must have exactly 1 route: /generated");
-    assert.strictEqual(registeredRoutes[0].path, "/generated");
-    assert.ok(registeredRoutes[0].methods.includes("post"));
+    assert.strictEqual(
+      registeredRoutes.length,
+      5,
+      "imagesRouter must have exactly 5 routes: /generated, /relight, /angles, /remove-background, /edit"
+    );
+    assert.deepStrictEqual(
+      registeredRoutes.map((r) => r.path),
+      ["/generated", "/relight", "/angles", "/remove-background", "/edit"]
+    );
+    for (const route of registeredRoutes) {
+      assert.ok(route.methods.includes("post"), `imagesRouter ${route.path} must accept POST`);
+    }
 
     // Verify removed aliases do NOT exist
     const forbiddenPaths = [
       "/generated/edit/existing",
       "/generated/edit/new",
-      "/edit",
       "/motion",
       "/extend",
     ];

@@ -11,11 +11,22 @@ import { GenerationRequestService } from "../internal/services/GenerationRequest
 import { WorkflowService } from "../internal/services/WorkflowService.js";
 import { WorkflowRepository } from "../internal/db/WorkflowRepository.js";
 import { GenerationConfigRepository } from "../internal/db/GenerationConfigRepository.js";
-import { V3Dispatcher } from "../internal/v3/core/V3Dispatcher.js";
+import { ExecutionEngine } from "../internal/v3/core/ExecutionEngine.js";
+import { JobExecutionContext, createJobExecutionContext } from "../internal/v3/core/JobExecutionContext.js";
 import { setGenerationServices } from "../internal/services/serviceAccessor.js";
 
 export function configureGeneration(services = {}) {
     setGenerationServices(services);
+}
+
+/**
+ * Lazily starts the dedicated BullMQ generation worker and reservation reaper.
+ * Kept dynamic so importing `#generation/tools` from `src/container.js` in the
+ * HTTP API process (`index.js`) does not start background workers.
+ */
+export async function startGenerationWorker() {
+    const mod = await import("../internal/workers/worker.js");
+    return mod.useCaseWorker || mod.default;
 }
 
 export {
@@ -25,5 +36,7 @@ export {
     WorkflowService,
     WorkflowRepository,
     GenerationConfigRepository,
-    V3Dispatcher,
+    ExecutionEngine,
+    JobExecutionContext,
+    createJobExecutionContext,
 };

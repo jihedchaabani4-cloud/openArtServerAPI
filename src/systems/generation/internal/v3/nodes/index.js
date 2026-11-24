@@ -1,6 +1,8 @@
 import { NodeRegistry } from "../core/NodeRegistry.js";
 import { ResolveRefsNode } from "./base/resolveRefsNode.js";
 import { LlmNode, LLM_SKILLS_REGISTRY, buildUnifiedLlmInstruction } from "./base/llmNode.js";
+import { ExtractNode } from "./base/extractNode.js";
+import { TextTemplateNode, renderTextTemplate } from "./base/textTemplateNode.js";
 import { ImageGenerateNode } from "./base/imageGenerateNode.js";
 import { VideoGenerateNode } from "./base/videoGenerateNode.js";
 import { SaveMediaNode } from "./base/saveMediaNode.js";
@@ -8,6 +10,8 @@ import { SaveMediaNode } from "./base/saveMediaNode.js";
 export const V3_BASE_NODES = Object.freeze([
   ResolveRefsNode,
   LlmNode,
+  ExtractNode,
+  TextTemplateNode,
   ImageGenerateNode,
   VideoGenerateNode,
   SaveMediaNode,
@@ -18,7 +22,7 @@ export const V3_CUSTOM_NODES = Object.freeze([]);
 export const ALL_V3_NODES = Object.freeze([...V3_BASE_NODES]);
 
 /**
- * Creates a fresh, frozen `NodeRegistry` populated with all 5 standard `base.*` V3 nodes.
+ * Creates a fresh, frozen `NodeRegistry` populated with all 7 standard `base.*` V3 nodes.
  *
  * @param {Array<Object>} [extraNodes=[]]
  * @returns {NodeRegistry}
@@ -34,6 +38,9 @@ export function createDefaultV3NodeRegistry(extraNodes = []) {
 export {
   ResolveRefsNode,
   LlmNode,
+  ExtractNode,
+  TextTemplateNode,
+  renderTextTemplate,
   LLM_SKILLS_REGISTRY,
   buildUnifiedLlmInstruction,
   ImageGenerateNode,

@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach, after, before } from "node:test";
 import assert from "node:assert/strict";
 import { LlmNode, characterSheetV3, getV3Workflow } from "../../../src/systems/generation/internal/v3/index.js";
-import { NodeSafetyService } from "../../../src/systems/generation/internal/services/NodeSafetyService.js";
+import { sanitizeClientError } from "../../../src/systems/generation/internal/errors.js";
 import { llmService } from "#models/tools";
 import express from "express";
 import http from "node:http";
@@ -24,11 +24,13 @@ describe("Content Moderation Fail-Closed & Prompt Unification Boundary Tests (Ta
     llmService.generate = originalGenerate;
   });
 
-  it("TEST 1: LlmNode (system-safety) must fail-closed (throw SAFETY_CHECK_FAILED) when LLM throws an upstream error", async () => {
+  it("TEST 1: LlmNode (system-safety) must fail-closed with SAFETY_CHECK_UNAVAILABLE (not is_safe=false) when LLM throws a transient timeout", async () => {
     // Upstream provider timeout / 504 / network crash
     llmService.generate = async () => {
-      const err = new Error("Upstream Gemini API gateway timeout (504)");
+      const err = new Error('Upstream Provider route "gemini_3_1_flash_lite:google" gateway timeout (504)');
       err.code = "PROVIDER_TIMEOUT";
+      err.statusCode = 504;
+      err.retryable = true;
       throw err;
     };
 
@@ -43,14 +45,130 @@ describe("Content Moderation Fail-Closed & Prompt Unification Boundary Tests (Ta
         );
       },
       (err) => {
-        assert.ok(
-          err.code === "SAFETY_CHECK_FAILED" || err.code === "PROVIDER_TIMEOUT",
-          `Expected SAFETY_CHECK_FAILED or upstream error code, got: ${err.code}`
-        );
-        assert.strictEqual(err.is_safe, false, "Error must indicate is_safe is false");
+        assert.strictEqual(err.code, "SAFETY_CHECK_UNAVAILABLE");
+        assert.strictEqual(err.category, "UPSTREAM_FAULT");
+        assert.strictEqual(err.retryable, true);
+        assert.notStrictEqual(err.is_safe, false, "Transient safety outage must NOT set is_safe = false");
         return true;
       },
       "LlmNode must throw and never return { is_safe: true } when LLM service fails"
+    );
+  });
+
+  it("TEST 1b (P0-2 M2): transient 429, 503, and CIRCUIT_BREAKER_OPEN during system-safety throw SAFETY_CHECK_UNAVAILABLE with proper retryable flags and zero leaked route/model keys", async () => {
+    // 1. Gemini 429 RATE_LIMITED -> retryable: true, RATE_LIMIT, is_safe !== false
+    let err429;
+    try {
+      await LlmNode.execute(
+        { prompt: "A serene mountain lake", skills: ["system-safety", "translate"] },
+        {
+          userId: "usr-m2",
+          executeLLM: async () => {
+            const err = new Error('Provider route "gemini_3_1_flash_lite:google" rate limited (429)');
+            err.code = "RATE_LIMITED";
+            err.statusCode = 429;
+            err.retryable = true;
+            throw err;
+          },
+        }
+      );
+    } catch (e) {
+      err429 = e;
+    }
+    assert.ok(err429, "429 must still fail closed");
+    assert.strictEqual(err429.code, "SAFETY_CHECK_UNAVAILABLE");
+    assert.strictEqual(err429.category, "RATE_LIMIT");
+    assert.strictEqual(err429.statusCode, 429);
+    assert.strictEqual(err429.retryable, true);
+    assert.notStrictEqual(err429.is_safe, false);
+
+    const sanitized429 = sanitizeClientError(err429);
+    assert.strictEqual(sanitized429.code, "SAFETY_CHECK_UNAVAILABLE");
+    assert.strictEqual(sanitized429.category, "RATE_LIMIT");
+    assert.strictEqual(sanitized429.statusCode, 429);
+    assert.strictEqual(sanitized429.retryable, true);
+    assert.ok(!/gemini_3_1_flash_lite|provider route|google/i.test(sanitized429.userMessage));
+
+    // 2. 503 PROVIDER_TRANSIENT_ERROR -> retryable: true, UPSTREAM_FAULT, is_safe !== false
+    let err503;
+    try {
+      await LlmNode.execute(
+        { prompt: "A serene mountain lake", skills: ["system-safety"] },
+        {
+          userId: "usr-m2",
+          executeLLM: async () => {
+            const err = new Error('Provider route "gemini_3_1_flash_lite:google" unavailable (503)');
+            err.code = "PROVIDER_TRANSIENT_ERROR";
+            err.statusCode = 503;
+            err.retryable = true;
+            throw err;
+          },
+        }
+      );
+    } catch (e) {
+      err503 = e;
+    }
+    assert.ok(err503, "503 must still fail closed");
+    assert.strictEqual(err503.code, "SAFETY_CHECK_UNAVAILABLE");
+    assert.strictEqual(err503.category, "UPSTREAM_FAULT");
+    assert.strictEqual(err503.statusCode, 503);
+    assert.strictEqual(err503.retryable, true);
+    assert.notStrictEqual(err503.is_safe, false);
+
+    const sanitized503 = sanitizeClientError(err503);
+    assert.strictEqual(sanitized503.code, "SAFETY_CHECK_UNAVAILABLE");
+    assert.strictEqual(sanitized503.category, "UPSTREAM_FAULT");
+    assert.strictEqual(sanitized503.statusCode, 503);
+    assert.ok(!/gemini_3_1_flash_lite|provider route|google/i.test(sanitized503.userMessage));
+
+    // 3. CIRCUIT_BREAKER_OPEN -> retryable: false, UPSTREAM_FAULT, 503, is_safe !== false
+    let errCb;
+    try {
+      await LlmNode.execute(
+        { prompt: "A serene mountain lake", skills: ["system-safety"] },
+        {
+          userId: "usr-m2",
+          executeLLM: async () => {
+            const err = new Error('Circuit breaker OPEN for route "gemini_3_1_flash_lite:google"');
+            err.code = "CIRCUIT_BREAKER_OPEN";
+            err.statusCode = 503;
+            err.retryable = false;
+            throw err;
+          },
+        }
+      );
+    } catch (e) {
+      errCb = e;
+    }
+    assert.ok(errCb, "CIRCUIT_BREAKER_OPEN must still fail closed");
+    assert.strictEqual(errCb.code, "SAFETY_CHECK_UNAVAILABLE");
+    assert.strictEqual(errCb.category, "UPSTREAM_FAULT");
+    assert.strictEqual(errCb.statusCode, 503);
+    assert.strictEqual(errCb.retryable, false);
+    assert.notStrictEqual(errCb.is_safe, false);
+
+    const sanitizedCb = sanitizeClientError(errCb);
+    assert.strictEqual(sanitizedCb.code, "SAFETY_CHECK_UNAVAILABLE");
+    assert.strictEqual(sanitizedCb.statusCode, 503);
+    assert.strictEqual(sanitizedCb.retryable, false);
+    assert.ok(!/gemini_3_1_flash_lite|circuit breaker|google/i.test(sanitizedCb.userMessage));
+
+    // 4. SAFETY_CHECK_FAILED with leaked internal model/route -> static user-safe message distinct from SAFETY_CHECK_UNAVAILABLE
+    const rawSafetyCheckFailed = new Error(
+      'Safety verification failed (fail-closed): Provider route "gemini_3_1_flash_lite:google" malformed payload'
+    );
+    rawSafetyCheckFailed.code = "SAFETY_CHECK_FAILED";
+    rawSafetyCheckFailed.is_safe = false;
+    const sanitizedFailed = sanitizeClientError(rawSafetyCheckFailed);
+    assert.strictEqual(sanitizedFailed.code, "SAFETY_CHECK_FAILED");
+    assert.strictEqual(sanitizedFailed.category, "CONTENT_SAFETY_VIOLATION");
+    assert.strictEqual(sanitizedFailed.statusCode, 422);
+    assert.strictEqual(sanitizedFailed.retryable, false);
+    assert.ok(!/gemini_3_1_flash_lite|provider route|google|malformed/i.test(sanitizedFailed.userMessage));
+    assert.notStrictEqual(
+      sanitizedFailed.userMessage,
+      sanitized503.userMessage,
+      "SAFETY_CHECK_FAILED and SAFETY_CHECK_UNAVAILABLE must return distinct static user-safe messages"
     );
   });
 
@@ -148,41 +266,30 @@ describe("Content Moderation Fail-Closed & Prompt Unification Boundary Tests (Ta
     );
   });
 
-  it("TEST 5: Strict schema validation - missing or non-boolean is_safe in safety mode must throw validation error", async () => {
+  it("TEST 5: Omitted is_safe in valid JSON defaults to safe (only explicit is_safe: false blocks)", async () => {
     llmService.generate = async () => {
       return {
         raw: JSON.stringify({
-          title: "Test Title",
-          description: "Some translated text",
-          // Notice: is_safe is omitted!
+          prompt: "Relit portrait with soft golden light",
+          // Notice: is_safe is omitted -> defaults to true
         }),
         json: {
-          title: "Test Title",
-          description: "Some translated text",
+          prompt: "Relit portrait with soft golden light",
         },
         model: "gemini-3.1-flash-lite",
       };
     };
 
-    await assert.rejects(
-      async () => {
-        await LlmNode.execute(
-          {
-            prompt: "Some prompt",
-            skills: ["system-safety", "translate"],
-          },
-          { runId: "run-t9-5", nodeId: "llm_process", userId: "usr-1" }
-        );
+    const result = await LlmNode.execute(
+      {
+        prompt: "Some prompt",
+        skills: ["system-safety", "translate"],
       },
-      (err) => {
-        assert.ok(
-          err.code === "SAFETY_CHECK_FAILED" || err.code === "OUTPUT_CONTRACT_VIOLATION",
-          `Expected schema validation failure, got: ${err.code}`
-        );
-        return true;
-      },
-      "Missing is_safe boolean in safety evaluation mode must fail closed"
+      { runId: "run-t9-5", nodeId: "llm_process", userId: "usr-1" }
     );
+
+    assert.strictEqual(result.status, "success");
+    assert.strictEqual(result.text, "Relit portrait with soft golden light");
   });
 
   it("TEST 6: character-sheet-v1 V3 workflow includes base.llm node with system-safety skill before image generation", async () => {
@@ -194,70 +301,6 @@ describe("Content Moderation Fail-Closed & Prompt Unification Boundary Tests (Ta
     assert.ok(llmNode, "llm_enrich node must exist in character-sheet-v3");
     assert.strictEqual(llmNode.type, "base.llm");
     assert.ok(llmNode.inputs.skills.includes("system-safety"));
-  });
-});
-}
-
-// ─── Source: promptLengthSafetyCeilingBoundary.test.js ───
-{
-describe("D2.4 — Generic Prompt Safety Ceiling (7000 chars) Boundary Tests", () => {
-  it("TEST 1: assertVideoInputs and assertImageInputs accept a 3500-character expressive prompt without throwing", () => {
-    const longPrompt = "A cinematic multi-shot sequence with intricate details, lighting, and camera motion. ".repeat(40);
-    assert.ok(longPrompt.length > 2000 && longPrompt.length <= 7000, `Prompt length is ${longPrompt.length}`);
-
-    // Should succeed under 7000 ceiling
-    const videoResult = NodeSafetyService.assertVideoInputs({ prompt: longPrompt }, "video-generation");
-    assert.equal(videoResult.prompt, longPrompt.trim());
-    assert.equal(videoResult.prompt.length, longPrompt.trim().length, "Must not truncate prompt");
-
-    const imageResult = NodeSafetyService.assertImageInputs({ prompt: longPrompt }, "image-generation");
-    assert.equal(imageResult.prompt, longPrompt.trim());
-    assert.equal(imageResult.prompt.length, longPrompt.trim().length, "Must not truncate prompt");
-  });
-
-  it("TEST 2: assertLLMInputs accepts a 6000-character userPrompt without throwing", () => {
-    const longUserPrompt = "Detailed user instruction describing characters, scenes, and actions. ".repeat(85);
-    assert.ok(longUserPrompt.length > 4000 && longUserPrompt.length <= 7000, `User prompt length is ${longUserPrompt.length}`);
-
-    // Should succeed under 7000 ceiling
-    const llmInputs = {
-      userPrompt: longUserPrompt,
-      skills: ["llm/translate"],
-    };
-    const llmResult = NodeSafetyService.assertLLMInputs(llmInputs, "llm");
-    assert.equal(llmResult.userPrompt, longUserPrompt.trim());
-    assert.equal(llmResult.userPrompt.length, longUserPrompt.trim().length, "Must not truncate userPrompt");
-  });
-
-  it("TEST 3: Prompts exceeding 7000 characters are strictly rejected with NODE_VALIDATION_ERROR", () => {
-    const excessivePrompt = "X".repeat(7001);
-
-    assert.throws(
-      () => NodeSafetyService.assertVideoInputs({ prompt: excessivePrompt }, "video-generation"),
-      (err) => {
-        assert.equal(err.code, "NODE_VALIDATION_ERROR");
-        assert.match(err.message, /exceeds maximum length of 7000 characters/);
-        return true;
-      }
-    );
-
-    assert.throws(
-      () => NodeSafetyService.assertImageInputs({ prompt: excessivePrompt }, "image-generation"),
-      (err) => {
-        assert.equal(err.code, "NODE_VALIDATION_ERROR");
-        assert.match(err.message, /exceeds maximum length of 7000 characters/);
-        return true;
-      }
-    );
-
-    assert.throws(
-      () => NodeSafetyService.assertLLMInputs({ userPrompt: excessivePrompt, skills: ["llm/translate"] }, "llm"),
-      (err) => {
-        assert.equal(err.code, "NODE_VALIDATION_ERROR");
-        assert.match(err.message, /exceeds maximum length of 7000 characters/);
-        return true;
-      }
-    );
   });
 });
 }

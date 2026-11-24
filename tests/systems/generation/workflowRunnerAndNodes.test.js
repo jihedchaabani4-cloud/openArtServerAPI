@@ -1,25 +1,29 @@
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  V3Dispatcher,
+  ExecutionEngine,
   GenerationService,
   GenerationRequestService,
 } from "#generation/tools";
 import {
   WorkflowExecutor,
   GraphCompiler,
+  NodeRegistry,
+  LlmNode,
   ImageGenerateNode,
   VideoGenerateNode,
   SaveMediaNode,
   createDefaultV3NodeRegistry,
   imageGenerationV3,
+  videoGenerationV3,
 } from "../../../src/systems/generation/internal/v3/index.js";
 import {
   ERROR_CODES,
   parseProviderError,
+  sanitizeClientError,
 } from "../../../src/systems/generation/internal/errors.js";
 import { db } from "../../../src/container.js";
-import { redisConnection, workerRedisConnection } from "#shared";
+import { redisConnection, workerRedisConnection, baseLogger, LogEvents } from "#shared";
 import { calculateCost, ProviderTransientError } from "#models/tools";
 import {
   registerProviderRunner,
@@ -61,7 +65,7 @@ describe("F2 — Server-Side Workflow Context & Failure Handling Boundary Tests 
     }
   });
 
-  it("TEST 1: V3Dispatcher / WorkflowExecutor writes ONLY to server-assigned serverMediaIds, ignoring missing media_id", async () => {
+  it("TEST 1: ExecutionEngine / WorkflowExecutor writes ONLY to server-assigned serverMediaIds, ignoring missing media_id", async () => {
     db.media.updateMedia = async (id, patch) => {
       updatedMediaCalls.push({ id, patch });
       return { id, ...patch };
@@ -96,7 +100,7 @@ describe("F2 — Server-Side Workflow Context & Failure Handling Boundary Tests 
 
     assert.strictEqual(updatedMediaCalls.length, 1, "Exactly one media update must be executed");
     assert.strictEqual(updatedMediaCalls[0].id, "media-server-1");
-    assert.strictEqual(updatedMediaCalls[0].patch.status, "completed");
+    assert.strictEqual(updatedMediaCalls[0].patch.status, "success");
 
     // If neither media_id nor serverMediaIds is provided, SaveMediaNode refuses to write
     await assert.rejects(
@@ -133,18 +137,18 @@ describe("F2 — Server-Side Workflow Context & Failure Handling Boundary Tests 
     );
   });
 
-  it("TEST 3: V3Dispatcher throws unless execution result status === 'completed'", async () => {
-    const dispatcher = new V3Dispatcher({
+  it("TEST 3: ExecutionEngine throws unless execution result status === 'completed'", async () => {
+    const engine = new ExecutionEngine({
       billingTools: {
-        settleHold: async () => {},
-        releaseHold: async () => {},
+        settleCredits: async () => ({ settled: true }),
+        rollbackCredits: async () => ({ rolledBack: true }),
       },
       mediaTools: {
         markMediaFailed: async () => {},
       },
     });
 
-    dispatcher.executor = {
+    engine.executor = {
       execute: async () => ({
         status: "pending",
       }),
@@ -152,7 +156,7 @@ describe("F2 — Server-Side Workflow Context & Failure Handling Boundary Tests 
 
     await assert.rejects(
       async () => {
-        await dispatcher.executeQueuedV3Run({
+        await engine.execute({
           useCaseId: "image-generation-v1",
           input: { prompt: "Test prompt", media_id: "m-1" },
           userId: "user-test-f2b",
@@ -165,30 +169,22 @@ describe("F2 — Server-Side Workflow Context & Failure Handling Boundary Tests 
     );
   });
 
-  it("TEST 4: V3Dispatcher failure handler marks character-sheet media as failed via serverWorkflowId", async () => {
+  it("TEST 4: ExecutionEngine failure handler marks character-sheet target mediaId as failed (never spoofed workflow)", async () => {
     const realCharWorkflowId = "char-wf-real-555";
     const spoofedInputWfId = "victim-wf-spoofed-888";
 
-    let failedMediaWorkflowId = null;
+    const failedMediaIds = [];
 
-    const mockMediaDb = {
-      findByWorkflow: async (wfId) => [
-        { id: `media-${wfId}`, workflow_id: wfId, status: "processing", step_id: "character_sheet" },
-      ],
-      updateMedia: async (id, fields) => {
-        failedMediaWorkflowId = id;
-        return { id, ...fields };
-      },
-    };
-
-    const dispatcher = new V3Dispatcher({
-      db: { media: mockMediaDb },
+    const engine = new ExecutionEngine({
       billingTools: {
-        releaseHold: async () => {},
-        settleHold: async () => {},
+        rollbackCredits: async () => ({ rolledBack: true }),
+        settleCredits: async () => ({ settled: true }),
       },
       mediaTools: {
-        markMediaFailed: async () => {},
+        markMediaFailed: async ({ mediaId }) => {
+          failedMediaIds.push(mediaId);
+          return { mediaId, status: "failed" };
+        },
       },
     });
 
@@ -207,7 +203,7 @@ describe("F2 — Server-Side Workflow Context & Failure Handling Boundary Tests 
     };
 
     await assert.rejects(async () => {
-      await dispatcher.executeQueuedV3Run({
+      await engine.execute({
         workflow: failingWorkflow,
         input: {
           workflow_id: spoofedInputWfId,
@@ -218,10 +214,10 @@ describe("F2 — Server-Side Workflow Context & Failure Handling Boundary Tests 
       });
     });
 
-    assert.strictEqual(
-      failedMediaWorkflowId,
-      `media-${realCharWorkflowId}`,
-      "Failure handler must fail the real character workflow media, never the spoofed input workflow ID"
+    assert.deepStrictEqual(
+      failedMediaIds,
+      [`media-${realCharWorkflowId}`],
+      "Failure handler must fail ONLY the real character workflow media, never the spoofed input workflow ID"
     );
   });
 });
@@ -277,10 +273,12 @@ describe("F2.4-b5 — Real ModelRunner & OutputMap Pipeline Boundary Tests (V3 N
     registerProviderRunner("wavespeed", async () => ({ outputs: [videoUrl] }));
 
     const result = await VideoGenerateNode.execute(
-      { model: "wan_3_0", prompt: "A cinematic flying drone shot", duration: 5, parameters: { duration: 5 } },
+      { model: "wan_3_0", prompt: "A cinematic flying drone shot", parameters: { duration: 5 } },
       makeCtx()
     );
 
+    assert.strictEqual(result.status, "success");
+    assert.strictEqual(result.assets.length, 1);
     assert.strictEqual(result.video_url, videoUrl);
     assert.strictEqual(result.metadata.model, "wan_3_0");
     assert.strictEqual(result.metadata.provider, "wavespeed");
@@ -291,10 +289,12 @@ describe("F2.4-b5 — Real ModelRunner & OutputMap Pipeline Boundary Tests (V3 N
     registerProviderRunner("wavespeed", async () => ({ outputs: [videoUrl] }));
 
     const result = await VideoGenerateNode.execute(
-      { model: "seedance_2_5", prompt: "A dancer spinning", duration: 5, parameters: { duration: 5 } },
+      { model: "seedance_2_5", prompt: "A dancer spinning", parameters: { duration: 5 } },
       makeCtx()
     );
 
+    assert.strictEqual(result.status, "success");
+    assert.strictEqual(result.assets.length, 1);
     assert.strictEqual(result.video_url, videoUrl);
     assert.strictEqual(result.metadata.model, "seedance_2_5");
     assert.strictEqual(result.metadata.provider, "wavespeed");
@@ -305,10 +305,12 @@ describe("F2.4-b5 — Real ModelRunner & OutputMap Pipeline Boundary Tests (V3 N
     registerProviderRunner("ltx", async () => ({ status: "completed", result: { video_url: videoUrl } }));
 
     const result = await VideoGenerateNode.execute(
-      { model: "ltx_2_3_fast", prompt: "Time lapse of stars", duration: 6, parameters: { duration: 6, resolution: "720p" } },
+      { model: "ltx_2_3_fast", prompt: "Time lapse of stars", parameters: { duration: 6, resolution: "720p" } },
       makeCtx()
     );
 
+    assert.strictEqual(result.status, "success");
+    assert.strictEqual(result.assets.length, 1);
     assert.strictEqual(result.video_url, videoUrl);
     assert.strictEqual(result.metadata.model, "ltx_2_3_fast");
     assert.strictEqual(result.metadata.provider, "ltx");
@@ -409,7 +411,7 @@ describe("F2.4-b5 — Real ModelRunner & OutputMap Pipeline Boundary Tests (V3 N
     );
 
     const finalPlaceholder = mediaRows.get(ph1);
-    assert.strictEqual(finalPlaceholder.status, "completed");
+    assert.strictEqual(finalPlaceholder.status, "success");
     assert.strictEqual(finalPlaceholder.url, "https://storage.example.com/asset-1-USED.png");
   });
 
@@ -510,10 +512,10 @@ describe("Multi-Asset Outputs & Count Boundary (F2.4-b / V3)", () => {
   });
 
   it("TEST 4: imageController clamps output count to 1 and pre-allocates exactly 1 placeholder even if count=4 is requested", async () => {
-    const { useCaseService } = await import("../../../src/container.js");
-    const origPrepare = useCaseService.prepareAndEnqueue;
+    const { executionEngine } = await import("../../../src/container.js");
+    const origLaunch = executionEngine.launch;
     let preparedArgs = null;
-    useCaseService.prepareAndEnqueue = async (args) => {
+    executionEngine.launch = async (args) => {
       preparedArgs = args;
       return { executionId: "exec-multi-test", cost: { totalCredits: 8 } };
     };
@@ -554,7 +556,7 @@ describe("Multi-Asset Outputs & Count Boundary (F2.4-b / V3)", () => {
       assert.strictEqual(preparedArgs.serverContext.mediaIds.length, 1, "serverContext.mediaIds must contain exactly 1 id");
       assert.strictEqual(mediaRows.size, 1, "Exactly 1 media placeholder created in db.media");
     } finally {
-      useCaseService.prepareAndEnqueue = origPrepare;
+      executionEngine.launch = origLaunch;
     }
   });
 });
@@ -636,6 +638,233 @@ describe("D2.5 — Provider Error Semantics & Upstream Fault Mapping Boundary Te
       `Expected exactly 1 attempt without duplicate re-submissions, got ${attempts}`
     );
   });
+  it("TEST 5 (P1-2): WorkflowExecutor fails fast on CIRCUIT_BREAKER_OPEN on attempt 1 with 0 retries and 0 sleep", async () => {
+    const registry = new NodeRegistry();
+    let attempts = 0;
+    const sleeps = [];
+
+    registry.register({
+      type: "custom.cb_node",
+      OUTPUT_NODE: true,
+      CACHEABLE: false,
+      INPUT_TYPES: { required: { prompt: { type: "STRING" } } },
+      RETURN_TYPES: { url: "STRING" },
+      retryPolicy: {
+        maxAttempts: 3,
+        backoffMs: 1500,
+        retryableCategories: ["UPSTREAM_FAULT", "RATE_LIMIT"],
+      },
+      estimateCost: () => 0,
+      async execute() {
+        attempts++;
+        const err = new Error("Circuit breaker OPEN for ltx:ltx_2_3_fast");
+        err.code = "CIRCUIT_BREAKER_OPEN";
+        err.category = "UPSTREAM_FAULT";
+        err.statusCode = 503;
+        // Even if retryable were left true/undefined, NON_RETRYABLE_CODES must fail fast
+        err.retryable = true;
+        throw err;
+      },
+    });
+
+    const executor = new WorkflowExecutor(registry, {
+      sleepFn: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        executor.execute({
+          workflow: {
+            id: "wf-cb-fastfail",
+            nodes: [{ id: "step1", type: "custom.cb_node", inputs: { prompt: "test" } }],
+          },
+          input: {},
+        }),
+      (err) => {
+        assert.strictEqual(err.code, "CIRCUIT_BREAKER_OPEN");
+        return true;
+      }
+    );
+
+    assert.strictEqual(attempts, 1, "CIRCUIT_BREAKER_OPEN must fail fast on attempt 1 with 0 retries");
+    assert.deepStrictEqual(sleeps, [], "CIRCUIT_BREAKER_OPEN must incur 0 sleep calls");
+  });
+
+  it("TEST 6 (P1-3): PROVIDER_QUOTA_EXCEEDED maps to 503 maintenance message (NOT 429 / currently busy) in mediaNodeHelpers and sanitizeClientError", async () => {
+    let caughtNodeErr;
+    try {
+      await VideoGenerateNode.execute(
+        { model: "ltx_2_3_fast", prompt: "Ocean waves at sunrise" },
+        {
+          userId: "user-p1-3",
+          executeGeneration: async () => {
+            const err = new Error("Insufficient funds. Required: 18 cents");
+            err.code = "PROVIDER_QUOTA_EXCEEDED";
+            err.statusCode = 503;
+            err.retryable = false;
+            throw err;
+          },
+        }
+      );
+    } catch (e) {
+      caughtNodeErr = e;
+    }
+
+    assert.ok(caughtNodeErr, "VideoGenerateNode must throw on PROVIDER_QUOTA_EXCEEDED");
+    assert.strictEqual(caughtNodeErr.code, "PROVIDER_QUOTA_EXCEEDED");
+    assert.strictEqual(caughtNodeErr.category, "UPSTREAM_FAULT");
+    assert.strictEqual(caughtNodeErr.statusCode, 503);
+    assert.strictEqual(caughtNodeErr.retryable, false);
+
+    const sanitizedFromNode = sanitizeClientError(caughtNodeErr);
+    assert.strictEqual(sanitizedFromNode.code, "PROVIDER_QUOTA_EXCEEDED");
+    assert.strictEqual(sanitizedFromNode.category, "UPSTREAM_FAULT");
+    assert.strictEqual(sanitizedFromNode.statusCode, 503);
+    assert.strictEqual(sanitizedFromNode.retryable, false);
+    assert.match(sanitizedFromNode.userMessage, /maintenance/i);
+    assert.ok(!/currently busy/i.test(sanitizedFromNode.userMessage));
+
+    // Also verify sanitizeClientError directly when raw error carries status 429 or RATE_LIMIT
+    const rawQuotaErr = new Error("Insufficient funds");
+    rawQuotaErr.code = "PROVIDER_QUOTA_EXCEEDED";
+    rawQuotaErr.statusCode = 429;
+    const sanitizedRaw = sanitizeClientError(rawQuotaErr);
+    assert.strictEqual(sanitizedRaw.statusCode, 503);
+    assert.strictEqual(sanitizedRaw.category, "UPSTREAM_FAULT");
+    assert.strictEqual(sanitizedRaw.retryable, false);
+    assert.match(sanitizedRaw.userMessage, /maintenance/i);
+    assert.ok(!/currently busy/i.test(sanitizedRaw.userMessage));
+  });
+
+  it("TEST 7 (P2-3): invokeModelGeneration resolves single model via getModelSchema without cold 5-model catalog cost fan-out", async () => {
+    const costEvents = [];
+    const origDebug = baseLogger.debug;
+    const origInfo = baseLogger.info;
+    baseLogger.debug = (payload, msg) => {
+      if (payload?.event === LogEvents.MODELS_COST_CALCULATED) {
+        costEvents.push(payload);
+      }
+      return origDebug.call(baseLogger, payload, msg);
+    };
+    baseLogger.info = (payload, msg) => {
+      if (payload?.event === LogEvents.MODELS_COST_CALCULATED) {
+        costEvents.push(payload);
+      }
+      return origInfo.call(baseLogger, payload, msg);
+    };
+
+    try {
+      registerProviderRunner("ltx", async () => ({
+        status: "completed",
+        result: { video_url: "https://api.ltx.io/generated/single_lookup.mp4" },
+      }));
+
+      const result = await VideoGenerateNode.execute(
+        { model: "ltx_2_3_fast", prompt: "Single model lookup test", parameters: { duration: 6, resolution: "720p" } },
+        { runId: `run-p23-${randomUUID()}`, nodeId: "generate_video", userId: "user-p23" }
+      );
+
+      assert.strictEqual(result.status, "success");
+      assert.strictEqual(result.video_url, "https://api.ltx.io/generated/single_lookup.mp4");
+      assert.strictEqual(
+        costEvents.length,
+        0,
+        `Expected 0 catalog cost fan-out calculations during invokeModelGeneration, got ${costEvents.length}`
+      );
+    } finally {
+      unregisterProviderRunner("ltx");
+      baseLogger.debug = origDebug;
+      baseLogger.info = origInfo;
+    }
+  });
+
+  it("TEST 8 (P2-3): videoGenerationV3 llm_process configures timeout_ms: 15000 and LlmNode forwards timeoutMs to executeLLM", async () => {
+    const llmStep = videoGenerationV3.nodes.find((n) => n.id === "llm_process");
+    assert.ok(llmStep, "videoGenerationV3 must define llm_process node");
+    assert.strictEqual(llmStep.type, "base.llm");
+    assert.strictEqual(llmStep.inputs.timeout_ms, 15000, "llm_process must enforce timeout_ms: 15000");
+
+    let capturedWithTimeout = null;
+    await LlmNode.execute(
+      {
+        prompt: "A drone sweeping across red canyons",
+        skills: ["system-safety", "translate"],
+        timeout_ms: 15000,
+      },
+      {
+        userId: "user-timeout-test",
+        executeLLM: async (args) => {
+          capturedWithTimeout = args;
+          return {
+            json: { is_safe: true, prompt: "A drone sweeping across red canyons" },
+            model: "gemini-3.1-flash-lite",
+            durationMs: 12,
+          };
+        },
+      }
+    );
+    assert.strictEqual(capturedWithTimeout.timeoutMs, 15000, "LlmNode must forward timeout_ms as timeoutMs");
+
+    let capturedWithoutTimeout = null;
+    await LlmNode.execute(
+      {
+        prompt: "No explicit timeout",
+        skills: ["system-safety"],
+      },
+      {
+        userId: "user-timeout-test",
+        executeLLM: async (args) => {
+          capturedWithoutTimeout = args;
+          return {
+            json: { is_safe: true, prompt: "No explicit timeout" },
+            model: "gemini-3.1-flash-lite",
+            durationMs: 10,
+          };
+        },
+      }
+    );
+    assert.strictEqual("timeoutMs" in capturedWithoutTimeout, false, "LlmNode should omit timeoutMs when timeout_ms is unset");
+
+    // End-to-end through WorkflowExecutor on videoGenerationV3 to verify timeout_ms resolves & forwards
+    let capturedExecutorLlmArgs = null;
+    const executor = new WorkflowExecutor(createDefaultV3NodeRegistry());
+    await executor.execute({
+      workflow: videoGenerationV3,
+      input: {
+        prompt: "End-to-end timeout check",
+        model: "ltx_2_3_fast",
+        media_id: "media-timeout-e2e",
+      },
+      context: {
+        userId: "user-timeout-e2e",
+        executeLLM: async (args) => {
+          capturedExecutorLlmArgs = args;
+          return {
+            json: { is_safe: true, prompt: "End-to-end timeout check" },
+            model: "gemini-3.1-flash-lite",
+            durationMs: 8,
+          };
+        },
+        executeProvider: async () => ({
+          url: "https://mock.example.com/timeout-e2e.mp4",
+          metadata: { model: "ltx_2_3_fast", provider: "ltx" },
+        }),
+        db: {
+          media: {
+            findById: async () => ({ id: "media-timeout-e2e", status: "processing" }),
+            updateMedia: async (id, patch) => ({ id, ...patch }),
+          },
+        },
+      },
+    });
+    assert.strictEqual(
+      capturedExecutorLlmArgs?.timeoutMs,
+      15000,
+      "WorkflowExecutor must resolve videoGenerationV3 llm_process.inputs.timeout_ms and forward timeoutMs: 15000"
+    );
+  });
 });
 }
 
@@ -661,8 +890,8 @@ describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", ()
       },
     };
 
-    const mockUseCaseService = {
-      prepareAndEnqueue: async (args) => ({
+    const mockExecutionEngine = {
+      launch: async (args) => ({
         jobId: "job-123",
         executionId: args.executionId,
         cost: { totalCredits: 10 },
@@ -675,7 +904,7 @@ describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", ()
 
     const service = new GenerationRequestService({
       db: mockDb,
-      useCaseService: mockUseCaseService,
+      executionEngine: mockExecutionEngine,
       folderService: mockFolderService,
     });
 
@@ -899,7 +1128,7 @@ describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", ()
       { db: mockDb }
     );
 
-    assert.equal(updatedMedia.status, "completed");
+    assert.equal(updatedMedia.status, "success");
     assert.equal(updatedMedia.url, "https://storage.cdn/success-asset.png");
     assert.ok(updatedMedia.generation_config);
 
@@ -938,8 +1167,8 @@ describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", ()
       workflowMedia: { linkMedia: async () => {} },
     };
 
-    const mockUseCaseService = {
-      prepareAndEnqueue: async (args) => ({
+    const mockExecutionEngine = {
+      launch: async (args) => ({
         jobId: "job-edit-2",
         executionId: args.executionId,
       }),
@@ -947,7 +1176,7 @@ describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", ()
 
     const service = new GenerationRequestService({
       db: mockDb,
-      useCaseService: mockUseCaseService,
+      executionEngine: mockExecutionEngine,
       folderService: { validateAndAssertUsable: async () => null },
     });
 
@@ -988,13 +1217,13 @@ describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", ()
       workflowMedia: { linkMedia: async () => {} },
     };
 
-    const mockUseCaseService = {
-      prepareAndEnqueue: async () => ({ jobId: "job-should-not-run" }),
+    const mockExecutionEngine = {
+      launch: async () => ({ jobId: "job-should-not-run" }),
     };
 
     const service = new GenerationRequestService({
       db: mockDb,
-      useCaseService: mockUseCaseService,
+      executionEngine: mockExecutionEngine,
       folderService: { validateAndAssertUsable: async () => null },
     });
 
@@ -1159,7 +1388,7 @@ describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", ()
 
     const service = new GenerationRequestService({
       db: mockDb,
-      useCaseService: { prepareAndEnqueue: async () => ({ jobId: "job-secret" }) },
+      executionEngine: { launch: async () => ({ jobId: "job-secret" }) },
       folderService: { validateAndAssertUsable: async () => null },
     });
 

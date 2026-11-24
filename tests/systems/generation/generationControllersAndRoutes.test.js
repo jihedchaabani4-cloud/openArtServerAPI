@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as imageController from "#generation/api";
 import * as videoController from "#generation/api";
 import { generateImage, generateVideo, deleteItem, toggleItemLike as toggleLike, imagesRouter, workflowsRouter, deleteWorkflow, bulkDeleteWorkflows, deleteMedia } from "#generation/api";
-import { generationRequestService, db, workflowService, useCaseService, characterService, folderService, trashService } from "../../../src/container.js";
+import { generationRequestService, db, workflowService, executionEngine, characterService, folderService, trashService } from "../../../src/container.js";
 import { MediaConflictError } from "#media/tools";
 import { AppError, redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared";
 import { randomUUID } from "node:crypto";
@@ -525,7 +525,7 @@ describe("generationsMutation mounted-handler error masking boundary", () => {
  *   3. characterController.generateCharacterSheet (generate-sheet)
  *   4. characterController.createCharacter (AI visual sheet creation)
  *
- * Each entry point tests two failure boundaries using the REAL prepareAndEnqueue and billing runtime:
+ * Each entry point tests two failure boundaries using the REAL ExecutionEngine.launch and billing runtime:
  *   (a) Error after placeholders are created but before enqueue (e.g. wallet DB failure on reserve):
  *       - All placeholders marked "failed"
  *       - Hold released exactly 0 times (never reserved)
@@ -595,8 +595,8 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
     origDbWorkflows = db.workflows;
     origDbProjects = db.projects;
     origDbCharacters = db.characters;
-    origWalletService = useCaseService.walletService;
-    origJobQueueService = useCaseService.jobQueueService;
+    origWalletService = executionEngine.walletService;
+    origJobQueueService = executionEngine.jobQueueService;
 
     db.media = {
       createMedia: async (data) => {
@@ -654,8 +654,8 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
     db.workflows = origDbWorkflows;
     db.projects = origDbProjects;
     db.characters = origDbCharacters;
-    useCaseService.walletService = origWalletService;
-    useCaseService.jobQueueService = origJobQueueService;
+    executionEngine.walletService = origWalletService;
+    executionEngine.jobQueueService = origJobQueueService;
   });
 
   function makeMockRes() {
@@ -691,7 +691,7 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
         throw err;
       };
 
-      useCaseService.walletService = wallet;
+      executionEngine.walletService = wallet;
 
       const req = {
         user: { id: "user-ctrl-test" },
@@ -726,8 +726,8 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
       const wallet = new TrackingWalletService();
       await wallet.setBalance("user-ctrl-test", 100);
 
-      useCaseService.walletService = wallet;
-      useCaseService.jobQueueService = {
+      executionEngine.walletService = wallet;
+      executionEngine.jobQueueService = {
         addUseCaseJob: async () => {
           throw new Error("Redis cluster failover in progress");
         },
@@ -774,7 +774,7 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
         throw err;
       };
 
-      useCaseService.walletService = wallet;
+      executionEngine.walletService = wallet;
 
       const req = {
         user: { id: "user-ctrl-test" },
@@ -805,8 +805,8 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
       const wallet = new TrackingWalletService();
       await wallet.setBalance("user-ctrl-test", 100);
 
-      useCaseService.walletService = wallet;
-      useCaseService.jobQueueService = {
+      executionEngine.walletService = wallet;
+      executionEngine.jobQueueService = {
         addUseCaseJob: async () => {
           throw new Error("Redis OOM or unreachable for video job");
         },
@@ -852,7 +852,7 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
         throw err;
       };
 
-      useCaseService.walletService = wallet;
+      executionEngine.walletService = wallet;
 
       const req = {
         user: { id: "user-ctrl-test" },
@@ -883,8 +883,8 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
       const wallet = new TrackingWalletService();
       await wallet.setBalance("user-ctrl-test", 100);
 
-      useCaseService.walletService = wallet;
-      useCaseService.jobQueueService = {
+      executionEngine.walletService = wallet;
+      executionEngine.jobQueueService = {
         addUseCaseJob: async () => {
           throw new Error("Redis down during character sheet enqueue");
         },
@@ -930,7 +930,7 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
         throw err;
       };
 
-      useCaseService.walletService = wallet;
+      executionEngine.walletService = wallet;
 
       const req = {
         user: { id: "user-ctrl-test" },
@@ -959,8 +959,8 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
       const wallet = new TrackingWalletService();
       await wallet.setBalance("user-ctrl-test", 100);
 
-      useCaseService.walletService = wallet;
-      useCaseService.jobQueueService = {
+      executionEngine.walletService = wallet;
+      executionEngine.jobQueueService = {
         addUseCaseJob: async () => {
           throw new Error("Redis queue down during character create");
         },
@@ -1008,7 +1008,7 @@ describe("RC1.1-R3 — Count Parameter Current Server Behavior Test", () => {
 
   let origCreateWorkflow;
   let origCreateMedia;
-  let origPrepareAndEnqueue;
+  let origLaunch;
   let origProjectsFindByUser;
 
   after(async () => {
@@ -1058,7 +1058,7 @@ describe("RC1.1-R3 — Count Parameter Current Server Behavior Test", () => {
 
     origCreateWorkflow = db.workflows.createWorkflow;
     origCreateMedia = db.media.createMedia;
-    origPrepareAndEnqueue = useCaseService.prepareAndEnqueue;
+    origLaunch = executionEngine.launch;
     origProjectsFindByUser = db.projects?.findByUser;
 
     db.projects = {
@@ -1076,14 +1076,13 @@ describe("RC1.1-R3 — Count Parameter Current Server Behavior Test", () => {
       return data;
     };
 
-    useCaseService.prepareAndEnqueue = async (useCaseId, input, opts) => {
-      enqueueCalls.push({ useCaseId, input, opts });
+    executionEngine.launch = async (params) => {
+      enqueueCalls.push(params);
       return {
         jobId: "mock-job-count-test",
         taskId: "mock-job-count-test",
-        hasSufficientCredits: true,
-        calculatedCost: 10,
-        billingPlan: { totalCredits: 10 },
+        executionId: params.executionId,
+        cost: { totalCredits: 10 },
       };
     };
   });
@@ -1091,7 +1090,7 @@ describe("RC1.1-R3 — Count Parameter Current Server Behavior Test", () => {
   afterEach(() => {
     db.workflows.createWorkflow = origCreateWorkflow;
     db.media.createMedia = origCreateMedia;
-    useCaseService.prepareAndEnqueue = origPrepareAndEnqueue;
+    executionEngine.launch = origLaunch;
     if (db.projects) db.projects.findByUser = origProjectsFindByUser;
   });
 
@@ -1195,7 +1194,7 @@ describe("Generation & Gen-Edit APIs — All Models & Parameters Boundary Suite"
   let originalLinkMedia;
   let originalFindByCharacterId;
   let originalResolveElementRecord;
-  let originalPrepareAndEnqueue;
+  let originalLaunch;
 
   let createdWorkflows = [];
   let createdMedia = [];
@@ -1260,7 +1259,7 @@ describe("Generation & Gen-Edit APIs — All Models & Parameters Boundary Suite"
     originalLinkMedia = db.workflowMedia?.linkMedia;
     originalFindByCharacterId = db.characters?.findByCharacterId;
     originalResolveElementRecord = db.elements?.resolveRecord;
-    originalPrepareAndEnqueue = useCaseService?.prepareAndEnqueue;
+    originalLaunch = executionEngine?.launch;
 
     createdWorkflows = [];
     createdMedia = [];
@@ -1346,7 +1345,7 @@ describe("Generation & Gen-Edit APIs — All Models & Parameters Boundary Suite"
       };
     }
 
-    useCaseService.prepareAndEnqueue = async (args) => {
+    executionEngine.launch = async (args) => {
       enqueueCalls.push(args);
       return {
         jobId: `job-${enqueueCalls.length}`,
@@ -1377,7 +1376,7 @@ describe("Generation & Gen-Edit APIs — All Models & Parameters Boundary Suite"
     if (db.workflowMedia) db.workflowMedia.linkMedia = originalLinkMedia;
     if (db.characters) db.characters.findByCharacterId = originalFindByCharacterId;
     if (db.elements) db.elements.resolveRecord = originalResolveElementRecord;
-    if (useCaseService) useCaseService.prepareAndEnqueue = originalPrepareAndEnqueue;
+    if (executionEngine) executionEngine.launch = originalLaunch;
   });
 
   async function postJson(path, body, token = "token-user-A") { // gate:allow-secret

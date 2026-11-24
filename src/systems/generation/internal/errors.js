@@ -394,6 +394,37 @@ export function sanitizeClientError(err) {
     const rawCategory = String(err?.category || "").toUpperCase();
     const rawStatus = Number(err?.statusCode || err?.status || 0);
 
+    // 0. SAFETY_CHECK_UNAVAILABLE (429 / 502 / 503 — transient safety provider fault; fail-closed, NOT user policy violation)
+    if (rawCode === "SAFETY_CHECK_UNAVAILABLE") {
+        const isRateLimit = rawCategory === "RATE_LIMIT" || rawStatus === 429;
+        const category = isRateLimit ? "RATE_LIMIT" : "UPSTREAM_FAULT";
+        const statusCode = isRateLimit ? 429 : rawStatus === 503 ? 503 : 502;
+        const userMessage = isRateLimit
+            ? "Safety check service is temporarily busy. Please try again in a moment."
+            : "Safety check service is temporarily unavailable. Your credits have been refunded. Please try again shortly.";
+        return {
+            code: "SAFETY_CHECK_UNAVAILABLE",
+            category,
+            statusCode,
+            retryable: err?.retryable !== undefined ? Boolean(err.retryable) : true,
+            message: userMessage,
+            userMessage,
+        };
+    }
+
+    // 0b. SAFETY_CHECK_FAILED (422 — static user-safe message; never leak internal route/model keys)
+    if (rawCode === "SAFETY_CHECK_FAILED") {
+        const staticMsg = "Unable to verify prompt safety. Please revise your prompt and try again.";
+        return {
+            code: "SAFETY_CHECK_FAILED",
+            category: "CONTENT_SAFETY_VIOLATION",
+            statusCode: 422,
+            retryable: false,
+            message: staticMsg,
+            userMessage: staticMsg,
+        };
+    }
+
     // 1. CONTENT_SAFETY_VIOLATION (422)
     if (
         rawCode === "CONTENT_SAFETY_VIOLATION" ||
@@ -408,7 +439,7 @@ export function sanitizeClientError(err) {
             "Your prompt violates our content safety policy."
         );
         return {
-            code: rawCode === "SAFETY_CHECK_FAILED" ? "SAFETY_CHECK_FAILED" : "CONTENT_SAFETY_VIOLATION",
+            code: "CONTENT_SAFETY_VIOLATION",
             category: "CONTENT_SAFETY_VIOLATION",
             statusCode: 422,
             retryable: false,
@@ -460,6 +491,8 @@ export function sanitizeClientError(err) {
 
     // 4. UPSTREAM_FAULT / RATE_LIMIT (429 / 502 / 503)
     if (
+        rawCode === "PROVIDER_QUOTA_EXCEEDED" ||
+        rawCode === "CIRCUIT_BREAKER_OPEN" ||
         rawCategory === "UPSTREAM_FAULT" ||
         rawCategory === "RATE_LIMIT" ||
         rawStatus === 429 ||
@@ -468,17 +501,32 @@ export function sanitizeClientError(err) {
         /rate limit|quota|timeout|timed out|upstream/i.test(rawCode) ||
         /rate limit|quota|timed out/i.test(rawMsg)
     ) {
-        const isRateLimit = rawCategory === "RATE_LIMIT" || rawStatus === 429 || /rate limit|quota/i.test(rawCode);
+        const isProviderQuota = rawCode === "PROVIDER_QUOTA_EXCEEDED";
+        const isRateLimit =
+            !isProviderQuota &&
+            (rawCategory === "RATE_LIMIT" || rawStatus === 429 || /rate limit|quota/i.test(rawCode));
         const category = isRateLimit ? "RATE_LIMIT" : "UPSTREAM_FAULT";
-        const statusCode = isRateLimit ? 429 : rawStatus === 503 ? 503 : 502;
-        const userMessage = isRateLimit
-            ? "Generation service is currently busy. Please try again in a moment."
-            : "Generation failed due to a temporary service issue. Your credits have been refunded.";
+        const statusCode = isProviderQuota
+            ? 503
+            : isRateLimit
+              ? 429
+              : rawStatus === 503 || rawCode === "CIRCUIT_BREAKER_OPEN"
+                ? 503
+                : 502;
+        const userMessage = isProviderQuota
+            ? "This model is temporarily unavailable due to upstream provider maintenance. Your credits have been refunded. Please select a different model."
+            : isRateLimit
+              ? "Generation service is currently busy. Please try again in a moment."
+              : "Generation failed due to a temporary service issue. Your credits have been refunded.";
         return {
             code: rawCode || (isRateLimit ? "RATE_LIMIT_EXCEEDED" : "GENERATION_UPSTREAM_ERROR"),
             category,
             statusCode,
-            retryable: err?.retryable !== undefined ? Boolean(err.retryable) : true,
+            retryable: isProviderQuota || rawCode === "CIRCUIT_BREAKER_OPEN"
+                ? false
+                : err?.retryable !== undefined
+                  ? Boolean(err.retryable)
+                  : true,
             message: userMessage,
             userMessage,
         };

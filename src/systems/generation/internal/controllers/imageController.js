@@ -1,5 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { getGenerationServices } from "../services/serviceAccessor.js";
+import {
+  IMAGE_EDIT_MODELS,
+  parseRelightRequest,
+  parseAnglesRequest,
+  parseRemoveBackgroundRequest,
+  parseImageEditRequest,
+} from "../services/imageEditContract.js";
 import { createLogger } from "#shared";
 import { resolveMediaMetadata } from "#media/tools";
 import { assertOwns, assertOwnsAny, toMediaIdList } from "#identity/tools";
@@ -149,5 +156,190 @@ export async function generateImage(req, res) {
       message: err.isOperational ? err.message : "Failed to generate image",
       traceId,
     });
+  }
+}
+
+function handleImageEditError(res, err, actionName, fallbackMessage) {
+  if (err.code === "QUEUE_DISPATCH_FAILED") {
+    return res.status(503).json({
+      ok: false,
+      status: "failed",
+      code: "QUEUE_DISPATCH_FAILED",
+      message: err.message,
+      workflowId: err.workflowId,
+      mediaId: err.mediaId,
+      mediaIds: err.mediaIds,
+    });
+  }
+
+  const statusCode = err.statusCode || 500;
+  controllerLogger.error({ err, statusCode }, `${actionName} error: ${err.message}`);
+  const traceId = err.workflowId || randomUUID();
+  return res.status(statusCode).json({
+    ok: false,
+    code: statusCode >= 500 ? "INTERNAL_ERROR" : (err.code || "REQUEST_FAILED"),
+    message: err.isOperational ? err.message : fallbackMessage,
+    traceId,
+  });
+}
+
+/**
+ * POST /api/images/relight
+ *
+ * Pure HTTP Controller — In-Place Image Relight.
+ * Validates flat single-light settings, verifies workflow ownership,
+ * and delegates to GenerationRequestService.requestImageEdit.
+ */
+export async function relightImage(req, res) {
+  try {
+    const parsed = parseRelightRequest(req.body);
+    const userId = req.user.id;
+
+    await assertOwns("workflow", parsed.workflowId, userId);
+
+    const { generationRequestService } = getGenerationServices();
+    const result = await generationRequestService.requestImageEdit({
+      userId,
+      workflowId: parsed.workflowId,
+      editType: "relight",
+      stepId: "image_relight",
+      useCaseId: "image-relight-v3",
+      model: IMAGE_EDIT_MODELS.relight,
+      prompt: parsed.prompt,
+      userPrompt: parsed.userPrompt,
+      editSettings: parsed.editSettings,
+      templateVars: parsed.templateVars,
+      parameters: parsed.parameters,
+      defaultMessages: {
+        started: "Image relight started.",
+        addCredits: "Add credits to relight your image.",
+      },
+    });
+
+    return res.json(result);
+  } catch (err) {
+    return handleImageEditError(res, err, "relightImage", "Failed to relight image");
+  }
+}
+
+/**
+ * POST /api/images/angles
+ *
+ * Pure HTTP Controller — In-Place Camera Angle Edit.
+ * Validates camera pose settings, verifies workflow ownership,
+ * and delegates to GenerationRequestService.requestImageEdit.
+ */
+export async function changeImageAngle(req, res) {
+  try {
+    const parsed = parseAnglesRequest(req.body);
+    const userId = req.user.id;
+
+    await assertOwns("workflow", parsed.workflowId, userId);
+
+    const { generationRequestService } = getGenerationServices();
+    const result = await generationRequestService.requestImageEdit({
+      userId,
+      workflowId: parsed.workflowId,
+      editType: "angles",
+      stepId: "image_angles",
+      useCaseId: "image-angles-v3",
+      model: IMAGE_EDIT_MODELS.angles,
+      prompt: parsed.prompt,
+      userPrompt: parsed.userPrompt,
+      editSettings: parsed.editSettings,
+      templateVars: parsed.templateVars,
+      parameters: parsed.parameters,
+      defaultMessages: {
+        started: "Image angle adjustment started.",
+        addCredits: "Add credits to adjust your image angle.",
+      },
+    });
+
+    return res.json(result);
+  } catch (err) {
+    return handleImageEditError(res, err, "changeImageAngle", "Failed to adjust image angle");
+  }
+}
+
+/**
+ * POST /api/images/remove-background
+ *
+ * Pure HTTP Controller — In-Place Image Background Removal (Direct 2-node V3, zero LLM).
+ * Allows selecting between Bria remove-background models (`bria_remove_background_3_0` or
+ * `bria_remove_background_guided`), verifies workflow ownership, and delegates to
+ * GenerationRequestService.requestImageEdit.
+ */
+export async function removeImageBackground(req, res) {
+  try {
+    const parsed = parseRemoveBackgroundRequest(req.body);
+    const userId = req.user.id;
+
+    await assertOwns("workflow", parsed.workflowId, userId);
+
+    const { generationRequestService } = getGenerationServices();
+    const result = await generationRequestService.requestImageEdit({
+      userId,
+      workflowId: parsed.workflowId,
+      editType: "remove_background",
+      stepId: "image_remove_background",
+      useCaseId: "image-remove-background-v3",
+      model: parsed.model,
+      prompt: parsed.prompt,
+      userPrompt: parsed.userPrompt,
+      editSettings: parsed.editSettings,
+      templateVars: parsed.templateVars,
+      parameters: parsed.parameters,
+      defaultMessages: {
+        started: "Background removal started.",
+        addCredits: "Add credits to remove background from your image.",
+      },
+    });
+
+    return res.json(result);
+  } catch (err) {
+    return handleImageEditError(res, err, "removeImageBackground", "Failed to remove image background");
+  }
+}
+
+/**
+ * POST /api/images/edit
+ *
+ * Pure HTTP Controller — General In-Place Image Edit.
+ * Allows selecting any active edit-capable image model, validates prompt + optional references,
+ * verifies workflow and reference ownership, and delegates to GenerationRequestService.requestImageEdit.
+ */
+export async function editImage(req, res) {
+  try {
+    const parsed = parseImageEditRequest(req.body);
+    const userId = req.user.id;
+
+    await assertOwns("workflow", parsed.workflowId, userId);
+
+    for (const refId of parsed.references) {
+      await assertOwnsAny(["workflow", "character", "element", "media"], refId, userId);
+    }
+
+    const { generationRequestService } = getGenerationServices();
+    const result = await generationRequestService.requestImageEdit({
+      userId,
+      workflowId: parsed.workflowId,
+      editType: "edit",
+      stepId: "image_edit",
+      useCaseId: "image-edit-v3",
+      model: parsed.model,
+      prompt: parsed.prompt,
+      userPrompt: parsed.userPrompt,
+      references: parsed.references,
+      editSettings: parsed.editSettings,
+      parameters: parsed.parameters,
+      defaultMessages: {
+        started: "Image edit started.",
+        addCredits: "Add credits to edit your image.",
+      },
+    });
+
+    return res.json(result);
+  } catch (err) {
+    return handleImageEditError(res, err, "editImage", "Failed to edit image");
   }
 }

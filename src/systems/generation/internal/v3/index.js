@@ -1,7 +1,15 @@
 import { NodeRegistry } from "./core/NodeRegistry.js";
 import { GraphCompiler } from "./core/GraphCompiler.js";
+import { JobExecutionContext, createJobExecutionContext } from "./core/JobExecutionContext.js";
 import { WorkflowExecutor, computeNodeSignature, isErrorRetryable } from "./core/WorkflowExecutor.js";
-import { V3Dispatcher } from "./core/V3Dispatcher.js";
+import { ExecutionEngine, collectTargetMediaIds } from "./core/ExecutionEngine.js";
+import {
+  LLM_SKILLS_REGISTRY,
+  normalizeSkillName,
+  getSkill,
+  listSkills,
+  buildUnifiedLlmInstruction,
+} from "./skills/index.js";
 import {
   ALL_V3_NODES,
   V3_BASE_NODES,
@@ -9,8 +17,7 @@ import {
   createDefaultV3NodeRegistry,
   ResolveRefsNode,
   LlmNode,
-  LLM_SKILLS_REGISTRY,
-  buildUnifiedLlmInstruction,
+  ExtractNode,
   ImageGenerateNode,
   VideoGenerateNode,
   SaveMediaNode,
@@ -29,17 +36,24 @@ import {
 export {
   NodeRegistry,
   GraphCompiler,
+  JobExecutionContext,
+  createJobExecutionContext,
   WorkflowExecutor,
   computeNodeSignature,
   isErrorRetryable,
-  V3Dispatcher,
+  ExecutionEngine,
+  collectTargetMediaIds,
   ALL_V3_NODES,
   V3_BASE_NODES,
   V3_CUSTOM_NODES,
   createDefaultV3NodeRegistry,
   ResolveRefsNode,
   LlmNode,
+  ExtractNode,
   LLM_SKILLS_REGISTRY,
+  normalizeSkillName,
+  getSkill,
+  listSkills,
   buildUnifiedLlmInstruction,
   ImageGenerateNode,
   VideoGenerateNode,

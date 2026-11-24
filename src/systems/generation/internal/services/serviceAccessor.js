@@ -11,7 +11,7 @@ const _services = {
     characterService: null,
     elementService: null,
     trashService: null,
-    v3Dispatcher: null,
+    executionEngine: null,
     db: null,
 };
 
@@ -25,8 +25,8 @@ export function getGenerationServices() {
     return _services;
 }
 
-export function getV3Dispatcher() {
-    return _services.v3Dispatcher;
+export function getExecutionEngine() {
+    return _services.executionEngine;
 }
 
 export function getDefaultDb() {

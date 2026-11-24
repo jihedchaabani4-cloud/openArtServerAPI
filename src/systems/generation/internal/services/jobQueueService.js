@@ -9,7 +9,7 @@ import { getCleanContext, createLogger, LogEvents, redisConnection } from "#shar
 /**
  * Thrown when all dispatch attempts to Redis/BullMQ have failed.
  * This is an infrastructure error — callers should not inspect its internals.
- * UseCaseService catches this and handles business cleanup (rollback, status update).
+ * ExecutionEngine catches this and handles business cleanup (rollback, status update).
  */
 export class QueueDispatchError extends Error {
   constructor(cause, attempts) {
@@ -33,7 +33,7 @@ export async function getUseCaseQueue() {
     useCaseQueueInstance = new Queue(USECASE_QUEUE_NAME, {
       connection: redisConnection,
       defaultJobOptions: {
-        attempts: 1, // Retries are handled at the Node level inside DAG, NEVER re-run entire UseCase
+        attempts: 1, // Retries are handled at the Node level inside DAG, NEVER re-run entire workflow
         removeOnComplete: { count: 100 },
         removeOnFail: { count: 500 },
       },
@@ -50,7 +50,7 @@ export async function getUseCaseQueue() {
 }
 
 /**
- * Centralized Job Queue Service for UseCases & Background Tasks.
+ * Centralized Job Queue Service for V3 Workflow Executions.
  */
 export class JobQueueService {
   constructor(queue = null) {
@@ -65,7 +65,8 @@ export class JobQueueService {
   }
 
   /**
-   * Enqueue a UseCase execution job for background worker processing.
+   * Enqueue an independent V3 workflow execution job for background worker processing.
+   *
    * @param {Object} params
    * @param {string} params.useCaseId
    * @param {Object} params.input
@@ -75,6 +76,7 @@ export class JobQueueService {
    * @param {string} [params.billingHoldId]
    * @param {string} [params.idempotencyKey]
    * @param {string} [params.traceId]
+   * @param {Object|null} [params.serverContext]
    * @returns {Promise<import('bullmq').Job>}
    */
   async addUseCaseJob({
@@ -86,8 +88,9 @@ export class JobQueueService {
     billingHoldId = null,
     idempotencyKey = null,
     traceId = null,
+    serverContext = null,
   }) {
-    const finalExecutionId = executionId || workflowRunId || input?.workflow_id || randomUUID();
+    const finalExecutionId = executionId || workflowRunId || randomUUID();
     const queue = await this.getQueue();
     const jobId = `usecase-${finalExecutionId}`;
 
@@ -100,18 +103,9 @@ export class JobQueueService {
       operation: "run-usecase",
     };
 
-    queueLogger.info(
-      {
-        event: LogEvents.JOB_QUEUED,
-        jobId,
-        useCase: useCaseId,
-        userId: jobContext.userId,
-      },
-      `Job ${jobId} enqueued for usecase "${useCaseId}"`
-    );
-
     const DISPATCH_MAX_ATTEMPTS = 3;
     const DISPATCH_BASE_BACKOFF_MS = 300;
+    const enqueueStartMs = performance.now();
 
     let lastErr = null;
     for (let attempt = 1; attempt <= DISPATCH_MAX_ATTEMPTS; attempt++) {
@@ -127,15 +121,25 @@ export class JobQueueService {
             billingHoldId,
             idempotencyKey,
             traceId: traceId || finalExecutionId,
+            serverContext: serverContext || null,
             _context: jobContext,
           },
           {
             jobId,
           }
         );
-        if (attempt > 1) {
-          queueLogger.info({ jobId, attempt }, `Job ${jobId} dispatched successfully on attempt ${attempt}`);
-        }
+        const enqueueDurationMs = Math.round(performance.now() - enqueueStartMs);
+        queueLogger.info(
+          {
+            event: LogEvents.JOB_QUEUED,
+            jobId,
+            useCase: useCaseId,
+            userId: jobContext.userId,
+            attempt,
+            enqueueDurationMs,
+          },
+          `Job ${jobId} enqueued for usecase "${useCaseId}"`
+        );
         return job;
       } catch (err) {
         lastErr = err;
@@ -150,67 +154,7 @@ export class JobQueueService {
       }
     }
 
-    // All attempts exhausted — throw a clean infrastructure error upward
     throw new QueueDispatchError(lastErr, DISPATCH_MAX_ATTEMPTS);
-  }
-
-  /**
-
-   * Enqueue a single node execution job.
-   * @param {string} runId
-   * @param {string} nodeId
-   * @returns {Promise<import('bullmq').Job>}
-   */
-  async addNodeExecutionJob(runId, nodeId) {
-    const queue = await this.getQueue();
-    const jobId = `node-${runId}-${nodeId}`;
-    const activeContext = getCleanContext();
-
-    return queue.add(
-      "node-execute",
-      { runId, nodeId, _context: activeContext },
-      { jobId }
-    );
-  }
-
-  /**
-   * Get BullMQ job by ID.
-   * @param {string} jobId
-   */
-  async getJob(jobId) {
-    const queue = await this.getQueue();
-    return queue.getJob(jobId);
-  }
-
-  /**
-   * Get job status and progress.
-   * @param {string} jobId
-   */
-  async getJobStatus(jobId) {
-    const job = await this.getJob(jobId);
-    if (!job) return null;
-    const state = await job.getState();
-    return {
-      id: job.id,
-      state,
-      progress: job.progress,
-      failedReason: job.failedReason,
-      returnvalue: job.returnvalue,
-      timestamp: job.timestamp,
-    };
-  }
-
-  /**
-   * Remove a job from the queue.
-   * @param {string} jobId
-   */
-  async removeJob(jobId) {
-    const job = await this.getJob(jobId);
-    if (job) {
-      await job.remove();
-      return true;
-    }
-    return false;
   }
 }
 

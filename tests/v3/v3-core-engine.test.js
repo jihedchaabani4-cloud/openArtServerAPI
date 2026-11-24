@@ -6,6 +6,11 @@ import {
   WorkflowExecutor,
   computeNodeSignature,
 } from "../../src/systems/generation/internal/v3/core/WorkflowExecutor.js";
+import {
+  JobExecutionContext,
+  createJobExecutionContext,
+} from "../../src/systems/generation/internal/v3/core/JobExecutionContext.js";
+import { createDefaultV3NodeRegistry } from "../../src/systems/generation/internal/v3/nodes/index.js";
 
 function createTestRegistry() {
   const registry = new NodeRegistry();
@@ -18,9 +23,7 @@ function createTestRegistry() {
       required: {
         prompt: { type: "STRING" },
       },
-      optional: {
-        style: { type: "STRING", default: "cinematic" },
-      },
+      optional: {},
     },
     RETURN_TYPES: {
       prepared_prompt: "STRING",
@@ -28,7 +31,7 @@ function createTestRegistry() {
     estimateCost: () => 0,
     async execute(inputs) {
       return {
-        prepared_prompt: `${inputs.prompt} [${inputs.style}]`,
+        prepared_prompt: inputs.prompt,
       };
     },
   });
@@ -325,18 +328,76 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
     });
   });
 
+  describe("JobExecutionContext & NodeRegistry CACHEABLE contracts", () => {
+    it("creates isolated frozen identity/resources, tracks lifecycle state, and clears cache on dispose()", () => {
+      const ctx = createJobExecutionContext({
+        jobId: "job-100",
+        userId: "user-100",
+        blueprintId: "image-generation-v3",
+        workflowId: "wf-100",
+        billingHoldId: "hold-100",
+        mediaId: "media-100",
+        mediaRole: "output",
+        saveType: "workflow_output",
+      });
+
+      assert.ok(ctx instanceof JobExecutionContext);
+      assert.ok(ctx.identity.executionId);
+      assert.equal(ctx.identity.runId, ctx.identity.executionId);
+      assert.equal(ctx.identity.jobId, "job-100");
+      assert.equal(ctx.identity.userId, "user-100");
+      assert.equal(ctx.identity.blueprintId, "image-generation-v3");
+      assert.equal(ctx.identity.workflowId, "wf-100");
+      assert.equal(Object.isFrozen(ctx.identity), true);
+      assert.equal(Object.isFrozen(ctx.resources), true);
+      assert.equal(ctx.resources.billingHoldId, "hold-100");
+      assert.equal(ctx.resources.mediaId, "media-100");
+
+      assert.equal(ctx.state.status, "created");
+      ctx.markRunning();
+      assert.equal(ctx.state.status, "running");
+      assert.ok(ctx.state.startedAt);
+      ctx.markCompleted();
+      assert.equal(ctx.state.status, "completed");
+      assert.ok(ctx.state.finishedAt);
+      assert.equal(ctx.state.error, null);
+
+      const err = new Error("boom");
+      ctx.markFailed(err);
+      assert.equal(ctx.state.status, "failed");
+      assert.equal(ctx.state.error, err);
+
+      ctx.cache.set("sig-1", { value: 1 });
+      assert.equal(ctx.cache.size, 1);
+      ctx.dispose();
+      assert.equal(ctx.cache.size, 0);
+    });
+
+    it("enforces CACHEABLE: false on base.image_generate, base.video_generate, base.llm in default registry", () => {
+      const defaultReg = createDefaultV3NodeRegistry();
+      assert.equal(defaultReg.get("base.image_generate").CACHEABLE, false);
+      assert.equal(defaultReg.get("base.video_generate").CACHEABLE, false);
+      assert.equal(defaultReg.get("base.llm").CACHEABLE, false);
+      assert.equal(defaultReg.get("base.save_media").CACHEABLE, false);
+      assert.equal(defaultReg.get("base.resolve_references").CACHEABLE, true);
+    });
+  });
+
   describe("WorkflowExecutor", () => {
-    it("executes parallel waves, caches non-output nodes by SHA-256 signature, and always runs OUTPUT_NODEs", async () => {
+    it("isolates per-run cache (zero shared executor.cache, zero cross-run cache hits), enforces CACHEABLE: false, and clears cache in finally", async () => {
       const reg = new NodeRegistry();
+      let resolveCalls = 0;
       let genCalls = 0;
       let saveCalls = 0;
 
       reg.register({
         type: "base.resolve_references",
         OUTPUT_NODE: false,
+        CACHEABLE: true,
         INPUT_TYPES: { required: { prompt: { type: "STRING" } } },
         RETURN_TYPES: { prepared_prompt: "STRING" },
         async execute(inputs) {
+          resolveCalls++;
           return { prepared_prompt: inputs.prompt.toUpperCase() };
         },
       });
@@ -344,6 +405,7 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
       reg.register({
         type: "base.image_generate",
         OUTPUT_NODE: false,
+        CACHEABLE: false,
         INPUT_TYPES: {
           required: {
             model: { type: "STRING" },
@@ -374,16 +436,13 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
       });
 
       const executor = new WorkflowExecutor(reg);
+      assert.equal("cache" in executor, false, "WorkflowExecutor must NOT hold process-global this.cache");
+
       const workflow = {
-        id: "cache-test-v3",
+        id: "isolated-cache-test-v3",
         nodes: [
           {
             id: "branch_a",
-            type: "base.resolve_references",
-            inputs: { prompt: { fromInput: "prompt" } },
-          },
-          {
-            id: "branch_b",
             type: "base.resolve_references",
             inputs: { prompt: { fromInput: "prompt" } },
           },
@@ -406,23 +465,59 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
         ],
       };
 
+      const jobCtx1 = createJobExecutionContext({ userId: "user-1", blueprintId: workflow.id });
       const run1 = await executor.execute({
         workflow,
         input: { prompt: "sunset beach", media_id: "m-1" },
+        jobContext: jobCtx1,
       });
       assert.equal(run1.status, "completed");
+      assert.equal(resolveCalls, 1);
       assert.equal(genCalls, 1);
       assert.equal(saveCalls, 1);
       assert.equal(run1.terminalOutputs.save.saved_media.url, "https://cdn.test/flux/1.png");
+      assert.equal(jobCtx1.cache.size, 0, "Per-run JobExecutionContext cache must be cleared in finally");
 
+      // Second independent run with identical prompt MUST NOT hit run1's cache
+      const jobCtx2 = createJobExecutionContext({ userId: "user-1", blueprintId: workflow.id });
       const run2 = await executor.execute({
         workflow,
         input: { prompt: "sunset beach", media_id: "m-2" },
+        jobContext: jobCtx2,
       });
-      assert.equal(genCalls, 1, "image_generate should be served from SHA-256 cache");
-      assert.equal(saveCalls, 2, "OUTPUT_NODE must never be skipped by cache");
-      assert.deepEqual(run2.cacheHits.sort(), ["branch_a", "gen"]);
+      assert.equal(resolveCalls, 2, "resolve_references must run fresh in an independent execution");
+      assert.equal(genCalls, 2, "generative node must execute fresh on every run (0 cross-run cache hits)");
+      assert.equal(saveCalls, 2, "OUTPUT_NODE must execute on every run");
+      assert.deepEqual(run2.cacheHits, []);
+      assert.equal(run2.terminalOutputs.save.saved_media.url, "https://cdn.test/flux/2.png");
       assert.equal(run2.terminalOutputs.save.saved_media.id, "m-2");
+      assert.equal(jobCtx2.cache.size, 0, "Per-run cache cleared in finally on run2");
+
+      // Even with an explicit shared signatureCache, CACHEABLE: false nodes must NEVER return cached output
+      const sharedCache = new Map();
+      const explicit1 = await executor.execute({
+        workflow,
+        input: { prompt: "sunset beach", media_id: "m-3" },
+        context: { runId: "same-run", userId: "user-1" },
+        signatureCache: sharedCache,
+      });
+      const explicit2 = await executor.execute({
+        workflow,
+        input: { prompt: "sunset beach", media_id: "m-4" },
+        context: { runId: "same-run", userId: "user-1" },
+        signatureCache: sharedCache,
+      });
+      assert.equal(resolveCalls, 3, "cacheable node reused inside explicit same-scope signatureCache");
+      assert.equal(genCalls, 4, "CACHEABLE: false generative node must NEVER be served from cache");
+      assert.deepEqual(explicit2.cacheHits, ["branch_a"]);
+      assert.notEqual(explicit1.terminalOutputs.save.saved_media.url, explicit2.terminalOutputs.save.saved_media.url);
+
+      // Scoped signatures prevent cross-tenant and cross-run collisions
+      const sigUserA = computeNodeSignature("base.resolve_references", { prompt: "hi" }, { runId: "r1", userId: "user-A" });
+      const sigUserB = computeNodeSignature("base.resolve_references", { prompt: "hi" }, { runId: "r1", userId: "user-B" });
+      const sigRun2 = computeNodeSignature("base.resolve_references", { prompt: "hi" }, { runId: "r2", userId: "user-A" });
+      assert.notEqual(sigUserA, sigUserB);
+      assert.notEqual(sigUserA, sigRun2);
     });
 
     it("retries transient upstream errors according to node retryPolicy and fails immediately on USER_FAULT", async () => {

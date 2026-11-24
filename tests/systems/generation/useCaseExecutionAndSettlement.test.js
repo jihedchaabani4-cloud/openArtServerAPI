@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  V3Dispatcher,
+  ExecutionEngine,
   WorkflowExecutor,
   GraphCompiler,
   SaveMediaNode,
@@ -11,9 +11,9 @@ import {
   videoGenerationV3,
   characterSheetV3,
 } from "../../../src/systems/generation/internal/v3/index.js";
-import { WorkflowBillingGateway } from "../../../src/systems/generation/internal/gateways/workflowBillingGateway.js";
 import { ERROR_CODES } from "../../../src/systems/generation/internal/errors.js";
-import { useCaseService, db, assertWalletConfiguredForEnvironment } from "../../../src/container.js";
+import { executionEngine, db, assertWalletConfiguredForEnvironment } from "../../../src/container.js";
+import { reserveCredits, BillingValidationError } from "#billing/tools";
 import { redisConnection, workerRedisConnection } from "#shared";
 import { randomUUID } from "node:crypto";
 import { InMemoryWalletService } from "../../helpers/inMemoryWalletService.js";
@@ -169,7 +169,7 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
     assert.equal(mediaCreateCalls.length, 0, "createMedia fallback must NOT be called");
     assert.equal(mediaUpdateCalls.length, 1, "Exactly one media update");
     assert.equal(mediaUpdateCalls[0].id, "attacker-media-id");
-    assert.equal(mediaUpdateCalls[0].patch.status, "completed");
+    assert.equal(mediaUpdateCalls[0].patch.status, "success");
   });
 
   it("F2.1-d TEST 3: Settle hold called exactly 1 time on success and 0 times on failure", async () => {
@@ -188,16 +188,15 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
       },
     };
 
-    const dispatcher = new V3Dispatcher({
+    const engine = new ExecutionEngine({
       walletService: mockWalletService,
-      db,
       mediaTools: {
         markMediaFailed: async () => {},
       },
     });
 
     // Case 1: Successful run
-    dispatcher.executor = {
+    engine.executor = {
       execute: async () => ({
         executionId: "exec-success",
         status: "completed",
@@ -205,7 +204,7 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
       }),
     };
 
-    await dispatcher.executeQueuedUseCase({
+    await engine.execute({
       useCaseId: "image-generation-v1",
       input: { workflow_id: "wf-1", media_id: "m-1" },
       userId: "00000000-0000-0000-0000-000000000001",
@@ -216,7 +215,7 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
     assert.equal(rollbackCount, 0, "rollback must NOT be called on success");
 
     // Case 2: Failed run
-    dispatcher.executor = {
+    engine.executor = {
       execute: async () => {
         const failErr = new Error("Provider timeout");
         failErr.code = "UPSTREAM_TIMEOUT";
@@ -226,7 +225,7 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
 
     await assert.rejects(
       async () => {
-        await dispatcher.executeQueuedUseCase({
+        await engine.execute({
           useCaseId: "image-generation-v1",
           input: { workflow_id: "wf-2", media_id: "m-2" },
           userId: "00000000-0000-0000-0000-000000000001",
@@ -251,12 +250,11 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
       rollback: async () => {},
     };
 
-    const dispatcher = new V3Dispatcher({
+    const engine = new ExecutionEngine({
       walletService: mockWallet,
-      db,
     });
 
-    const result = await dispatcher.executeQueuedV3Run({
+    const result = await engine.execute({
       useCaseId: "image-generation-v1",
       input: {
         prompt: "A beautiful mountain landscape at sunset",
@@ -269,14 +267,14 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
       },
       userId: "00000000-0000-0000-0000-000000000001",
       billingHoldId: "hold-img-e2e",
-      nodeContext: createDefaultMockNodeContext(),
+      nodeContext: createDefaultMockNodeContext({ db }),
     });
 
     assert.equal(result.status, "completed");
     assert.equal(settledRef, "hold-img-e2e", "Upfront hold must be settled once");
-    assert.equal(mediaUpdateCalls.length, 1, "Placeholder media must be updated to completed");
+    assert.equal(mediaUpdateCalls.length, 1, "Placeholder media must be updated to success");
     assert.equal(mediaUpdateCalls[0].id, "media-img-e2e");
-    assert.equal(mediaUpdateCalls[0].patch.status, "completed");
+    assert.equal(mediaUpdateCalls[0].patch.status, "success");
     assert.equal(mediaUpdateCalls[0].patch.url, "https://mock-storage.example.com/e2e-image.png");
   });
 
@@ -291,12 +289,11 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
       rollback: async () => {},
     };
 
-    const dispatcher = new V3Dispatcher({
+    const engine = new ExecutionEngine({
       walletService: mockWallet,
-      db,
     });
 
-    const result = await dispatcher.executeQueuedV3Run({
+    const result = await engine.execute({
       useCaseId: "video-generation-v1",
       input: {
         prompt: "A drone shot flying over waves crashing on rocks",
@@ -309,14 +306,14 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
       },
       userId: "00000000-0000-0000-0000-000000000001",
       billingHoldId: "hold-vid-e2e",
-      nodeContext: createDefaultMockNodeContext(),
+      nodeContext: createDefaultMockNodeContext({ db }),
     });
 
     assert.equal(result.status, "completed");
     assert.equal(settledRef, "hold-vid-e2e", "Video hold must be settled once");
-    assert.equal(mediaUpdateCalls.length, 1, "Placeholder media must be updated to completed");
+    assert.equal(mediaUpdateCalls.length, 1, "Placeholder media must be updated to success");
     assert.equal(mediaUpdateCalls[0].id, "media-vid-e2e");
-    assert.equal(mediaUpdateCalls[0].patch.status, "completed");
+    assert.equal(mediaUpdateCalls[0].patch.status, "success");
     assert.equal(mediaUpdateCalls[0].patch.url, "https://mock-storage.example.com/e2e-video.mp4");
   });
 
@@ -331,12 +328,11 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
       rollback: async () => {},
     };
 
-    const dispatcher = new V3Dispatcher({
+    const engine = new ExecutionEngine({
       walletService: mockWallet,
-      db,
     });
 
-    const result = await dispatcher.executeQueuedV3Run({
+    const result = await engine.execute({
       useCaseId: "character-sheet-v1",
       input: {
         prompt: "Futuristic cyberpunk warrior with cybernetic arm",
@@ -350,15 +346,15 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
       },
       userId: "00000000-0000-0000-0000-000000000001",
       billingHoldId: "hold-char-e2e",
-      nodeContext: createDefaultMockNodeContext(),
+      nodeContext: createDefaultMockNodeContext({ db }),
     });
 
     assert.equal(result.status, "completed");
     assert.equal(settledRef, "hold-char-e2e", "Character sheet hold must be settled once");
     assert.equal(characterUpdateCalls.length, 0, "V3 save_media node must not touch characters table directly");
-    assert.equal(mediaUpdateCalls.length, 1, "Placeholder media must be updated to completed");
+    assert.equal(mediaUpdateCalls.length, 1, "Placeholder media must be updated to success");
     assert.equal(mediaUpdateCalls[0].id, "media-char-e2e");
-    assert.equal(mediaUpdateCalls[0].patch.status, "completed");
+    assert.equal(mediaUpdateCalls[0].patch.status, "success");
     assert.equal(mediaUpdateCalls[0].patch.url, "https://mock-storage.example.com/e2e-image.png");
     assert.equal(
       mediaUpdateCalls[0].patch.generation_config?.character_description,
@@ -398,7 +394,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
     await wallet.setBalance("user-attacker", 100);
 
     let mediaUpdatedWithStatus = null;
-    let failedPendingMediaCalls = [];
+    const failedMediaCalls = [];
 
     const mockMediaRepo = {
       findById: async (id) => ({ id, workflow_id: "wf-legacy-target", status: "processing" }),
@@ -409,17 +405,18 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         mediaUpdatedWithStatus = fields.status;
         return { id, ...fields };
       },
-      failPendingMediaByWorkflow: async (wfId, message) => {
-        failedPendingMediaCalls.push({ wfId, message });
-        return [{ id: "media-legacy-target", status: "failed", error_message: message }];
-      },
     };
 
     db.media = mockMediaRepo;
 
-    const dispatcher = new V3Dispatcher({
+    const engine = new ExecutionEngine({
       walletService: wallet,
-      db: { media: mockMediaRepo },
+      mediaTools: {
+        markMediaFailed: async (args) => {
+          failedMediaCalls.push(args);
+          return { mediaId: args.mediaId, status: "failed" };
+        },
+      },
     });
 
     await wallet.reserve({
@@ -443,19 +440,23 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
 
     let caughtError = null;
     try {
-      await dispatcher.executeQueuedUseCase(legacyPayload);
+      await engine.execute(legacyPayload);
     } catch (err) {
       caughtError = err;
     }
 
     assert.ok(caughtError, "Job must fail when no server-verified targets exist");
-    assert.notStrictEqual(mediaUpdatedWithStatus, "completed", "Node must NOT complete media without server-verified target");
+    assert.ok(
+      mediaUpdatedWithStatus !== "success" && mediaUpdatedWithStatus !== "completed",
+      "Node must NOT complete media without server-verified target"
+    );
     const holdRecord = wallet.reservations.get("hold-legacy-test");
     assert.ok(
       holdRecord.status === "released" || holdRecord.status === "rolled_back",
       "Billing hold must be released/rolled back on fail-closed rejection"
     );
-    assert.ok(failedPendingMediaCalls.length > 0, "failPendingMediaByWorkflow must be called on failure");
+    assert.equal(failedMediaCalls.length, 1, "markMediaFailed must be called for the target media on fail-closed rejection");
+    assert.equal(failedMediaCalls[0].mediaId, "media-legacy-target");
   });
 
   it("TEST 2 (F2.4-b1): ImageGenerateNode with 4 surplus assets and 1 target placeholder — maps FIRST asset, run SUCCEEDS, hold settled", async () => {
@@ -489,9 +490,8 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
 
     db.media = mockMediaRepo;
 
-    const dispatcher = new V3Dispatcher({
+    const engine = new ExecutionEngine({
       walletService: wallet,
-      db: { media: mockMediaRepo },
     });
 
     await wallet.reserve({
@@ -500,7 +500,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
       referenceId: "hold-multi-test",
     });
 
-    await dispatcher.executeQueuedV3Run({
+    await engine.execute({
       useCaseId: "image-generation-v1",
       input: {
         prompt: "four variations of cat",
@@ -512,13 +512,14 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
       userId: "user-multi",
       billingHoldId: "hold-multi-test",
       nodeContext: createDefaultMockNodeContext({
+        db,
         executeProvider: async () => ({
           assets: multiAssets,
         }),
       }),
     });
 
-    const completedUpdate = updatedMediaRows.find((m) => m.status === "completed");
+    const completedUpdate = updatedMediaRows.find((m) => m.status === "success");
     assert.ok(completedUpdate, "Placeholder must be completed with first asset");
     assert.strictEqual(
       completedUpdate.url,
@@ -550,23 +551,18 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         await wallet.setBalance("user-err-test", 100);
 
         let mediaFailedCalled = false;
-        const mockMediaRepo = {
-          failPendingMediaByWorkflow: async () => {
-            mediaFailedCalled = true;
-            return [{ id: "m-err-1", status: "failed" }];
-          },
-          findByWorkflow: async () => [],
-        };
 
-        const dispatcher = new V3Dispatcher({
+        const engine = new ExecutionEngine({
           walletService: wallet,
-          db: { media: mockMediaRepo },
           mediaTools: {
-            markMediaFailed: async () => {},
+            markMediaFailed: async ({ mediaId }) => {
+              if (mediaId === "m-err-1") mediaFailedCalled = true;
+              return { mediaId, status: "failed" };
+            },
           },
         });
 
-        dispatcher.executor = {
+        engine.executor = {
           execute: async () => {
             const simulatedErr = new Error(`Simulated failure for code: ${testCode}`);
             if (testCode) simulatedErr.code = testCode;
@@ -595,7 +591,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
 
         let threw = false;
         try {
-          await dispatcher.executeQueuedUseCase(payload);
+          await engine.execute(payload);
         } catch {
           threw = true;
         }
@@ -607,7 +603,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
           hold.status === "released" || hold.status === "rolled_back",
           `Hold must be rolled back for error code "${testCode}"`
         );
-        assert.ok(mediaFailedCalled, `failPendingMediaByWorkflow must be called for error code "${testCode}"`);
+        assert.ok(mediaFailedCalled, `markMediaFailed must be called for error code "${testCode}"`);
       });
     }
   });
@@ -625,16 +621,15 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         },
       };
 
-      const testDispatcher = new V3Dispatcher({
+      const testEngine = new ExecutionEngine({
         walletService: wallet,
         jobQueueService: mockQueue,
-        db,
       });
 
-      const origPrepare = useCaseService.prepareAndEnqueue;
-      const origExecute = useCaseService.executeQueuedUseCase;
-      useCaseService.prepareAndEnqueue = testDispatcher.prepareAndEnqueue.bind(testDispatcher);
-      useCaseService.executeQueuedUseCase = testDispatcher.executeQueuedUseCase.bind(testDispatcher);
+      const origLaunch = executionEngine.launch;
+      const origExecute = executionEngine.execute;
+      executionEngine.launch = testEngine.launch.bind(testEngine);
+      executionEngine.execute = testEngine.execute.bind(testEngine);
 
       try {
         const dbWorkflowsStore = new Map();
@@ -703,31 +698,33 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         assert.ok(workflowId, "Workflow ID created by controller");
         assert.ok(mediaId, "Media ID created by controller");
 
-        assert.ok(capturedJobPayload, "Job was enqueued via prepareAndEnqueue");
-        assert.strictEqual(capturedJobPayload.serverContext.v1_workflow_id, workflowId);
+        assert.ok(capturedJobPayload, "Job was enqueued via launch");
+        assert.strictEqual(capturedJobPayload.serverContext.workflowId, workflowId);
         assert.deepStrictEqual(capturedJobPayload.serverContext.mediaIds, [mediaId]);
         assert.strictEqual(capturedJobPayload.input.serverWorkflowId, workflowId);
         assert.deepStrictEqual(capturedJobPayload.input.serverMediaIds, [mediaId]);
 
-        const runResult = await testDispatcher.executeQueuedV3Run({
+        const runResult = await testEngine.execute({
           useCaseId: capturedJobPayload.useCaseId,
           input: capturedJobPayload.input,
           userId: capturedJobPayload.userId,
           billingHoldId: capturedJobPayload.billingHoldId,
-          nodeContext: createDefaultMockNodeContext(),
+          executionId: capturedJobPayload.executionId,
+          runId: capturedJobPayload.workflowRunId,
+          nodeContext: createDefaultMockNodeContext({ db }),
         });
 
         assert.strictEqual(runResult.status, "completed");
 
         const completedMedia = dbMediaStore.get(mediaId);
-        assert.strictEqual(completedMedia.status, "completed", "Placeholder media must be completed by node");
+        assert.strictEqual(completedMedia.status, "success", "Placeholder media must be completed by node");
         assert.ok(completedMedia.url.startsWith("https://"), "Media URL must be populated");
 
         const hold = wallet.reservations.get(capturedJobPayload.billingHoldId);
         assert.strictEqual(hold.status, "committed", "Billing hold must be settled/committed exactly once");
       } finally {
-        useCaseService.prepareAndEnqueue = origPrepare;
-        useCaseService.executeQueuedUseCase = origExecute;
+        executionEngine.launch = origLaunch;
+        executionEngine.execute = origExecute;
       }
     });
 
@@ -743,16 +740,15 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         },
       };
 
-      const testDispatcher = new V3Dispatcher({
+      const testEngine = new ExecutionEngine({
         walletService: wallet,
         jobQueueService: mockQueue,
-        db,
       });
 
-      const origPrepare = useCaseService.prepareAndEnqueue;
-      const origExecute = useCaseService.executeQueuedUseCase;
-      useCaseService.prepareAndEnqueue = testDispatcher.prepareAndEnqueue.bind(testDispatcher);
-      useCaseService.executeQueuedUseCase = testDispatcher.executeQueuedUseCase.bind(testDispatcher);
+      const origLaunch = executionEngine.launch;
+      const origExecute = executionEngine.execute;
+      executionEngine.launch = testEngine.launch.bind(testEngine);
+      executionEngine.execute = testEngine.execute.bind(testEngine);
 
       try {
         const dbMediaStore = new Map();
@@ -817,28 +813,30 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         assert.ok(workflowId && mediaId);
 
         assert.ok(capturedJobPayload);
-        assert.strictEqual(capturedJobPayload.serverContext.v1_workflow_id, workflowId);
+        assert.strictEqual(capturedJobPayload.serverContext.workflowId, workflowId);
         assert.deepStrictEqual(capturedJobPayload.serverContext.mediaIds, [mediaId]);
 
-        const runResult = await testDispatcher.executeQueuedV3Run({
+        const runResult = await testEngine.execute({
           useCaseId: capturedJobPayload.useCaseId,
           input: capturedJobPayload.input,
           userId: capturedJobPayload.userId,
           billingHoldId: capturedJobPayload.billingHoldId,
-          nodeContext: createDefaultMockNodeContext(),
+          executionId: capturedJobPayload.executionId,
+          runId: capturedJobPayload.workflowRunId,
+          nodeContext: createDefaultMockNodeContext({ db }),
         });
 
         assert.strictEqual(runResult.status, "completed");
 
         const completedMedia = dbMediaStore.get(mediaId);
-        assert.strictEqual(completedMedia.status, "completed");
+        assert.strictEqual(completedMedia.status, "success");
         assert.ok(completedMedia.url);
 
         const hold = wallet.reservations.get(capturedJobPayload.billingHoldId);
         assert.strictEqual(hold.status, "committed");
       } finally {
-        useCaseService.prepareAndEnqueue = origPrepare;
-        useCaseService.executeQueuedUseCase = origExecute;
+        executionEngine.launch = origLaunch;
+        executionEngine.execute = origExecute;
       }
     });
 
@@ -854,16 +852,15 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         },
       };
 
-      const testDispatcher = new V3Dispatcher({
+      const testEngine = new ExecutionEngine({
         walletService: wallet,
         jobQueueService: mockQueue,
-        db,
       });
 
-      const origPrepare = useCaseService.prepareAndEnqueue;
-      const origExecute = useCaseService.executeQueuedUseCase;
-      useCaseService.prepareAndEnqueue = testDispatcher.prepareAndEnqueue.bind(testDispatcher);
-      useCaseService.executeQueuedUseCase = testDispatcher.executeQueuedUseCase.bind(testDispatcher);
+      const origLaunch = executionEngine.launch;
+      const origExecute = executionEngine.execute;
+      executionEngine.launch = testEngine.launch.bind(testEngine);
+      executionEngine.execute = testEngine.execute.bind(testEngine);
 
       try {
         const dbMediaStore = new Map();
@@ -936,30 +933,32 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         await generateCharacterSheet(req, res);
 
         assert.ok(responseData?.ok, "Character sheet response must be ok");
-        assert.ok(capturedJobPayload, "Job was enqueued via prepareAndEnqueue");
+        assert.ok(capturedJobPayload, "Job was enqueued via launch");
 
-        assert.strictEqual(capturedJobPayload.serverContext.v1_workflow_id, characterId);
+        assert.strictEqual(capturedJobPayload.serverContext.workflowId, characterId);
         assert.ok(capturedJobPayload.serverContext.mediaIds.length > 0);
         const placeholderMediaId = capturedJobPayload.serverContext.mediaIds[0];
 
-        const runResult = await testDispatcher.executeQueuedV3Run({
+        const runResult = await testEngine.execute({
           useCaseId: capturedJobPayload.useCaseId,
           input: capturedJobPayload.input,
           userId: capturedJobPayload.userId,
           billingHoldId: capturedJobPayload.billingHoldId,
-          nodeContext: createDefaultMockNodeContext(),
+          executionId: capturedJobPayload.executionId,
+          runId: capturedJobPayload.workflowRunId,
+          nodeContext: createDefaultMockNodeContext({ db }),
         });
 
         assert.strictEqual(runResult.status, "completed");
 
         const completedMedia = dbMediaStore.get(placeholderMediaId);
-        assert.strictEqual(completedMedia.status, "completed");
+        assert.strictEqual(completedMedia.status, "success");
 
         const hold = wallet.reservations.get(capturedJobPayload.billingHoldId);
         assert.strictEqual(hold.status, "committed");
       } finally {
-        useCaseService.prepareAndEnqueue = origPrepare;
-        useCaseService.executeQueuedUseCase = origExecute;
+        executionEngine.launch = origLaunch;
+        executionEngine.execute = origExecute;
       }
     });
 
@@ -975,16 +974,15 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         },
       };
 
-      const testDispatcher = new V3Dispatcher({
+      const testEngine = new ExecutionEngine({
         walletService: wallet,
         jobQueueService: mockQueue,
-        db,
       });
 
-      const origPrepare = useCaseService.prepareAndEnqueue;
-      const origExecute = useCaseService.executeQueuedUseCase;
-      useCaseService.prepareAndEnqueue = testDispatcher.prepareAndEnqueue.bind(testDispatcher);
-      useCaseService.executeQueuedUseCase = testDispatcher.executeQueuedUseCase.bind(testDispatcher);
+      const origLaunch = executionEngine.launch;
+      const origExecute = executionEngine.execute;
+      executionEngine.launch = testEngine.launch.bind(testEngine);
+      executionEngine.execute = testEngine.execute.bind(testEngine);
 
       try {
         const dbMediaStore = new Map();
@@ -1063,30 +1061,32 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         await createCharacter(req, res);
 
         assert.ok(responseData?.ok, "createCharacter response must be ok");
-        assert.ok(capturedJobPayload, "Job was enqueued via prepareAndEnqueue");
+        assert.ok(capturedJobPayload, "Job was enqueued via launch");
 
-        assert.strictEqual(capturedJobPayload.serverContext.v1_workflow_id, responseData.characterId);
+        assert.strictEqual(capturedJobPayload.serverContext.workflowId, responseData.characterId);
         assert.ok(capturedJobPayload.serverContext.mediaIds.length > 0);
         const placeholderMediaId = capturedJobPayload.serverContext.mediaIds[0];
 
-        const runResult = await testDispatcher.executeQueuedV3Run({
+        const runResult = await testEngine.execute({
           useCaseId: capturedJobPayload.useCaseId,
           input: capturedJobPayload.input,
           userId: capturedJobPayload.userId,
           billingHoldId: capturedJobPayload.billingHoldId,
-          nodeContext: createDefaultMockNodeContext(),
+          executionId: capturedJobPayload.executionId,
+          runId: capturedJobPayload.workflowRunId,
+          nodeContext: createDefaultMockNodeContext({ db }),
         });
 
         assert.strictEqual(runResult.status, "completed");
 
         const completedMedia = dbMediaStore.get(placeholderMediaId);
-        assert.strictEqual(completedMedia.status, "completed");
+        assert.strictEqual(completedMedia.status, "success");
 
         const hold = wallet.reservations.get(capturedJobPayload.billingHoldId);
         assert.strictEqual(hold.status, "committed");
       } finally {
-        useCaseService.prepareAndEnqueue = origPrepare;
-        useCaseService.executeQueuedUseCase = origExecute;
+        executionEngine.launch = origLaunch;
+        executionEngine.execute = origExecute;
       }
     });
   });
@@ -1099,39 +1099,30 @@ describe("Execution Error & Billing Settlement Boundary Tests (BUG-01 / V3)", ()
   let settledCalls = [];
   let rollbackCalls = [];
   let mediaUpdates = [];
-  let mockMediaDb;
-  let dispatcher;
+  let engine;
 
   beforeEach(() => {
     settledCalls = [];
     rollbackCalls = [];
     mediaUpdates = [];
 
-    mockMediaDb = {
-      findByWorkflow: async (wfId) => [
-        { id: "media-placeholder-1", status: "processing", workflow_id: wfId },
-      ],
-      updateMedia: async (id, patch) => {
-        mediaUpdates.push({ id, ...patch });
-        return { id, ...patch };
-      },
-    };
-
-    dispatcher = new V3Dispatcher({
+    engine = new ExecutionEngine({
       billingTools: {
-        settleHold: async ({ referenceId, metadata }) => {
+        settleCredits: async ({ referenceId, metadata }) => {
           settledCalls.push({ referenceId, metadata });
           return { settled: true };
         },
-        releaseHold: async ({ referenceId, metadata }) => {
+        rollbackCredits: async ({ referenceId, metadata }) => {
           rollbackCalls.push({ referenceId, metadata });
           return { rolledBack: true };
         },
       },
       mediaTools: {
-        markMediaFailed: async () => {},
+        markMediaFailed: async ({ mediaId, errorMessage }) => {
+          mediaUpdates.push({ id: mediaId, status: "failed", error_message: errorMessage });
+          return { mediaId, status: "failed" };
+        },
       },
-      db: { media: mockMediaDb },
     });
   });
 
@@ -1148,8 +1139,8 @@ describe("Execution Error & Billing Settlement Boundary Tests (BUG-01 / V3)", ()
     );
   });
 
-  it("TEST 2: V3Dispatcher throws when workflow run ends in non-completed status (e.g. running)", async () => {
-    dispatcher.executor = {
+  it("TEST 2: ExecutionEngine throws when workflow run ends in non-completed status (e.g. running)", async () => {
+    engine.executor = {
       execute: async () => ({
         executionId: "run-failed-swallowed",
         status: "running",
@@ -1161,10 +1152,11 @@ describe("Execution Error & Billing Settlement Boundary Tests (BUG-01 / V3)", ()
 
     await assert.rejects(
       async () => {
-        await dispatcher.executeQueuedUseCase({
+        await engine.execute({
           useCaseId: "image-generation-v1",
           input: {
             workflow_id: "wf-bug01-media",
+            media_id: "media-placeholder-1",
             billing_hold_id: "hold-bug01-123",
             billing_status: "reserved",
             reserved_credits: 10,
@@ -1176,17 +1168,17 @@ describe("Execution Error & Billing Settlement Boundary Tests (BUG-01 / V3)", ()
       /(did not complete|WORKFLOW_INCOMPLETE|failed)/i
     );
 
-    assert.strictEqual(settledCalls.length, 0, "settleHold must NEVER be called when run did not complete!");
-    assert.strictEqual(rollbackCalls.length, 1, "releaseHold MUST be called to release held credits!");
+    assert.strictEqual(settledCalls.length, 0, "settleCredits must NEVER be called when run did not complete!");
+    assert.strictEqual(rollbackCalls.length, 1, "rollbackCredits MUST be called to release held credits!");
     assert.strictEqual(
-      mediaUpdates.some((m) => m.status === "failed"),
+      mediaUpdates.some((m) => m.id === "media-placeholder-1" && m.status === "failed"),
       true,
       "Stuck placeholder media must be marked as failed!"
     );
   });
 
   it("TEST 3: End-to-end execution failure: hold released, media marked failed, NO settle", async () => {
-    dispatcher.executor = {
+    engine.executor = {
       execute: async () => {
         const err = new TypeError("Cannot read properties of undefined (reading 'filter')");
         err.code = "ORCHESTRATION_ERROR";
@@ -1196,10 +1188,11 @@ describe("Execution Error & Billing Settlement Boundary Tests (BUG-01 / V3)", ()
 
     await assert.rejects(
       async () => {
-        await dispatcher.executeQueuedUseCase({
+        await engine.execute({
           useCaseId: "image-generation-v1",
           input: {
             workflow_id: "wf-bug01-e2e",
+            media_id: "media-placeholder-e2e",
             billing_hold_id: "hold-bug01-e2e",
             billing_status: "reserved",
             reserved_credits: 10,
@@ -1211,9 +1204,13 @@ describe("Execution Error & Billing Settlement Boundary Tests (BUG-01 / V3)", ()
       /Cannot read properties|filter|ORCHESTRATION_ERROR/i
     );
 
-    assert.strictEqual(settledCalls.length, 0, "No settleHold must be executed");
-    assert.strictEqual(rollbackCalls.length, 1, "Hold must be released via releaseHold");
-    assert.strictEqual(mediaUpdates.some((m) => m.status === "failed"), true, "Media must be marked failed");
+    assert.strictEqual(settledCalls.length, 0, "No settleCredits must be executed");
+    assert.strictEqual(rollbackCalls.length, 1, "Hold must be released via rollbackCredits");
+    assert.strictEqual(
+      mediaUpdates.some((m) => m.id === "media-placeholder-e2e" && m.status === "failed"),
+      true,
+      "Media must be marked failed"
+    );
   });
 });
 }
@@ -1249,53 +1246,23 @@ describe("F2.4-a — Wallet Misconfiguration & Zero Price Invariants (V3)", () =
     );
   });
 
-  it("TEST 2: Missing wallet on paid workflow MUST fail with clear error and NEVER run for free", async () => {
-    const unconfiguredGateway = new WorkflowBillingGateway({ walletService: null });
-
-    await assert.rejects(
-      async () => {
-        await unconfiguredGateway.reserve({
-          userId: "user-test",
-          amount: 8,
-          referenceId: "ref-test-unconfigured",
-        });
-      },
-      (err) => {
-        assert.strictEqual(err.code, "WALLET_NOT_CONFIGURED");
-        return true;
-      }
-    );
-  });
-
-  it("TEST 3: NO_CHARGE is allowed ONLY for explicit finite zero (amount === 0)", async () => {
-    const unconfiguredGateway = new WorkflowBillingGateway({ walletService: null });
-
-    const zeroResult = await unconfiguredGateway.reserve({
-      userId: "user-free",
-      amount: 0,
-      referenceId: "ref-free-explicit",
-    });
-
-    assert.strictEqual(zeroResult.kind, "NO_CHARGE", "Explicit zero amount must yield NO_CHARGE");
-    assert.strictEqual(zeroResult.amount, 0);
-  });
-
-  it("TEST 4: workflowBillingGateway throws PRICING_CONFIG_ERROR for invalid amounts (undefined, null, NaN, -1, 'abc')", async () => {
-    const gateway = new WorkflowBillingGateway({ walletService: null });
+  it("TEST 2: #billing/tools reserveCredits throws BillingValidationError for invalid amounts (undefined, null, NaN, -1, 'abc')", async () => {
     const invalidAmounts = [undefined, null, NaN, -1, -5, "abc", "0", {}, []];
 
     for (const invalidAmount of invalidAmounts) {
       await assert.rejects(
         async () => {
-          await gateway.reserve({
-            userId: "user-test",
-            amount: invalidAmount,
-            referenceId: `ref-invalid-${String(invalidAmount)}`,
-          });
+          await reserveCredits(
+            {
+              userId: "user-test",
+              amount: invalidAmount,
+              referenceId: `ref-invalid-${String(invalidAmount)}`,
+            },
+            { walletService: new InMemoryWalletService() }
+          );
         },
         (err) => {
-          assert.strictEqual(err.code, "PRICING_CONFIG_ERROR");
-          assert.strictEqual(err.category, "SERVER_FAULT");
+          assert.ok(err instanceof BillingValidationError);
           return true;
         }
       );
@@ -1335,13 +1302,14 @@ describe("F2.4-a — Wallet Misconfiguration & Zero Price Invariants (V3)", () =
   it("TEST 7: pricing failure at prepare time through real controller -> placeholders failed, no hold, clean 500 with INTERNAL_ERROR + traceId", async () => {
     const wallet = new InMemoryWalletService();
     await wallet.setBalance("user-pricing-fail", 100);
-    useCaseService.walletService = wallet;
+    const origWalletService = executionEngine.walletService;
+    executionEngine.walletService = wallet;
 
     const mediaRows = new Map();
     const origDbMedia = db.media;
     const origDbProjects = db.projects;
     const origDbWorkflows = db.workflows;
-    const origPrepareAndEnqueue = useCaseService.prepareAndEnqueue;
+    const origLaunch = executionEngine.launch;
 
     db.media = {
       createMedia: async (data) => {
@@ -1366,7 +1334,7 @@ describe("F2.4-a — Wallet Misconfiguration & Zero Price Invariants (V3)", () =
       createWorkflow: async (data) => data,
     };
 
-    useCaseService.prepareAndEnqueue = async () => {
+    executionEngine.launch = async () => {
       const pricingErr = new Error("Pricing engine failed to resolve valid cost: NaN");
       pricingErr.code = "PRICING_CONFIG_ERROR";
       pricingErr.category = "SERVER_FAULT";
@@ -1411,7 +1379,8 @@ describe("F2.4-a — Wallet Misconfiguration & Zero Price Invariants (V3)", () =
       db.media = origDbMedia;
       db.projects = origDbProjects;
       db.workflows = origDbWorkflows;
-      useCaseService.prepareAndEnqueue = origPrepareAndEnqueue;
+      executionEngine.launch = origLaunch;
+      executionEngine.walletService = origWalletService;
     }
   });
 });
@@ -1419,7 +1388,7 @@ describe("F2.4-a — Wallet Misconfiguration & Zero Price Invariants (V3)", () =
 
 // ─── Source: useCasePendingMediaZombieCleanup.test.js ───
 {
-describe("Sprint R2: V3Dispatcher Pending Media Zombie Cleanup", () => {
+describe("Sprint R2: ExecutionEngine Pending Media Zombie Cleanup", () => {
   it("when queue.addUseCaseJob throws, both the credit hold is released AND pending media rows are marked failed", async () => {
     let rollbackCalledWith = null;
     const updatedMedia = [];
@@ -1430,38 +1399,32 @@ describe("Sprint R2: V3Dispatcher Pending Media Zombie Cleanup", () => {
       },
     };
 
-    const mockDb = {
-      media: {
-        updateMedia: async (mediaId, fields) => {
-          updatedMedia.push({ mediaId, fields });
-          return { id: mediaId, ...fields };
-        },
-      },
-    };
-
-    const service = new V3Dispatcher({
+    const service = new ExecutionEngine({
       billingTools: {
-        reserveHold: async () => ({
+        reserveCredits: async () => ({
           billingHoldId: "hold-test-123",
           billingStatus: "reserved",
           reservedCredits: 50,
         }),
-        releaseHold: async ({ referenceId, metadata }) => {
+        rollbackCredits: async ({ referenceId, metadata }) => {
           rollbackCalledWith = { holdId: referenceId, meta: metadata };
+          return { rolledBack: true };
         },
       },
       mediaTools: {
-        markMediaFailed: async () => {},
+        markMediaFailed: async ({ mediaId, errorMessage }) => {
+          updatedMedia.push({ mediaId, fields: { status: "failed", error_message: errorMessage } });
+          return { mediaId, status: "failed" };
+        },
       },
       jobQueueService: mockQueue,
-      db: mockDb,
     });
 
     const serverMediaIds = ["media-pending-1", "media-pending-2"];
     let caughtError = null;
 
     try {
-      await service.prepareAndEnqueue({
+      await service.launch({
         useCaseId: "image-generation-v1",
         input: {
           prompt: "A neon cyborg cat",
@@ -1479,7 +1442,7 @@ describe("Sprint R2: V3Dispatcher Pending Media Zombie Cleanup", () => {
       caughtError = err;
     }
 
-    assert.ok(caughtError, "prepareAndEnqueue should throw when queue dispatch fails");
+    assert.ok(caughtError, "launch should throw when queue dispatch fails");
     assert.equal(caughtError.code, "QUEUE_DISPATCH_FAILED");
     assert.equal(caughtError.statusCode, 503);
 
@@ -1499,25 +1462,19 @@ describe("Sprint R2: V3Dispatcher Pending Media Zombie Cleanup", () => {
     let rollbackCalled = false;
     const updatedMedia = [];
 
-    const mockDb = {
-      media: {
-        updateMedia: async (mediaId, fields) => {
-          updatedMedia.push({ mediaId, fields });
-          return { id: mediaId, ...fields };
-        },
-      },
-    };
-
-    const service = new V3Dispatcher({
+    const service = new ExecutionEngine({
       billingTools: {
-        releaseHold: async () => {
+        rollbackCredits: async () => {
           rollbackCalled = true;
+          return { rolledBack: true };
         },
       },
       mediaTools: {
-        markMediaFailed: async () => {},
+        markMediaFailed: async ({ mediaId, errorMessage }) => {
+          updatedMedia.push({ mediaId, fields: { status: "failed", error_message: errorMessage } });
+          return { mediaId, status: "failed" };
+        },
       },
-      db: mockDb,
     });
 
     service.executor = {
@@ -1528,7 +1485,7 @@ describe("Sprint R2: V3Dispatcher Pending Media Zombie Cleanup", () => {
 
     let caughtError = null;
     try {
-      await service.executeQueuedUseCase({
+      await service.execute({
         useCaseId: "image-generation-v1",
         input: {
           serverMediaIds: ["media-standalone-1", "media-standalone-2"],
@@ -1542,7 +1499,7 @@ describe("Sprint R2: V3Dispatcher Pending Media Zombie Cleanup", () => {
       caughtError = err;
     }
 
-    assert.ok(caughtError, "executeQueuedUseCase should re-throw execution error");
+    assert.ok(caughtError, "execute should re-throw execution error");
     assert.ok(rollbackCalled, "Hold must be rolled back on standalone failure");
 
     assert.equal(updatedMedia.length, 2, "Both standalone media rows must be marked failed");

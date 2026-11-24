@@ -7,7 +7,7 @@ import { AppError, redisConnection, workerRedisConnection, rateLimitRedisConnect
 import express from "express";
 import http from "node:http";
 import apiRouter from "../../../src/api/routes.js";
-import { db, walletService, v3Dispatcher as useCaseService, folderService, workflowService } from "../../../src/container.js";
+import { db, walletService, executionEngine, folderService, workflowService } from "../../../src/container.js";
 import { supabase } from "#shared/db/supabase.js";
 import { CharacterGenerationService } from "#characters/tools";
 import { generateImage, generateVideo } from "#generation/api";
@@ -15,7 +15,7 @@ import { generateImage, generateVideo } from "#generation/api";
 // ─── Source: generationRequestService.test.js ───
 {
 describe("GenerationRequestService unit tests", () => {
-    it("successfully creates workflow, media placeholders, and dispatches to useCaseService", async () => {
+    it("successfully creates workflow, single media placeholder, and dispatches to executionEngine", async () => {
         const createdWorkflows = [];
         const createdMedia = [];
         const linkedWorkflows = [];
@@ -42,8 +42,8 @@ describe("GenerationRequestService unit tests", () => {
             },
         };
 
-        const mockUseCaseService = {
-            prepareAndEnqueue: async (args) => {
+        const mockExecutionEngine = {
+            launch: async (args) => {
                 enqueuedPayload = args;
                 return {
                     jobId: "job-img-999",
@@ -59,7 +59,7 @@ describe("GenerationRequestService unit tests", () => {
 
         const service = new GenerationRequestService({
             db: mockDb,
-            useCaseService: mockUseCaseService,
+            executionEngine: mockExecutionEngine,
             folderService: mockFolderService,
         });
 
@@ -75,7 +75,6 @@ describe("GenerationRequestService unit tests", () => {
             references: ["wf-ref-1"],
             parameters: { aspect_ratio: "16:9" },
             mediaMeta: { width: 1920, height: 1080, aspect_ratio: "16:9" },
-            outputCount: 1,
             defaultMessages: {
                 started: "Image generation started.",
                 addCredits: "Add credits to generate your image.",
@@ -96,66 +95,67 @@ describe("GenerationRequestService unit tests", () => {
         assert.equal(enqueuedPayload.userId, "user-1");
     });
 
-    it("handles INSUFFICIENT_CREDITS gracefully without throwing, marking media as saved", async () => {
-        const updatedMedia = [];
-        const mockDb = {
-            workflows: {
-                createWorkflow: async (wf) => wf,
-            },
-            media: {
-                createMedia: async (m) => m,
-                updateMedia: async (id, patch) => {
-                    updatedMedia.push({ id, ...patch });
+    it("handles INSUFFICIENT_CREDITS and INSUFFICIENT_FUNDS (H10) gracefully without throwing, marking media as saved", async () => {
+        for (const errCode of ["INSUFFICIENT_CREDITS", "INSUFFICIENT_FUNDS"]) {
+            const updatedMedia = [];
+            const mockDb = {
+                workflows: {
+                    createWorkflow: async (wf) => wf,
                 },
-            },
-            workflowMedia: {
-                linkMedia: async () => {},
-            },
-        };
+                media: {
+                    createMedia: async (m) => m,
+                    updateMedia: async (id, patch) => {
+                        updatedMedia.push({ id, ...patch });
+                    },
+                },
+                workflowMedia: {
+                    linkMedia: async () => {},
+                },
+            };
 
-        const mockUseCaseService = {
-            prepareAndEnqueue: async () => {
-                const err = new Error("User does not have enough credits");
-                err.code = "INSUFFICIENT_CREDITS";
-                throw err;
-            },
-        };
+            const mockExecutionEngine = {
+                launch: async () => {
+                    const err = new Error("User does not have enough credits");
+                    err.code = errCode;
+                    throw err;
+                },
+            };
 
-        const mockFolderService = {
-            validateAndAssertUsable: async () => null,
-        };
+            const mockFolderService = {
+                validateAndAssertUsable: async () => null,
+            };
 
-        const service = new GenerationRequestService({
-            db: mockDb,
-            useCaseService: mockUseCaseService,
-            folderService: mockFolderService,
-        });
+            const service = new GenerationRequestService({
+                db: mockDb,
+                executionEngine: mockExecutionEngine,
+                folderService: mockFolderService,
+            });
 
-        const result = await service.requestGeneration({
-            userId: "user-1",
-            mediaType: "video",
-            stepId: "video_generation",
-            useCaseId: "video-generation-v1",
-            prompt: "A cinematic slow motion scene",
-            model: "seedance_2_5",
-            projectId: "proj-123",
-            folderId: null,
-            references: [],
-            parameters: {},
-            mediaMeta: { width: 1920, height: 1080, aspect_ratio: "16:9" },
-            outputCount: 1,
-            defaultMessages: {
-                started: "Video generation started.",
-                addCredits: "Add credits to generate your video.",
-            },
-        });
+            const result = await service.requestGeneration({
+                userId: "user-1",
+                mediaType: "video",
+                stepId: "video_generation",
+                useCaseId: "video-generation-v1",
+                prompt: "A cinematic slow motion scene",
+                model: "seedance_2_5",
+                projectId: "proj-123",
+                folderId: null,
+                references: [],
+                parameters: {},
+                mediaMeta: { width: 1920, height: 1080, aspect_ratio: "16:9" },
+                defaultMessages: {
+                    started: "Video generation started.",
+                    addCredits: "Add credits to generate your video.",
+                },
+            });
 
-        assert.equal(result.ok, true);
-        assert.equal(result.status, "saved");
-        assert.equal(result.needsCredits, true);
-        assert.equal(result.message, "User does not have enough credits");
-        assert.equal(updatedMedia.length, 1);
-        assert.equal(updatedMedia[0].status, "saved");
+            assert.equal(result.ok, true, `${errCode} must return ok: true`);
+            assert.equal(result.status, "saved", `${errCode} must return status: 'saved'`);
+            assert.equal(result.needsCredits, true, `${errCode} must return needsCredits: true`);
+            assert.equal(result.message, "User does not have enough credits");
+            assert.equal(updatedMedia.length, 1);
+            assert.equal(updatedMedia[0].status, "saved");
+        }
     });
 
     it("handles QUEUE_DISPATCH_FAILED by marking media as failed and throwing 503 error", async () => {
@@ -175,8 +175,8 @@ describe("GenerationRequestService unit tests", () => {
             },
         };
 
-        const mockUseCaseService = {
-            prepareAndEnqueue: async () => {
+        const mockExecutionEngine = {
+            launch: async () => {
                 const err = new Error("Redis cluster unreachable");
                 err.code = "QUEUE_DISPATCH_FAILED";
                 throw err;
@@ -189,7 +189,7 @@ describe("GenerationRequestService unit tests", () => {
 
         const service = new GenerationRequestService({
             db: mockDb,
-            useCaseService: mockUseCaseService,
+            executionEngine: mockExecutionEngine,
             folderService: mockFolderService,
         });
 
@@ -207,7 +207,6 @@ describe("GenerationRequestService unit tests", () => {
                     references: [],
                     parameters: {},
                     mediaMeta: { width: 1024, height: 1024, aspect_ratio: "1:1" },
-                    outputCount: 1,
                 });
             },
             (err) => {
@@ -218,6 +217,153 @@ describe("GenerationRequestService unit tests", () => {
                 return true;
             }
         );
+    });
+
+    it("P1-1: collapses workflow + media placeholder + workflow_media link into a single create_generation_placeholder_atomic RPC hop", async () => {
+        const rpcCalls = [];
+        let fallbackWorkflowCalled = false;
+        let fallbackMediaCalled = false;
+        let fallbackLinkCalled = false;
+        let launchedArgs = null;
+
+        const mockDb = {
+            rpc: async (fnName, params) => {
+                rpcCalls.push({ fnName, params });
+                assert.equal(fnName, "create_generation_placeholder_atomic");
+                return {
+                    data: {
+                        workflow_id: params.p_workflow_id,
+                        media_id: params.p_media_id,
+                        role: params.p_role,
+                    },
+                    error: null,
+                };
+            },
+            workflows: {
+                createWorkflow: async () => {
+                    fallbackWorkflowCalled = true;
+                    throw new Error("Should not call multi-step createWorkflow when atomic RPC succeeds");
+                },
+            },
+            media: {
+                createMedia: async () => {
+                    fallbackMediaCalled = true;
+                    throw new Error("Should not call multi-step createMedia when atomic RPC succeeds");
+                },
+                updateMedia: async () => {},
+            },
+            workflowMedia: {
+                linkMedia: async () => {
+                    fallbackLinkCalled = true;
+                    throw new Error("Should not call multi-step linkMedia when atomic RPC succeeds");
+                },
+            },
+        };
+
+        const mockExecutionEngine = {
+            launch: async (args) => {
+                launchedArgs = args;
+                return { jobId: "job-vid-atomic", executionId: args.executionId, cost: { totalCredits: 10 } };
+            },
+        };
+
+        const service = new GenerationRequestService({
+            db: mockDb,
+            executionEngine: mockExecutionEngine,
+            folderService: { validateAndAssertUsable: async (fid) => fid },
+        });
+
+        const result = await service.requestGeneration({
+            userId: "user-atomic-1",
+            mediaType: "video",
+            stepId: "video_generation",
+            useCaseId: "video-generation-v1",
+            prompt: "Cinematic ocean waves at sunset",
+            model: "seedance_2_5",
+            projectId: "proj-atomic-1",
+            folderId: "folder-atomic-1",
+            references: [],
+            parameters: {},
+            mediaMeta: { width: 1280, height: 720, aspect_ratio: "16:9" },
+        });
+
+        assert.equal(result.ok, true);
+        assert.equal(result.status, "processing");
+        assert.equal(rpcCalls.length, 1);
+        assert.equal(rpcCalls[0].params.p_project_id, "proj-atomic-1");
+        assert.equal(rpcCalls[0].params.p_user_id, "user-atomic-1");
+        assert.equal(rpcCalls[0].params.p_folder_id, "folder-atomic-1");
+        assert.equal(rpcCalls[0].params.p_step_id, "video_generation");
+        assert.equal(rpcCalls[0].params.p_workflow_type, "GENERATION");
+        assert.equal(rpcCalls[0].params.p_role, "output");
+        assert.equal(rpcCalls[0].params.p_width, 1280);
+        assert.equal(rpcCalls[0].params.p_height, 720);
+        assert.equal(rpcCalls[0].params.p_generation_config.model, "seedance_2_5");
+        assert.equal(fallbackWorkflowCalled, false);
+        assert.equal(fallbackMediaCalled, false);
+        assert.equal(fallbackLinkCalled, false);
+        assert.equal(launchedArgs.serverContext.workflowId, result.workflowId);
+        assert.deepEqual(launchedArgs.serverContext.mediaIds, [result.mediaId]);
+    });
+
+    it("P1-1: gracefully falls back to multi-step persistence when create_generation_placeholder_atomic returns PGRST202", async () => {
+        let rpcAttempts = 0;
+        let createdWorkflow = null;
+        let createdMedia = null;
+        let linked = null;
+
+        const mockDb = {
+            rpc: async () => {
+                rpcAttempts++;
+                return { data: null, error: { code: "PGRST202", message: "function not found in schema cache" } };
+            },
+            workflows: {
+                createWorkflow: async (wf) => {
+                    createdWorkflow = wf;
+                    return wf;
+                },
+            },
+            media: {
+                createMedia: async (m) => {
+                    createdMedia = m;
+                    return m;
+                },
+                updateMedia: async () => {},
+            },
+            workflowMedia: {
+                linkMedia: async (link) => {
+                    linked = link;
+                    return link;
+                },
+            },
+        };
+
+        const service = new GenerationRequestService({
+            db: mockDb,
+            executionEngine: {
+                launch: async (args) => ({ jobId: "job-fb", executionId: args.executionId, cost: { totalCredits: 5 } }),
+            },
+            folderService: { validateAndAssertUsable: async () => null },
+        });
+
+        const result = await service.requestGeneration({
+            userId: "user-fb-1",
+            mediaType: "image",
+            stepId: "image_generation",
+            useCaseId: "image-generation-v1",
+            prompt: "Fallback mountain",
+            model: "nanobana_pro",
+            projectId: "proj-fb-1",
+            folderId: null,
+            parameters: {},
+            mediaMeta: { width: 1024, height: 1024, aspect_ratio: "1:1" },
+        });
+
+        assert.equal(result.ok, true);
+        assert.equal(rpcAttempts, 1);
+        assert.ok(createdWorkflow);
+        assert.ok(createdMedia);
+        assert.ok(linked);
     });
 });
 }
@@ -239,7 +385,7 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
   let workflows = [];
   let media = [];
   let creditHolds = [];
-  let origPrepareAndEnqueue;
+  let origLaunch;
   let origHoldCredits;
   let origDbMethods;
 
@@ -251,7 +397,7 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
       const proj = projects.find((p) => p.id === wf.project_id);
       return Boolean(proj && proj.user_id === userId);
     };
-    origPrepareAndEnqueue = useCaseService.prepareAndEnqueue;
+    origLaunch = executionEngine.launch;
     origHoldCredits = walletService?.holdCredits;
     origDbMethods = {
       findByUser: db.projects.findByUser,
@@ -294,7 +440,7 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
   after(async () => {
     supabase.auth.getUser = origGetUser;
     if (origVerifyWorkflowOwnership) workflowService.authService.verifyWorkflowOwnership = origVerifyWorkflowOwnership;
-    if (origPrepareAndEnqueue) useCaseService.prepareAndEnqueue = origPrepareAndEnqueue;
+    if (origLaunch) executionEngine.launch = origLaunch;
     if (walletService && origHoldCredits) walletService.holdCredits = origHoldCredits;
     if (origDbMethods) {
       db.projects.findByUser = origDbMethods.findByUser;
@@ -364,8 +510,8 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
       return record;
     };
 
-    // Mock useCaseService / wallet
-    useCaseService.prepareAndEnqueue = async (opts) => {
+    // Mock executionEngine / wallet
+    executionEngine.launch = async (opts) => {
       return { jobId: "job-1", executionId: opts.executionId, cost: { totalCredits: 1 } };
     };
 
@@ -716,10 +862,10 @@ describe("F2.2-a — RunRepository Target Columns & Fallback Invariants (Supabas
     assert.strictEqual(run.v1_workflow_id, null, "Must NOT fall back to run.input.workflow_id");
     assert.deepStrictEqual(run.target_media_ids, [], "Must NOT fall back to run.input.media_id");
 
-    // Assert V3Dispatcher.executeQueuedV3Run rejects immediately and fails closed when server targets are missing
+    // Assert ExecutionEngine.execute rejects immediately and fails closed when server targets are missing
     await assert.rejects(
       async () => {
-        await useCaseService.executeQueuedV3Run({
+        await executionEngine.execute({
           useCaseId: "character-sheet-v1",
           input: {
             characterId: "spoofed-char-id",
@@ -738,7 +884,8 @@ describe("F2.2-a — RunRepository Target Columns & Fallback Invariants (Supabas
 });
 
 describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () => {
-  let origPrepareAndEnqueue;
+  let origLaunch;
+  let origJobQueueService;
   let origCreateWorkflow;
   let origCreateMedia;
   let origUpdateMedia;
@@ -748,19 +895,21 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
   let origWalletService;
 
   beforeEach(() => {
-    origPrepareAndEnqueue = useCaseService.prepareAndEnqueue;
+    origLaunch = executionEngine.launch;
+    origJobQueueService = executionEngine.jobQueueService;
     origCreateWorkflow = db.workflows?.createWorkflow;
     origCreateMedia = db.media?.createMedia;
     origUpdateMedia = db.media?.updateMedia;
     origUpdateFields = db.media?.updateFields;
     origFindWorkflow = db.workflows?.findById;
     origProjectsFindById = db.projects?.findById;
-    origWalletService = useCaseService.walletService;
+    origWalletService = executionEngine.walletService;
   });
 
   afterEach(() => {
-    useCaseService.prepareAndEnqueue = origPrepareAndEnqueue;
-    useCaseService.walletService = origWalletService;
+    executionEngine.launch = origLaunch;
+    executionEngine.jobQueueService = origJobQueueService;
+    executionEngine.walletService = origWalletService;
 
     if (db.workflows) {
       db.workflows.createWorkflow = origCreateWorkflow;
@@ -803,19 +952,19 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
       },
     };
 
-    const mockUseCaseService = {
-      prepareAndEnqueue: async (params) => {
+    const mockExecutionEngine = {
+      launch: async (params) => {
         capturedPrepare = params;
         return {
-          executionId: "char-wf-888",
-          workflowRunId: "char-wf-888",
+          executionId: params.executionId,
+          workflowRunId: params.executionId,
         };
       },
     };
 
     const service = new CharacterGenerationService({
       db: mockDb,
-      useCaseService: mockUseCaseService,
+      executionEngine: mockExecutionEngine,
     });
 
     const res = await service.enqueueSheetGeneration({
@@ -832,7 +981,8 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
     assert.strictEqual(capturedMediaCreate.workflow_id, undefined, "workflow_id must NOT be written to media");
     assert.strictEqual(capturedWorkflowMediaLink?.workflowId, "char-wf-888", "workflow_media relation must be created");
 
-    assert.ok(capturedPrepare, "prepareAndEnqueue must be called");
+    assert.ok(capturedPrepare, "executionEngine.launch must be called");
+    assert.notStrictEqual(capturedPrepare.executionId, "char-wf-888", "H9: executionId must be a fresh UUID, never characterId");
     assert.strictEqual(capturedPrepare.input.media_id, "media-char-placeholder-777", "media_id must match placeholder media ID");
     assert.deepStrictEqual(capturedPrepare.input.serverMediaIds, ["media-char-placeholder-777"], "serverMediaIds must include placeholder media ID");
     assert.strictEqual(capturedPrepare.input.serverWorkflowId, "char-wf-888", "serverWorkflowId must be set");
@@ -844,7 +994,7 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
   it("TEST 6: imageController.generateImage creates workflow and placeholder and propagates server targets", async () => {
     let capturedPrepare = null;
 
-    useCaseService.prepareAndEnqueue = async (params) => {
+    executionEngine.launch = async (params) => {
       capturedPrepare = params;
       return {
         jobId: "job-img-123",
@@ -898,7 +1048,7 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
     assert.ok(jsonResponse.workflowId);
     assert.ok(jsonResponse.mediaId);
 
-    assert.ok(capturedPrepare, "useCaseService.prepareAndEnqueue must be called");
+    assert.ok(capturedPrepare, "executionEngine.launch must be called");
     assert.strictEqual(capturedPrepare.input.workflow_id, jsonResponse.workflowId);
     assert.strictEqual(capturedPrepare.input.media_id, jsonResponse.mediaId);
     assert.strictEqual(capturedPrepare.input.serverWorkflowId, jsonResponse.workflowId, "serverWorkflowId must be set");
@@ -909,7 +1059,7 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
   it("TEST 7: videoController.generateVideo creates workflow and placeholder and propagates server targets", async () => {
     let capturedPrepare = null;
 
-    useCaseService.prepareAndEnqueue = async (params) => {
+    executionEngine.launch = async (params) => {
       capturedPrepare = params;
       return {
         jobId: "job-vid-123",
@@ -963,7 +1113,7 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
     assert.ok(jsonResponse.workflowId);
     assert.ok(jsonResponse.mediaId);
 
-    assert.ok(capturedPrepare, "useCaseService.prepareAndEnqueue must be called");
+    assert.ok(capturedPrepare, "executionEngine.launch must be called");
     assert.strictEqual(capturedPrepare.input.workflow_id, jsonResponse.workflowId);
     assert.strictEqual(capturedPrepare.input.media_id, jsonResponse.mediaId);
     assert.strictEqual(capturedPrepare.input.serverWorkflowId, jsonResponse.workflowId, "serverWorkflowId must be set");
@@ -971,7 +1121,7 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
     assert.strictEqual(capturedPrepare.input.serverProjectId, "proj-vid-1", "serverProjectId must be set");
   });
 
-  it("TEST 8: End-to-end integration: Character generation sheet completes target placeholder media via V3Dispatcher", async () => {
+  it("TEST 8: End-to-end integration: Character generation sheet completes target placeholder media via ExecutionEngine", async () => {
     let mediaRecord = {
       id: "media-e2e-char-1",
       workflow_id: "char-wf-e2e-999",
@@ -1033,13 +1183,13 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
       extendHold: async () => ({ status: "extended" }),
     };
 
-    useCaseService.jobQueueService = mockQueue;
-    useCaseService.walletService = mockWallet;
+    executionEngine.jobQueueService = mockQueue;
+    executionEngine.walletService = mockWallet;
 
     // 1. CharacterGenerationService creates placeholder, links it to character upfront, & enqueues
     const charGenService = new CharacterGenerationService({
       db,
-      useCaseService,
+      executionEngine,
     });
 
     await charGenService.enqueueSheetGeneration({
@@ -1061,12 +1211,15 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
     assert.deepStrictEqual(enqueuedJobData.input.serverMediaIds, ["media-e2e-char-1"]);
 
     // 2. Worker executes queued job end-to-end with mocked V3 node context (purely media-centric save_media)
-    const result = await useCaseService.executeQueuedUseCase({
+    const result = await executionEngine.execute({
       useCaseId: enqueuedJobData.useCaseId,
       input: enqueuedJobData.input,
       userId: enqueuedJobData.userId,
       billingHoldId: enqueuedJobData.billingHoldId,
+      executionId: enqueuedJobData.executionId,
+      runId: enqueuedJobData.workflowRunId,
       nodeContext: {
+        db,
         executeLLM: async ({ prompt }) => ({
           content: prompt,
           json: {
@@ -1085,7 +1238,7 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
 
     assert.strictEqual(result.status, "completed");
     // Assert target placeholder media is now completed with the generated URL!
-    assert.strictEqual(mediaRecord.status, "completed");
+    assert.strictEqual(mediaRecord.status, "success");
     assert.strictEqual(mediaRecord.url, "https://storage.openart.ai/character-sheets/turnaround-char-999.png");
   });
 });

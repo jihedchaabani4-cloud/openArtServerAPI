@@ -10,6 +10,7 @@
  */
 
 import * as identityTools from "#identity/tools";
+import { getWorkflowVisualMedia } from "#media/tools";
 import { ElementRepository, elementRepository } from "../internal/db/ElementRepository.js";
 import { ElementService, getElementContextForPrompt } from "../internal/services/ElementService.js";
 import { ElementMediaService } from "../internal/services/ElementMediaService.js";
@@ -32,15 +33,44 @@ export function configureElements(services = {}) {
 // ── Inter-System Tools Functions ──────────────────────────────────────────────
 
 
+const ELEMENT_VISUAL_ROLE_PRIORITY = Object.freeze([
+    "detail",
+    "reference",
+    "sheet",
+    "output",
+    "original",
+]);
+
+function extractValidHttpUrls(rawList) {
+    if (!Array.isArray(rawList)) return [];
+    const seen = new Set();
+    const out = [];
+    for (const item of rawList) {
+        const url = typeof item === "string" ? item.trim() : "";
+        if ((url.startsWith("http://") || url.startsWith("https://")) && !seen.has(url)) {
+            seen.add(url);
+            out.push(url);
+        }
+    }
+    return out;
+}
+
 /**
- * Retrieves formatted element prompt context (traits, guidelines, reference media URLs).
+ * Retrieves formatted element prompt context (traits, guidelines, visual reference URLs from `workflow_media`).
  *
  * @param {object} input
  * @param {string[]} input.elementIds - Array of element or workflow UUIDs
  * @param {string} [input.userId] - Optional caller user ID for ownership validation
- * @returns {Promise<{ elements: Array<{ id: string, name: string, description: string, guidelines: string, referenceMediaUrls: string[] }>, referenceMediaUrls: string[] }>}
+ * @param {object} [input.workflowMediaRepository] - Optional repository override (testing)
+ * @param {object} [input.mediaRepository] - Optional repository override (testing)
+ * @returns {Promise<{ elements: Array<{ id: string, workflowId: string, name: string, description: string, guidelines: string, referenceMediaUrls: string[] }>, referenceMediaUrls: string[] }>}
  */
-export async function getElementPromptContext({ elementIds = [], userId = null } = {}) {
+export async function getElementPromptContext({
+    elementIds = [],
+    userId = null,
+    workflowMediaRepository = null,
+    mediaRepository = null,
+} = {}) {
     if (!Array.isArray(elementIds) || elementIds.length === 0) {
         return {
             elements: [],
@@ -63,9 +93,21 @@ export async function getElementPromptContext({ elementIds = [], userId = null }
             throw new ElementsNotFoundError(`Element "${elemId}" not found`, { elementId: elemId });
         }
 
-        const urls = Array.isArray(record.reference_images)
-            ? record.reference_images.filter(Boolean)
-            : (Array.isArray(record.reference_media_urls) ? record.reference_media_urls.filter(Boolean) : []);
+        const workflowId = record.workflow_id || record.id;
+        const visualMedia = await getWorkflowVisualMedia(workflowId, {
+            preferredRoles: ELEMENT_VISUAL_ROLE_PRIORITY,
+            workflowMediaRepository,
+            mediaRepository,
+        });
+
+        let urls = visualMedia.map((m) => m.url);
+
+        // Compatibility fallback only when workflow_media returned nothing and an in-memory mock supplies legacy fields
+        if (urls.length === 0) {
+            urls = extractValidHttpUrls(
+                Array.isArray(record.reference_images) ? record.reference_images : record.reference_media_urls
+            );
+        }
 
         elements.push({
             id: record.id,

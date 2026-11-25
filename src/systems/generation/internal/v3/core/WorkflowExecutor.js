@@ -2,9 +2,18 @@ import { createHash } from "node:crypto";
 import { createLogger } from "#shared";
 import { GraphCompiler, getValueByPath } from "./GraphCompiler.js";
 import { createJobExecutionContext } from "./JobExecutionContext.js";
-import { GenerationValidationError } from "../../errors.js";
+import { GenerationValidationError, GenerationHoldExpiredError } from "../../errors.js";
 
 const v3ExecutorLogger = createLogger("v3-executor");
+
+function assertHoldNotExpired(context, jobCtx, nodeId) {
+  if (context?.holdExpired === true || jobCtx?.state?.holdExpired === true) {
+    throw new GenerationHoldExpiredError(
+      `Execution halted before node "${nodeId}" because the billing hold has expired`,
+      { nodeId, mediaId: jobCtx?.resources?.mediaId || null }
+    );
+  }
+}
 
 /**
  * Deterministically serializes a value for SHA-256 signature calculation.
@@ -194,6 +203,8 @@ export class WorkflowExecutor {
       for (const wave of plan.waves) {
         await Promise.all(
           wave.map(async (nodeId) => {
+            assertHoldNotExpired(executionContext, jobCtx, nodeId);
+
             const step = nodesMap.get(nodeId);
             const def = this.registry.get(step.type);
             const resolvedInputs = this.resolveNodeInputs(step, def, normalizedInput, nodeOutputs);
@@ -308,6 +319,7 @@ export class WorkflowExecutor {
 
     let lastErr = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      assertHoldNotExpired(context, context?.jobContext, step.id);
       try {
         const nodeCtx = {
           ...context,

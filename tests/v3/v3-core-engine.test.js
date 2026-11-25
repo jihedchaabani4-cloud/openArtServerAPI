@@ -587,5 +587,67 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
       const sig2 = computeNodeSignature("base.video_generate", { a: 1, b: 2 });
       assert.equal(sig1, sig2);
     });
+
+    it("Layer 2 centralized holdExpired guard halts immediately before the next node runs", async () => {
+      const reg = new NodeRegistry();
+      let step1Calls = 0;
+      let step2Calls = 0;
+
+      reg.register({
+        type: "base.step_one",
+        OUTPUT_NODE: false,
+        CACHEABLE: false,
+        INPUT_TYPES: { required: { prompt: { type: "STRING" } } },
+        RETURN_TYPES: { text: "STRING" },
+        async execute(inputs, ctx) {
+          step1Calls++;
+          // Simulate heartbeat expiring hold during wave 1
+          ctx.jobContext?.markHoldExpired();
+          return { text: inputs.prompt };
+        },
+      });
+
+      reg.register({
+        type: "base.step_two",
+        OUTPUT_NODE: true,
+        CACHEABLE: false,
+        INPUT_TYPES: { required: { text: { type: "STRING" } } },
+        RETURN_TYPES: { saved: "STRING" },
+        async execute(inputs) {
+          step2Calls++;
+          return { saved: inputs.text };
+        },
+      });
+
+      const executor = new WorkflowExecutor(reg);
+      const wf = {
+        id: "hold-guard-v3",
+        nodes: [
+          { id: "n1", type: "base.step_one", inputs: { prompt: "hello" } },
+          { id: "n2", type: "base.step_two", inputs: { text: { fromNode: "n1", output: "text" } } },
+        ],
+      };
+
+      // Case A: Mid-run hold expiry stops before node 2 ever runs
+      await assert.rejects(
+        () => executor.execute({ workflow: wf, input: {} }),
+        (err) => {
+          assert.equal(err.code, "HOLD_EXPIRED");
+          assert.equal(err.category, "HOLD_EXPIRED");
+          assert.equal(err.retryable, false);
+          return true;
+        }
+      );
+      assert.equal(step1Calls, 1);
+      assert.equal(step2Calls, 0, "Node 2 must never execute once holdExpired is set");
+
+      // Case B: Already expired context stops before node 1 even runs
+      step1Calls = 0;
+      await assert.rejects(
+        () => executor.execute({ workflow: wf, input: {}, context: { holdExpired: true } }),
+        (err) => err.code === "HOLD_EXPIRED"
+      );
+      assert.equal(step1Calls, 0, "Node 1 must never execute when ctx.holdExpired === true");
+    });
   });
 });

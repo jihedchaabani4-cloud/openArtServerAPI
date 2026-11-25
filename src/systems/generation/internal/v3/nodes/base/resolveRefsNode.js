@@ -1,19 +1,100 @@
 import { getCharacterPromptContext } from "#characters/tools";
 import { getElementPromptContext } from "#elements/tools";
-import { getMediaById, getMediaUrls } from "#media/tools";
+import { getMediaById, getMediaUrls, getWorkflowPrimaryMedia } from "#media/tools";
 import { assertOwns, assertOwnsAny } from "#identity/tools";
 import { GenerationError } from "../../../errors.js";
 
 const INLINE_TAG_REGEX = /<(character|element):([^>\s]+)>/gi;
-const isHttpUrl = (v) => typeof v === "string" && (v.startsWith("http://") || v.startsWith("https://"));
-const extractUrls = (obj) =>
-  (Array.isArray(obj.referenceMediaUrls) ? obj.referenceMediaUrls : Array.isArray(obj.imageUrls) ? obj.imageUrls : []).filter(Boolean);
+const INACTIVE_MEDIA_STATUSES = new Set(["failed", "saved", "processing", "pending", "queued", "uploading", "in_progress", "starting"]);
+const isHttpUrl = (v) => {
+  if (typeof v !== "string") return false;
+  const trimmed = v.trim();
+  return trimmed.startsWith("http://") || trimmed.startsWith("https://");
+};
+const isUsableMediaRecord = (m) => {
+  if (!m || !isHttpUrl(m.url)) return false;
+  if (typeof m.status === "string" && m.status.trim()) {
+    return !INACTIVE_MEDIA_STATUSES.has(m.status.trim().toLowerCase());
+  }
+  return true;
+};
+const extractUrls = (obj) => {
+  const raw = Array.isArray(obj.referenceMediaUrls)
+    ? obj.referenceMediaUrls
+    : Array.isArray(obj.imageUrls)
+      ? obj.imageUrls
+      : [];
+  const deduped = [];
+  for (const item of raw) {
+    if (!isHttpUrl(item)) continue;
+    const clean = item.trim();
+    if (!deduped.includes(clean)) deduped.push(clean);
+  }
+  return deduped;
+};
 const formatTraits = (traits) =>
   Array.isArray(traits)
     ? traits
     : traits && typeof traits === "object"
       ? Object.entries(traits).map(([k, v]) => `${k}: ${v}`)
       : [];
+
+function parseReferenceDescriptor(ref) {
+  if (!ref) return null;
+  if (typeof ref === "string") {
+    const trimmed = ref.trim();
+    if (!trimmed) return null;
+    return isHttpUrl(trimmed)
+      ? { kind: "url", url: trimmed, name: "Image Reference" }
+      : { kind: "auto", id: trimmed };
+  }
+  if (typeof ref !== "object") return null;
+
+  if ((ref.entityType === "character" || ref.entityType === "element") && ref.name) {
+    return { kind: "inline_entity", entity: ref };
+  }
+  if (typeof ref.url === "string" && isHttpUrl(ref.url)) {
+    return { kind: "url", url: ref.url.trim(), name: ref.name || "Image Reference" };
+  }
+
+  const explicitType = typeof ref.type === "string" ? ref.type.trim().toLowerCase() : "";
+  const charId = typeof (ref.character_id || ref.characterId) === "string"
+    ? (ref.character_id || ref.characterId).trim()
+    : "";
+  if (charId || (explicitType === "character" && typeof ref.id === "string" && ref.id.trim())) {
+    return { kind: "character", id: charId || ref.id.trim() };
+  }
+
+  const elemId = typeof (ref.element_id || ref.elementId) === "string"
+    ? (ref.element_id || ref.elementId).trim()
+    : "";
+  if (elemId || (explicitType === "element" && typeof ref.id === "string" && ref.id.trim())) {
+    return { kind: "element", id: elemId || ref.id.trim() };
+  }
+
+  const wfId = typeof (ref.workflow_id || ref.workflowId) === "string"
+    ? (ref.workflow_id || ref.workflowId).trim()
+    : "";
+  if (wfId || (explicitType === "workflow" && typeof ref.id === "string" && ref.id.trim())) {
+    return { kind: "workflow", id: wfId || ref.id.trim() };
+  }
+
+  const mediaId = typeof (ref.media_id || ref.mediaId) === "string"
+    ? (ref.media_id || ref.mediaId).trim()
+    : "";
+  if (mediaId || (explicitType === "media" && typeof ref.id === "string" && ref.id.trim())) {
+    return { kind: "media", id: mediaId || ref.id.trim() };
+  }
+
+  const genericId = typeof ref.id === "string" ? ref.id.trim() : "";
+  if (genericId) {
+    return isHttpUrl(genericId)
+      ? { kind: "url", url: genericId, name: ref.name || "Image Reference" }
+      : { kind: "auto", id: genericId };
+  }
+
+  return null;
+}
 
 function toOwnershipGenerationError(err, resourceId = null) {
   if (err instanceof GenerationError) return err;
@@ -72,6 +153,7 @@ export const ResolveRefsNode = {
     const getElementFn = ctx.getElementPromptContext || getElementPromptContext;
     const getMediaByIdFn = ctx.getMediaById || getMediaById;
     const getMediaUrlsFn = ctx.getMediaUrls || getMediaUrls;
+    const getWorkflowPrimaryMediaFn = ctx.getWorkflowPrimaryMedia || getWorkflowPrimaryMedia;
     const assertOwnsFn = ctx.assertOwns || assertOwns;
     const assertOwnsAnyFn = ctx.assertOwnsAny || assertOwnsAny;
 
@@ -104,68 +186,94 @@ export const ResolveRefsNode = {
 
     const entities = [];
     const entityById = new Map();
+    const mediaEntityByUrl = new Map();
     const referenceUrls = [];
 
     const registerReferenceUrl = (url) => {
-      if (!url || typeof url !== "string" || !url.startsWith("http")) return null;
-      let idx = referenceUrls.indexOf(url);
-      if (idx === -1) idx = referenceUrls.push(url) - 1;
+      if (!isHttpUrl(url)) return null;
+      const cleanUrl = url.trim();
+      let idx = referenceUrls.indexOf(cleanUrl);
+      if (idx === -1) idx = referenceUrls.push(cleanUrl) - 1;
       return `@image${idx + 1}`;
     };
 
-    const addEntity = (entity) => {
+    const addEntity = (entity, extraAliasIds = []) => {
       if (!entity) return;
       entities.push(entity);
       if (entity.id) entityById.set(String(entity.id), entity);
       if (entity.workflowId) entityById.set(String(entity.workflowId), entity);
+      for (const alias of extraAliasIds) {
+        if (alias) entityById.set(String(alias), entity);
+      }
     };
 
-    const addMediaEntity = (id, url, name = "Image Reference") => {
-      registerReferenceUrl(url);
-      addEntity({
+    const addMediaEntity = (id, url, name = "Image Reference", extraAliasIds = []) => {
+      if (!isHttpUrl(url)) return;
+      const cleanUrl = url.trim();
+      const alreadyRegistered = referenceUrls.includes(cleanUrl);
+      registerReferenceUrl(cleanUrl);
+      if (alreadyRegistered) {
+        const existing = mediaEntityByUrl.get(cleanUrl);
+        if (existing) {
+          if (id) entityById.set(String(id), existing);
+          for (const alias of extraAliasIds) {
+            if (alias) entityById.set(String(alias), existing);
+          }
+        }
+        return;
+      }
+      const entity = {
         id,
         workflowId: id,
         entityType: "media",
         name,
         description: null,
         visualTraits: [],
-        imageUrls: [url],
-      });
+        imageUrls: [cleanUrl],
+      };
+      mediaEntityByUrl.set(cleanUrl, entity);
+      addEntity(entity, extraAliasIds);
     };
 
-    const addCharacterEntity = (id, src, fallbackName = "Character") => {
+    const addCharacterEntity = (id, src, fallbackName = "Character", extraAliasIds = []) => {
       const urls = extractUrls(src);
       urls.forEach(registerReferenceUrl);
-      addEntity({
-        id,
-        workflowId: src.workflowId || id,
-        entityType: "character",
-        name: src.name || fallbackName,
-        description: src.description || "",
-        visualTraits: Array.isArray(src.visualTraits) ? src.visualTraits : formatTraits(src.traits),
-        imageUrls: urls,
-        sheetImages: Array.isArray(src.sheetImages) ? src.sheetImages : urls,
-        detailImages: Array.isArray(src.detailImages) ? src.detailImages : [],
-      });
+      addEntity(
+        {
+          id: src.id || id,
+          workflowId: src.workflowId || id,
+          entityType: "character",
+          name: src.name || fallbackName,
+          description: src.description || "",
+          visualTraits: Array.isArray(src.visualTraits) ? src.visualTraits : formatTraits(src.traits),
+          imageUrls: urls,
+          sheetImages: Array.isArray(src.sheetImages) ? src.sheetImages : urls,
+          detailImages: Array.isArray(src.detailImages) ? src.detailImages : [],
+        },
+        [id, ...extraAliasIds]
+      );
     };
 
-    const addElementEntity = (id, src) => {
+    const addElementEntity = (id, src, extraAliasIds = []) => {
       const urls = extractUrls(src);
       urls.forEach(registerReferenceUrl);
-      addEntity({
-        id,
-        workflowId: src.workflowId || id,
-        entityType: "element",
-        name: src.name || "Element",
-        description: src.description || "",
-        visualTraits: Array.isArray(src.visualTraits) ? src.visualTraits : src.guidelines ? [src.guidelines] : [],
-        imageUrls: urls,
-        sheetImages: [],
-        detailImages: urls,
-      });
+      addEntity(
+        {
+          id: src.id || id,
+          workflowId: src.workflowId || id,
+          entityType: "element",
+          name: src.name || "Element",
+          description: src.description || "",
+          visualTraits: Array.isArray(src.visualTraits) ? src.visualTraits : src.guidelines ? [src.guidelines] : [],
+          imageUrls: urls,
+          sheetImages: [],
+          detailImages: urls,
+        },
+        [id, ...extraAliasIds]
+      );
     };
 
-    // 0. Optional single media_id load
+    // 0. Optional single media_id load (direct HTTP URL, media_id, or workflow_id)
     let loadedMediaUrl = null;
     if (typeof inputs.media_id === "string" && inputs.media_id.trim()) {
       const mId = inputs.media_id.trim();
@@ -173,14 +281,17 @@ export const ResolveRefsNode = {
         loadedMediaUrl = mId;
         addMediaEntity("source_image", mId, "Source Image");
       } else if (await checkOwnership(["media", "workflow"], mId, { strictFlag: ctx.strictMediaLoad === true })) {
-        let record = await getMediaByIdFn(mId);
-        if (!record) {
-          const list = await getMediaUrlsFn([mId]);
-          if (Array.isArray(list) && list.length > 0) record = list[0];
+        let record = await getMediaByIdFn(mId).catch(() => null);
+        if (!isUsableMediaRecord(record)) {
+          const list = await getMediaUrlsFn([mId]).catch(() => []);
+          record = Array.isArray(list) ? list.find(isUsableMediaRecord) || null : null;
         }
-        if (record?.url) {
-          loadedMediaUrl = record.url;
-          addMediaEntity(record.id || record.mediaId || mId, record.url, "Media Reference");
+        if (!isUsableMediaRecord(record)) {
+          record = await getWorkflowPrimaryMediaFn(mId).catch(() => null);
+        }
+        if (isUsableMediaRecord(record)) {
+          loadedMediaUrl = record.url.trim();
+          addMediaEntity(record.id || record.mediaId || mId, loadedMediaUrl, "Media Reference", [mId]);
         }
       }
     }
@@ -231,29 +342,87 @@ export const ResolveRefsNode = {
       }
     }
 
-    // 3. Resolve generic references (URLs or media/character/element IDs)
-    const mediaIdsToLookup = [];
+    // 3. Resolve generic references (URLs, media_id, workflow_id, character_id, element_id)
+    const refDescriptorsToLookup = [];
     for (const ref of Array.isArray(inputs.references) ? inputs.references : []) {
-      if (!ref) continue;
-      if (typeof ref === "object" && (ref.entityType === "character" || ref.entityType === "element") && ref.name) {
-        (Array.isArray(ref.imageUrls) ? ref.imageUrls.filter(Boolean) : []).forEach(registerReferenceUrl);
-        addEntity(ref);
-        continue;
-      }
-      const val = typeof ref === "string" ? ref.trim() : (ref.url || ref.id || ref.mediaId || ref.workflowId || "").trim();
-      if (!val) continue;
-      if (isHttpUrl(val)) {
-        addMediaEntity(val, val, (typeof ref === "object" && ref.name) || "Image Reference");
+      const parsedRef = parseReferenceDescriptor(ref);
+      if (!parsedRef) continue;
+      if (parsedRef.kind === "inline_entity") {
+        extractUrls(parsedRef.entity).forEach(registerReferenceUrl);
+        addEntity(parsedRef.entity);
+      } else if (parsedRef.kind === "url") {
+        addMediaEntity(parsedRef.url, parsedRef.url, parsedRef.name);
       } else {
-        mediaIdsToLookup.push(val);
+        refDescriptorsToLookup.push(parsedRef);
       }
     }
 
-    for (const mId of mediaIdsToLookup) {
-      if (entityById.has(mId)) continue;
-      if (!(await checkOwnership(["media", "workflow", "character", "element"], mId))) continue;
-      for (const m of (await getMediaUrlsFn([mId])) || []) {
-        if (m?.url) addMediaEntity(m.mediaId || m.id || mId, m.url);
+    const effectiveLookupUserId = verifyOwnership ? userId : null;
+
+    const tryResolveAsMedia = async (refId) => {
+      const mediaRows = await getMediaUrlsFn([refId]).catch(() => []);
+      const validRows = Array.isArray(mediaRows) ? mediaRows.filter(isUsableMediaRecord) : [];
+      if (validRows.length === 0) return false;
+      for (const m of validRows) {
+        addMediaEntity(m.mediaId || m.id || refId, m.url, "Image Reference", [refId]);
+      }
+      return true;
+    };
+
+    const tryResolveAsCharacter = async (refId) => {
+      const charCtx = await getCharacterFn({ characterId: refId, userId: effectiveLookupUserId }).catch(() => null);
+      if (!charCtx || typeof charCtx !== "object") return false;
+      addCharacterEntity(refId, charCtx);
+      return true;
+    };
+
+    const tryResolveAsElement = async (refId) => {
+      const elemRes = await getElementFn({ elementIds: [refId], userId: effectiveLookupUserId }).catch(() => null);
+      const matched = Array.isArray(elemRes?.elements) ? elemRes.elements : [];
+      if (matched.length === 0) return false;
+      for (const elem of matched) {
+        addElementEntity(elem.id || refId, elem, [refId]);
+      }
+      return true;
+    };
+
+    const tryResolveAsWorkflow = async (refId) => {
+      const wfMedia = await getWorkflowPrimaryMediaFn(refId).catch(() => null);
+      if (!isUsableMediaRecord(wfMedia)) return false;
+      addMediaEntity(refId, wfMedia.url, "Image Reference", [wfMedia.mediaId || wfMedia.id].filter(Boolean));
+      return true;
+    };
+
+    for (const { kind, id: refId } of refDescriptorsToLookup) {
+      if (entityById.has(refId)) continue;
+
+      const ownershipTypes =
+        kind === "character"
+          ? ["character", "workflow"]
+          : kind === "element"
+            ? ["element", "workflow"]
+            : kind === "workflow"
+              ? ["workflow"]
+              : kind === "media"
+                ? ["media", "workflow"]
+                : ["media", "workflow", "character", "element"];
+
+      if (!(await checkOwnership(ownershipTypes, refId))) continue;
+
+      if (kind === "media") {
+        await tryResolveAsMedia(refId);
+      } else if (kind === "character") {
+        await tryResolveAsCharacter(refId);
+      } else if (kind === "element") {
+        await tryResolveAsElement(refId);
+      } else if (kind === "workflow") {
+        await tryResolveAsWorkflow(refId);
+      } else {
+        // Auto-detect untyped ID across media -> character -> element -> workflow
+        if (await tryResolveAsMedia(refId)) continue;
+        if (await tryResolveAsCharacter(refId)) continue;
+        if (await tryResolveAsElement(refId)) continue;
+        await tryResolveAsWorkflow(refId);
       }
     }
 

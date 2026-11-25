@@ -86,6 +86,56 @@ describe("System 7: Elements (#elements/tools & #elements/api)", () => {
             }
         });
 
+        it("getElementPromptContext resolves real visual URLs from workflow_media prioritizing primary cover and filtering non-success rows", async () => {
+            const mockRecord = {
+                id: "elem-wm-1",
+                workflow_id: "wf-elem-wm-1",
+                name: "Obsidian Crown",
+                description: "Volcanic glass crown with gold filigree",
+                guidelines: "Preserve jagged silhouette and warm gold veins",
+                // Legacy dropped columns absent in production Postgres:
+            };
+
+            const mockWorkflowMediaRepo = {
+                findByWorkflow: async (wfId) => {
+                    assert.equal(wfId, "wf-elem-wm-1");
+                    return [
+                        { id: "m-failed", url: "https://cdn.art/crown-failed.png", status: "failed", role: "detail", is_primary: false },
+                        { id: "m-saved", url: null, status: "saved", role: "detail", is_primary: false },
+                        { id: "m-ref", url: "https://cdn.art/crown-ref.png", status: "success", role: "reference", is_primary: false },
+                        { id: "m-detail", url: "https://cdn.art/crown-detail.png", status: "success", role: "detail", is_primary: false },
+                        { id: "m-cover", url: "https://cdn.art/crown-cover.png", status: "success", role: "detail", is_primary: true },
+                        { id: "m-cover-dup", url: "https://cdn.art/crown-cover.png", status: "success", role: "reference", is_primary: false },
+                    ];
+                },
+            };
+
+            const origResolve = elementRepository.resolveRecord;
+            elementRepository.resolveRecord = async (id) => (id === "elem-wm-1" ? mockRecord : null);
+
+            try {
+                const res = await getElementPromptContext({
+                    elementIds: ["elem-wm-1"],
+                    workflowMediaRepository: mockWorkflowMediaRepo,
+                });
+                assert.equal(res.elements.length, 1);
+                assert.equal(res.elements[0].id, "elem-wm-1");
+                assert.equal(res.elements[0].workflowId, "wf-elem-wm-1");
+                assert.deepEqual(res.elements[0].referenceMediaUrls, [
+                    "https://cdn.art/crown-cover.png",
+                    "https://cdn.art/crown-detail.png",
+                    "https://cdn.art/crown-ref.png",
+                ]);
+                assert.deepEqual(res.referenceMediaUrls, [
+                    "https://cdn.art/crown-cover.png",
+                    "https://cdn.art/crown-detail.png",
+                    "https://cdn.art/crown-ref.png",
+                ]);
+            } finally {
+                elementRepository.resolveRecord = origResolve;
+            }
+        });
+
         it("validateElementsExist throws ElementsValidationError if elementIds is empty", async () => {
             await assert.rejects(
                 async () => validateElementsExist({ elementIds: [] }),

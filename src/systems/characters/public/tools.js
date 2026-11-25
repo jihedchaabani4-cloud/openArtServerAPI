@@ -10,6 +10,7 @@
  */
 
 import * as identityTools from "#identity/tools";
+import { getWorkflowVisualMedia } from "#media/tools";
 import { CharacterRepository, characterRepository } from "../internal/db/CharacterRepository.js";
 import { CharacterService } from "../internal/services/CharacterService.js";
 import { CharacterMediaService, CHARACTER_MAX_DETAIL_MEDIA } from "../internal/services/CharacterMediaService.js";
@@ -29,15 +30,48 @@ export function configureCharacters(services = {}) {
 
 // ── Inter-System Tools Functions ──────────────────────────────────────────────
 
+const CHARACTER_VISUAL_ROLE_PRIORITY = Object.freeze([
+    "sheet",
+    "turnaround",
+    "avatar",
+    "detail",
+    "reference",
+    "output",
+    "original",
+]);
+const SHEET_ROLES = new Set(["sheet", "turnaround", "avatar"]);
+
+function extractValidHttpUrls(rawList) {
+    if (!Array.isArray(rawList)) return [];
+    const seen = new Set();
+    const out = [];
+    for (const item of rawList) {
+        const url = typeof item === "string" ? item.trim() : "";
+        if ((url.startsWith("http://") || url.startsWith("https://")) && !seen.has(url)) {
+            seen.add(url);
+            out.push(url);
+        }
+    }
+    return out;
+}
+
 /**
- * Retrieves normalized prompt context (traits, description, references) for a character.
+ * Retrieves normalized prompt context (traits, description, visual references from `workflow_media`)
+ * for a character.
  *
  * @param {object} input
  * @param {string} input.characterId - Target character or workflow UUID
  * @param {string} [input.userId] - Optional owner userId for access control assertion
- * @returns {Promise<{ name: string, description: string, traits: object, referenceMediaUrls: string[] }>}
+ * @param {object} [input.workflowMediaRepository] - Optional repository override (testing)
+ * @param {object} [input.mediaRepository] - Optional repository override (testing)
+ * @returns {Promise<{ id: string, workflowId: string, name: string, description: string, traits: object, referenceMediaUrls: string[], sheetImages: string[], detailImages: string[] }>}
  */
-export async function getCharacterPromptContext({ characterId, userId = null } = {}) {
+export async function getCharacterPromptContext({
+    characterId,
+    userId = null,
+    workflowMediaRepository = null,
+    mediaRepository = null,
+} = {}) {
     if (!characterId) {
         throw new CharactersValidationError("characterId is required to retrieve prompt context", {
             field: "characterId",
@@ -53,16 +87,39 @@ export async function getCharacterPromptContext({ characterId, userId = null } =
         throw new CharactersNotFoundError(`Character "${characterId}" not found`, { characterId });
     }
 
+    const workflowId = char.workflow_id || char.id || characterId;
     const traits = char.traits && typeof char.traits === "object" ? char.traits : {};
-    const referenceMediaUrls = Array.isArray(char.reference_media_urls)
-        ? char.reference_media_urls.filter(Boolean)
-        : [];
+
+    const visualMedia = await getWorkflowVisualMedia(workflowId, {
+        preferredRoles: CHARACTER_VISUAL_ROLE_PRIORITY,
+        workflowMediaRepository,
+        mediaRepository,
+    });
+
+    let referenceMediaUrls = visualMedia.map((m) => m.url);
+    let sheetImages = visualMedia
+        .filter((m) => m.isPrimary || SHEET_ROLES.has(String(m.role || "").toLowerCase()))
+        .map((m) => m.url);
+    let detailImages = visualMedia
+        .filter((m) => !sheetImages.includes(m.url))
+        .map((m) => m.url);
+
+    // Compatibility fallback only when workflow_media returned nothing and an in-memory mock supplies legacy field
+    if (referenceMediaUrls.length === 0) {
+        referenceMediaUrls = extractValidHttpUrls(char.reference_media_urls);
+        sheetImages = [...referenceMediaUrls];
+        detailImages = [];
+    }
 
     return {
+        id: char.id || characterId,
+        workflowId,
         name: char.name || char.title || "",
         description: char.description || char.character_info || "",
         traits,
         referenceMediaUrls,
+        sheetImages,
+        detailImages,
     };
 }
 

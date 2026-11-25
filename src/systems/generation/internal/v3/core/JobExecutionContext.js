@@ -39,6 +39,7 @@ export class JobExecutionContext {
       startedAt: null,
       finishedAt: null,
       error: null,
+      holdExpired: false,
     };
 
     this.cache = new Map();
@@ -70,6 +71,11 @@ export class JobExecutionContext {
     this.state.status = "failed";
     this.state.finishedAt = new Date().toISOString();
     this.state.error = err ?? null;
+    return this.state;
+  }
+
+  markHoldExpired() {
+    this.state.holdExpired = true;
     return this.state;
   }
 

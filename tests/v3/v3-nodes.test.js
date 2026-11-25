@@ -35,7 +35,7 @@ import {
   registerProviderRunner,
   unregisterProviderRunner,
 } from "../../src/systems/models/internal/runtime/providerRuntimeRegistry.js";
-import { WorkflowMediaRepository } from "#media/tools";
+import { WorkflowMediaRepository, getWorkflowPrimaryMedia } from "#media/tools";
 
 describe("V3 Base Nodes Suite", () => {
   it("registers the 7 pure base.* nodes and 0 custom.* nodes into a frozen registry", () => {
@@ -268,6 +268,160 @@ describe("V3 Base Nodes Suite", () => {
     assert.equal(res.reference_urls[1], "https://cdn.example.com/workflows/wf-1/extra-ref.png");
     assert.match(res.prepared_prompt, /\[Reference Guide\]/);
     assert.match(res.prepared_prompt, /Source Image \(image reference\) — @image1/);
+  });
+
+  it("base.resolve_references resolves mixed references (media_id + workflow_id + character_id + element_id) and deduplicates URLs against source_image_url", async () => {
+    const sourceUrl = "https://cdn.example.com/workflows/wf-target/primary.png";
+    const res = await ResolveRefsNode.execute(
+      {
+        prompt: "Place @Lyra holding @Runeblade on the rooftop",
+        media_id: sourceUrl,
+        references: [
+          "media-direct-1",
+          "wf-ref-2",
+          "char-ref-3",
+          "elem-ref-4",
+          // Duplicate URL matching source_image_url and duplicate workflow returning sourceUrl
+          sourceUrl,
+          { type: "workflow", id: "wf-dup-source" },
+          // Typed character & duplicate media ID
+          { type: "media", id: "media-direct-1" },
+        ],
+        verify_ownership: true,
+      },
+      {
+        userId: "user-multi",
+        assertOwnsAny: async () => true,
+        getMediaUrls: async (ids) => {
+          if (ids.includes("media-direct-1")) {
+            return [{ mediaId: "media-direct-1", url: "https://cdn.example.com/media-direct-1.png", status: "success" }];
+          }
+          return [];
+        },
+        getCharacterPromptContext: async ({ characterId }) => {
+          if (characterId === "char-ref-3") {
+            return {
+              id: "char-ref-3",
+              workflowId: "wf-char-ref-3",
+              name: "Lyra",
+              description: "Silver-armored pilot",
+              traits: { hair: "indigo" },
+              referenceMediaUrls: [
+                "https://cdn.example.com/lyra-sheet.png",
+                sourceUrl, // Duplicate of source_image_url must NOT create a duplicate slot
+                "https://cdn.example.com/lyra-detail.png",
+              ],
+            };
+          }
+          throw new Error("Character not found");
+        },
+        getElementPromptContext: async ({ elementIds }) => {
+          if (elementIds.includes("elem-ref-4")) {
+            return {
+              elements: [
+                {
+                  id: "elem-ref-4",
+                  workflowId: "wf-elem-ref-4",
+                  name: "Runeblade",
+                  description: "Glowing cyan sword",
+                  guidelines: "Keep glowing runes",
+                  referenceMediaUrls: [
+                    "https://cdn.example.com/runeblade-cover.png",
+                    "https://cdn.example.com/lyra-detail.png", // Cross-entity duplicate URL
+                  ],
+                },
+              ],
+            };
+          }
+          throw new Error("Element not found");
+        },
+        getWorkflowPrimaryMedia: async (wfId) => {
+          if (wfId === "wf-ref-2") {
+            return {
+              mediaId: "m-wf-2-primary",
+              url: "https://cdn.example.com/wf-ref-2-primary.png",
+              role: "output",
+              status: "success",
+            };
+          }
+          if (wfId === "wf-dup-source") {
+            return {
+              mediaId: "m-dup-src",
+              url: sourceUrl,
+              role: "output",
+              status: "success",
+            };
+          }
+          return null;
+        },
+      }
+    );
+
+    assert.equal(res.status, "success");
+    assert.deepEqual(res.reference_urls, [
+      sourceUrl,
+      "https://cdn.example.com/media-direct-1.png",
+      "https://cdn.example.com/wf-ref-2-primary.png",
+      "https://cdn.example.com/lyra-sheet.png",
+      "https://cdn.example.com/lyra-detail.png",
+      "https://cdn.example.com/runeblade-cover.png",
+    ]);
+    // Verify no duplicate Source Image / generic media entity was added for sourceUrl
+    const mediaGuideMentions = res.entities.filter((e) => e.entityType === "media");
+    assert.equal(mediaGuideMentions.length, 3);
+    assert.equal(res.entities.some((e) => e.entityType === "character" && e.name === "Lyra"), true);
+    assert.equal(res.entities.some((e) => e.entityType === "element" && e.name === "Runeblade"), true);
+    assert.match(res.prepared_prompt, /@Lyra \(character\)/);
+    assert.match(res.prepared_prompt, /@Runeblade \(element\)/);
+    assert.match(res.prepared_prompt, /Source Image \(image reference\) — @image1/);
+  });
+
+  it("getWorkflowPrimaryMedia resolves fallback completed non-reference media when primary is failed", async () => {
+    const mockWfRepo = {
+      findByWorkflow: async () => [
+        { id: "m-1", url: "https://cdn.example.com/v1.png", status: "success", role: "output", is_primary: false },
+        { id: "m-ref", url: "https://cdn.example.com/ref.png", status: "success", role: "reference", is_primary: false },
+        { id: "m-2", url: "https://cdn.example.com/v2.png", status: "success", role: "output", is_primary: false },
+        { id: "m-fail", url: null, status: "failed", role: "output", is_primary: true, generation_config: {} },
+      ],
+    };
+
+    const resolved = await getWorkflowPrimaryMedia("wf-failed-primary", {
+      workflowMediaRepository: mockWfRepo,
+    });
+    assert.ok(resolved);
+    assert.equal(resolved.mediaId, "m-2");
+    assert.equal(resolved.url, "https://cdn.example.com/v2.png");
+  });
+
+  it("base.image_generate deduplicates and caps expanded images to model.parameters.images.max preserving source_image_url", async () => {
+    let capturedInput = null;
+    const expandedUrls = Array.from({ length: 18 }, (_, i) => `https://cdn.example.com/ref-${i + 1}.png`);
+    // Include duplicates too
+    const withDups = [expandedUrls[0], expandedUrls[0], ...expandedUrls.slice(1), expandedUrls[2]];
+
+    const res = await ImageGenerateNode.execute(
+      {
+        model: "nanobana_2", // images.max === 14
+        operation: "edit",
+        prompt: "Composite character and elements into scene",
+        images: withDups,
+      },
+      {
+        executeProvider: async (model, params) => {
+          capturedInput = { model, params };
+          return {
+            assets: [{ url: "https://cdn.example.com/final-capped.png" }],
+            metadata: { model: "nanobana_2", provider: "wavespeed" },
+          };
+        },
+      }
+    );
+
+    assert.equal(res.status, "success");
+    assert.equal(capturedInput.params.images.length, 14, "nanobana_2 must cap images at 14");
+    assert.equal(capturedInput.params.images[0], "https://cdn.example.com/ref-1.png", "@image1 source preserved");
+    assert.equal(new Set(capturedInput.params.images).size, 14, "all capped URLs must be unique");
   });
 
   it("base.llm exposes the minimal 4-input / 4-output contract and SKILL.md registry re-exports", () => {
@@ -1766,5 +1920,182 @@ describe("V3 Base Nodes Suite", () => {
       WorkflowMediaRepository.clearMemory();
       WorkflowMediaRepository.disableTestMemoryFallback();
     }
+  });
+
+  it("Layer 3/4 alignment (Problem #1): base.save_media uploads external URL via { uploaded: [...] }, saves real width/height + generation_config, skips own-storage URLs, and discards storage on DB commit failure", async () => {
+    const { envConfig } = await import("#shared");
+    const uploadCalls = [];
+    const discardedKeys = [];
+
+    const mockUploadService = {
+      upload: async (args) => {
+        uploadCalls.push(args);
+        return {
+          uploaded: [
+            {
+              url: "https://storage.supabase.test/storage/v1/object/public/media/u1/uploads/perm.webp",
+              storageKey: "u1/uploads/perm.webp",
+              width: 1536,
+              height: 1024,
+              ratio: "3:2",
+            },
+          ],
+        };
+      },
+      discard: async (keys) => {
+        discardedKeys.push(...keys);
+      },
+    };
+
+    const rows = new Map([
+      [
+        "media-ext-1",
+        {
+          id: "media-ext-1",
+          workflow_id: "wf-ext-1",
+          status: "processing",
+          url: null,
+          width: 1024,
+          height: 1024,
+          generation_config: {
+            prompt: "relight portrait",
+            model: "nanobana_2",
+            edit_type: "relight",
+            source_media_id: "media-orig-1",
+          },
+        },
+      ],
+      [
+        "media-ext-2",
+        {
+          id: "media-ext-2",
+          workflow_id: "wf-ext-1",
+          status: "processing",
+          url: null,
+          width: 1024,
+          height: 1024,
+        },
+      ],
+      [
+        "media-ext-failed",
+        {
+          id: "media-ext-failed",
+          workflow_id: "wf-ext-1",
+          status: "failed",
+          url: null,
+        },
+      ],
+    ]);
+
+    const mediaRepo = {
+      findById: async (id) => rows.get(id) || null,
+      updateMedia: async (id, fields) => {
+        const updated = { ...(rows.get(id) || { id }), ...fields };
+        rows.set(id, updated);
+        return updated;
+      },
+    };
+
+    // 1. External WaveSpeed URL -> uploads via { uploaded: [...] }, commits permanent URL + real 1536x1024 + preserves generation_config
+    //    Also confirms SaveMediaNode itself has zero holdExpired logic (Layer 2 owns holdExpired)
+    const res1 = await SaveMediaNode.execute(
+      {
+        media_id: "media-ext-1",
+        asset_url: "https://d1q70pf5vjeyhc.cloudfront.net/temp-wavespeed-out.png",
+        final_prompt: "Relit portrait with warm rim light",
+        metadata: { provider: "wavespeed", model: "nanobana_2" },
+        save_type: "workflow_output",
+      },
+      {
+        userId: "user-ext-1",
+        workflowId: "wf-ext-1",
+        useExternalPersistence: true,
+        mediaRepository: mediaRepo,
+        mediaUploadService: mockUploadService,
+      }
+    );
+
+    assert.equal(uploadCalls.length, 1);
+    assert.equal(res1.status, "success");
+    assert.equal(
+      res1.saved_media.url,
+      "https://storage.supabase.test/storage/v1/object/public/media/u1/uploads/perm.webp"
+    );
+    const savedRow = rows.get("media-ext-1");
+    assert.equal(savedRow.width, 1536);
+    assert.equal(savedRow.height, 1024);
+    assert.equal(savedRow.generation_config.source_media_id, "media-orig-1");
+    assert.equal(savedRow.generation_config.edit_type, "relight");
+    assert.equal(savedRow.generation_config.prompt_optimized, "Relit portrait with warm rim light");
+    assert.equal(savedRow.generation_config.provider, "wavespeed");
+
+    // 2. Idempotent skip when asset_url is already in our own Supabase Storage
+    const ownStoragePrefix = (envConfig.rawSupabaseUrl || "").trim().replace(/\/+$/, "");
+    if (ownStoragePrefix) {
+      const ownUrl = `${ownStoragePrefix}/storage/v1/object/public/media/u1/uploads/already-saved.png`;
+      const uploadsBefore = uploadCalls.length;
+      const resOwn = await SaveMediaNode.execute(
+        { media_id: "media-ext-2", asset_url: ownUrl },
+        {
+          userId: "user-ext-1",
+          useExternalPersistence: true,
+          mediaRepository: mediaRepo,
+          mediaUploadService: mockUploadService,
+        }
+      );
+      assert.equal(uploadCalls.length, uploadsBefore, "Own Supabase Storage URL must skip re-upload");
+      assert.equal(resOwn.saved_media.url, ownUrl);
+    }
+
+    // 3. Pre-upload fail-closed guard when placeholder is already failed (zero wasted upload)
+    const uploadsBeforeFail = uploadCalls.length;
+    await assert.rejects(
+      () =>
+        SaveMediaNode.execute(
+          { media_id: "media-ext-failed", asset_url: "https://cdn.example.com/late.png" },
+          {
+            userId: "user-ext-1",
+            useExternalPersistence: true,
+            mediaRepository: mediaRepo,
+            mediaUploadService: mockUploadService,
+          }
+        ),
+      (err) => err.code === "HOLD_EXPIRED" && err.statusCode === 409
+    );
+    assert.equal(uploadCalls.length, uploadsBeforeFail, "Already-failed placeholder must fail before uploading");
+
+    // 4. Compensating discard([storageKey]) when DB commit fails after storage upload
+    rows.set("media-ext-race", { id: "media-ext-race", status: "processing", url: null });
+    let findCount = 0;
+    const raceMediaRepo = {
+      findById: async (id) => {
+        findCount++;
+        // First read (pre-check) sees processing; second read (inside completeMedia) sees Reaper marked failed!
+        if (findCount === 1) return { id, status: "processing", url: null };
+        return { id, status: "failed", hold_expired: true, url: null };
+      },
+      updateMedia: async () => {
+        throw new Error("updateMedia must not be called after HOLD_EXPIRED race");
+      },
+    };
+
+    await assert.rejects(
+      () =>
+        SaveMediaNode.execute(
+          { media_id: "media-ext-race", asset_url: "https://d1q70pf5vjeyhc.cloudfront.net/race.png" },
+          {
+            userId: "user-ext-1",
+            useExternalPersistence: true,
+            mediaRepository: raceMediaRepo,
+            mediaUploadService: mockUploadService,
+          }
+        ),
+      (err) => err.code === "HOLD_EXPIRED" && err.statusCode === 409
+    );
+    assert.deepEqual(
+      discardedKeys,
+      ["u1/uploads/perm.webp"],
+      "Uploaded storage object must be discarded immediately when completeMedia fails"
+    );
   });
 });

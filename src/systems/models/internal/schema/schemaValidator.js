@@ -145,6 +145,19 @@ export function validateCanonicalInput(operationDefOrSchema = {}, rawInput = {},
       }
     }
 
+    // Array max length validation (e.g., images.max)
+    if (
+      paramDef.type === "array" &&
+      Array.isArray(coerced) &&
+      typeof paramDef.max === "number" &&
+      coerced.length > paramDef.max
+    ) {
+      throw new ValidationError(
+        `Parameter "${paramName}" supports at most ${paramDef.max} item${paramDef.max === 1 ? "" : "s"} (received ${coerced.length}).`,
+        { field: paramName }
+      );
+    }
+
     cleanInput[paramName] = coerced;
   }
 

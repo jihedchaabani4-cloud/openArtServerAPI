@@ -1,0 +1,342 @@
+{
+  "runTag": "ltmwu1sbnt",
+  "createdAt": "2026-11-24T02:00:38.635Z",
+  "apiBase": "http://localhost:5000",
+  "model": "ltx_2_3_fast",
+  "users": [
+    {
+      "index": 1,
+      "userId": "3a899608-d17f-4d21-9c95-fb2ded5bfed9",
+      "email": "loadtest.ltmwu1sbnt.u1@labveil.test",
+      "walletId": "64e2e105-5019-4641-a958-4164b3969f69",
+      "initialBalance": 1000,
+      "projectId": "1367ba19-1c8a-4ba3-8b52-cc9de63a5063",
+      "projectName": "Video LoadTest ltmwu1sbnt - User 1"
+    },
+    {
+      "index": 2,
+      "userId": "24f01e09-a8a5-48bb-bdce-4f31fc45101a",
+      "email": "loadtest.ltmwu1sbnt.u2@labveil.test",
+      "walletId": "58362a8f-72d4-4b77-a13e-3e8460747bca",
+      "initialBalance": 1000,
+      "projectId": "951856ed-590c-4879-880e-a9820dc782a4",
+      "projectName": "Video LoadTest ltmwu1sbnt - User 2"
+    },
+    {
+      "index": 3,
+      "userId": "d0d4a6d0-0508-4b25-96a2-ef4d6bbb8491",
+      "email": "loadtest.ltmwu1sbnt.u3@labveil.test",
+      "walletId": "6b013697-0595-4489-bb85-f4231a1c42d8",
+      "initialBalance": 1000,
+      "projectId": "f50be20a-5016-4a15-abc3-e37b07da7a37",
+      "projectName": "Video LoadTest ltmwu1sbnt - User 3"
+    },
+    {
+      "index": 4,
+      "userId": "7e99c336-af8b-4e6c-acde-2ac4658fa470",
+      "email": "loadtest.ltmwu1sbnt.u4@labveil.test",
+      "walletId": "4e11a241-366d-4932-99c3-792261493af7",
+      "initialBalance": 1000,
+      "projectId": "fdd4298a-4293-4558-be1a-45464432dc71",
+      "projectName": "Video LoadTest ltmwu1sbnt - User 4"
+    },
+    {
+      "index": 5,
+      "userId": "73c16fd0-1692-470f-8781-511d906d0781",
+      "email": "loadtest.ltmwu1sbnt.u5@labveil.test",
+      "walletId": "3ac16626-8258-4dcc-bd06-46e099a9186c",
+      "initialBalance": 1000,
+      "projectId": "d62bd106-e673-4d54-8813-e9117bdf9511",
+      "projectName": "Video LoadTest ltmwu1sbnt - User 5"
+    }
+  ],
+  "finishedAt": "2026-11-24T02:03:48.082Z",
+  "totals": {
+    "httpAttempts": 150,
+    "httpStatusCounts": {
+      "200": 75,
+      "429": 75
+    },
+    "acceptedJobs": 75,
+    "rateLimited429": 75,
+    "otherErrors": 0,
+    "mediaSuccess": 0,
+    "mediaFailed": 75,
+    "mediaStillProcessing": 0,
+    "crossUserLeaks": 0,
+    "allLatencyMs": {
+      "p50": 1853,
+      "p95": 31627,
+      "max": 31889
+    },
+    "acceptedLatencyMs": {
+      "p50": 7827,
+      "p95": 31635,
+      "max": 31889
+    }
+  },
+  "waves": [
+    {
+      "wave": 1,
+      "elapsedS": 0,
+      "waveDurationMs": 1910,
+      "statusCounts": {
+        "200": 25
+      },
+      "acceptedInWave": 25,
+      "rateLimitedInWave": 0,
+      "p50Ms": 1849,
+      "p95Ms": 1893,
+      "maxMs": 1913
+    },
+    {
+      "wave": 2,
+      "elapsedS": 30,
+      "waveDurationMs": 449,
+      "statusCounts": {
+        "429": 25
+      },
+      "acceptedInWave": 0,
+      "rateLimitedInWave": 25,
+      "p50Ms": 434,
+      "p95Ms": 450,
+      "maxMs": 452
+    },
+    {
+      "wave": 3,
+      "elapsedS": 60,
+      "waveDurationMs": 7831,
+      "statusCounts": {
+        "200": 25
+      },
+      "acceptedInWave": 25,
+      "rateLimitedInWave": 0,
+      "p50Ms": 7827,
+      "p95Ms": 7831,
+      "maxMs": 7832
+    },
+    {
+      "wave": 4,
+      "elapsedS": 90,
+      "waveDurationMs": 533,
+      "statusCounts": {
+        "429": 25
+      },
+      "acceptedInWave": 0,
+      "rateLimitedInWave": 25,
+      "p50Ms": 523,
+      "p95Ms": 536,
+      "maxMs": 537
+    },
+    {
+      "wave": 5,
+      "elapsedS": 120,
+      "waveDurationMs": 31886,
+      "statusCounts": {
+        "200": 25
+      },
+      "acceptedInWave": 25,
+      "rateLimitedInWave": 0,
+      "p50Ms": 31563,
+      "p95Ms": 31887,
+      "maxMs": 31889
+    },
+    {
+      "wave": 6,
+      "elapsedS": 151.9,
+      "waveDurationMs": 1929,
+      "statusCounts": {
+        "429": 25
+      },
+      "acceptedInWave": 0,
+      "rateLimitedInWave": 25,
+      "p50Ms": 1876,
+      "p95Ms": 1904,
+      "maxMs": 1932
+    }
+  ],
+  "perUser": [
+    {
+      "userIndex": 1,
+      "userId": "3a899608-d17f-4d21-9c95-fb2ded5bfed9",
+      "email": "loadtest.ltmwu1sbnt.u1@labveil.test",
+      "projectId": "1367ba19-1c8a-4ba3-8b52-cc9de63a5063",
+      "acceptedJobs": 15,
+      "successCount": 0,
+      "failedCount": 15,
+      "processingCount": 0,
+      "initialBalance": 1000,
+      "finalBalance": 1000,
+      "netDeducted": 0,
+      "completedHoldSum": 0,
+      "pendingHoldSum": 0,
+      "balanceMatchesLedger": true,
+      "txSummary": {
+        "CREDIT": 1,
+        "HOLD_PENDING": 0,
+        "HOLD_COMPLETED": 0,
+        "HOLD_ROLLED_BACK": 15,
+        "OTHER": 0
+      },
+      "errorBuckets": {
+        "Generation service is currently busy. Please try again in a moment.": 3,
+        "Generation failed due to a temporary service issue. Your credits have been refunded.": 10,
+        "Safety verification failed (fail-closed): Provider rate limit reached. Please try again shortly.": 2
+      }
+    },
+    {
+      "userIndex": 2,
+      "userId": "24f01e09-a8a5-48bb-bdce-4f31fc45101a",
+      "email": "loadtest.ltmwu1sbnt.u2@labveil.test",
+      "projectId": "951856ed-590c-4879-880e-a9820dc782a4",
+      "acceptedJobs": 15,
+      "successCount": 0,
+      "failedCount": 15,
+      "processingCount": 0,
+      "initialBalance": 1000,
+      "finalBalance": 1000,
+      "netDeducted": 0,
+      "completedHoldSum": 0,
+      "pendingHoldSum": 0,
+      "balanceMatchesLedger": true,
+      "txSummary": {
+        "CREDIT": 1,
+        "HOLD_PENDING": 0,
+        "HOLD_COMPLETED": 0,
+        "HOLD_ROLLED_BACK": 15,
+        "OTHER": 0
+      },
+      "errorBuckets": {
+        "Generation service is currently busy. Please try again in a moment.": 5,
+        "Generation failed due to a temporary service issue. Your credits have been refunded.": 7,
+        "Safety verification failed (fail-closed): Provider rate limit reached. Please try again shortly.": 3
+      }
+    },
+    {
+      "userIndex": 3,
+      "userId": "d0d4a6d0-0508-4b25-96a2-ef4d6bbb8491",
+      "email": "loadtest.ltmwu1sbnt.u3@labveil.test",
+      "projectId": "f50be20a-5016-4a15-abc3-e37b07da7a37",
+      "acceptedJobs": 15,
+      "successCount": 0,
+      "failedCount": 15,
+      "processingCount": 0,
+      "initialBalance": 1000,
+      "finalBalance": 1000,
+      "netDeducted": 0,
+      "completedHoldSum": 0,
+      "pendingHoldSum": 0,
+      "balanceMatchesLedger": true,
+      "txSummary": {
+        "CREDIT": 1,
+        "HOLD_PENDING": 0,
+        "HOLD_COMPLETED": 0,
+        "HOLD_ROLLED_BACK": 15,
+        "OTHER": 0
+      },
+      "errorBuckets": {
+        "Generation failed due to a temporary service issue. Your credits have been refunded.": 12,
+        "Safety verification failed (fail-closed): Provider rate limit reached. Please try again shortly.": 3
+      }
+    },
+    {
+      "userIndex": 4,
+      "userId": "7e99c336-af8b-4e6c-acde-2ac4658fa470",
+      "email": "loadtest.ltmwu1sbnt.u4@labveil.test",
+      "projectId": "fdd4298a-4293-4558-be1a-45464432dc71",
+      "acceptedJobs": 15,
+      "successCount": 0,
+      "failedCount": 15,
+      "processingCount": 0,
+      "initialBalance": 1000,
+      "finalBalance": 1000,
+      "netDeducted": 0,
+      "completedHoldSum": 0,
+      "pendingHoldSum": 0,
+      "balanceMatchesLedger": true,
+      "txSummary": {
+        "CREDIT": 1,
+        "HOLD_PENDING": 0,
+        "HOLD_COMPLETED": 0,
+        "HOLD_ROLLED_BACK": 15,
+        "OTHER": 0
+      },
+      "errorBuckets": {
+        "Safety verification failed (fail-closed): Provider rate limit reached. Please try again shortly.": 8,
+        "Safety verification failed (fail-closed): Provider is currently unavailable.": 1,
+        "Generation failed due to a temporary service issue. Your credits have been refunded.": 6
+      }
+    },
+    {
+      "userIndex": 5,
+      "userId": "73c16fd0-1692-470f-8781-511d906d0781",
+      "email": "loadtest.ltmwu1sbnt.u5@labveil.test",
+      "projectId": "d62bd106-e673-4d54-8813-e9117bdf9511",
+      "acceptedJobs": 15,
+      "successCount": 0,
+      "failedCount": 15,
+      "processingCount": 0,
+      "initialBalance": 1000,
+      "finalBalance": 1000,
+      "netDeducted": 0,
+      "completedHoldSum": 0,
+      "pendingHoldSum": 0,
+      "balanceMatchesLedger": true,
+      "txSummary": {
+        "CREDIT": 1,
+        "HOLD_PENDING": 0,
+        "HOLD_COMPLETED": 0,
+        "HOLD_ROLLED_BACK": 15,
+        "OTHER": 0
+      },
+      "errorBuckets": {
+        "Generation failed due to a temporary service issue. Your credits have been refunded.": 8,
+        "Generation service is currently busy. Please try again in a moment.": 4,
+        "Safety verification failed (fail-closed): Provider rate limit reached. Please try again shortly.": 3
+      }
+    }
+  ],
+  "sampleSucceededUrls": [],
+  "sampleErrors": [
+    {
+      "id": "285be2f2-db0d-4f15-a59b-720821219461",
+      "error": "Safety verification failed (fail-closed): Provider rate limit reached. Please try again shortly."
+    },
+    {
+      "id": "30642e1b-4a08-414c-b29e-dc2ed9b714fd",
+      "error": "Generation failed due to a temporary service issue. Your credits have been refunded."
+    },
+    {
+      "id": "345a33bb-41a7-48dd-837f-61acee3ed0ea",
+      "error": "Generation failed due to a temporary service issue. Your credits have been refunded."
+    },
+    {
+      "id": "6317066d-fbd9-43d9-80a3-15e5a95d8780",
+      "error": "Generation service is currently busy. Please try again in a moment."
+    },
+    {
+      "id": "41663a17-afaf-4be6-a650-698fc572eedc",
+      "error": "Generation service is currently busy. Please try again in a moment."
+    },
+    {
+      "id": "0aab5aad-e77d-43f4-99af-18ea97c6126a",
+      "error": "Generation service is currently busy. Please try again in a moment."
+    },
+    {
+      "id": "aa13a18e-5573-4143-bb1b-e2f10add6b58",
+      "error": "Generation service is currently busy. Please try again in a moment."
+    },
+    {
+      "id": "414b453f-c22c-4584-8851-8e1838bc3d4f",
+      "error": "Generation failed due to a temporary service issue. Your credits have been refunded."
+    },
+    {
+      "id": "c4aa5a3b-0c48-4052-949b-14630e39328b",
+      "error": "Generation service is currently busy. Please try again in a moment."
+    },
+    {
+      "id": "1b0c6089-a0a0-40d6-8db8-0bd17c9f62a6",
+      "error": "Generation service is currently busy. Please try again in a moment."
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createLogger, LogEvents, ErrorSystem } from "#shared";
+import { createLogger, LogEvents, ErrorSystem, envConfig } from "#shared";
 import { assertOwns, assertOwnsAny } from "#identity/tools";
 import { reserveCredits, settleCredits, rollbackCredits, extendHold } from "#billing/tools";
 import { createPendingMedia, markMediaFailed } from "#media/tools";
@@ -427,7 +427,7 @@ export class ExecutionEngine {
   /**
    * Starts a periodic hold heartbeat timer during worker execution.
    */
-  startHoldHeartbeat(billingHoldId, { intervalMs = 120_000, extensionSeconds = 300 } = {}) {
+  startHoldHeartbeat(billingHoldId, { intervalMs = 120_000, extensionSeconds = 300, onHoldExpired = null } = {}) {
     if (!billingHoldId || typeof this.billingTools.extendHold !== "function") {
       return { stop: () => {} };
     }
@@ -436,10 +436,27 @@ export class ExecutionEngine {
       try {
         await this.billingTools.extendHold(billingHoldId, extensionSeconds, billingCtx);
       } catch (err) {
+        const errCode = String(err?.code || "").toUpperCase();
+        const status = Number(err?.statusCode || err?.status || 0);
+        const msg = String(err?.message || "");
+        const isTerminalHoldExpiry =
+          errCode === "HOLD_EXPIRED" ||
+          errCode === "HOLD_NOT_FOUND" ||
+          status === 404 ||
+          status === 409 ||
+          /expired|not found|already (committed|settled|rolled back|released)/i.test(msg);
+
         engineLogger.warn(
-          { billingHoldId, err: err.message },
+          { billingHoldId, isTerminalHoldExpiry, err: err.message },
           `[ExecutionEngine] Hold heartbeat extension failed: ${err.message}`
         );
+
+        if (isTerminalHoldExpiry) {
+          clearInterval(timer);
+          if (typeof onHoldExpired === "function") {
+            onHoldExpired(err);
+          }
+        }
       }
     }, intervalMs);
     timer.unref?.();
@@ -511,7 +528,13 @@ export class ExecutionEngine {
     const heartbeat = this.startHoldHeartbeat(effectiveHoldId, {
       intervalMs: heartbeatIntervalMs,
       extensionSeconds: 300,
+      onHoldExpired: () => jobCtx.markHoldExpired(),
     });
+
+    const useExternalPersistence =
+      nodeContext?.useExternalPersistence !== undefined
+        ? Boolean(nodeContext.useExternalPersistence)
+        : !envConfig.isTest;
 
     try {
       jobCtx.markRunning();
@@ -522,6 +545,7 @@ export class ExecutionEngine {
         jobContext: jobCtx,
         context: {
           ...nodeContext,
+          useExternalPersistence,
           runId: jobCtx.identity.runId,
           executionId: jobCtx.identity.executionId,
           jobId: jobCtx.identity.jobId,

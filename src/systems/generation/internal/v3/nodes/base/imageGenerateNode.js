@@ -1,4 +1,5 @@
-import { calculateCost } from "#models/tools";
+import { calculateCost, getModelSchema } from "#models/tools";
+import { createLogger } from "#shared";
 import {
   GenerationValidationError,
   GenerationCompilationError,
@@ -8,6 +9,8 @@ import {
   invokeModelGeneration,
   extractImageOutput,
 } from "./mediaNodeHelpers.js";
+
+const logger = createLogger("v3.image_generate");
 
 function normalizeImages(rawImages) {
   if (typeof rawImages === "string") {
@@ -21,17 +24,43 @@ function normalizeImages(rawImages) {
   if (!Array.isArray(rawImages)) {
     return [];
   }
+  const seen = new Set();
   const urls = [];
   for (const item of rawImages) {
     const raw = typeof item === "string" ? item : item?.url;
     if (typeof raw === "string") {
       const trimmed = raw.trim();
-      if (trimmed) {
+      if (trimmed && !seen.has(trimmed)) {
+        seen.add(trimmed);
         urls.push(trimmed);
       }
     }
   }
   return urls;
+}
+
+function getModelMaxImages(model) {
+  try {
+    const schema = getModelSchema(model);
+    const maxVal = Number(schema?.parameters?.images?.max);
+    if (Number.isInteger(maxVal) && maxVal >= 1) return maxVal;
+    if (schema?.parameters?.input_image) return 1;
+  } catch {
+    // Unknown/test model not registered in catalog
+  }
+  return null;
+}
+
+function capImagesForModel(images, model) {
+  const maxImages = getModelMaxImages(model);
+  if (maxImages !== null && images.length > maxImages) {
+    logger.warn(
+      { model, receivedCount: images.length, maxImages },
+      "Capping resolved reference images to model images.max limit"
+    );
+    return images.slice(0, maxImages);
+  }
+  return images;
 }
 
 function normalizeParameters(rawParameters) {
@@ -194,13 +223,16 @@ export const ImageGenerateNode = {
       ...normalizeParameters(inputs.parameters),
       prompt: inputs.prompt,
     };
-    if (images.length > 0 && !hasImagesParam(params)) {
-      params.images = images;
+    const cappedImages = capImagesForModel(images, inputs.model);
+    if (cappedImages.length > 0 && !hasImagesParam(params)) {
+      params.images = cappedImages;
+    } else if (hasImagesParam(params)) {
+      params.images = capImagesForModel(normalizeImages(params.images), inputs.model);
     }
 
     if (operation === "edit") {
       const hasEditSource =
-        images.some(isValidImageUrl) ||
+        cappedImages.some(isValidImageUrl) ||
         hasValidImagesParam(params) ||
         hasValidInputImageParam(params);
       if (!hasEditSource) {
@@ -214,7 +246,7 @@ export const ImageGenerateNode = {
       model: inputs.model,
       prompt: inputs.prompt,
       params,
-      references: images,
+      references: cappedImages,
       ctx,
     });
 

@@ -318,6 +318,12 @@ export async function editImage(req, res) {
     for (const refId of parsed.references) {
       await assertOwnsAny(["workflow", "character", "element", "media"], refId, userId);
     }
+    for (const charId of parsed.characters) {
+      await assertOwnsAny(["character", "workflow"], charId, userId);
+    }
+    for (const elemId of parsed.elements) {
+      await assertOwnsAny(["element", "workflow"], elemId, userId);
+    }
 
     const { generationRequestService } = getGenerationServices();
     const result = await generationRequestService.requestImageEdit({
@@ -330,6 +336,8 @@ export async function editImage(req, res) {
       prompt: parsed.prompt,
       userPrompt: parsed.userPrompt,
       references: parsed.references,
+      characters: parsed.characters,
+      elements: parsed.elements,
       editSettings: parsed.editSettings,
       parameters: parsed.parameters,
       defaultMessages: {

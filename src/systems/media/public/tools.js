@@ -5,7 +5,7 @@
  * linking, URL resolution, asset upload, and storage management.
  */
 
-import { createLogger } from "#shared";
+import { createLogger, envConfig } from "#shared";
 import { saveTypeRegistry, SAVE_TYPES, RETENTION_POLICIES } from "../internal/services/saveTypes.js";
 import { MediaRepository } from "../internal/db/MediaRepository.js";
 import { WorkflowMediaRepository } from "../internal/db/WorkflowMediaRepository.js";
@@ -121,6 +121,8 @@ export function configureMedia(services = {}) {
     if (services.storageService) _storageService = services.storageService;
     if (services.mediaUploadService) _mediaUploadService = services.mediaUploadService;
     if (services.mediaService) _mediaService = services.mediaService;
+    if (services.workflowMediaRepository) _workflowMediaRepo = services.workflowMediaRepository;
+    else if (services.db?.workflowMedia) _workflowMediaRepo = services.db.workflowMedia;
     setMediaServices(services);
 }
 
@@ -225,62 +227,166 @@ export async function createPendingMedia({
     };
 }
 
+function isAlreadyInOwnStorage(source) {
+    if (typeof source !== "string") return false;
+    const base = (envConfig.rawSupabaseUrl || "").trim().replace(/\/+$/, "");
+    if (!base) return false;
+    return source.trim().startsWith(`${base}/storage/v1/object/`);
+}
+
+function assertPlaceholderCompletable(existingMedia, mediaId) {
+    if (!existingMedia) return;
+    const status = existingMedia.status;
+    const isTerminalOrInactive =
+        status === MEDIA_WORKFLOW_STATUS.FAILED ||
+        existingMedia.hold_expired === true ||
+        (typeof status === "string" &&
+            status !== MEDIA_WORKFLOW_STATUS.PROCESSING &&
+            status !== "pending");
+
+    if (isTerminalOrInactive) {
+        throw new MediaConflictError(
+            `Cannot complete media "${mediaId}" because its placeholder is no longer in-flight (status: "${status || "unknown"}", hold_expired: ${Boolean(existingMedia.hold_expired)})`,
+            {
+                code: "HOLD_EXPIRED",
+                statusCode: 409,
+                context: { mediaId, status },
+            }
+        );
+    }
+}
+
 /**
- * Persists external media (e.g., from provider temp URL or raw buffer) to storage
- * and updates the media record to completed status.
+ * Persists external media (e.g., from provider temp URL or raw buffer) to Supabase Storage
+ * (idempotently skipping upload when already stored in our own bucket), extracts real width/height,
+ * commits via unified `completeMedia()` (preserving generation_config, is_primary, and in-flight DB guard),
+ * and immediately discards the uploaded storage object if DB commit fails.
  *
  * @param {Object} params
  * @param {string} params.mediaId
  * @param {string|Buffer} params.source
  * @param {string} params.userId
  * @param {string} [params.saveType="default"]
- * @param {Object} [params.metadata]
- * @returns {Promise<{ mediaId: string, url: string, width: number, height: number, ratio: string, status: string }>}
+ * @param {string} [params.role="output"]
+ * @param {string|null} [params.finalPrompt=null]
+ * @param {string|null} [params.characterDescription=null]
+ * @param {Object} [params.metadata={}]
+ * @param {string|null} [params.workflowId=null]
+ * @param {string|null} [params.stepId=null]
+ * @param {Object|null} [params.mediaRepository=null]
+ * @param {Object|null} [params.workflowMediaRepository=null]
+ * @param {Object|null} [params.uploadService=null]
+ * @returns {Promise<Object>} Plain completed media DTO
  */
 export async function persistExternalMedia({
     mediaId,
     source,
     userId,
     saveType = "default",
+    role = "output",
+    finalPrompt = null,
+    characterDescription = null,
     metadata = {},
+    workflowId = null,
+    stepId = null,
+    mediaRepository = null,
+    workflowMediaRepository = null,
+    uploadService = null,
 } = {}) {
     if (!mediaId) throw new MediaValidationError("mediaId is required for persistExternalMedia");
     if (!source) throw new MediaValidationError("source is required for persistExternalMedia");
     if (!userId) throw new MediaValidationError("userId is required for persistExternalMedia");
 
-    const stConfig = saveTypeRegistry.get(saveType);
-    const folder = stConfig?.storageFolder || "uploads";
-    const uploadService = getMediaUploadService();
-
-    const uploadResults = await uploadService.upload({
-        files: [source],
-        policy: DEFAULT_UPLOAD_POLICY,
-        userId,
-        folder,
-    });
-
-    const uploaded = uploadResults[0];
-    if (!uploaded || !uploaded.url) {
-        throw new MediaStorageError("Failed to persist media to cloud storage");
+    const repo = mediaRepository || getMediaRepository();
+    if (typeof repo?.findById === "function") {
+        const existingMedia = await repo.findById(mediaId).catch(() => null);
+        assertPlaceholderCompletable(existingMedia, mediaId);
     }
 
-    const repo = getMediaRepository();
-    const updated = await repo.updateFields(mediaId, {
-        url: uploaded.url,
-        width: uploaded.width || metadata.width || 1024,
-        height: uploaded.height || metadata.height || 1024,
-        status: "success",
-        error_message: null,
-    });
+    const baseMeta = metadata && typeof metadata === "object" ? { ...metadata } : {};
+    const effectiveFinalPrompt = finalPrompt ?? baseMeta.prompt ?? null;
+    const effectiveCharDesc = characterDescription ?? baseMeta.character_description ?? null;
+    const effectiveRole = role || baseMeta.role || "output";
 
-    return {
-        mediaId,
-        url: uploaded.url,
-        width: updated.width,
-        height: updated.height,
-        ratio: uploaded.ratio || calculateAspectRatio(updated.width, updated.height),
-        status: updated.status,
+    let finalUrl = typeof source === "string" ? source.trim() : null;
+    let uploadedStorageKey = null;
+    let realWidth = baseMeta.width || null;
+    let realHeight = baseMeta.height || null;
+    let realRatio = baseMeta.ratio || null;
+    const uploader = uploadService || getMediaUploadService();
+
+    if (!isAlreadyInOwnStorage(source)) {
+        const stConfig = saveTypeRegistry.get(saveType);
+        const folder = stConfig?.storageFolder || "uploads";
+
+        const uploadResult = await uploader.upload({
+            files: [source],
+            policy: DEFAULT_UPLOAD_POLICY,
+            userId,
+            folder,
+        });
+
+        const uploadedList = Array.isArray(uploadResult) ? uploadResult : uploadResult?.uploaded;
+        const uploaded = Array.isArray(uploadedList) ? uploadedList[0] : null;
+        if (!uploaded || !uploaded.url) {
+            throw new MediaStorageError("Failed to persist media to cloud storage");
+        }
+
+        finalUrl = uploaded.url;
+        uploadedStorageKey = uploaded.storageKey || uploaded.key || null;
+        if (uploaded.width) realWidth = uploaded.width;
+        if (uploaded.height) realHeight = uploaded.height;
+        if (uploaded.ratio) realRatio = uploaded.ratio;
+    }
+
+    const mergedMeta = {
+        ...baseMeta,
+        ...(realWidth ? { width: realWidth } : {}),
+        ...(realHeight ? { height: realHeight } : {}),
+        ...(uploadedStorageKey ? { storageKey: uploadedStorageKey } : {}),
     };
+
+    try {
+        const completed = await completeMedia({
+            mediaId,
+            url: finalUrl,
+            finalPrompt: effectiveFinalPrompt,
+            characterDescription: effectiveCharDesc,
+            metadata: mergedMeta,
+            role: effectiveRole,
+            saveType,
+            workflowId,
+            stepId,
+            mediaRepository: repo,
+            workflowMediaRepository,
+        });
+
+        const finalWidth = completed.width || realWidth || null;
+        const finalHeight = completed.height || realHeight || null;
+        return {
+            ...completed,
+            ...(finalWidth ? { width: finalWidth } : {}),
+            ...(finalHeight ? { height: finalHeight } : {}),
+            ratio:
+                realRatio ||
+                (finalWidth && finalHeight ? calculateAspectRatio(finalWidth, finalHeight) : null),
+        };
+    } catch (commitErr) {
+        if (uploadedStorageKey && typeof uploader?.discard === "function") {
+            await uploader.discard([uploadedStorageKey]).catch((discardErr) => {
+                mediaToolsLogger.error(
+                    {
+                        event: "media.persist_external.discard_failed",
+                        mediaId,
+                        storageKey: uploadedStorageKey,
+                        err: discardErr?.message,
+                    },
+                    "[MediaTools] Compensating storage discard failed after DB commit error"
+                );
+            });
+        }
+        throw commitErr;
+    }
 }
 
 /**
@@ -335,16 +441,7 @@ export async function completeMedia({
         existingMedia = await repo.findById(mediaId).catch(() => null);
     }
 
-    if (existingMedia?.status === MEDIA_WORKFLOW_STATUS.FAILED || existingMedia?.hold_expired === true) {
-        throw new MediaConflictError(
-            `Cannot complete media "${mediaId}" because its placeholder is already in terminal "failed" status (hold expired or reaped)`,
-            {
-                code: "HOLD_EXPIRED",
-                statusCode: 409,
-                context: { mediaId },
-            }
-        );
-    }
+    assertPlaceholderCompletable(existingMedia, mediaId);
 
     const meta = metadata && typeof metadata === "object" ? metadata : {};
     let mergedConfig;
@@ -423,6 +520,12 @@ export async function completeMedia({
         mediaId: updated?.id || mediaId,
         id: updated?.id || mediaId,
         url: updated?.url || url,
+        ...(updated?.width || meta.width || existingMedia?.width
+            ? { width: updated?.width || meta.width || existingMedia?.width }
+            : {}),
+        ...(updated?.height || meta.height || existingMedia?.height
+            ? { height: updated?.height || meta.height || existingMedia?.height }
+            : {}),
         prompt: finalPrompt || null,
         role,
         save_type: saveType,
@@ -555,6 +658,213 @@ export async function getMediaById(mediaId) {
     };
 }
 
+function isValidHttpUrl(value) {
+    if (typeof value !== "string") return false;
+    const trimmed = value.trim();
+    return trimmed.startsWith("http://") || trimmed.startsWith("https://");
+}
+
+function isCompletedHttpMedia(item) {
+    return Boolean(
+        item &&
+        item.status === MEDIA_WORKFLOW_STATUS.SUCCESS &&
+        isValidHttpUrl(item.url)
+    );
+}
+
+async function loadHydratedWorkflowMedia(workflowId, { workflowMediaRepository = null, mediaRepository = null } = {}) {
+    if (!workflowId) return [];
+
+    const wfRepo = workflowMediaRepository || getWorkflowMediaRepository();
+    if (!wfRepo || typeof wfRepo.findByWorkflow !== "function") return [];
+
+    let rawRows = [];
+    try {
+        rawRows = (await wfRepo.findByWorkflow(workflowId)) || [];
+    } catch (err) {
+        mediaToolsLogger.debug(
+            { workflowId, err: err?.message },
+            "[MediaTools] Unable to read workflow_media rows for visual lookup"
+        );
+        return [];
+    }
+
+    if (!Array.isArray(rawRows) || rawRows.length === 0) return [];
+
+    let repo = mediaRepository;
+    const getMediaRepoSafe = () => {
+        if (repo) return repo;
+        try {
+            repo = getMediaRepository();
+        } catch {
+            repo = null;
+        }
+        return repo;
+    };
+
+    const hydrated = [];
+    for (const item of rawRows) {
+        if (!item) continue;
+        if (item.status !== undefined || item.url !== undefined) {
+            hydrated.push(item);
+            continue;
+        }
+        const itemId = item.id || item.media_id;
+        const activeMediaRepo = getMediaRepoSafe();
+        if (itemId && typeof activeMediaRepo?.findById === "function") {
+            const full = await activeMediaRepo.findById(itemId).catch(() => null);
+            if (full) {
+                hydrated.push({ ...item, ...full, id: full.id || itemId });
+                continue;
+            }
+        }
+        hydrated.push(item);
+    }
+
+    return hydrated;
+}
+
+function toWorkflowVisualDto(item) {
+    const mediaId = item.id || item.media_id || null;
+    return {
+        mediaId,
+        id: mediaId,
+        url: item.url.trim(),
+        role: item.role || item.mediaRole || null,
+        isPrimary: Boolean(item.is_primary || item.isPrimary),
+        status: item.status,
+        width: item.width ?? null,
+        height: item.height ?? null,
+    };
+}
+
+/**
+ * Resolves completed (`status === 'success'`), valid HTTP(S) visual media linked to a workflow
+ * via `workflow_media`, prioritizing `is_primary = true` first and then `preferredRoles` order.
+ *
+ * @param {string} workflowId
+ * @param {Object} [options]
+ * @param {string[]} [options.preferredRoles] - Ordered role priority (e.g. ["sheet", "detail", "reference"])
+ * @param {string[]} [options.excludeRoles] - Roles to exclude
+ * @param {Object|null} [options.workflowMediaRepository]
+ * @param {Object|null} [options.mediaRepository]
+ * @returns {Promise<Array<{ mediaId: string|null, id: string|null, url: string, role: string|null, isPrimary: boolean, status: string, width: number|null, height: number|null }>>}
+ */
+export async function getWorkflowVisualMedia(
+    workflowId,
+    {
+        preferredRoles = ["sheet", "turnaround", "avatar", "detail", "reference", "output", "original"],
+        excludeRoles = [],
+        workflowMediaRepository = null,
+        mediaRepository = null,
+    } = {}
+) {
+    const hydrated = await loadHydratedWorkflowMedia(workflowId, {
+        workflowMediaRepository,
+        mediaRepository,
+    });
+    if (hydrated.length === 0) return [];
+
+    const excludeSet = new Set((Array.isArray(excludeRoles) ? excludeRoles : []).map((r) => String(r).toLowerCase()));
+    const rolePriority = new Map(
+        (Array.isArray(preferredRoles) ? preferredRoles : []).map((r, idx) => [String(r).toLowerCase(), idx])
+    );
+    const defaultRank = rolePriority.size;
+
+    const validItems = hydrated.filter((item) => {
+        if (!isCompletedHttpMedia(item)) return false;
+        const role = String(item.role || item.mediaRole || "").toLowerCase();
+        if (role && excludeSet.has(role)) return false;
+        return true;
+    });
+
+    validItems.sort((a, b) => {
+        const aPrimary = a.is_primary || a.isPrimary ? 0 : 1;
+        const bPrimary = b.is_primary || b.isPrimary ? 0 : 1;
+        if (aPrimary !== bPrimary) return aPrimary - bPrimary;
+
+        const aRole = String(a.role || a.mediaRole || "").toLowerCase();
+        const bRole = String(b.role || b.mediaRole || "").toLowerCase();
+        const aRank = rolePriority.has(aRole) ? rolePriority.get(aRole) : defaultRank;
+        const bRank = rolePriority.has(bRole) ? rolePriority.get(bRole) : defaultRank;
+        return aRank - bRank;
+    });
+
+    const seenUrls = new Set();
+    const results = [];
+    for (const item of validItems) {
+        const dto = toWorkflowVisualDto(item);
+        if (seenUrls.has(dto.url)) continue;
+        seenUrls.add(dto.url);
+        results.push(dto);
+    }
+
+    return results;
+}
+
+/**
+ * Resolves the canonical single visual media for a workflow:
+ *   1. The workflow's `is_primary = true` media if `status === 'success'` with valid HTTP(S) `url`.
+ *   2. If primary is failed/saved/missing URL, falls back to its `generation_config.source_media_id`
+ *      on the same workflow (if valid `success` and not excluded), otherwise the latest completed
+ *      non-excluded media on that workflow.
+ *
+ * @param {string} workflowId
+ * @param {Object} [options]
+ * @param {string[]} [options.excludeRoles=["reference"]]
+ * @param {Object|null} [options.workflowMediaRepository]
+ * @param {Object|null} [options.mediaRepository]
+ * @returns {Promise<{ mediaId: string|null, id: string|null, url: string, role: string|null, isPrimary: boolean, status: string, width: number|null, height: number|null }|null>}
+ */
+export async function getWorkflowPrimaryMedia(
+    workflowId,
+    {
+        excludeRoles = ["reference"],
+        workflowMediaRepository = null,
+        mediaRepository = null,
+    } = {}
+) {
+    const hydrated = await loadHydratedWorkflowMedia(workflowId, {
+        workflowMediaRepository,
+        mediaRepository,
+    });
+    if (hydrated.length === 0) return null;
+
+    const excludeSet = new Set((Array.isArray(excludeRoles) ? excludeRoles : []).map((r) => String(r).toLowerCase()));
+    const isEligible = (item) => {
+        if (!isCompletedHttpMedia(item)) return false;
+        const role = String(item.role || item.mediaRole || "").toLowerCase();
+        return !(role && excludeSet.has(role));
+    };
+
+    const primary = hydrated.find((item) => item.is_primary === true || item.isPrimary === true);
+    if (primary && isEligible(primary)) {
+        return toWorkflowVisualDto(primary);
+    }
+
+    const refSourceId =
+        typeof primary?.generation_config?.source_media_id === "string" &&
+        primary.generation_config.source_media_id.trim()
+            ? primary.generation_config.source_media_id.trim()
+            : null;
+    if (refSourceId) {
+        const directSource = hydrated.find(
+            (item) => (item.id || item.media_id) === refSourceId && isEligible(item)
+        );
+        if (directSource) {
+            return toWorkflowVisualDto(directSource);
+        }
+    }
+
+    for (let i = hydrated.length - 1; i >= 0; i--) {
+        if (isEligible(hydrated[i])) {
+            return toWorkflowVisualDto(hydrated[i]);
+        }
+    }
+
+    return null;
+}
+
 /**
  * Deletes a media item from DB and unlinks its workflow association.
  *
@@ -678,6 +988,8 @@ export default {
     linkMediaToEntity,
     getMediaUrls,
     getMediaById,
+    getWorkflowVisualMedia,
+    getWorkflowPrimaryMedia,
     deleteMedia,
     getMediaRepository,
     getWorkflowMediaRepository,

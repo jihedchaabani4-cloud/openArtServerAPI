@@ -46,13 +46,7 @@ export const SaveMediaNode = {
 
     const mediaRole = inputs.media_role || ctx.mediaRole || "output";
     const saveType = inputs.save_type || ctx.saveType || "default";
-
-    if (ctx.holdExpired === true) {
-      throw new GenerationHoldExpiredError(
-        `Cannot complete media "${inputs.media_id}" because its credit hold has expired`,
-        { mediaId: inputs.media_id }
-      );
-    }
+    const normalizedMeta = inputs.metadata && typeof inputs.metadata === "object" ? inputs.metadata : {};
 
     if (typeof ctx.markMediaStatus === "function") {
       const saved = await ctx.markMediaStatus(inputs.media_id, MEDIA_WORKFLOW_STATUS.SUCCESS, {
@@ -61,7 +55,7 @@ export const SaveMediaNode = {
         role: mediaRole,
         save_type: saveType,
         ...(inputs.character_description ? { character_description: inputs.character_description } : {}),
-        metadata: inputs.metadata ?? {},
+        metadata: normalizedMeta,
       });
       return { status: MEDIA_WORKFLOW_STATUS.SUCCESS, saved_media: saved };
     }
@@ -73,39 +67,46 @@ export const SaveMediaNode = {
         userId: ctx.userId || "system",
         saveType,
         role: mediaRole,
+        finalPrompt: inputs.final_prompt ?? null,
+        characterDescription: inputs.character_description ?? null,
+        workflowId: ctx.workflowId || null,
+        stepId: ctx.stepId || null,
         metadata: {
           prompt: inputs.final_prompt,
           role: mediaRole,
           ...(inputs.character_description ? { character_description: inputs.character_description } : {}),
-          ...(inputs.metadata || {}),
-        },
-      });
-      return { status: MEDIA_WORKFLOW_STATUS.SUCCESS, saved_media: saved };
-    }
-
-    if (ctx.useExternalPersistence === true) {
-      const saved = await persistExternalMedia({
-        mediaId: inputs.media_id,
-        source: inputs.asset_url,
-        userId: ctx.userId || "system",
-        saveType,
-        metadata: {
-          prompt: inputs.final_prompt,
-          role: mediaRole,
-          ...(inputs.character_description ? { character_description: inputs.character_description } : {}),
-          ...(inputs.metadata || {}),
+          ...normalizedMeta,
         },
       });
       return { status: MEDIA_WORKFLOW_STATUS.SUCCESS, saved_media: saved };
     }
 
     try {
+      if (ctx.useExternalPersistence === true) {
+        const saved = await persistExternalMedia({
+          mediaId: inputs.media_id,
+          source: inputs.asset_url,
+          userId: ctx.userId || "system",
+          saveType,
+          role: mediaRole,
+          finalPrompt: inputs.final_prompt ?? null,
+          characterDescription: inputs.character_description ?? null,
+          metadata: normalizedMeta,
+          workflowId: ctx.workflowId || null,
+          stepId: ctx.stepId || null,
+          mediaRepository: ctx.mediaRepository || ctx.db?.media || null,
+          workflowMediaRepository: ctx.workflowMediaRepository || ctx.db?.workflowMedia || null,
+          uploadService: ctx.mediaUploadService || null,
+        });
+        return { status: MEDIA_WORKFLOW_STATUS.SUCCESS, saved_media: saved };
+      }
+
       const saved = await completeMedia({
         mediaId: inputs.media_id,
         url: inputs.asset_url,
         finalPrompt: inputs.final_prompt ?? null,
         characterDescription: inputs.character_description ?? null,
-        metadata: inputs.metadata && typeof inputs.metadata === "object" ? inputs.metadata : {},
+        metadata: normalizedMeta,
         role: mediaRole,
         saveType,
         workflowId: ctx.workflowId || null,

@@ -90,6 +90,57 @@ describe("System 6: Characters (#characters/tools & #characters/api)", () => {
             }
         });
 
+        it("getCharacterPromptContext resolves real visual URLs from workflow_media prioritizing primary/sheet over detail and filtering non-success rows", async () => {
+            const mockChar = {
+                id: "char-wm-001",
+                workflow_id: "wf-char-wm-001",
+                name: "Kaelen",
+                description: "Armored desert ranger",
+                traits: { cloak: "sandstone" },
+                // Legacy dropped column absent in production Postgres:
+            };
+
+            const mockWorkflowMediaRepo = {
+                findByWorkflow: async (wfId) => {
+                    assert.equal(wfId, "wf-char-wm-001");
+                    return [
+                        { id: "m-failed", url: "https://cdn.art/failed.png", status: "failed", role: "sheet", is_primary: false },
+                        { id: "m-proc", url: null, status: "processing", role: "detail", is_primary: false },
+                        { id: "m-bad-scheme", url: "s3://bucket/private.png", status: "success", role: "detail", is_primary: false },
+                        { id: "m-detail-1", url: "https://cdn.art/kaelen-detail-1.png", status: "success", role: "detail", is_primary: false },
+                        { id: "m-ref-1", url: "https://cdn.art/kaelen-ref-1.png", status: "success", role: "reference", is_primary: false },
+                        { id: "m-sheet-primary", url: "https://cdn.art/kaelen-sheet.png", status: "success", role: "sheet", is_primary: true },
+                        { id: "m-dup-sheet", url: "https://cdn.art/kaelen-sheet.png", status: "success", role: "detail", is_primary: false },
+                    ];
+                },
+            };
+
+            const origFind = characterRepository.findByCharacterId;
+            characterRepository.findByCharacterId = async () => mockChar;
+
+            try {
+                const context = await getCharacterPromptContext({
+                    characterId: "char-wm-001",
+                    workflowMediaRepository: mockWorkflowMediaRepo,
+                });
+                assert.equal(context.id, "char-wm-001");
+                assert.equal(context.workflowId, "wf-char-wm-001");
+                assert.equal(context.name, "Kaelen");
+                assert.deepEqual(context.referenceMediaUrls, [
+                    "https://cdn.art/kaelen-sheet.png",
+                    "https://cdn.art/kaelen-detail-1.png",
+                    "https://cdn.art/kaelen-ref-1.png",
+                ]);
+                assert.deepEqual(context.sheetImages, ["https://cdn.art/kaelen-sheet.png"]);
+                assert.deepEqual(context.detailImages, [
+                    "https://cdn.art/kaelen-detail-1.png",
+                    "https://cdn.art/kaelen-ref-1.png",
+                ]);
+            } finally {
+                characterRepository.findByCharacterId = origFind;
+            }
+        });
+
         it("validateCharacterExists throws CharactersValidationError if characterId is missing", async () => {
             await assert.rejects(
                 async () => validateCharacterExists({}),

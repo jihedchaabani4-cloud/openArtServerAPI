@@ -39,6 +39,13 @@ The mandatory financial safety protocol for billable AI operations managed betwe
 - **Workflow (`workflows` table)**: A persistent creative unit in a project owning generated or uploaded media via `workflow_media`.
 - **Workflow Run (`workflow_runs` & `node_runs` tables)**: An execution instance of a compiled V3 workflow orchestrated by `WorkflowExecutor.js`.
 
+### 4-Layer Composable V3 Architecture
+The locked separation of responsibilities across the V3 Generation & Edit Engine so Base Nodes remain composable into future Composite Nodes and User Workflows:
+- **Layer 1 — API & Intake Guards**: HTTP intake, auth, ownership, rate limits, domain validation, and concurrency guards (`GenerationRequestService`).
+- **Layer 2 — Execution Engine (`ExecutionEngine` & `WorkflowExecutor`)**: Sole owner of execution lifecycle, credit holds, heartbeats, centralized pre-node `holdExpired` enforcement, retries, settlement, and rollback.
+- **Layer 3 — Pure Base Nodes**: Stateless, single-responsibility DAG units with a strict `inputs -> execute() -> outputs` contract, zero billing or credit-hold awareness, and report-don't-decide typed error handling.
+- **Layer 4 — Storage & DB Tools**: Idempotent permanent object-storage persistence, real media dimension extraction, atomic DB completion guards, and compensating storage discard on commit failure.
+
 ### Media & Save Types
 Assets stored and tracked by `src/systems/media/` (`media` and `workflow_media` tables) with declarative retention, quota, and storage bucket policies defined in `src/systems/media/internal/services/saveTypes.js`.
 

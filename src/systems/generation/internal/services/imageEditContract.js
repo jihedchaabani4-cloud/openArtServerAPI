@@ -40,7 +40,102 @@ const FORBIDDEN_SOURCE_FIELDS = Object.freeze([
 const ALLOWED_LIGHT_TYPES = new Set(["soft", "hard"]);
 const HEX_COLOR_REGEX = /^#[0-9A-Fa-f]{6}$/;
 const RAW_HTTP_URL_REGEX = /https?:\/\//i;
+const INLINE_ENTITY_TAG_REGEX = /<(?:character|element):([^>\s]+)>/gi;
 const MAX_PROMPT_LENGTH = 2000;
+
+/**
+ * Returns the maximum number of additional reference inputs allowed for an edit model,
+ * reserving 1 slot for the primary source image (`@image1`).
+ *
+ * - Models declaring `parameters.images.max` -> `Math.max(0, images.max - 1)`
+ * - Models declaring only `parameters.input_image` (no `images` array) -> `0`
+ * - Otherwise -> `null` (unconstrained)
+ *
+ * @param {Object|null} schema
+ * @returns {number|null}
+ */
+export function getModelMaxEditReferences(schema) {
+    const imagesMax = Number(schema?.parameters?.images?.max);
+    if (Number.isInteger(imagesMax) && imagesMax >= 1) {
+        return Math.max(0, imagesMax - 1);
+    }
+    if (schema?.parameters?.input_image) {
+        return 0;
+    }
+    return null;
+}
+
+function parseResourceIdArray(rawList, { field, invalidCode }) {
+    if (rawList === undefined || rawList === null) {
+        return [];
+    }
+    if (!Array.isArray(rawList)) {
+        throw badRequest(`${field} must be an array of resource IDs.`, invalidCode, field);
+    }
+    const seen = new Set();
+    const out = [];
+    for (const item of rawList) {
+        if (typeof item !== "string" || !item.trim()) {
+            throw badRequest(`Each entry in ${field} must be a non-empty resource ID string.`, invalidCode, field);
+        }
+        const trimmed = item.trim();
+        if (RAW_HTTP_URL_REGEX.test(trimmed)) {
+            throw badRequest(
+                `Direct image URLs are not permitted in ${field}. Use resource IDs only.`,
+                "DIRECT_URL_NOT_ALLOWED",
+                field
+            );
+        }
+        if (!seen.has(trimmed)) {
+            seen.add(trimmed);
+            out.push(trimmed);
+        }
+    }
+    return out;
+}
+
+/**
+ * Validates that the total number of distinct additional edit references (across `references`,
+ * `characters`, `elements`, and inline `<character:id>`/`<element:id>` prompt tags, excluding
+ * the target `workflowId` itself) does not exceed `model.parameters.images.max - 1`.
+ */
+export function assertEditReferenceCap({
+    model,
+    schema,
+    workflowId = null,
+    references = [],
+    characters = [],
+    elements = [],
+    prompt = "",
+}) {
+    const maxAdditionalRefs = getModelMaxEditReferences(schema);
+    if (maxAdditionalRefs === null) return;
+
+    const uniqueAdditional = new Set();
+    const addCandidate = (id) => {
+        if (typeof id !== "string") return;
+        const trimmed = id.trim();
+        if (!trimmed || (workflowId && trimmed === workflowId)) return;
+        uniqueAdditional.add(trimmed);
+    };
+
+    for (const r of Array.isArray(references) ? references : []) addCandidate(r);
+    for (const c of Array.isArray(characters) ? characters : []) addCandidate(c);
+    for (const e of Array.isArray(elements) ? elements : []) addCandidate(e);
+    if (typeof prompt === "string" && prompt) {
+        for (const [, rawId] of prompt.matchAll(INLINE_ENTITY_TAG_REGEX)) {
+            addCandidate(rawId);
+        }
+    }
+
+    if (uniqueAdditional.size > maxAdditionalRefs) {
+        throw badRequest(
+            `Model "${model}" supports at most ${maxAdditionalRefs} additional reference${maxAdditionalRefs === 1 ? "" : "s"} for image editing (${maxAdditionalRefs + 1} total images including the source image). Received ${uniqueAdditional.size}.`,
+            "TOO_MANY_REFERENCES",
+            "references"
+        );
+    }
+}
 
 function badRequest(message, code = "VALIDATION_ERROR", field = null) {
     const err = new AppError(message, 400, { code });
@@ -605,30 +700,31 @@ export function parseImageEditRequest(body) {
         schema = getModelSchema(defaultEntry.id);
     }
 
-    const rawRefs = body.references;
-    const references = [];
-    if (rawRefs !== undefined && rawRefs !== null) {
-        if (!Array.isArray(rawRefs)) {
-            throw badRequest("references must be an array of resource IDs.", "INVALID_REFERENCES", "references");
-        }
-        for (const item of rawRefs) {
-            if (typeof item !== "string" || !item.trim()) {
-                throw badRequest("Each reference must be a non-empty resource ID string.", "INVALID_REFERENCES", "references");
-            }
-            const trimmed = item.trim();
-            if (RAW_HTTP_URL_REGEX.test(trimmed)) {
-                throw badRequest(
-                    "Direct image URLs are not permitted in references. Use resource IDs only.",
-                    "DIRECT_URL_NOT_ALLOWED",
-                    "references"
-                );
-            }
-            references.push(trimmed);
-        }
-    }
+    const references = parseResourceIdArray(body.references, {
+        field: "references",
+        invalidCode: "INVALID_REFERENCES",
+    });
+    const characters = parseResourceIdArray(body.characters, {
+        field: "characters",
+        invalidCode: "INVALID_CHARACTERS",
+    });
+    const elements = parseResourceIdArray(body.elements, {
+        field: "elements",
+        invalidCode: "INVALID_ELEMENTS",
+    });
 
     const parameters = parseOptionalParameters(body.parameters);
     const model = schema.id;
+
+    assertEditReferenceCap({
+        model,
+        schema,
+        workflowId,
+        references,
+        characters,
+        elements,
+        prompt,
+    });
 
     return {
         workflowId,
@@ -636,6 +732,8 @@ export function parseImageEditRequest(body) {
         prompt,
         userPrompt: prompt,
         references,
+        characters,
+        elements,
         editSettings: { model },
         parameters,
     };
@@ -648,6 +746,8 @@ export default {
     DEFAULT_IMAGE_EDIT_MODEL,
     getRemoveBackgroundModels,
     getEditableImageModels,
+    getModelMaxEditReferences,
+    assertEditReferenceCap,
     validateCommonEditRejection,
     buildRelightPrompt,
     buildAnglesPrompt,

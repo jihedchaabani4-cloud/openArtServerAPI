@@ -12,6 +12,8 @@ import assert from "node:assert/strict";
 import { relightImage, changeImageAngle, removeImageBackground, editImage, getProjectData, imagesRouter } from "#generation/api";
 import { GenerationRequestService } from "#generation/tools";
 import { appendMediaToWorkflow, completeMedia, WorkflowMediaRepository } from "#media/tools";
+import { WorkflowExecutor, createDefaultV3NodeRegistry } from "../../../src/systems/generation/internal/v3/index.js";
+import { imageEditV3 } from "../../../src/systems/generation/internal/v3/workflows/imageEditV3.js";
 import { generationRequestService, db } from "../../../src/container.js";
 import { AppError } from "#shared";
 
@@ -493,6 +495,7 @@ describe("GenerationRequestService.requestImageEdit behavioral tests", () => {
       height: 1080,
       generation_config: { aspect_ratio: "16:9" },
     },
+    workflowMediaList = null,
     launchImpl = null,
   } = {}) {
     const createdWorkflows = [];
@@ -516,6 +519,9 @@ describe("GenerationRequestService.requestImageEdit behavioral tests", () => {
       },
       workflowMedia: {
         getPrimaryMedia: async () => primaryMedia,
+        ...(workflowMediaList !== null
+          ? { findByWorkflow: async () => workflowMediaList }
+          : {}),
         linkMedia: async (link) => {
           linkedMedia.push(link);
           return link;
@@ -934,6 +940,316 @@ describe("GenerationRequestService.requestImageEdit behavioral tests", () => {
     assert.equal(primaryAfterComplete.media_id, editMediaId);
     assert.equal(primaryAfterComplete.is_primary, true);
   });
+
+  it("falls back to failed primary's valid source_media_id on the same workflow without reverting is_primary", async () => {
+    const validOriginal = {
+      id: "media-orig-1",
+      url: "https://cdn.example.com/workflows/wf-edit-1/orig.png",
+      status: "success",
+      role: "output",
+      width: 1920,
+      height: 1080,
+      generation_config: { aspect_ratio: "16:9" },
+    };
+    const failedPrimary = {
+      id: "media-failed-2",
+      url: null,
+      status: "failed",
+      role: "output",
+      is_primary: true,
+      width: 1920,
+      height: 1080,
+      generation_config: {
+        aspect_ratio: "16:9",
+        source_media_id: "media-orig-1",
+        edit_type: "relight",
+      },
+    };
+
+    const { service, createdMedia, primarySwaps, launchCalls } = createEditMocks({
+      primaryMedia: failedPrimary,
+      workflowMediaList: [validOriginal, failedPrimary],
+    });
+
+    const result = await service.requestImageEdit(baseEditRequest);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.status, "processing");
+    assert.equal(result.sourceMediaId, "media-orig-1");
+    assert.equal(createdMedia.length, 1);
+    assert.equal(createdMedia[0].generation_config.source_media_id, "media-orig-1");
+    assert.notEqual(createdMedia[0].generation_config.source_media_id, "media-failed-2");
+    assert.equal(createdMedia[0].width, 1920);
+    assert.equal(createdMedia[0].height, 1080);
+    assert.equal(launchCalls.length, 1);
+    assert.equal(launchCalls[0].input.source_image_url, validOriginal.url);
+    assert.equal(launchCalls[0].input.source_media_id, "media-orig-1");
+    assert.equal(primarySwaps.length, 1);
+    assert.deepEqual(primarySwaps[0], { workflowId: "wf-edit-1", mediaId: result.mediaId });
+  });
+
+  it("falls back to latest completed non-reference media when failed primary lacks a valid in-workflow source_media_id", async () => {
+    const olderSuccess = {
+      id: "media-v1",
+      url: "https://cdn.example.com/workflows/wf-edit-1/v1.png",
+      status: "success",
+      role: "original",
+      width: 1024,
+      height: 1024,
+      generation_config: { aspect_ratio: "1:1" },
+    };
+    const newerSuccess = {
+      id: "media-v2",
+      url: "https://cdn.example.com/workflows/wf-edit-1/v2.png",
+      status: "success",
+      role: "output",
+      width: 1280,
+      height: 720,
+      generation_config: { aspect_ratio: "16:9" },
+    };
+    const refAttachment = {
+      id: "media-ref-attach",
+      url: "https://cdn.example.com/workflows/wf-edit-1/ref.png",
+      status: "success",
+      role: "reference",
+      width: 512,
+      height: 512,
+    };
+    const failedPrimaryWithForeignSource = {
+      id: "media-failed-3",
+      url: null,
+      status: "failed",
+      role: "output",
+      is_primary: true,
+      generation_config: { source_media_id: "media-from-another-workflow" },
+    };
+
+    const { service, createdMedia, launchCalls } = createEditMocks({
+      primaryMedia: failedPrimaryWithForeignSource,
+      workflowMediaList: [olderSuccess, newerSuccess, refAttachment, failedPrimaryWithForeignSource],
+    });
+
+    const result = await service.requestImageEdit(baseEditRequest);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.sourceMediaId, "media-v2");
+    assert.equal(createdMedia[0].generation_config.source_media_id, "media-v2");
+    assert.equal(createdMedia[0].width, 1280);
+    assert.equal(createdMedia[0].height, 720);
+    assert.equal(launchCalls[0].input.source_image_url, newerSuccess.url);
+    assert.equal(launchCalls[0].input.source_media_id, "media-v2");
+  });
+
+  it("recovers after INSUFFICIENT_CREDITS (saved primary stays is_primary = true) on subsequent requestImageEdit", async () => {
+    const wfId = "wf-recover-insufficient-credits-1";
+    const origMediaId = "media-ic-orig-1";
+    const workflowMediaRepo = new WorkflowMediaRepository();
+    const mediaStore = new Map();
+
+    mediaStore.set(origMediaId, {
+      id: origMediaId,
+      project_id: "proj-1",
+      step_id: "image_generation",
+      url: "https://cdn.example.com/workflows/wf-ic/orig.png",
+      status: "success",
+      width: 1024,
+      height: 1024,
+      generation_config: { aspect_ratio: "1:1" },
+    });
+    await workflowMediaRepo.linkMedia({
+      workflowId: wfId,
+      mediaId: origMediaId,
+      role: "output",
+      is_primary: true,
+    });
+
+    let shouldFailCredits = true;
+    const launchCalls = [];
+    const service = new GenerationRequestService({
+      db: {
+        workflows: {
+          findById: async (id) => (id === wfId ? { id: wfId, project_id: "proj-1", user_id: "user-1" } : null),
+        },
+        trash: { getTrashedWorkflowIdSet: async () => new Set() },
+        workflowMedia: workflowMediaRepo,
+        media: {
+          createMedia: async (m) => {
+            const record = { ...m };
+            mediaStore.set(record.id, record);
+            return record;
+          },
+          findById: async (id) => mediaStore.get(id) || null,
+          updateMedia: async (id, patch) => {
+            const next = { ...(mediaStore.get(id) || { id }), ...patch };
+            mediaStore.set(id, next);
+            return next;
+          },
+        },
+      },
+      executionEngine: {
+        launch: async (args) => {
+          launchCalls.push(args);
+          if (shouldFailCredits) {
+            const err = new Error("Not enough credits");
+            err.code = "INSUFFICIENT_CREDITS";
+            throw err;
+          }
+          return { jobId: "job-ic-retry-2", executionId: args.executionId, cost: { totalCredits: 13 } };
+        },
+      },
+      folderService: {},
+    });
+
+    // Call 1: hits INSUFFICIENT_CREDITS -> saved placeholder MUST remain is_primary = true
+    const first = await service.requestImageEdit({ ...baseEditRequest, workflowId: wfId });
+    assert.equal(first.status, "saved");
+    assert.equal(first.needsCredits, true);
+    const primaryAfterSaved = await workflowMediaRepo.getPrimaryMedia(wfId);
+    assert.equal(primaryAfterSaved?.media_id, first.mediaId, "saved edit must stay is_primary = true");
+    assert.equal(mediaStore.get(first.mediaId)?.status, "saved");
+    assert.equal(mediaStore.get(first.mediaId)?.url, null);
+
+    // Call 2: user tops up credits and retries edit on the same workflow -> must NOT throw 400 PRIMARY_MEDIA_INVALID
+    shouldFailCredits = false;
+    const second = await service.requestImageEdit({ ...baseEditRequest, workflowId: wfId });
+    assert.equal(second.ok, true);
+    assert.equal(second.status, "processing");
+    assert.equal(second.sourceMediaId, origMediaId);
+    assert.notEqual(second.mediaId, first.mediaId);
+    assert.equal(mediaStore.get(second.mediaId)?.generation_config?.source_media_id, origMediaId);
+    assert.equal(launchCalls[1].input.source_image_url, "https://cdn.example.com/workflows/wf-ic/orig.png");
+    assert.equal(launchCalls[1].input.source_media_id, origMediaId);
+
+    const primaryAfterRetry = await workflowMediaRepo.getPrimaryMedia(wfId);
+    assert.equal(primaryAfterRetry?.media_id, second.mediaId, "new retry edit must now be promoted to is_primary = true");
+  });
+
+  it("recovers after failed edit (failed primary stays is_primary = true) on subsequent requestImageEdit", async () => {
+    const wfId = "wf-recover-failed-edit-1";
+    const origMediaId = "media-fail-orig-1";
+    const workflowMediaRepo = new WorkflowMediaRepository();
+    const mediaStore = new Map();
+
+    mediaStore.set(origMediaId, {
+      id: origMediaId,
+      project_id: "proj-1",
+      step_id: "image_generation",
+      url: "https://cdn.example.com/workflows/wf-fail/orig.png",
+      status: "success",
+      width: 1024,
+      height: 1536,
+      generation_config: { aspect_ratio: "2:3" },
+    });
+    await workflowMediaRepo.linkMedia({
+      workflowId: wfId,
+      mediaId: origMediaId,
+      role: "output",
+      is_primary: true,
+    });
+
+    let shouldFailDispatch = true;
+    const launchCalls = [];
+    const service = new GenerationRequestService({
+      db: {
+        workflows: {
+          findById: async (id) => (id === wfId ? { id: wfId, project_id: "proj-1", user_id: "user-1" } : null),
+        },
+        trash: { getTrashedWorkflowIdSet: async () => new Set() },
+        workflowMedia: workflowMediaRepo,
+        media: {
+          createMedia: async (m) => {
+            const record = { ...m };
+            mediaStore.set(record.id, record);
+            return record;
+          },
+          findById: async (id) => mediaStore.get(id) || null,
+          updateMedia: async (id, patch) => {
+            const next = { ...(mediaStore.get(id) || { id }), ...patch };
+            mediaStore.set(id, next);
+            return next;
+          },
+        },
+      },
+      executionEngine: {
+        launch: async (args) => {
+          launchCalls.push(args);
+          if (shouldFailDispatch) {
+            const err = new Error("Redis unavailable");
+            err.code = "QUEUE_DISPATCH_FAILED";
+            throw err;
+          }
+          return { jobId: "job-fail-retry-2", executionId: args.executionId, cost: { totalCredits: 13 } };
+        },
+      },
+      folderService: {},
+    });
+
+    // Call 1: fails -> failed placeholder MUST remain is_primary = true
+    let failedMediaId = null;
+    await assert.rejects(
+      () => service.requestImageEdit({ ...baseEditRequest, workflowId: wfId }),
+      (err) => {
+        assert.equal(err.statusCode, 503);
+        assert.equal(err.code, "QUEUE_DISPATCH_FAILED");
+        failedMediaId = err.mediaId;
+        return true;
+      }
+    );
+    assert.ok(failedMediaId);
+    const primaryAfterFailure = await workflowMediaRepo.getPrimaryMedia(wfId);
+    assert.equal(primaryAfterFailure?.media_id, failedMediaId, "failed edit must stay is_primary = true");
+    assert.equal(mediaStore.get(failedMediaId)?.status, "failed");
+
+    // Call 2: subsequent edit on the same workflow succeeds using origMediaId
+    shouldFailDispatch = false;
+    const recovered = await service.requestImageEdit({ ...baseEditRequest, workflowId: wfId });
+    assert.equal(recovered.ok, true);
+    assert.equal(recovered.status, "processing");
+    assert.equal(recovered.sourceMediaId, origMediaId);
+    assert.equal(mediaStore.get(recovered.mediaId)?.generation_config?.source_media_id, origMediaId);
+    assert.equal(launchCalls[1].input.source_image_url, "https://cdn.example.com/workflows/wf-fail/orig.png");
+    assert.equal(launchCalls[1].input.source_media_id, origMediaId);
+
+    const primaryAfterRecovery = await workflowMediaRepo.getPrimaryMedia(wfId);
+    assert.equal(primaryAfterRecovery?.media_id, recovered.mediaId);
+  });
+
+  it("still throws 400 PRIMARY_MEDIA_INVALID when workflow has zero valid completed non-reference media", async () => {
+    const failedOnlyPrimary = {
+      id: "media-only-failed-1",
+      url: null,
+      status: "failed",
+      role: "output",
+      is_primary: true,
+    };
+    const savedRow = {
+      id: "media-only-saved-2",
+      url: null,
+      status: "saved",
+      role: "output",
+    };
+    const refOnlyRow = {
+      id: "media-only-ref-3",
+      url: "https://cdn.example.com/ref-only.png",
+      status: "success",
+      role: "reference",
+    };
+
+    const { service, createdMedia } = createEditMocks({
+      primaryMedia: failedOnlyPrimary,
+      workflowMediaList: [savedRow, refOnlyRow, failedOnlyPrimary],
+    });
+
+    await assert.rejects(
+      () => service.requestImageEdit(baseEditRequest),
+      (err) => {
+        assert.equal(err.statusCode, 400);
+        assert.equal(err.code, "PRIMARY_MEDIA_INVALID");
+        return true;
+      }
+    );
+    assert.equal(createdMedia.length, 0);
+  });
 });
 
 describe("POST /api/images/remove-background — Direct & Guided Bria Models + Project Data Config", () => {
@@ -1155,11 +1471,310 @@ describe("POST /api/images/edit — General In-Place Image Edit (Dynamic Edit-Ca
       );
       assert.equal(resMediaId.getStatus(), 400);
       assert.equal(resMediaId.getPayload().code, "MEDIA_ID_NOT_ALLOWED");
+
+      // 7. Rejects raw URL in characters or elements
+      const resBadCharUrl = createMockRes();
+      await editImage(
+        {
+          user: { id: userId },
+          body: { workflow_id: wfId, prompt: "Add char", characters: ["https://evil.com/c.png"] },
+        },
+        resBadCharUrl
+      );
+      assert.equal(resBadCharUrl.getStatus(), 400);
+      assert.equal(resBadCharUrl.getPayload().code, "DIRECT_URL_NOT_ALLOWED");
+
+      const resBadElemUrl = createMockRes();
+      await editImage(
+        {
+          user: { id: userId },
+          body: { workflow_id: wfId, prompt: "Add elem", elements: ["https://evil.com/e.png"] },
+        },
+        resBadElemUrl
+      );
+      assert.equal(resBadElemUrl.getStatus(), 400);
+      assert.equal(resBadElemUrl.getPayload().code, "DIRECT_URL_NOT_ALLOWED");
     } finally {
       generationRequestService.requestImageEdit = origRequestImageEdit;
       db.workflows.findById = origFindById;
       db.workflows.getWorkflow = origGetWorkflow;
       db.projects.findByUser = origFindByUser;
+    }
+  });
+
+  it("enforces model.parameters.images.max - 1 cap upfront on POST /api/images/edit (400 TOO_MANY_REFERENCES)", async () => {
+    const wfId = "wf-edit-cap-1";
+    const userId = "user-edit-cap-1";
+    const calls = [];
+
+    const origRequestImageEdit = generationRequestService.requestImageEdit;
+    const origFindById = db.workflows.findById;
+    const origGetWorkflow = db.workflows.getWorkflow;
+    const origFindByUser = db.projects.findByUser;
+
+    try {
+      generationRequestService.requestImageEdit = async (args) => {
+        calls.push(args);
+        return {
+          ok: true,
+          status: "processing",
+          needsCredits: false,
+          workflowId: args.workflowId,
+          mediaId: "media-cap-ok",
+          sourceMediaId: "media-cap-src",
+          cost: 13,
+        };
+      };
+      db.workflows.findById = async (id) => ({ id, project_id: "proj-cap-1", user_id: userId });
+      db.workflows.getWorkflow = db.workflows.findById;
+      db.projects.findByUser = async (uid, pid) =>
+        uid === userId && pid === "proj-cap-1" ? [{ id: "proj-cap-1", user_id: userId }] : [];
+
+      // nanobana_2 has images.max = 14 -> max 13 additional references (1 slot reserved for source image)
+      const thirteenRefs = Array.from({ length: 13 }, (_, i) => `wf-ref-${i + 1}`);
+      const resOk13 = createMockRes();
+      await editImage(
+        {
+          user: { id: userId },
+          body: {
+            workflow_id: wfId,
+            model: "nanobana_2",
+            prompt: "Add all 13 references",
+            references: [...thirteenRefs, wfId, thirteenRefs[0]], // duplicate + target wfId do not inflate count
+          },
+        },
+        resOk13
+      );
+      assert.equal(resOk13.getStatus(), 200);
+      assert.equal(calls.length, 1);
+
+      // 14 additional references across references + characters + elements exceeds nanobana_2 cap (13) -> 400
+      const resTooManyNano = createMockRes();
+      await editImage(
+        {
+          user: { id: userId },
+          body: {
+            workflow_id: wfId,
+            model: "nanobana_2",
+            prompt: "Add too many refs",
+            references: Array.from({ length: 10 }, (_, i) => `wf-ref-${i + 1}`),
+            characters: ["char-1", "char-2"],
+            elements: ["elem-1", "elem-2"],
+          },
+        },
+        resTooManyNano
+      );
+      assert.equal(resTooManyNano.getStatus(), 400);
+      assert.equal(resTooManyNano.getPayload().code, "TOO_MANY_REFERENCES");
+
+      // gpt_image_2 has images.max = 16 -> max 15 additional references
+      const resOkGpt15 = createMockRes();
+      await editImage(
+        {
+          user: { id: userId },
+          body: {
+            workflow_id: wfId,
+            model: "gpt_image_2",
+            prompt: "Add 15 refs",
+            references: Array.from({ length: 15 }, (_, i) => `wf-gpt-${i + 1}`),
+          },
+        },
+        resOkGpt15
+      );
+      assert.equal(resOkGpt15.getStatus(), 200);
+
+      const resTooManyGpt16 = createMockRes();
+      await editImage(
+        {
+          user: { id: userId },
+          body: {
+            workflow_id: wfId,
+            model: "gpt_image_2",
+            prompt: "Add 16 refs",
+            references: Array.from({ length: 16 }, (_, i) => `wf-gpt-${i + 1}`),
+          },
+        },
+        resTooManyGpt16
+      );
+      assert.equal(resTooManyGpt16.getStatus(), 400);
+      assert.equal(resTooManyGpt16.getPayload().code, "TOO_MANY_REFERENCES");
+    } finally {
+      generationRequestService.requestImageEdit = origRequestImageEdit;
+      db.workflows.findById = origFindById;
+      db.workflows.getWorkflow = origGetWorkflow;
+      db.projects.findByUser = origFindByUser;
+    }
+  });
+
+  it("forwards characters and elements from POST /api/images/edit through GenerationRequestService into imageEditV3 -> ResolveRefsNode", async () => {
+    const wfId = "wf-edit-char-elem-1";
+    const charId = "char-edit-1";
+    const elemId = "elem-edit-1";
+    const refWfId = "wf-edit-ref-2";
+    const userId = "user-edit-ce-1";
+
+    const origRequestImageEdit = generationRequestService.requestImageEdit;
+    const origFindById = db.workflows.findById;
+    const origGetWorkflow = db.workflows.getWorkflow;
+    const origFindByUser = db.projects.findByUser;
+    const origCharFind = db.characters.findByCharacterId;
+    const origElemResolve = db.elements.resolveRecord;
+
+    let launchedArgs = null;
+    const service = new GenerationRequestService({
+      db: {
+        workflows: {
+          findById: async (id) => (id === wfId ? { id: wfId, project_id: "proj-ce-1", user_id: userId } : null),
+        },
+        trash: { getTrashedWorkflowIdSet: async () => new Set() },
+        workflowMedia: {
+          getPrimaryMedia: async () => ({
+            id: "media-src-ce-1",
+            url: "https://cdn.example.com/workflows/wf-ce/primary.png",
+            status: "success",
+            width: 1024,
+            height: 1024,
+            generation_config: { aspect_ratio: "1:1" },
+          }),
+          linkMedia: async (l) => l,
+          setPrimaryMedia: async (p) => p,
+        },
+        media: {
+          createMedia: async (m) => m,
+          updateMedia: async (id, patch) => ({ id, ...patch }),
+        },
+      },
+      executionEngine: {
+        launch: async (args) => {
+          launchedArgs = args;
+          return { jobId: "job-ce-1", executionId: args.executionId, cost: { totalCredits: 13 } };
+        },
+      },
+      folderService: {},
+    });
+
+    try {
+      generationRequestService.requestImageEdit = service.requestImageEdit.bind(service);
+      db.workflows.findById = async (id) =>
+        [wfId, refWfId, charId, elemId].includes(id)
+          ? { id, project_id: "proj-ce-1", user_id: userId }
+          : null;
+      db.workflows.getWorkflow = db.workflows.findById;
+      db.projects.findByUser = async (uid, pid) =>
+        uid === userId && pid === "proj-ce-1" ? [{ id: "proj-ce-1", user_id: userId }] : [];
+      db.characters.findByCharacterId = async (id) =>
+        id === charId ? { id: charId, workflow_id: charId, project_id: "proj-ce-1", user_id: userId } : null;
+      db.elements.resolveRecord = async (id) =>
+        id === elemId ? { id: elemId, workflow_id: elemId } : null;
+
+      const res = createMockRes();
+      await editImage(
+        {
+          user: { id: userId },
+          body: {
+            workflow_id: wfId,
+            model: "nanobana_2",
+            prompt: `Place <character:${charId}> holding <element:${elemId}> next to the lamp`,
+            references: [refWfId],
+            characters: [charId],
+            elements: [elemId],
+          },
+        },
+        res
+      );
+
+      assert.equal(res.getStatus(), 200);
+      assert.ok(launchedArgs, "ExecutionEngine.launch must be called");
+      assert.deepEqual(launchedArgs.input.references, [refWfId]);
+      assert.deepEqual(launchedArgs.input.characters, [charId]);
+      assert.deepEqual(launchedArgs.input.elements, [elemId]);
+
+      // Execute full 4-node imageEditV3 DAG with the exact runtime input forwarded by requestImageEdit
+      const executor = new WorkflowExecutor(createDefaultV3NodeRegistry());
+      let capturedGenerateImages = null;
+      const execResult = await executor.execute({
+        workflow: imageEditV3,
+        input: launchedArgs.input,
+        context: {
+          userId,
+          assertOwns: async () => true,
+          assertOwnsAny: async () => true,
+          getCharacterPromptContext: async ({ characterId }) => {
+            if (characterId !== charId) throw new Error("Character not found");
+            return {
+              id: characterId,
+              workflowId: characterId,
+              name: "Nova",
+              description: "Cyber courier",
+              traits: { visor: "amber" },
+              referenceMediaUrls: ["https://cdn.example.com/nova-sheet.png"],
+            };
+          },
+          getElementPromptContext: async ({ elementIds }) => {
+            if (!elementIds.includes(elemId)) throw new Error("Element not found");
+            return {
+              elements: [
+                {
+                  id: elemId,
+                  workflowId: elemId,
+                  name: "Plasma Lantern",
+                  description: "Floating glass lantern",
+                  guidelines: "Warm cyan glow",
+                  referenceMediaUrls: ["https://cdn.example.com/lantern.png"],
+                },
+              ],
+            };
+          },
+          getMediaUrls: async () => [],
+          getWorkflowPrimaryMedia: async (id) =>
+            id === refWfId
+              ? { mediaId: "m-ref-wf-2", url: "https://cdn.example.com/ref-wf-2.png", status: "success" }
+              : null,
+          executeLLM: async () => ({
+            text: "Edit @image1 adding @Nova with @Plasma Lantern",
+            json: { is_safe: true, prompt: "Edit @image1 adding @Nova with @Plasma Lantern" },
+          }),
+          executeProvider: async (_model, params) => {
+            capturedGenerateImages = params.images;
+            return {
+              assets: [{ url: "https://cdn.example.com/edit-ce-result.png" }],
+              metadata: { model: "nanobana_2", provider: "wavespeed" },
+            };
+          },
+          db: {
+            media: {
+              findById: async (id) => ({ id, workflow_id: wfId, status: "processing", generation_config: {} }),
+              updateMedia: async (id, patch) => ({ id, ...patch }),
+            },
+            workflowMedia: {
+              isMediaLinkedToWorkflow: async () => true,
+              linkMedia: async (l) => l,
+            },
+          },
+        },
+      });
+
+      assert.equal(execResult.status, "completed");
+      const resolved = execResult.nodeOutputs.resolve_refs;
+      assert.equal(resolved.status, "success");
+      assert.deepEqual(resolved.reference_urls, [
+        "https://cdn.example.com/workflows/wf-ce/primary.png",
+        "https://cdn.example.com/nova-sheet.png",
+        "https://cdn.example.com/lantern.png",
+        "https://cdn.example.com/ref-wf-2.png",
+      ]);
+      assert.deepEqual(capturedGenerateImages, resolved.reference_urls);
+      assert.match(resolved.prepared_prompt, /@Nova/);
+      assert.match(resolved.prepared_prompt, /@Plasma Lantern/);
+      assert.ok(!resolved.prepared_prompt.includes(`<character:${charId}>`));
+      assert.ok(!resolved.prepared_prompt.includes(`<element:${elemId}>`));
+    } finally {
+      generationRequestService.requestImageEdit = origRequestImageEdit;
+      db.workflows.findById = origFindById;
+      db.workflows.getWorkflow = origGetWorkflow;
+      db.projects.findByUser = origFindByUser;
+      db.characters.findByCharacterId = origCharFind;
+      db.elements.resolveRecord = origElemResolve;
     }
   });
 });

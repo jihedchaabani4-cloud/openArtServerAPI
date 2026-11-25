@@ -17,6 +17,7 @@ import {
 } from "#media/tools";
 import { toMediaIdList } from "#identity/tools";
 import { validateModelInputs, getModelSchema } from "#models/tools";
+import { assertEditReferenceCap } from "./imageEditContract.js";
 
 const logger = createLogger("generation_request_service");
 const ARRAY_MEDIA_PARAM_KEYS = ["images", "reference_images", "reference_videos"];
@@ -294,6 +295,132 @@ export class GenerationRequestService {
     }
 
     /**
+     * Checks whether a media record is a valid, completed HTTP(S) asset eligible as an edit source.
+     */
+    _isValidEditableMedia(media) {
+        return Boolean(
+            media &&
+            media.status === "success" &&
+            typeof media.url === "string" &&
+            (media.url.startsWith("http://") || media.url.startsWith("https://"))
+        );
+    }
+
+    /**
+     * Resolves the source media to edit on `workflowId`.
+     *
+     * Rules (Problem #2 — non-bricking fallback while keeping failed/saved media as `is_primary`):
+     *   1. If the current `is_primary` media is `processing`/`pending` -> 409 PRIMARY_MEDIA_NOT_READY.
+     *   2. If the current `is_primary` media is `success` with a valid HTTP(S) `url` -> use it directly.
+     *   3. If the current `is_primary` media is `failed` or `saved` (or `url: null`), keep it as primary
+     *      and fall back within the SAME `workflow_id`:
+     *        a) First check its `generation_config.source_media_id` if present on this workflow and valid `success`.
+     *        b) Otherwise select the latest completed `status === "success"` media with a valid HTTP(S) `url`.
+     *   4. Only throw 400 PRIMARY_MEDIA_INVALID if the workflow has zero valid completed media.
+     */
+    async _resolveEditableSourceMedia(workflowId) {
+        const hydrateItem = async (item) => {
+            if (!item) return null;
+            if (item.status !== undefined && item.url !== undefined) {
+                return item;
+            }
+            const itemId = item.id || item.media_id;
+            if (itemId && typeof this.db?.media?.findById === "function") {
+                const full = await this.db.media.findById(itemId).catch(() => null);
+                if (full) {
+                    return { ...item, ...full, id: full.id || itemId };
+                }
+            }
+            return item;
+        };
+
+        const rawPrimaryMedia = typeof this.db?.workflowMedia?.getPrimaryMedia === "function"
+            ? await this.db.workflowMedia.getPrimaryMedia(workflowId)
+            : null;
+        const primaryMedia = await hydrateItem(rawPrimaryMedia);
+
+        if (!primaryMedia) {
+            throw new AppError("Workflow has no primary image to edit", 400, {
+                code: "PRIMARY_MEDIA_NOT_FOUND",
+            });
+        }
+
+        if (primaryMedia.status === "processing" || primaryMedia.status === "pending") {
+            throw new AppError("Primary media is still processing and cannot be edited yet", 409, {
+                code: "PRIMARY_MEDIA_NOT_READY",
+            });
+        }
+
+        if (this._isValidEditableMedia(primaryMedia)) {
+            return primaryMedia;
+        }
+
+        // Load workflow's media history for safe in-workflow fallback resolution
+        let rawWorkflowItems = null;
+        if (typeof this.db?.workflowMedia?.findByWorkflow === "function") {
+            rawWorkflowItems = await this.db.workflowMedia.findByWorkflow(workflowId);
+        } else if (typeof this.db?.media?.findByWorkflow === "function") {
+            rawWorkflowItems = await this.db.media.findByWorkflow(workflowId);
+        }
+
+        const refSourceId =
+            typeof primaryMedia.generation_config?.source_media_id === "string" &&
+            primaryMedia.generation_config.source_media_id.trim()
+                ? primaryMedia.generation_config.source_media_id.trim()
+                : null;
+
+        if (Array.isArray(rawWorkflowItems) && rawWorkflowItems.length > 0) {
+            const hydratedItems = [];
+            for (const item of rawWorkflowItems) {
+                const hydrated = await hydrateItem(item);
+                if (hydrated) hydratedItems.push(hydrated);
+            }
+
+            // (a) Prefer the failed/saved primary's own source_media_id if it belongs to this workflow and is valid
+            if (refSourceId) {
+                const directSource = hydratedItems.find(
+                    (m) => (m.id || m.media_id) === refSourceId && m.role !== "reference"
+                );
+                if (this._isValidEditableMedia(directSource)) {
+                    logger.info(
+                        {
+                            workflowId,
+                            primaryMediaId: primaryMedia.id || primaryMedia.media_id,
+                            primaryStatus: primaryMedia.status,
+                            fallbackSourceMediaId: directSource.id || directSource.media_id,
+                        },
+                        "Primary media is not editable; falling back to its source_media_id on the same workflow"
+                    );
+                    return directSource;
+                }
+            }
+
+            // (b) Otherwise select the latest completed valid non-reference media on this workflow
+            //     (repositories return created_at ASC; scan newest -> oldest)
+            for (let i = hydratedItems.length - 1; i >= 0; i--) {
+                const candidate = hydratedItems[i];
+                if (candidate.role === "reference") continue;
+                if (this._isValidEditableMedia(candidate)) {
+                    logger.info(
+                        {
+                            workflowId,
+                            primaryMediaId: primaryMedia.id || primaryMedia.media_id,
+                            primaryStatus: primaryMedia.status,
+                            fallbackSourceMediaId: candidate.id || candidate.media_id,
+                        },
+                        "Primary media is not editable; falling back to latest completed media on the same workflow"
+                    );
+                    return candidate;
+                }
+            }
+        }
+
+        throw new AppError("Primary media is not in a valid completed state for editing", 400, {
+            code: "PRIMARY_MEDIA_INVALID",
+        });
+    }
+
+    /**
      * Executes an in-place image edit request (e.g. relight, angles) on an existing workflow.
      *
      * Appends a new placeholder media row into the same parent workflow, flips `is_primary = true`
@@ -309,6 +436,8 @@ export class GenerationRequestService {
         prompt,
         userPrompt = "",
         references = [],
+        characters = [],
+        elements = [],
         editSettings = {},
         templateVars = null,
         parameters = {},
@@ -331,33 +460,8 @@ export class GenerationRequestService {
             });
         }
 
-        // 2. Server-Resolved Primary Media Lookup
-        const primaryMedia = typeof this.db?.workflowMedia?.getPrimaryMedia === "function"
-            ? await this.db.workflowMedia.getPrimaryMedia(workflowId)
-            : null;
-
-        if (!primaryMedia) {
-            throw new AppError("Workflow has no primary image to edit", 400, {
-                code: "PRIMARY_MEDIA_NOT_FOUND",
-            });
-        }
-
-        if (primaryMedia.status === "processing" || primaryMedia.status === "pending") {
-            throw new AppError("Primary media is still processing and cannot be edited yet", 409, {
-                code: "PRIMARY_MEDIA_NOT_READY",
-            });
-        }
-
-        const hasValidUrl =
-            typeof primaryMedia.url === "string" &&
-            (primaryMedia.url.startsWith("http://") || primaryMedia.url.startsWith("https://"));
-
-        if (primaryMedia.status !== "success" || !hasValidUrl) {
-            throw new AppError("Primary media is not in a valid completed state for editing", 400, {
-                code: "PRIMARY_MEDIA_INVALID",
-            });
-        }
-
+        // 2. Server-Resolved Source Media Lookup (with non-bricking fallback when primary is failed/saved)
+        const primaryMedia = await this._resolveEditableSourceMedia(workflowId);
         const sourceMediaId = primaryMedia.id || primaryMedia.media_id;
 
         // 3. Dimension & Aspect Ratio Inheritance + Model Validation
@@ -373,23 +477,41 @@ export class GenerationRequestService {
         const resolvedParams = parameters && typeof parameters === "object" ? { ...parameters } : {};
         let inheritedAspectRatio = rawDerivedAspectRatio;
 
+        let modelSchema = null;
+        try {
+            modelSchema = getModelSchema(model);
+        } catch {
+            // Unknown model will be handled by this.modelValidator below
+        }
+
+        const normalizedReferences = Array.isArray(references) ? references : [];
+        const normalizedCharacters = Array.isArray(characters) ? characters : [];
+        const normalizedElements = Array.isArray(elements) ? elements : [];
+
+        if (modelSchema && editType !== "remove_background") {
+            assertEditReferenceCap({
+                model,
+                schema: modelSchema,
+                workflowId,
+                references: normalizedReferences,
+                characters: normalizedCharacters,
+                elements: normalizedElements,
+                prompt,
+            });
+        }
+
         if (!resolvedParams.aspect_ratio) {
-            try {
-                const schema = getModelSchema(model);
-                const arDef = schema?.parameters?.aspect_ratio;
-                if (arDef) {
-                    const allowedValues = Array.isArray(arDef.values) ? arDef.values.map(String) : null;
-                    if (!allowedValues || allowedValues.length === 0 || allowedValues.includes(String(rawDerivedAspectRatio))) {
-                        resolvedParams.aspect_ratio = rawDerivedAspectRatio;
-                        inheritedAspectRatio = rawDerivedAspectRatio;
-                    } else {
-                        const fallbackRatio = arDef.default || "1:1";
-                        resolvedParams.aspect_ratio = fallbackRatio;
-                        inheritedAspectRatio = fallbackRatio;
-                    }
+            const arDef = modelSchema?.parameters?.aspect_ratio;
+            if (arDef) {
+                const allowedValues = Array.isArray(arDef.values) ? arDef.values.map(String) : null;
+                if (!allowedValues || allowedValues.length === 0 || allowedValues.includes(String(rawDerivedAspectRatio))) {
+                    resolvedParams.aspect_ratio = rawDerivedAspectRatio;
+                    inheritedAspectRatio = rawDerivedAspectRatio;
+                } else {
+                    const fallbackRatio = arDef.default || "1:1";
+                    resolvedParams.aspect_ratio = fallbackRatio;
+                    inheritedAspectRatio = fallbackRatio;
                 }
-            } catch {
-                // Unknown model will be handled by this.modelValidator below
             }
         } else {
             inheritedAspectRatio = resolvedParams.aspect_ratio;
@@ -485,7 +607,9 @@ export class GenerationRequestService {
                 aspect_ratio: cleanInput.aspect_ratio || inheritedAspectRatio,
                 width,
                 height,
-                references: Array.isArray(references) ? references : [],
+                references: normalizedReferences,
+                characters: normalizedCharacters,
+                elements: normalizedElements,
                 parameters: sanitizedParams,
                 edit_settings: editSettings,
                 ...(templateVars && typeof templateVars === "object"

@@ -10,7 +10,6 @@ import { getMediaRepository, getWorkflowMediaRepository } from "#media/tools";
 import { characterRepository } from "#characters/tools";
 import { elementRepository } from "#elements/tools";
 import { workflowRepository } from "./WorkflowRepository.js";
-import { generationConfigRepository } from "./GenerationConfigRepository.js";
 import { getGenerationServices } from "../services/serviceAccessor.js";
 
 const fallbackDb = {
@@ -18,7 +17,6 @@ const fallbackDb = {
     workflows: workflowRepository,
     media: getMediaRepository(),
     workflowMedia: getWorkflowMediaRepository(),
-    configs: generationConfigRepository,
     characters: characterRepository,
     elements: elementRepository,
     folders: folderRepository,

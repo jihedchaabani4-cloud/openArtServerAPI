@@ -9,7 +9,7 @@
  */
 export const videoGenerationV3 = Object.freeze({
   id: "video-generation-v3",
-  aliases: Object.freeze(["video-generation-v1", "videoGeneration"]),
+  aliases: Object.freeze(["videoGeneration"]),
   name: "Video Generation V3",
   version: "3.0.0",
   category: "video",
@@ -26,6 +26,7 @@ export const videoGenerationV3 = Object.freeze({
         references: { fromInput: "references", default: [] },
         characters: { fromInput: "characters", default: [] },
         elements: { fromInput: "elements", default: [] },
+        verify_ownership: { fromInput: "verify_ownership", default: true },
       },
     },
     {

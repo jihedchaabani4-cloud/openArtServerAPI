@@ -171,7 +171,8 @@ export class CharacterMediaService {
             });
 
             const attachedMedia = attachRes.attached[0].media;
-            const oldPrimary = wf.primary_media_id || null;
+            const existingPrimary = await this.db.workflowMedia?.getPrimaryMedia?.(wf.id).catch(() => null);
+            const oldPrimary = existingPrimary?.media_id || existingPrimary?.id || wf.primary_media_id || null;
 
             try {
                 if (this.db.workflows?.updatePrimaryMedia) {
@@ -489,7 +490,6 @@ export class CharacterMediaService {
                 });
                 if (wasPrimary) {
                     await this.db.workflowMedia.clearPrimaryMedia?.({ workflowId: resolvedWfId });
-                    await this.db.workflows?.updateFields?.(resolvedWfId, { primary_media_id: null });
                 }
                 const remaining = await this.db.workflowMedia.countLinksForMedia?.(mediaId);
                 if (remaining === 0) {

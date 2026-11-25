@@ -2,7 +2,7 @@
  * @owns System 6: Characters
  * CharacterGenerationService
  * Dedicated Domain Service owning character AI generation orchestration:
- * - ExecutionEngine job dispatching for character 3-view turnaround sheet ("character-sheet-v1")
+ * - ExecutionEngine job dispatching for character 3-view turnaround sheet ("character-sheet-v3")
  * - LLM prompt generation for Haute-Couture character concepts
  */
 
@@ -112,8 +112,6 @@ export class CharacterGenerationService {
                 if (placeholderMedia?.id && resolvedWorkflowId && this.db?.workflows) {
                     if (typeof this.db.workflows.updatePrimaryMedia === "function") {
                         await this.db.workflows.updatePrimaryMedia(resolvedWorkflowId, placeholderMedia.id).catch(() => null);
-                    } else if (typeof this.db.workflows.updateFields === "function") {
-                        await this.db.workflows.updateFields(resolvedWorkflowId, { primary_media_id: placeholderMedia.id }).catch(() => null);
                     }
                 }
             } catch (mediaErr) {
@@ -148,6 +146,7 @@ export class CharacterGenerationService {
                 prompt: charPrompt,
                 references: toMediaIdList(references),
                 characters: [{ name: charName, description: charPrompt }],
+                verify_ownership: false,
             };
 
             // 3. Dispatch ExecutionEngine job with credit reservation
@@ -159,7 +158,7 @@ export class CharacterGenerationService {
                 const executionId = randomUUID();
                 try {
                     const prepared = await this.executionEngine.launch({
-                        useCaseId: "character-sheet-v1",
+                        useCaseId: "character-sheet-v3",
                         input: runtimeInput,
                         userId,
                         executionId,
@@ -167,7 +166,6 @@ export class CharacterGenerationService {
                         projectId,
                         serverContext: {
                             workflowId: resolvedWorkflowId,
-                            v1_workflow_id: resolvedWorkflowId,
                             characterId,
                             mediaIds: serverMediaIds,
                             projectId,

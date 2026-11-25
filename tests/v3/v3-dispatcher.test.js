@@ -203,20 +203,20 @@ describe("ExecutionEngine — Domain-Agnostic Black-Box Launch, Execution & Life
     assert.ok(!events.some((e) => e.startsWith("onSuccess")));
   });
 
-  it("wires default jobQueueService cleanly without raw db/billing coupling and resolves V1 UseCase aliases", () => {
+  it("wires default jobQueueService cleanly without raw db/billing coupling and resolves V3 workflows", () => {
     const defaultEngine = new ExecutionEngine();
     assert.ok(defaultEngine.jobQueueService, "default jobQueueService should be wired");
     assert.equal(typeof defaultEngine.jobQueueService.addUseCaseJob, "function");
     assert.equal("db" in defaultEngine, false, "ExecutionEngine must not hold raw db reference");
     assert.equal("walletService" in defaultEngine, false, "ExecutionEngine must not hold walletService");
 
-    const resolvedImg = defaultEngine.resolveWorkflow("image-generation-v1");
+    const resolvedImg = defaultEngine.resolveWorkflow("image-generation-v3");
     assert.equal(resolvedImg.id, "image-generation-v3");
 
-    const resolvedVid = defaultEngine.resolveWorkflow("video-generation-v1");
+    const resolvedVid = defaultEngine.resolveWorkflow("video-generation-v3");
     assert.equal(resolvedVid.id, "video-generation-v3");
 
-    const resolvedChar = defaultEngine.resolveWorkflow("character-sheet-v1");
+    const resolvedChar = defaultEngine.resolveWorkflow("character-sheet-v3");
     assert.equal(resolvedChar.id, "character-sheet-v3");
   });
 

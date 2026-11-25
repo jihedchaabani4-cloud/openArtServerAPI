@@ -4,7 +4,6 @@ import * as container from "../../src/container.js";
 import { db, workflowService, projectReadService } from "../../src/container.js";
 import { WorkflowService, ExecutionEngine } from "#generation/tools";
 import { WorkflowMediaService } from "../../src/systems/generation/internal/services/WorkflowMediaService.js";
-import { RunRepository } from "../../src/systems/generation/internal/db/RunRepository.js";
 import { MediaUploadService, MediaService, MediaWorkflowLifecycleService } from "#media/tools";
 import { ElementService, ElementMediaService } from "#elements/tools";
 import { CharacterService, CharacterMediaService } from "#characters/tools";
@@ -497,18 +496,6 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     supabase.from = mockFrom;
     supabaseAdmin.from = mockFrom;
 
-    origRunRepoGetRun = RunRepository.prototype.getRun;
-    RunRepository.prototype.getRun = async (runId) => {
-      if (runId === FOREIGN_RUN_ID) {
-        return {
-          id: runId,
-          user_id: "00000000-0000-0000-0000-000000000088",
-          status: "completed",
-        };
-      }
-      return null;
-    };
-
     if (workflowService?.authService) {
       origVerifyWorkflow = workflowService.authService.verifyWorkflowOwnership;
       origVerifyWorkflowBulk = workflowService.authService.verifyWorkflowOwnershipBulk;
@@ -605,9 +592,6 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     }
     if (db?.trash && origDbTrashDeleteByWorkflowAndUser) {
       db.trash.deleteByWorkflowAndUser = origDbTrashDeleteByWorkflowAndUser;
-    }
-    if (origRunRepoGetRun) {
-      RunRepository.prototype.getRun = origRunRepoGetRun;
     }
     if (origSupabaseFrom) {
       supabase.from = origSupabaseFrom;
@@ -754,13 +738,6 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     const body = await res.json();
     assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
     assert.equal(body.ok, false);
-  });
-
-  it("TEST R4-16: GET /api/v2/workflows/runs/:run_id for foreign run returns 404", async () => {
-    const res = await reqAlice(`/api/v2/workflows/runs/${FOREIGN_RUN_ID}`);
-    const body = await res.json();
-    assert.equal(res.status, 404);
-    assert.equal(body.code, "RUN_NOT_FOUND");
   });
 
   it("TEST R4-17: GET /api/admin/wallet/:userId for normal user returns 403", async () => {
@@ -1068,7 +1045,6 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
       "POST /api/v2/elements/:id/images",
       "DELETE /api/v2/elements/:id/images/:mediaId",
       "GET /api/v2/elements/project/:projectId",
-      "GET /api/v2/workflows/runs/:run_id",
       "DELETE /api/workflows/:id",
       "PATCH /api/workflows/:id",
       "GET /api/workflows/assets/:project_id",

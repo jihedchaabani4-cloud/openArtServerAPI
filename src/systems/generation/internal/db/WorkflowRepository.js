@@ -152,18 +152,15 @@ export class WorkflowRepository extends BaseRepository {
 
     async conditionalRestorePrimaryMedia({ workflowId, expectedPrimaryMediaId, restorePrimaryMediaId }) {
         if (!workflowId || !expectedPrimaryMediaId) return { updated: false };
-        const client = this.client();
-        const { data, error } = await client
-            .from(this.tableName)
-            .update({ primary_media_id: restorePrimaryMediaId || null })
-            .eq("id", workflowId)
-            .eq("primary_media_id", expectedPrimaryMediaId)
-            .select("id, primary_media_id");
-        if (error) throw error;
+        const current = await this.getPrimaryMedia(workflowId);
+        if (!current || current.id !== expectedPrimaryMediaId) {
+            return { workflowId, updated: false, data: [] };
+        }
+        await this.updatePrimaryMedia(workflowId, restorePrimaryMediaId || null);
         return {
             workflowId,
-            updated: Array.isArray(data) && data.length > 0,
-            data,
+            updated: true,
+            data: [{ id: workflowId, primary_media_id: restorePrimaryMediaId || null }],
         };
     }
 

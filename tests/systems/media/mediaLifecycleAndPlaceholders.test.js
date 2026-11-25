@@ -301,7 +301,7 @@ describe("Per-Run Media Cleanup & Cycle Boundary Tests (ExecutionEngine & GraphC
     await assert.rejects(
       async () => {
         await engine.execute({
-          useCaseId: "image-generation-v1",
+          useCaseId: "image-generation-v3",
           input: {
             workflow_id: workflowId,
             media_id: "m-proc-1",

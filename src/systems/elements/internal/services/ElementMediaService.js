@@ -19,7 +19,6 @@ import { crudOperationLog, CrudServiceError, envConfig } from "#shared";
 import {
     ELEMENT_REFERENCE_UPLOAD_POLICY,
     ELEMENT_SHEET_UPLOAD_POLICY,
-    ELEMENT_SOURCES_UPLOAD_POLICY,
 } from "#media/tools";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -62,109 +61,6 @@ export class ElementMediaService {
         this.mediaUploadService = mediaUploadService;
         this.workflowMediaService = workflowMediaService;
         this.authService = authService;
-    }
-
-    /**
-     * Ingest 1 to 6 source images for a newly created or existing element workflow.
-     * Preserves media.step_id provenance ('upload' or source step_id).
-     * Relationship roles are canonically set in workflow_media.role ('detail').
-     *
-     * @deprecated Scheduled for removal in Ticket 11 (ADR-0010).
-     *
-     * @param {Object} params
-     * @param {string} params.workflowId
-     * @param {Array<string|Buffer|Object>} params.sourceImages
-     * @param {string} params.projectId
-     * @param {string} params.userId
-     * @returns {Promise<{ mediaRecords: Array<Object>, primaryMedia: Object, storageUrls: Array<string> }>}
-     */
-    async ingestElementSources({ workflowId, sourceImages, projectId, userId }) {
-        const traceId = randomUUID();
-        const start = Date.now();
-
-        crudOperationLog({ traceId, operation: "ingestElementSources", workflowId, count: sourceImages?.length });
-
-        if (!userId || userId === "anonymous") {
-            throw new CrudServiceError("Authentication required", {
-                statusCode: 401,
-                errorCode: "UNAUTHORIZED",
-                traceId,
-                operation: "ingestElementSources",
-            });
-        }
-
-        if (!Array.isArray(sourceImages) || sourceImages.length === 0) {
-            throw new CrudServiceError("At least 1 source image is required", {
-                statusCode: 400,
-                errorCode: "VALIDATION_ERROR",
-                traceId,
-                operation: "ingestElementSources",
-            });
-        }
-
-        const maxAllowed = getElementMaxMedia();
-        if (sourceImages.length > maxAllowed) {
-            throw new CrudServiceError(`Maximum ${maxAllowed} reference images allowed per element`, {
-                statusCode: 400,
-                errorCode: "LIMIT_EXCEEDED",
-                traceId,
-                operation: "ingestElementSources",
-            });
-        }
-
-        const isAuthorized = await this.authService.verifyWorkflowOwnership(workflowId, userId);
-        if (!isAuthorized) {
-            throw new CrudServiceError("Workflow not found", {
-                statusCode: 404,
-                errorCode: "NOT_FOUND",
-                traceId,
-                operation: "ingestElementSources",
-            });
-        }
-
-        const uploadResult = await this.mediaUploadService.upload({
-            files: sourceImages,
-            policy: ELEMENT_SOURCES_UPLOAD_POLICY,
-            maxFiles: maxAllowed,
-            userId,
-        });
-
-        const uploadedFiles = uploadResult.uploaded || uploadResult.files || [];
-        const items = uploadedFiles.map((uploadedFile) => ({
-            kind: "uploaded",
-            uploadedFile,
-            stepId: "upload",
-        }));
-
-        const attachResult = await this.workflowMediaService.attachMediaItems({
-            workflowId,
-            projectId,
-            userId,
-            role: "detail",
-            maxAllowed,
-            setPrimary: true,
-            workflowType: "ELEMENT_SHEET",
-            items,
-        });
-
-        const mediaRecords = (attachResult.attached || []).map((a) => a.media);
-        const primaryMedia = mediaRecords[0] || null;
-        const storageUrls = mediaRecords.map((m) => m.url).filter(Boolean);
-
-        if (primaryMedia?.id && this.db.workflows?.updatePrimaryMedia) {
-            await this.db.workflows.updatePrimaryMedia(workflowId, primaryMedia.id).catch(() => null);
-        }
-
-        crudOperationLog({
-            traceId,
-            operation: "ingestElementSources",
-            status: "ok",
-            durationMs: Date.now() - start,
-            workflowId,
-            mediaCount: mediaRecords.length,
-        });
-
-        return { mediaRecords, primaryMedia, storageUrls };
     }
 
     async _determineShouldBePrimary(wfId) {
@@ -232,6 +128,15 @@ export class ElementMediaService {
             });
         }
 
+        if (!userId || userId === "anonymous") {
+            throw new CrudServiceError("Authentication required", {
+                statusCode: 401,
+                errorCode: "UNAUTHORIZED",
+                traceId,
+                operation: "assertUploadAllowed",
+            });
+        }
+
         let element = null;
         try {
             if (this.db.elements?.resolveRecord) {
@@ -253,15 +158,6 @@ export class ElementMediaService {
         }
 
         const wfId = element.workflow_id || elementId;
-
-        if (!userId || userId === "anonymous") {
-            throw new CrudServiceError("Authentication required", {
-                statusCode: 401,
-                errorCode: "UNAUTHORIZED",
-                traceId,
-                operation: "assertUploadAllowed",
-            });
-        }
 
         // Cross-tenant ownership check - returns 404 (not 403) to prevent enumeration
         const isAuthorized = await this.authService.verifyWorkflowOwnership(wfId, userId);
@@ -495,6 +391,15 @@ export class ElementMediaService {
         crudOperationLog({ traceId, operation: "removeReferenceMedia", elementId, mediaId });
 
         try {
+            if (!userId || userId === "anonymous") {
+                throw new CrudServiceError("Authentication required", {
+                    statusCode: 401,
+                    errorCode: "UNAUTHORIZED",
+                    traceId,
+                    operation: "removeReferenceMedia",
+                });
+            }
+
             if (!mediaId) {
                 throw new CrudServiceError("mediaId is required", {
                     statusCode: 400,
@@ -525,16 +430,7 @@ export class ElementMediaService {
                 });
             }
 
-            if (!userId || userId === "anonymous") {
-                throw new CrudServiceError("Authentication required", {
-                    statusCode: 401,
-                    errorCode: "UNAUTHORIZED",
-                    traceId,
-                    operation: "removeReferenceMedia",
-                });
-            }
-
-            const isAuthorized = await this.authService.verifyWorkflowOwnership(wfId, userId, req);
+            const isAuthorized = await this.authService.verifyWorkflowOwnership(wfId, userId);
             if (!isAuthorized) {
                 throw new CrudServiceError(`Element not found: ${elementId}`, {
                     statusCode: 404,
@@ -664,8 +560,8 @@ export class ElementMediaService {
                 });
             }
 
-            const existingWf = await this.db.workflows?.findById?.(wfId).catch(() => null);
-            const oldPrimary = existingWf?.primary_media_id || null;
+            const existingPrimary = await this.db.workflowMedia?.getPrimaryMedia?.(wfId).catch(() => null);
+            const oldPrimary = existingPrimary?.media_id || existingPrimary?.id || null;
 
             if (mediaId) {
                 const attachResult = await this.workflowMediaService.attachMediaItems({

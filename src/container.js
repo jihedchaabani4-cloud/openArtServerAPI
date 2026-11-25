@@ -19,7 +19,6 @@ const systemLogger = createLogger("system");
 import { ProjectRepository, FolderRepository, TrashRepository, ProjectService, ProjectReadService, FolderService, TrashService, configureWorkspace } from "#workspace/tools";
 import {
     WorkflowRepository,
-    GenerationConfigRepository,
     GenerationService,
     GenerationRequestService,
     WorkflowService,
@@ -188,7 +187,6 @@ export const db = {
     workflows:     new WorkflowRepository(),
     media:         new MediaRepository(),
     workflowMedia: new WorkflowMediaRepository(),
-    configs:       new GenerationConfigRepository(),
     characters:    new CharacterRepository(),
     elements:      new ElementRepository(),
     folders:       new FolderRepository(),

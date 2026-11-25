@@ -2634,12 +2634,12 @@ describe("WorkflowMediaService delete, orphan rules, and sidecar preservation (W
     assert.equal(deleteRes.next_primary_media_id, null, "Must NOT auto-promote m-var-2 to primary_media_id on delete");
     assert.deepEqual(primaryUpdates, [{ wfId: "wf-gen-1", mediaId: null }]);
 
-    // 2. detachMedia on pinned generation/upload variation -> sets old workflow primary_media_id to null
-    fieldUpdates.length = 0;
+    // 2. detachMedia on pinned generation/upload variation -> clears old workflow primary pin without auto-promoting
+    primaryUpdates.length = 0;
     await service.detachMedia({ mediaId: "m-pinned-1", userId: "user-1" });
-    const oldWfUpdate = fieldUpdates.find((u) => u.wfId === "wf-gen-1");
-    assert.ok(oldWfUpdate, "Old workflow primary_media_id must be updated when detaching pinned media");
-    assert.equal(oldWfUpdate.fields.primary_media_id, null, "Old workflow primary_media_id must be nullified, never auto-promoted");
+    const oldWfPrimaryClear = primaryUpdates.find((u) => u.wfId === "wf-gen-1");
+    assert.ok(oldWfPrimaryClear, "Old workflow primary pin must be cleared when detaching pinned media");
+    assert.equal(oldWfPrimaryClear.mediaId, null, "Old workflow primary pin must be nullified, never auto-promoted");
   });
 
   it("Test 1 (B4c): reference-counted unlinking in ElementMediaService.removeReferenceMedia and CharacterMediaService.removeDetailMedia deletes DB row and storage ONLY when countLinksForMedia === 0", async () => {

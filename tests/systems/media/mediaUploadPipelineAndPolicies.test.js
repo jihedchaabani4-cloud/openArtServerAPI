@@ -697,25 +697,12 @@ describe("createUploadMiddleware(policy) Seam 1 Contract (Ticket 02a)", () => {
         resetInFlightBytesForTest();
     });
 
-    it("accepts a frozen UploadPolicy object directly without calling SourcePolicy.getProfile, while retaining the deprecated string purpose shim", async () => {
-        const origGetProfile = SourcePolicy.getProfile;
-        let getProfileCalls = 0;
-        SourcePolicy.getProfile = function (...args) {
-            getProfileCalls += 1;
-            return origGetProfile.apply(this, args);
-        };
+    it("accepts a frozen UploadPolicy object directly and falls back to DEFAULT_UPLOAD_POLICY when omitted", async () => {
+        const mwDirect = createUploadMiddleware(ELEMENT_REFERENCE_UPLOAD_POLICY);
+        assert.equal(typeof mwDirect, "function");
 
-        try {
-            const mwDirect = createUploadMiddleware(ELEMENT_REFERENCE_UPLOAD_POLICY);
-            assert.equal(typeof mwDirect, "function");
-            assert.equal(getProfileCalls, 0, "Passing an UploadPolicy object must NOT invoke SourcePolicy.getProfile");
-
-            const mwLegacy = createUploadMiddleware("element_reference");
-            assert.equal(typeof mwLegacy, "function");
-            assert.equal(getProfileCalls, 1, "Passing a legacy string purpose must invoke the deprecated SourcePolicy.getProfile shim");
-        } finally {
-            SourcePolicy.getProfile = origGetProfile;
-        }
+        const mwDefault = createUploadMiddleware();
+        assert.equal(typeof mwDefault, "function");
     });
 
     it("enforces stream-level magic-byte and policy allowedMimeTypes (415) across DEFAULT_UPLOAD_POLICY, ELEMENT_REFERENCE_UPLOAD_POLICY, and CHARACTER_DETAIL_UPLOAD_POLICY", async () => {
@@ -846,17 +833,7 @@ describe("createUploadMiddleware(policy) Seam 1 Contract (Ticket 02a)", () => {
         }
     });
 
-    it("applies allowedMimeTypes stream-sniffing ONLY when an UploadPolicy object is passed, preserving exact legacy string path behavior", async () => {
-        for (const legacyPurpose of ["default", "element_reference", "character_reference"]) {
-            const resolvedLegacy = resolveMiddlewarePolicy(legacyPurpose);
-            assert.equal(resolvedLegacy.isPolicyObject, false);
-            assert.equal(
-                resolvedLegacy.streamAllowedMimeTypes,
-                null,
-                `Legacy string "${legacyPurpose}" must NOT enable streamAllowedMimeTypes in sizeLimitedStorage`
-            );
-        }
-
+    it("enforces allowedMimeTypes stream-sniffing for frozen UploadPolicy objects", async () => {
         for (const policyObj of [
             DEFAULT_UPLOAD_POLICY,
             ELEMENT_REFERENCE_UPLOAD_POLICY,
@@ -868,9 +845,8 @@ describe("createUploadMiddleware(policy) Seam 1 Contract (Ticket 02a)", () => {
             assert.deepEqual(resolvedPolicy.streamAllowedMimeTypes, policyObj.allowedMimeTypes);
         }
 
-        // Behavioral verification: MP4 bytes declared as image/png on UploadPolicy vs legacy string
+        // Behavioral verification: MP4 bytes declared as image/png rejected via stream-sniffed allowedMimeTypes
         const policyMw = createUploadMiddleware(CHARACTER_DETAIL_UPLOAD_POLICY);
-        const legacyMw = createUploadMiddleware("character_reference");
 
         const policyRes = await invokeMiddleware(
             policyMw,
@@ -887,117 +863,6 @@ describe("createUploadMiddleware(policy) Seam 1 Contract (Ticket 02a)", () => {
             /Unsupported file type: video\/mp4/,
             "UploadPolicy path must reject via stream-sniffed allowedMimeTypes"
         );
-
-        const legacyRes = await invokeMiddleware(
-            legacyMw,
-            buildMultipartStream({
-                filename: "spoof.png",
-                contentType: "image/png",
-                payloadBuffer: buildMinimalMp4Buffer(),
-            })
-        );
-        assert.equal(legacyRes.status, 415);
-        assert.equal(legacyRes.body?.code, "UNSUPPORTED_MEDIA_TYPE");
-        assert.match(
-            legacyRes.body?.message || "",
-            /Declared MIME "image\/png" does not match detected file type \("video\/mp4"\)/,
-            "Legacy string path must behave identically to pre-02a (declared-vs-detected check without streamAllowedMimeTypes)"
-        );
-    });
-
-    it("verifies per-route equivalence between legacy string profile and target UploadPolicy (imageLimit, videoLimit, allowedMimeTypes, declared-MIME fileFilter behavior)", async () => {
-        const routeMappings = [
-            {
-                route: "POST /api/assets/upload (routes/assets.js)",
-                legacyPurpose: "default",
-                targetPolicy: DEFAULT_UPLOAD_POLICY,
-                allowsVideo: true,
-            },
-            {
-                route: "POST /api/media/ingest (routes/mediaIngestRoutes.js)",
-                legacyPurpose: "default",
-                targetPolicy: DEFAULT_UPLOAD_POLICY,
-                allowsVideo: true,
-            },
-            {
-                route: "POST /api/v2/elements/:id/images (routes/elementRoutes.js)",
-                legacyPurpose: "element_reference",
-                targetPolicy: ELEMENT_REFERENCE_UPLOAD_POLICY,
-                allowsVideo: false,
-            },
-            {
-                route: "POST /api/characters/:characterId/media (routes/characters.js detail)",
-                legacyPurpose: "character_reference",
-                targetPolicy: CHARACTER_DETAIL_UPLOAD_POLICY,
-                allowsVideo: false,
-            },
-            {
-                route: "POST /api/characters/{create,/,character,:characterId/sheet-media} (routes/characters.js sheet)",
-                legacyPurpose: "character_reference",
-                targetPolicy: CHARACTER_SHEET_UPLOAD_POLICY,
-                allowsVideo: false,
-            },
-        ];
-
-        for (const { route, legacyPurpose, targetPolicy, allowsVideo } of routeMappings) {
-            const legacyCfg = resolveMiddlewarePolicy(legacyPurpose);
-            const policyCfg = resolveMiddlewarePolicy(targetPolicy);
-
-            assert.equal(policyCfg.imageLimit, legacyCfg.imageLimit, `${route}: imageLimit must match`);
-            assert.equal(policyCfg.videoLimit, legacyCfg.videoLimit, `${route}: videoLimit must match`);
-            assert.equal(policyCfg.maxSizeBytes, legacyCfg.maxSizeBytes, `${route}: maxSizeBytes must match`);
-            assert.deepEqual(policyCfg.allowedMimeTypes, legacyCfg.allowedMimeTypes, `${route}: allowedMimeTypes must match`);
-
-            const legacyMw = createUploadMiddleware(legacyPurpose);
-            const policyMw = createUploadMiddleware(targetPolicy);
-
-            // Declared-MIME check 1: application/octet-stream rejected identically at fileFilter (415)
-            const legacyOctetRes = await invokeMiddleware(
-                legacyMw,
-                buildMultipartStream({
-                    filename: "raw.bin",
-                    contentType: "application/octet-stream",
-                    payloadBuffer: VALID_PNG_1X1,
-                })
-            );
-            const policyOctetRes = await invokeMiddleware(
-                policyMw,
-                buildMultipartStream({
-                    filename: "raw.bin",
-                    contentType: "application/octet-stream",
-                    payloadBuffer: VALID_PNG_1X1,
-                })
-            );
-            assert.equal(legacyOctetRes.status, 415, `${route}: legacy must reject application/octet-stream`);
-            assert.equal(policyOctetRes.status, 415, `${route}: policy must reject application/octet-stream`);
-            assert.equal(policyOctetRes.body?.message, legacyOctetRes.body?.message);
-
-            // Declared-MIME check 2: video/mp4 accepted on default routes, rejected at fileFilter on images-only routes
-            const legacyVidRes = await invokeMiddleware(
-                legacyMw,
-                buildMultipartStream({
-                    filename: "clip.mp4",
-                    contentType: "video/mp4",
-                    payloadBuffer: buildMinimalMp4Buffer(),
-                })
-            );
-            const policyVidRes = await invokeMiddleware(
-                policyMw,
-                buildMultipartStream({
-                    filename: "clip.mp4",
-                    contentType: "video/mp4",
-                    payloadBuffer: buildMinimalMp4Buffer(),
-                })
-            );
-            if (allowsVideo) {
-                assert.equal(legacyVidRes.nextCalled, true, `${route}: legacy must accept video/mp4`);
-                assert.equal(policyVidRes.nextCalled, true, `${route}: policy must accept video/mp4`);
-            } else {
-                assert.equal(legacyVidRes.status, 415, `${route}: legacy must reject video/mp4`);
-                assert.equal(policyVidRes.status, 415, `${route}: policy must reject video/mp4`);
-                assert.equal(policyVidRes.body?.message, legacyVidRes.body?.message);
-            }
-        }
     });
 });
 }
@@ -1016,29 +881,23 @@ const VALID_PNG_BUFFER = Buffer.from([
     0x42, 0x60, 0x82,
 ]);
 
-describe("Authoritative SourcePolicy & Upload Middleware Contract", () => {
-    it("SourcePolicy defines canonical profiles with verified limits", () => {
-        const defaultProfile = SourcePolicy.getProfile("default");
-        assert.equal(defaultProfile.maxSizeBytes, 100 * 1024 * 1024, "Default max size is 100MB");
-        assert.equal(defaultProfile.imageLimit, 20 * 1024 * 1024, "Default image limit is 20MB");
-        assert.equal(defaultProfile.videoLimit, 100 * 1024 * 1024, "Default video limit is 100MB");
+describe("Authoritative UploadPolicy & Upload Middleware Contract", () => {
+    it("UploadPolicy defines canonical frozen policies with verified limits", () => {
+        assert.equal(DEFAULT_UPLOAD_POLICY.maxImageSize, 20 * 1024 * 1024, "Default image limit is 20MB");
+        assert.equal(DEFAULT_UPLOAD_POLICY.maxVideoSize, 100 * 1024 * 1024, "Default video limit is 100MB");
 
-        const charProfile = SourcePolicy.getProfile("character_reference");
-        assert.equal(charProfile.maxSizeBytes, 20 * 1024 * 1024, "Character reference max size is 20MB");
-        assert.equal(charProfile.imageLimit, 20 * 1024 * 1024, "Character reference image limit is 20MB");
-        assert.equal(charProfile.videoLimit, 0, "Character reference rejects video");
+        assert.equal(CHARACTER_DETAIL_UPLOAD_POLICY.maxImageSize, 20 * 1024 * 1024, "Character detail image limit is 20MB");
+        assert.equal(CHARACTER_DETAIL_UPLOAD_POLICY.maxVideoSize, 0, "Character detail rejects video");
 
-        const elemProfile = SourcePolicy.getProfile("element_reference");
-        assert.equal(elemProfile.maxSizeBytes, 20 * 1024 * 1024, "Element reference max size is 20MB");
-        assert.equal(elemProfile.imageLimit, 20 * 1024 * 1024, "Element reference image limit is 20MB");
-        assert.equal(elemProfile.videoLimit, 0, "Element reference rejects video");
+        assert.equal(ELEMENT_REFERENCE_UPLOAD_POLICY.maxImageSize, 20 * 1024 * 1024, "Element reference image limit is 20MB");
+        assert.equal(ELEMENT_REFERENCE_UPLOAD_POLICY.maxVideoSize, 0, "Element reference rejects video");
     });
 
-    it("createUploadMiddleware derives limits and fileFilter directly from SourcePolicy", () => {
-        const middleware = createUploadMiddleware("character_reference");
+    it("createUploadMiddleware derives limits and fileFilter directly from frozen UploadPolicy", () => {
+        const middleware = createUploadMiddleware(CHARACTER_DETAIL_UPLOAD_POLICY);
         assert.equal(typeof middleware, "function", "Must return an Express middleware function");
 
-        const defaultMiddleware = createUploadMiddleware("default");
+        const defaultMiddleware = createUploadMiddleware(DEFAULT_UPLOAD_POLICY);
         assert.equal(typeof defaultMiddleware, "function", "Must return an Express middleware function for default");
     });
 });
@@ -1183,82 +1042,6 @@ describe("Canonical Primary-Media Persistence & WorkflowMedia Contract", () => {
 
         // 5. Assert redundant secondary update was not triggered
         assert.equal(redundantSecondaryCalled, false, "Redundant secondary updatePrimaryMedia must not be called");
-    });
-
-    it("ElementMediaService calls mediaUploadService.upload and links role: detail via workflowMediaService", async () => {
-        const linkCalls = [];
-
-        const mockDb = {
-            media: {
-                createMedia: async (data) => ({ id: "media-elem-1", ...data }),
-            },
-            workflowMedia: {
-                linkMedia: async (payload) => {
-                    linkCalls.push(payload);
-                    return payload;
-                },
-            },
-            workflows: {
-                updatePrimaryMedia: async () => ({}),
-            },
-        };
-
-        const { ElementMediaService } = await import("#elements/tools");
-        let uploadCalled = false;
-        const mockUploadService = {
-            upload: async ({ files }) => {
-                uploadCalled = true;
-                return {
-                    uploaded: files.map((f, i) => ({
-                        id: "media-elem-" + (i + 1),
-                        url: "https://storage.example.com/binary.png",
-                        storageKey: "binary.png",
-                        step_id: "upload",
-                    })),
-                };
-            },
-            discard: async () => ({}),
-        };
-        const mockWorkflowMediaService = {
-            attachMediaItems: async ({ workflowId, items, role }) => {
-                for (const item of items) {
-                    linkCalls.push({
-                        workflowId,
-                        mediaId: item.uploadedFile.id,
-                        role,
-                    });
-                }
-                return {
-                    attached: items.map((it) => ({
-                        media: it.uploadedFile,
-                        is_primary: true,
-                    })),
-                };
-            },
-        };
-        const mockAuthService = {
-            verifyWorkflowOwnership: async () => true,
-        };
-
-        const elemMediaService = new ElementMediaService({
-            db: mockDb,
-            storageService: {},
-            mediaUploadService: mockUploadService,
-            workflowMediaService: mockWorkflowMediaService,
-            authService: mockAuthService,
-        });
-
-        const result = await elemMediaService.ingestElementSources({
-            workflowId: "elem-wf-1",
-            sourceImages: ["https://example.com/source.png"],
-            projectId: "proj-1",
-            userId: "user-1",
-        });
-
-        assert.ok(uploadCalled, "ElementMediaService must call mediaUploadService.upload");
-        assert.equal(linkCalls.length, 1, "Must link to workflow_media");
-        assert.equal(linkCalls[0].role, "detail", "Element relationship role must be canonically 'detail'");
-        assert.equal(result.mediaRecords[0].id, "media-elem-1");
     });
 
     it("WorkflowMediaRepository & all server repositories route to supabaseAdmin to bypass RLS in background operations", async () => {

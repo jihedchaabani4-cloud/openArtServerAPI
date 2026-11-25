@@ -24,7 +24,7 @@ export class QueueDispatchError extends Error {
 
 const queueLogger = createLogger("queue");
 
-export const USECASE_QUEUE_NAME = "v2-workflow-jobs";
+export const USECASE_QUEUE_NAME = "workflow-jobs";
 
 let useCaseQueueInstance = null;
 

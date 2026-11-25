@@ -2,7 +2,7 @@ import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
 import { CharacterMediaService, CHARACTER_MAX_DETAIL_MEDIA, CharacterGenerationService } from "#characters/tools";
 import { CrudServiceError } from "#shared";
-import { CHARACTER_SHEET_UPLOAD_POLICY, CHARACTER_DETAIL_UPLOAD_POLICY, createWorkflowWithMediaAtomic, failWorkflowPendingMedia, WorkflowMediaRepository, configureMedia, getMediaRepository } from "#media/tools";
+import { CHARACTER_SHEET_UPLOAD_POLICY, CHARACTER_DETAIL_UPLOAD_POLICY, failWorkflowPendingMedia, WorkflowMediaRepository, configureMedia, getMediaRepository } from "#media/tools";
 import { ExecutionEngine } from "#generation/tools";
 import { InMemoryWalletService } from "../../helpers/inMemoryWalletService.js";
 import { WorkflowMediaService } from "../../../src/systems/generation/internal/services/WorkflowMediaService.js";
@@ -1447,92 +1447,6 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
     assert.ok(failedPlaceholder, "Failed placeholder media must be marked with status 'failed'");
   });
 
-  it("2. createWorkflowWithMediaAtomic path: links workflow_media when RPC returns and allows failWorkflowPendingMedia cleanup", async () => {
-    const mediaTable = new Map();
-    const workflowMediaTable = [];
-
-    const realDb = {
-      media: {
-        updateMedia: async (id, fields) => {
-          const existing = mediaTable.get(id) || {};
-          const updated = { ...existing, ...fields };
-          mediaTable.set(id, updated);
-          return updated;
-        },
-        findByWorkflow: async (workflowId) => {
-          const links = workflowMediaTable.filter((wm) => wm.workflow_id === workflowId);
-          return links.map((link) => ({
-            ...(mediaTable.get(link.media_id) || {}),
-            workflow_id: link.workflow_id,
-            role: link.role,
-          }));
-        },
-      },
-      workflowMedia: {
-        linkMedia: async ({ workflowId, mediaId, role, stepId }) => {
-          const link = {
-            workflow_id: workflowId,
-            media_id: mediaId,
-            role: role || (stepId === "character_sheet" ? "sheet" : "output"),
-          };
-          workflowMediaTable.push(link);
-          return link;
-        },
-      },
-    };
-
-    // Simulate Supabase RPC create_workflow_with_placeholder_media succeeding and returning { workflow_id, media_id }
-    const simulatedRpcWorkflowId = "wf-rpc-1";
-    const simulatedRpcMediaId = "m-rpc-1";
-    mediaTable.set(simulatedRpcMediaId, {
-      id: simulatedRpcMediaId,
-      step_id: "character_sheet",
-      status: "processing",
-      url: null,
-    });
-
-    supabase.rpc = async (fnName) => {
-      if (fnName === "create_workflow_with_placeholder_media") {
-        return {
-          data: {
-            workflow_id: simulatedRpcWorkflowId,
-            media_id: simulatedRpcMediaId,
-          },
-          error: null,
-        };
-      }
-      return { data: null, error: new Error("Unknown RPC") };
-    };
-
-    const res = await createWorkflowWithMediaAtomic(realDb, {
-      workflowData: {
-        project_id: "proj-1",
-        workflow_type: "CHARACTER",
-        display_name: "Atomic Hero",
-      },
-      mediaData: {
-        step_id: "character_sheet",
-        status: "processing",
-      },
-    });
-
-    assert.equal(res.workflow.id, simulatedRpcWorkflowId);
-    assert.equal(res.media.id, simulatedRpcMediaId);
-
-    // CRITICAL: workflow_media MUST be linked after createWorkflowWithMediaAtomic
-    const links = workflowMediaTable.filter(
-      (wm) => wm.workflow_id === simulatedRpcWorkflowId && wm.media_id === simulatedRpcMediaId
-    );
-    assert.equal(links.length, 1, "createWorkflowWithMediaAtomic must link row in workflow_media");
-    assert.equal(links[0].role, "sheet");
-
-    // Failure cleanup: when job fails/dies, failWorkflowPendingMedia must find the media and mark it failed
-    await failWorkflowPendingMedia(realDb, simulatedRpcWorkflowId, "Worker timed out after 2 hours");
-    const finalizedMedia = mediaTable.get(simulatedRpcMediaId);
-    assert.equal(finalizedMedia.status, "failed");
-    assert.match(finalizedMedia.error_message, /Worker timed out/);
-  });
-
   it("3. Element Sheet Generation / Ingestion path: links workflow_media even when db object lacks explicit workflowMedia repo", async () => {
     const mediaTable = new Map();
     const workflowMediaTable = [];
@@ -1575,13 +1489,14 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
       },
       elements: {
         create: async (data) => {
-          const row = { id: `elem-${Date.now()}`, ...data };
+          const row = { id: "11111111-1111-4111-8111-111111111111", ...data };
           elementTable.set(row.id, row);
           return row;
         },
         resolveRecord: async (id) => elementTable.get(id) || { id, workflow_id: id },
       },
       workflowMedia: {
+        getPrimaryMedia: async () => null,
         linkMedia: async ({ workflowId, mediaId, role, stepId }) => {
           const link = {
             workflow_id: workflowId,
@@ -1632,6 +1547,7 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
       db: dbWithoutWorkflowMedia,
       mediaService: elementMediaService,
       analysisService: { analyzeElement: async () => ({}) },
+      assertOwns: async () => true,
     });
 
     const created = await elementService.createElement({

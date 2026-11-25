@@ -9,7 +9,6 @@ import {
     GenerationRequestService,
     WorkflowService,
     WorkflowRepository,
-    GenerationConfigRepository,
     configureGeneration,
 } from "#generation/tools";
 import {
@@ -30,7 +29,6 @@ import {
     GenerationCompilationError,
     GenerationQueueDispatchError,
 } from "../../../src/systems/generation/internal/errors.js";
-import { RunRepository } from "../../../src/systems/generation/internal/db/RunRepository.js";
 import { imagesRouter, videoRouter, promptRouter, v2WorkflowsRouter, workflowsRouter, generationRouter } from "#generation/api";
 import apiRouter from "../../../src/api/routes.js";
 import express from "express";
@@ -57,7 +55,6 @@ describe("System 1: Generation & Workflows — Gateways & Public Tools Contract"
         assert.equal(typeof GenerationService, "function");
         assert.equal(typeof GenerationRequestService, "function");
         assert.equal(typeof WorkflowRepository, "function");
-        assert.equal(typeof GenerationConfigRepository, "function");
         assert.equal(typeof configureGeneration, "function");
     });
 
@@ -101,31 +98,6 @@ describe("System 1: Generation & Workflows — Gateways & Public Tools Contract"
         assert.equal(queueErr.statusCode, 503);
         assert.equal(queueErr.errorCode, "QUEUE_DISPATCH_FAILED");
         assert.equal(queueErr.attempts, 3);
-    });
-});
-
-describe("System 1: Generation & Workflows — WorkflowService.getWorkflowRun validations", () => {
-    it("should throw GenerationValidationError when runId is missing in getWorkflowRun", async () => {
-        await assert.rejects(
-            () => WorkflowService.getWorkflowRun({}),
-            (err) => {
-                assert.ok(err instanceof GenerationValidationError);
-                assert.equal(err.statusCode, 400);
-                assert.match(err.message, /runId is required/);
-                return true;
-            }
-        );
-    });
-
-    it("should throw GenerationNotFoundError when run is missing in getWorkflowRun", async () => {
-        await assert.rejects(
-            () => WorkflowService.getWorkflowRun({ runId: "00000000-0000-0000-0000-000000000000" }),
-            (err) => {
-                assert.ok(err instanceof GenerationNotFoundError);
-                assert.equal(err.statusCode, 404);
-                return true;
-            }
-        );
     });
 });
 }
@@ -218,8 +190,8 @@ describe("Generation API Boundary & Separation Tests", () => {
   });
 
   it("TEST 4: Independent V3 Workflows registered for Image and Video generation flows", () => {
-    const imageWf = getV3Workflow("image-generation-v1");
-    const videoWf = getV3Workflow("video-generation-v1");
+    const imageWf = getV3Workflow("image-generation-v3");
+    const videoWf = getV3Workflow("video-generation-v3");
 
     assert.ok(imageWf, "image-generation-v1 must resolve in V3 Workflow Registry");
     assert.strictEqual(imageWf.id, "image-generation-v3");
@@ -237,7 +209,7 @@ describe("Generation API Boundary & Separation Tests", () => {
 
   it("TEST 5: Image Generation V3 Workflow GraphCompiler compiles active nodes and waves", async () => {
     const compiler = new GraphCompiler(createDefaultV3NodeRegistry());
-    const plan = compiler.compile(getV3Workflow("image-generation-v1"));
+    const plan = compiler.compile(getV3Workflow("image-generation-v3"));
 
     assert.ok(plan, "Execution plan must compile successfully");
     assert.strictEqual(plan.workflowId, "image-generation-v3");
@@ -247,7 +219,7 @@ describe("Generation API Boundary & Separation Tests", () => {
 
   it("TEST 6: Video Generation V3 Workflow compiles cleanly into waves", async () => {
     const compiler = new GraphCompiler(createDefaultV3NodeRegistry());
-    const plan = compiler.compile(getV3Workflow("video-generation-v1"));
+    const plan = compiler.compile(getV3Workflow("video-generation-v3"));
 
     assert.ok(plan, "Video execution plan must compile successfully");
     assert.strictEqual(plan.workflowId, "video-generation-v3");
@@ -277,10 +249,6 @@ describe("V2 Workflow Run Security & Boundary Tests (Task T3)", () => {
   const testSecret = "test-internal-secret-phase0-t3"; // gate:allow-secret
   const originalSecret = process.env.INTERNAL_SECRET;
   const originalFlag = process.env.ENABLE_V2_WORKFLOW_RUN_ENDPOINT;
-
-  // Spy on runRepo
-  let originalGetRun;
-  let originalListNodeRuns;
 
   before(async () => {
     process.env.INTERNAL_SECRET = testSecret;
@@ -324,13 +292,6 @@ describe("V2 Workflow Run Security & Boundary Tests (Task T3)", () => {
 
   beforeEach(() => {
     delete process.env.ENABLE_V2_WORKFLOW_RUN_ENDPOINT;
-    originalGetRun = RunRepository.prototype.getRun;
-    originalListNodeRuns = RunRepository.prototype.listNodeRuns;
-  });
-
-  afterEach(() => {
-    RunRepository.prototype.getRun = originalGetRun;
-    RunRepository.prototype.listNodeRuns = originalListNodeRuns;
   });
 
   // ── TEST 1: Default configuration rejects POST /api/v2/workflows/run with 404 ──
@@ -344,7 +305,7 @@ describe("V2 Workflow Run Security & Boundary Tests (Task T3)", () => {
         "Authorization": "Bearer token-user-attacker",
       },
       body: JSON.stringify({
-        workflow_id: "image-generation-v1",
+        workflow_id: "image-generation-v3",
         input: {
           prompt: "An uncharged malicious run",
         },
@@ -378,134 +339,12 @@ describe("V2 Workflow Run Security & Boundary Tests (Task T3)", () => {
     assert.strictEqual(res.status, 404);
     assert.strictEqual(body.code, "ENDPOINT_DISABLED");
   });
-
-  // ── TEST 3: GET /runs/:run_id enforces user ownership ──
-  it("TEST 3: GET /runs/:run_id returns 404 when requested by a different user", async () => {
-    RunRepository.prototype.getRun = async (runId) => {
-      if (runId === "run-owned-by-user-A") {
-        return {
-          id: "run-owned-by-user-A",
-          user_id: "user-A",
-          status: "completed",
-        };
-      }
-      return null;
-    };
-
-    const res = await fetch(`${baseUrl}/api/v2/workflows/runs/run-owned-by-user-A`, {
-      method: "GET",
-      headers: {
-        "Authorization": "Bearer token-user-B", // DIFFERENT USER!
-      },
-    });
-
-    const body = await res.json();
-    assert.strictEqual(res.status, 404, `Expected HTTP 404 for unowned run, got ${res.status}`);
-    assert.strictEqual(body.code, "RUN_NOT_FOUND");
-  });
 });
 }
 
 // ─── Source: memoryFallbackProhibitionBoundary.test.js ───
 {
 describe("RC1.4-D3(1) — Memory Fallbacks Prohibition Outside Tests", () => {
-  let originalNodeEnv;
-
-  beforeEach(() => {
-    originalNodeEnv = process.env.NODE_ENV;
-  });
-
-  afterEach(() => {
-    process.env.NODE_ENV = originalNodeEnv;
-    RunRepository.useMemoryFallback = false;
-    RunRepository.clientOverride = null;
-  });
-
-  it("TEST 1: NODE_ENV=production, repository constructed with fallback enabled -> constructor throws", () => {
-    process.env.NODE_ENV = "production";
-    assert.throws(
-      () => new RunRepository({ useMemoryFallback: true }),
-      /in-memory fallback is prohibited outside node_env=test/i
-    );
-  });
-
-  it("TEST 2: NODE_ENV=development, repository constructed with fallback enabled -> constructor throws", () => {
-    process.env.NODE_ENV = "development";
-    assert.throws(
-      () => new RunRepository({ useMemoryFallback: true }),
-      /in-memory fallback is prohibited outside node_env=test/i
-    );
-  });
-
-  it("TEST 3: NODE_ENV=production, DB call rejects -> error propagates and repository did NOT switch to memory", async () => {
-    process.env.NODE_ENV = "production";
-    const repo = new RunRepository();
-
-    let calls = 0;
-    const mockDbError = new Error("Database offline");
-    mockDbError.code = "PGRST205"; // The table-not-found code that previously triggered fallback
-
-    RunRepository.clientOverride = {
-      from: () => ({
-        insert: () => ({
-          select: () => ({
-            single: async () => {
-              calls++;
-              return { data: null, error: mockDbError };
-            }
-          })
-        })
-      })
-    };
-
-    // First call must throw the DB error, NOT swallow it or fall back to memory
-    await assert.rejects(
-      async () => {
-        await repo.createRun({ run_id: "test-run-1", workflow_id: "wf-1" });
-      },
-      (err) => {
-        assert.equal(err.code, "PGRST205");
-        return true;
-      }
-    );
-
-    // Assert repository did NOT switch to memory fallback
-    assert.equal(RunRepository.useMemoryFallback, false);
-
-    // Second call must still attempt DB call, not use in-memory Map
-    await assert.rejects(
-      async () => {
-        await repo.createRun({ run_id: "test-run-2", workflow_id: "wf-1" });
-      },
-      (err) => {
-        assert.equal(err.code, "PGRST205");
-        return true;
-      }
-    );
-
-    assert.equal(calls, 2);
-    assert.equal(RunRepository.useMemoryFallback, false);
-  });
-
-  it("TEST 4: NODE_ENV=test, fallback enabled -> works as before (regression guard)", async () => {
-    process.env.NODE_ENV = "test";
-    const repo = new RunRepository({ useMemoryFallback: true });
-    RunRepository.useMemoryFallback = true;
-
-    const created = await repo.createRun({
-      run_id: "test-mem-run-1",
-      workflow_id: "wf-test",
-      input: { prompt: "test prompt" }
-    });
-
-    assert.ok(created);
-    assert.equal(created.run_id, "test-mem-run-1");
-
-    const fetched = await repo.getRun("test-mem-run-1");
-    assert.ok(fetched);
-    assert.equal(fetched.run_id, "test-mem-run-1");
-  });
-
   it("TEST 5: src/shared/db/supabase.js with missing env and NODE_ENV=production -> throws at load", () => {
     assert.throws(
       () => {

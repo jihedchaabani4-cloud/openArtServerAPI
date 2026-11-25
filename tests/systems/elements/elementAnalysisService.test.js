@@ -121,10 +121,9 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
     };
 
     elementService.mediaService = {
-      ingestElementSources: async ({ workflowId, sourceImages, userId }) => ({
-        mediaRecords: [{ id: "media-elem-1", url: "https://cdn.example.com/elem1.png" }],
-        primaryMedia: { id: "media-elem-1", url: "https://cdn.example.com/elem1.png" },
-        storageUrls: ["https://cdn.example.com/elem1.png"],
+      addReferenceMedia: async () => ({
+        media: { id: "media-elem-1", url: "https://cdn.example.com/elem1.png" },
+        url: "https://cdn.example.com/elem1.png",
       }),
     };
 

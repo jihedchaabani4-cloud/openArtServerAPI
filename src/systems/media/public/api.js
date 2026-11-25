@@ -10,7 +10,6 @@ import multer from "multer";
 import { createLogger } from "#shared";
 import { requireAuth } from "#identity/tools";
 import { DEFAULT_UPLOAD_POLICY } from "../internal/ingestion/UploadPolicy.js";
-import { SourcePolicy } from "../internal/ingestion/SourcePolicy.js";
 import { createSizeLimitedMemoryStorage } from "../internal/ingestion/sizeLimitedStorage.js";
 import {
     handleMediaIngest,
@@ -24,31 +23,22 @@ const uploadMiddlewareLogger = createLogger("upload-middleware");
 
 // ── Multipart Upload Middleware Factory ──────────────────────────────────────
 
-export function resolveMiddlewarePolicy(policyOrPurpose) {
-    if (policyOrPurpose && typeof policyOrPurpose === "object" && Array.isArray(policyOrPurpose.allowedTypes)) {
-        const imageLimit = policyOrPurpose.maxImageSize ?? 0;
-        const videoLimit = policyOrPurpose.maxVideoSize ?? 0;
-        const maxSizeBytes = Math.max(imageLimit, videoLimit);
-        return {
-            isPolicyObject: true,
-            imageLimit,
-            videoLimit,
-            maxSizeBytes,
-            allowedMimeTypes: policyOrPurpose.allowedMimeTypes,
-            streamAllowedMimeTypes: policyOrPurpose.allowedMimeTypes,
-            allowedTypes: policyOrPurpose.allowedTypes,
-        };
-    }
-
-    const profile = SourcePolicy.getProfile(policyOrPurpose);
+export function resolveMiddlewarePolicy(policy = DEFAULT_UPLOAD_POLICY) {
+    const resolved =
+        policy && typeof policy === "object" && Array.isArray(policy.allowedTypes)
+            ? policy
+            : DEFAULT_UPLOAD_POLICY;
+    const imageLimit = resolved.maxImageSize ?? 0;
+    const videoLimit = resolved.maxVideoSize ?? 0;
+    const maxSizeBytes = Math.max(imageLimit, videoLimit);
     return {
-        isPolicyObject: false,
-        imageLimit: profile.imageLimit ?? profile.maxSizeBytes,
-        videoLimit: profile.videoLimit ?? profile.maxSizeBytes,
-        maxSizeBytes: profile.maxSizeBytes,
-        allowedMimeTypes: profile.allowedMimeTypes,
-        streamAllowedMimeTypes: null,
-        allowedTypes: profile.allowedTypes,
+        isPolicyObject: true,
+        imageLimit,
+        videoLimit,
+        maxSizeBytes,
+        allowedMimeTypes: resolved.allowedMimeTypes,
+        streamAllowedMimeTypes: resolved.allowedMimeTypes,
+        allowedTypes: resolved.allowedTypes,
     };
 }
 

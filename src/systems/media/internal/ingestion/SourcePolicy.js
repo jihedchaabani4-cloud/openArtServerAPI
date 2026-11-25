@@ -6,22 +6,6 @@
 import dns from "node:dns/promises";
 import net from "node:net";
 import { ValidationError, createPayloadTooLargeError } from "../errors.js";
-import {
-    DEFAULT_UPLOAD_POLICY,
-    ELEMENT_REFERENCE_UPLOAD_POLICY,
-    ELEMENT_SHEET_UPLOAD_POLICY,
-    CHARACTER_SHEET_UPLOAD_POLICY,
-    CHARACTER_DETAIL_UPLOAD_POLICY,
-} from "./UploadPolicy.js";
-
-function toLegacyProfile(policy) {
-    return {
-        ...policy,
-        maxSizeBytes: Math.max(policy.maxImageSize || 0, policy.maxVideoSize || 0),
-        imageLimit: policy.maxImageSize || 0,
-        videoLimit: policy.maxVideoSize || 0,
-    };
-}
 
 function validateAllowedTypeAndMime(inspected, profile) {
     if (Array.isArray(profile.allowedTypes) && profile.allowedTypes.length > 0 && !profile.allowedTypes.includes(inspected.type)) {
@@ -83,27 +67,6 @@ function validateDimensionAndDurationCaps(inspected, profile) {
 }
 
 export class SourcePolicy {
-    static PROFILES = {
-        default: toLegacyProfile(DEFAULT_UPLOAD_POLICY),
-        character_reference: toLegacyProfile(CHARACTER_DETAIL_UPLOAD_POLICY),
-        character_sheet: toLegacyProfile(CHARACTER_SHEET_UPLOAD_POLICY),
-        character_detail: toLegacyProfile(CHARACTER_DETAIL_UPLOAD_POLICY),
-        element_reference: toLegacyProfile(ELEMENT_REFERENCE_UPLOAD_POLICY),
-        element_sheet: toLegacyProfile(ELEMENT_SHEET_UPLOAD_POLICY),
-    };
-
-    /**
-     * Retrieves policy configuration by purpose name.
-     * @deprecated Compatibility shim during expand-contract migration; scheduled for removal in Ticket 10.
-     * Import frozen UploadPolicy constants from UploadPolicy.js instead.
-     */
-    static getProfile(purpose = "default") {
-        if (purpose && typeof purpose === "object" && Array.isArray(purpose.allowedTypes)) {
-            return toLegacyProfile(purpose);
-        }
-        return this.PROFILES[purpose] || this.PROFILES.default;
-    }
-
     /**
      * Checks if an IP address belongs to a prohibited/internal range (SSRF defense).
      */

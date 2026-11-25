@@ -9,7 +9,7 @@
  */
 export const imageGenerationV3 = Object.freeze({
   id: "image-generation-v3",
-  aliases: Object.freeze(["image-generation-v1", "imageGeneration"]),
+  aliases: Object.freeze(["imageGeneration"]),
   name: "Image Generation V3",
   version: "3.0.0",
   category: "image",
@@ -28,6 +28,7 @@ export const imageGenerationV3 = Object.freeze({
         elements: { fromInput: "elements", default: [] },
         allowedMediaTypes: ["image"],
         maxReferences: { fromInput: "max_references" },
+        verify_ownership: { fromInput: "verify_ownership", default: true },
       },
     },
     {

@@ -5,8 +5,8 @@ import { createLogger, safePublicRouteError, AppError } from "#shared";
 import {
     getAssetUploadService,
     getWorkflowService,
+    getMediaService,
 } from "../services/serviceAccessor.js";
-import { getMediaRepository } from "../services/serviceAccessor.js";
 
 const routeLogger = createLogger("route:media");
 
@@ -24,7 +24,6 @@ export async function handleMediaIngest(req, res) {
 
         const {
             project_id,
-            session_id,
             workflow_id,
             display_name,
         } = req.body || {};
@@ -48,7 +47,6 @@ export async function handleMediaIngest(req, res) {
             source: sourceInput,
             userId,
             projectId: project_id,
-            sessionId: session_id,
             workflowId: workflow_id,
             folderId: normalizedFolder,
             displayName: display_name,
@@ -190,25 +188,8 @@ export async function handleMoveToFolder(req, res, next) {
 export async function handleGetMedia(req, res) {
     try {
         const { id } = req.params;
-        if (!id) {
-            return res.status(404).json({ ok: false, error: "Media not found" });
-        }
-        const repo = getMediaRepository();
-        const record = await repo.findById(id);
-        if (!record) {
-            return res.status(404).json({ ok: false, error: "Media not found" });
-        }
-        const media = {
-            id: record.id,
-            url: record.url,
-            width: record.width,
-            height: record.height,
-            status: record.status,
-            stepId: record.step_id,
-            projectId: record.project_id,
-            createTime: record.create_time,
-            errorMessage: record.error_message,
-        };
+        const userId = req.user?.id;
+        const media = await getMediaService().getOwnedMedia({ mediaId: id, userId });
         return res.json({ ok: true, media });
     } catch (err) {
         const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);

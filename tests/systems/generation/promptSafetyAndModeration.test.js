@@ -293,7 +293,7 @@ describe("Content Moderation Fail-Closed & Prompt Unification Boundary Tests (Ta
   });
 
   it("TEST 6: character-sheet-v1 V3 workflow includes base.llm node with system-safety skill before image generation", async () => {
-    const workflow = getV3Workflow("character-sheet-v1") || characterSheetV3;
+    const workflow = getV3Workflow("character-sheet-v3") || characterSheetV3;
     assert.ok(workflow, "character-sheet-v1 must be loadable");
     const llmNode = Array.isArray(workflow.nodes)
       ? workflow.nodes.find((n) => n.id === "llm_enrich")

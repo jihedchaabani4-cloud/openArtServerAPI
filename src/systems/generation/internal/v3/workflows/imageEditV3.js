@@ -29,6 +29,7 @@ export const imageEditV3 = Object.freeze({
         elements: { fromInput: "elements", default: [] },
         allowedMediaTypes: ["image"],
         maxReferences: { fromInput: "max_references" },
+        verify_ownership: { fromInput: "verify_ownership", default: true },
       },
     },
     {

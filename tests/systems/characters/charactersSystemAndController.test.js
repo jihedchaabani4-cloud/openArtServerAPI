@@ -1,6 +1,6 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
-import { getCharacterPromptContext, validateCharacterExists, attachCharacterSheetResult, characterRepository, CharacterRepository, CharacterService, CharacterMediaService, CharacterGenerationService, CHARACTER_MAX_DETAIL_MEDIA, CharactersError, CharactersValidationError, CharactersNotFoundError, CharactersConflictError, CharactersUnauthorizedError } from "#characters/tools";
+import { getCharacterPromptContext, validateCharacterExists, characterRepository, CharacterRepository, CharacterService, CharacterMediaService, CharacterGenerationService, CHARACTER_MAX_DETAIL_MEDIA, CharactersError, CharactersValidationError, CharactersNotFoundError, CharactersConflictError, CharactersUnauthorizedError } from "#characters/tools";
 import charactersRouter, { createCharacter, generateCharacterSheet, generateCharacterDescription, updateCharacter, deleteCharacter, addMediaToCharacter, removeMediaFromCharacter, setCharacterSheetMedia, uploadCharacterMedia } from "#characters/api";
 import { characterService, trashService } from "../../../src/container.js";
 import { safePublicRouteError } from "#shared";
@@ -70,14 +70,23 @@ describe("System 6: Characters (#characters/tools & #characters/api)", () => {
                 name: "Aria Thorne",
                 description: "An ethereal sorceress with silver hair and amethyst eyes.",
                 traits: { hair: "silver", eyes: "amethyst", archetype: "sorceress" },
-                reference_media_urls: ["https://storage.cdn/aria-1.png", "https://storage.cdn/aria-2.png"],
             };
 
             const origFind = characterRepository.findByCharacterId;
             characterRepository.findByCharacterId = async () => mockChar;
 
+            const mockWorkflowMediaRepo = {
+                findByWorkflow: async () => [
+                    { id: "m-1", url: "https://storage.cdn/aria-1.png", status: "success", role: "sheet", is_primary: true },
+                    { id: "m-2", url: "https://storage.cdn/aria-2.png", status: "success", role: "detail", is_primary: false },
+                ],
+            };
+
             try {
-                const context = await getCharacterPromptContext({ characterId: "char-uuid-001" });
+                const context = await getCharacterPromptContext({
+                    characterId: "char-uuid-001",
+                    workflowMediaRepository: mockWorkflowMediaRepo,
+                });
                 assert.equal(context.name, "Aria Thorne");
                 assert.equal(context.description, "An ethereal sorceress with silver hair and amethyst eyes.");
                 assert.deepEqual(context.traits, { hair: "silver", eyes: "amethyst", archetype: "sorceress" });
@@ -157,33 +166,6 @@ describe("System 6: Characters (#characters/tools & #characters/api)", () => {
                 assert.equal(exists, true);
             } finally {
                 characterRepository.findByCharacterId = origFind;
-            }
-        });
-
-        it("attachCharacterSheetResult updates character primary_media_id and sheet_url", async () => {
-            let capturedId = null;
-            let capturedPatch = null;
-
-            const origUpdate = characterRepository.updateCharacterFields;
-            characterRepository.updateCharacterFields = async (id, patch) => {
-                capturedId = id;
-                capturedPatch = patch;
-                return { id, ...patch };
-            };
-
-            try {
-                const result = await attachCharacterSheetResult({
-                    characterId: "char-001",
-                    mediaId: "media-sheet-001",
-                    sheetUrl: "https://storage.cdn/sheet.png",
-                });
-
-                assert.equal(capturedId, "char-001");
-                assert.equal(capturedPatch.primary_media_id, "media-sheet-001");
-                assert.equal(capturedPatch.sheet_url, "https://storage.cdn/sheet.png");
-                assert.ok(result);
-            } finally {
-                characterRepository.updateCharacterFields = origUpdate;
             }
         });
 

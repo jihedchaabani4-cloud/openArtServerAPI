@@ -10,11 +10,13 @@ import {
     StorageValidationError,
     MediaError,
     MediaValidationError,
+    MediaNotFoundError,
     MediaConflictError,
     MediaRepository,
     WorkflowMediaRepository,
     configureMedia,
     getMediaRepository,
+    getMediaService,
     getWorkflowMediaRepository,
     getStorageService,
     setStorageService,
@@ -31,7 +33,8 @@ import {
     hasInFlightMedia,
     areAllWorkflowMediaFailed,
 } from "#media/tools";
-import { mediaRouter, assetsRouter, mediaIngestRouter, handleDeleteMedia } from "#media/api";
+import { mediaRouter, assetsRouter, mediaIngestRouter, handleDeleteMedia, handleGetMedia } from "#media/api";
+import { assertOwns, IdentityForbiddenError, setDb as setIdentityDb } from "#identity/tools";
 import { randomUUID } from "node:crypto";
 import { AppError, calculateAspectRatio } from "#shared";
 
@@ -330,7 +333,6 @@ describe("Platform Media & Media-Ingestion Public Barrels", () => {
         assert.equal(typeof mediaBarrel.areAllWorkflowMediaFailed, "function");
         assert.equal(typeof mediaBarrel.MediaConflictError, "function");
         assert.equal(typeof mediaBarrel.failWorkflowPendingMedia, "function");
-        assert.equal(typeof mediaBarrel.normalizeNodeMediaOutputs, "function");
         assert.equal(typeof mediaBarrel.resolveMediaMetadata, "function");
         assert.equal(typeof mediaBarrel.calculateAspectRatio, "function");
     });
@@ -451,6 +453,199 @@ describe("MediaService — Canonical public.media Ownership & Error Propagation"
         await assert.rejects(() => service.findById("m-1"), /db connection lost/);
         await assert.rejects(() => service.findByIds(["m-1"]), /db connection lost/);
         await assert.rejects(() => service.findOwnershipRecord("m-1"), /db connection lost/);
+    });
+
+    it("getOwnedMedia enforces fail-closed ownership and returns formatted DTO only for owned media", async () => {
+        const mediaRepo = makeInMemoryMediaRepo();
+        const created = await mediaRepo.createMedia({
+            project_id: "proj-alice",
+            owner_user_id: "user-alice",
+            step_id: "image_generation",
+            url: "https://cdn.example.com/alice/out.png",
+            width: 1280,
+            height: 720,
+            status: "success",
+            error_message: null,
+            create_time: "2026-01-01T12:00:00.000Z",
+        });
+
+        // 1. Default fail-closed ownership path (via mediaRepo.findMediaOwnershipRecord)
+        const defaultService = new MediaService({ mediaRepo });
+
+        const dto = await defaultService.getOwnedMedia({ mediaId: created.id, userId: "user-alice" });
+        assert.deepEqual(dto, {
+            id: created.id,
+            url: "https://cdn.example.com/alice/out.png",
+            width: 1280,
+            height: 720,
+            status: "success",
+            stepId: "image_generation",
+            projectId: "proj-alice",
+            createTime: "2026-01-01T12:00:00.000Z",
+            errorMessage: null,
+        });
+
+        // Foreign/unowned media fails closed with 404 MediaNotFoundError
+        await assert.rejects(
+            () => defaultService.getOwnedMedia({ mediaId: created.id, userId: "user-bob" }),
+            (err) => err instanceof MediaNotFoundError && err.statusCode === 404
+        );
+
+        // Missing media returns 404 MediaNotFoundError
+        await assert.rejects(
+            () => defaultService.getOwnedMedia({ mediaId: "missing-media-id", userId: "user-alice" }),
+            (err) => err instanceof MediaNotFoundError && err.statusCode === 404
+        );
+
+        // Empty mediaId throws 404 MediaNotFoundError
+        await assert.rejects(
+            () => defaultService.getOwnedMedia({ mediaId: "  ", userId: "user-alice" }),
+            (err) => err instanceof MediaNotFoundError && err.statusCode === 404
+        );
+
+        // Missing userId fails closed with 401
+        await assert.rejects(
+            () => defaultService.getOwnedMedia({ mediaId: created.id, userId: null }),
+            (err) => err instanceof AppError && err.statusCode === 401
+        );
+
+        // 2. Injected #identity/tools assertOwns integration
+        setIdentityDb({
+            media: mediaRepo,
+            projects: {
+                findByUser: async (userId, projectId) =>
+                    userId === "user-alice" && projectId === "proj-alice"
+                        ? [{ id: "proj-alice", user_id: "user-alice" }]
+                        : [],
+            },
+        });
+
+        try {
+            const identityService = new MediaService({ mediaRepo, assertOwnsFn: assertOwns });
+            const ownedViaIdentity = await identityService.getOwnedMedia({
+                mediaId: created.id,
+                userId: "user-alice",
+            });
+            assert.equal(ownedViaIdentity.id, created.id);
+
+            await assert.rejects(
+                () => identityService.getOwnedMedia({ mediaId: created.id, userId: "user-bob" }),
+                (err) => err instanceof AppError && err.statusCode === 404
+            );
+
+            // When assertOwnsFn succeeds but repo row is gone, throws 404 MediaNotFoundError
+            const serviceWithStub = new MediaService({
+                mediaRepo,
+                assertOwnsFn: async () => ({ id: "ghost-id" }),
+            });
+            await assert.rejects(
+                () => serviceWithStub.getOwnedMedia({ mediaId: "ghost-id", userId: "user-alice" }),
+                (err) => err instanceof MediaNotFoundError && err.statusCode === 404
+            );
+        } finally {
+            setIdentityDb(null);
+        }
+    });
+
+    it("handleGetMedia routes through MediaService: returns 200 DTO for owned, 403/404 for foreign, 404 for missing", async () => {
+        const previousMediaService = getMediaService();
+        const mediaRepo = makeInMemoryMediaRepo();
+        const created = await mediaRepo.createMedia({
+            project_id: "proj-owner",
+            step_id: "upload",
+            url: "https://cdn.example.com/owner/pic.png",
+            width: 512,
+            height: 512,
+            status: "success",
+            error_message: null,
+            create_time: "2026-02-01T00:00:00.000Z",
+        });
+
+        const ownershipCalls = [];
+        const testService = new MediaService({
+            mediaRepo,
+            assertOwnsFn: async (resourceType, mediaId, userId) => {
+                ownershipCalls.push({ resourceType, mediaId, userId });
+                if (userId === "user-forbidden") {
+                    throw new IdentityForbiddenError("Forbidden");
+                }
+                if (userId !== "user-owner" || mediaId !== created.id) {
+                    throw new AppError("Media not found", 404);
+                }
+                return created;
+            },
+        });
+
+        configureMedia({ mediaService: testService });
+
+        const invoke = async (req) => {
+            let statusCode = 200;
+            let body = null;
+            const res = {
+                status(code) {
+                    statusCode = code;
+                    return this;
+                },
+                json(payload) {
+                    body = payload;
+                    return this;
+                },
+            };
+            await handleGetMedia(req, res);
+            return { statusCode, body };
+        };
+
+        try {
+            // 1. Owned media -> 200 DTO
+            const owned = await invoke({ params: { id: created.id }, user: { id: "user-owner" } });
+            assert.equal(owned.statusCode, 200);
+            assert.equal(owned.body.ok, true);
+            assert.deepEqual(owned.body.media, {
+                id: created.id,
+                url: "https://cdn.example.com/owner/pic.png",
+                width: 512,
+                height: 512,
+                status: "success",
+                stepId: "upload",
+                projectId: "proj-owner",
+                createTime: "2026-02-01T00:00:00.000Z",
+                errorMessage: null,
+            });
+
+            // 2. Foreign/unowned media -> 404 fail-closed
+            const foreign = await invoke({ params: { id: created.id }, user: { id: "user-intruder" } });
+            assert.equal(foreign.statusCode, 404);
+            assert.equal(foreign.body.ok, false);
+            assert.equal(foreign.body.errorCode, "NOT_FOUND");
+            assert.equal(foreign.body.media, undefined);
+
+            // 3. Explicit 403 forbidden error -> 403 fail-closed
+            const forbidden = await invoke({ params: { id: created.id }, user: { id: "user-forbidden" } });
+            assert.equal(forbidden.statusCode, 403);
+            assert.equal(forbidden.body.ok, false);
+            assert.equal(forbidden.body.media, undefined);
+
+            // 4. Missing media -> 404
+            const missing = await invoke({ params: { id: "non-existent" }, user: { id: "user-owner" } });
+            assert.equal(missing.statusCode, 404);
+            assert.equal(missing.body.ok, false);
+            assert.equal(missing.body.errorCode, "NOT_FOUND");
+
+            // 5. Missing id param -> 404
+            const noId = await invoke({ params: {}, user: { id: "user-owner" } });
+            assert.equal(noId.statusCode, 404);
+            assert.equal(noId.body.ok, false);
+            assert.equal(noId.body.errorCode, "NOT_FOUND");
+
+            assert.equal(ownershipCalls.length, 4);
+            assert.deepEqual(ownershipCalls[0], {
+                resourceType: "media",
+                mediaId: created.id,
+                userId: "user-owner",
+            });
+        } finally {
+            configureMedia({ mediaService: previousMediaService });
+        }
     });
 });
 
@@ -827,31 +1022,6 @@ describe("Media Deletion Status Predicates, MediaConflictError & deleteMedia Gua
         }
     });
 });
-
-describe("MediaWorkflowLifecycleService — Structured Logging & Bridge Injection", () => {
-    it("supports direct bridge injection", async () => {
-        const { MediaWorkflowLifecycleService } = await import("#media/tools");
-
-        let createdArgs = null;
-        const fakeBridge = {
-            createV1Placeholder: async (args) => {
-                createdArgs = args;
-                return { workflow: { id: "wf-1" }, media: { id: "media-1" } };
-            },
-        };
-
-        const lifecycle = new MediaWorkflowLifecycleService({ bridge: fakeBridge });
-        const placeholder = await lifecycle.startPlaceholder({
-            userId: "user-1",
-            nodeType: "image-generation",
-            input: { project_id: "proj-1", prompt: "Sunset" },
-            runId: "run-1",
-        });
-
-        assert.deepEqual(placeholder, { workflowId: "wf-1", mediaId: "media-1" });
-        assert.equal(createdArgs.projectId, "proj-1");
-    });
-});
 }
 
 // ─── Source: mediaServiceWorkflowMedia.test.js ───
@@ -942,164 +1112,6 @@ describe("D2.6 — Media Ratio & Dimension Preservation Boundary Tests", () => {
     assert.equal(calculateAspectRatio(1024, 1024), "1:1");
     assert.equal(calculateAspectRatio(1200, 800), "3:2");
     assert.equal(calculateAspectRatio(800, 600), "4:3");
-  });
-
-  it("TEST 3: V1StorageBridge createV1Placeholder uses resolveMediaMetadata instead of hardcoded 1024x1024", async () => {
-    const { V1StorageBridge } = await import("#media/tools");
-    let insertedMediaData = null;
-    let insertedConfigData = null;
-
-    const mockDb = {
-      configs: {
-        createConfig: async (cfg) => {
-          insertedConfigData = cfg;
-          return { id: "mock-cfg-id" };
-        },
-      },
-      workflows: {
-        createWorkflow: async (wf) => ({ id: "mock-wf-id", ...wf }),
-        updatePrimaryMedia: async () => {},
-      },
-      media: {
-        createMedia: async (m) => {
-          insertedMediaData = m;
-          return { id: "mock-media-id", ...m };
-        },
-      },
-    };
-
-    const bridge = new V1StorageBridge({ db: mockDb });
-
-    await bridge.createV1Placeholder({
-      userId: randomUUID(),
-      projectId: randomUUID(),
-      config: {
-        prompt: "A cinematic scene",
-        model: "nanobana_pro",
-        ratio: "16:9", // Frontend passed 'ratio', not 'aspect_ratio'
-      },
-    });
-
-    if (insertedConfigData) {
-      assert.equal(
-        insertedConfigData.aspect_ratio,
-        "16:9",
-        `Expected config.aspect_ratio to be 16:9, got ${insertedConfigData.aspect_ratio}`
-      );
-    }
-
-    assert.ok(insertedMediaData, "Expected media placeholder to be created");
-    assert.equal(
-      insertedMediaData.width,
-      1344,
-      `Expected media placeholder width to be 1344 for 16:9, got ${insertedMediaData.width}`
-    );
-    assert.equal(
-      insertedMediaData.height,
-      768,
-      `Expected media placeholder height to be 768 for 16:9, got ${insertedMediaData.height}`
-    );
-  });
-
-  it("TEST 4: V1StorageBridge finalizeV1Media preserves placeholder dimensions when asset has no width/height", async () => {
-    const { V1StorageBridge } = await import("#media/tools");
-    let updatedFields = null;
-
-    const mockDb = {
-      media: {
-        findById: async (id) => ({
-          id,
-          width: 1344,
-          height: 768,
-        }),
-        updateFields: async (id, fields) => {
-          updatedFields = fields;
-          return { id, ...fields };
-        },
-      },
-    };
-
-    const bridge = new V1StorageBridge({ db: mockDb });
-
-    await bridge.finalizeV1Media("media-123", {
-      url: "https://storage.example.com/asset.png",
-      // width and height intentionally missing from provider output
-    });
-
-    assert.ok(updatedFields, "Expected media fields to be updated");
-    assert.equal(
-      updatedFields.width,
-      1344,
-      `Expected finalized width to preserve 1344, got ${updatedFields.width}`
-    );
-    assert.equal(
-      updatedFields.height,
-      768,
-      `Expected finalized height to preserve 768, got ${updatedFields.height}`
-    );
-  });
-
-  it("TEST 5: MediaWorkflowLifecycleService preserves ratio in generation_config and placeholder dimensions", async () => {
-    const { MediaWorkflowLifecycleService } = await import("#media/tools");
-    let insertedMedia = null;
-    let insertedConfig = null;
-    let updatedMedia = null;
-
-    const mockDb = {
-      configs: {
-        createConfig: async (cfg) => {
-          insertedConfig = cfg;
-          return { id: "cfg-123", ...cfg };
-        },
-      },
-      workflows: {
-        createWorkflow: async (wf) => ({ id: "wf-123", ...wf }),
-        updatePrimaryMedia: async () => {},
-      },
-      media: {
-        createMedia: async (m) => {
-          insertedMedia = m;
-          return { id: "m-123", ...m };
-        },
-        findById: async (id) => ({
-          id,
-          width: insertedMedia?.width || 1344,
-          height: insertedMedia?.height || 768,
-        }),
-        updateFields: async (id, fields) => {
-          updatedMedia = { id, ...fields };
-          return updatedMedia;
-        },
-      },
-    };
-
-    const lifecycle = new MediaWorkflowLifecycleService({ db: mockDb });
-
-    const result = await lifecycle.startPlaceholder({
-      userId: randomUUID(),
-      nodeType: "image-generation",
-      input: {
-        projectId: randomUUID(),
-        prompt: "A neon cyberpunk cityscape",
-        ratio: "16:9",
-      },
-    });
-
-    assert.ok(result, "Placeholder result should not be null");
-    if (insertedConfig) {
-      assert.equal(insertedConfig.aspect_ratio, "16:9");
-    }
-    assert.equal(insertedMedia.width, 1344);
-    assert.equal(insertedMedia.height, 768);
-
-    // Complete placeholder with asset lacking width/height
-    const completed = await lifecycle.completePlaceholder("m-123", {
-      url: "https://storage.example.com/cyberpunk.png",
-    });
-
-    assert.equal(completed, true);
-    assert.equal(updatedMedia.width, 1344);
-    assert.equal(updatedMedia.height, 768);
   });
 
   it("TEST 6: SaveMediaNode preserves placeholder dimensions when provider asset lacks width/height", async () => {

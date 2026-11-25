@@ -141,10 +141,6 @@ export class WorkflowMediaService {
             const wfMedia = await this.db.media.findByWorkflow(targetId).catch(() => []);
             sourceMedia = wfMedia.find((m) => m.url && m.status !== "failed") || wfMedia[0] || null;
         }
-        sourceWf = await this.db.workflows.getWorkflow(targetId).catch(() => null);
-        if (!sourceMedia && sourceWf?.primary_media_id) {
-            sourceMedia = await this.db.media?.findById(sourceWf.primary_media_id).catch(() => null);
-        }
         if (!sourceMedia) {
             throw new CrudServiceError("Media not found", {
                 statusCode: 404,
@@ -342,7 +338,7 @@ export class WorkflowMediaService {
 
         // 5. Inspect previous primary state before any attachments
         const currentPrimary = await this.db.workflowMedia?.getPrimaryMedia?.(workflowId).catch(() => null);
-        const currentWf = await this.db.workflows?.findById?.(workflowId, "primary_media_id").catch(() => null);
+        const currentWf = !currentPrimary ? await this.db.workflows?.findById?.(workflowId).catch(() => null) : null;
         const previousPrimaryMediaId = currentPrimary?.media_id || currentPrimary?.id || currentWf?.primary_media_id || null;
 
         // 6. Build rollbackHandle tracking per-item state
@@ -466,8 +462,6 @@ export class WorkflowMediaService {
                 await this.db.workflowMedia?.setPrimaryMedia?.({ workflowId, mediaId: targetMediaId });
                 if (this.db.workflows?.updatePrimaryMedia) {
                     await this.db.workflows.updatePrimaryMedia(workflowId, targetMediaId).catch(() => null);
-                } else if (this.db.workflows?.updateFields) {
-                    await this.db.workflows.updateFields(workflowId, { primary_media_id: targetMediaId }).catch(() => null);
                 }
             }
 
@@ -570,8 +564,6 @@ export class WorkflowMediaService {
                     if (!currentWfPrimary || currentWfPrimary === newPrimaryMediaId) {
                         if (this.db.workflows?.updatePrimaryMedia) {
                             await this.db.workflows.updatePrimaryMedia(workflowId, previousPrimaryMediaId || null).catch(() => null);
-                        } else if (this.db.workflows?.updateFields) {
-                            await this.db.workflows.updateFields(workflowId, { primary_media_id: previousPrimaryMediaId || null }).catch(() => null);
                         }
                         currentMatches = true;
                     }
@@ -1000,8 +992,6 @@ export class WorkflowMediaService {
             // 3. Set primary media on the new workflow
             if (this.db.workflowMedia?.setPrimaryMedia) {
                 await this.db.workflowMedia.setPrimaryMedia({ workflowId: newWorkflow.id, mediaId });
-            } else if (this.db.workflows?.updateFields) {
-                await this.db.workflows.updateFields(newWorkflow.id, { primary_media_id: mediaId }).catch(() => null);
             }
             const updatedWorkflow = { ...newWorkflow, primary_media_id: mediaId, primaryMediaId: mediaId };
 
@@ -1012,11 +1002,6 @@ export class WorkflowMediaService {
                 }
                 if (this.db.workflows?.updatePrimaryMedia) {
                     await this.db.workflows.updatePrimaryMedia(currentWorkflowId, null).catch(() => null);
-                }
-                if (this.db.workflows?.updateFields) {
-                    await this.db.workflows.updateFields(currentWorkflowId, {
-                        primary_media_id: null,
-                    }).catch(() => null);
                 }
             }
 
@@ -1121,8 +1106,6 @@ export class WorkflowMediaService {
 
         if (this.db.workflows?.updatePrimaryMedia) {
             await this.db.workflows.updatePrimaryMedia(workflowId, null).catch(() => null);
-        } else if (this.db.workflows?.updateFields) {
-            await this.db.workflows.updateFields(workflowId, { primary_media_id: null }).catch(() => null);
         }
 
         const deletedOrphanIds = [];
@@ -1391,7 +1374,7 @@ export class WorkflowMediaService {
                         : [];
                     if (remainingWfMedia.length === 0) {
                         const wfRec = await this.db.workflows?.findById
-                            ? await this.db.workflows.findById(workflowId, "id, primary_media_id, workflow_type").catch(() => null)
+                            ? await this.db.workflows.findById(workflowId, "id, workflow_type").catch(() => null)
                             : null;
                         const sidecarPreserved = await this._hasSidecarEntity(workflowId, wfRec).catch(() => false);
                         if (!sidecarPreserved && this.db.workflows?.deleteById) {
@@ -1400,9 +1383,10 @@ export class WorkflowMediaService {
                             });
                             workflowDeleted = true;
                         }
-                    } else if (this.db.workflows?.findById && this.db.workflows?.updatePrimaryMedia) {
-                        const wfRec = await this.db.workflows.findById(workflowId, "primary_media_id").catch(() => null);
-                        if (wfRec?.primary_media_id === mediaId) {
+                    } else if (this.db.workflows?.updatePrimaryMedia) {
+                        const currentPrimary = await this.db.workflowMedia?.getPrimaryMedia?.(workflowId).catch(() => null);
+                        const currentPrimaryId = currentPrimary?.media_id || currentPrimary?.id || null;
+                        if (currentPrimaryId === mediaId) {
                             await this.db.workflows.updatePrimaryMedia(workflowId, null).catch(() => null);
                         }
                     }
@@ -1447,7 +1431,7 @@ export class WorkflowMediaService {
 
                 if (!remainingMedia || remainingMedia.length === 0) {
                     const workflowRecord = await this.db.workflows?.findById
-                        ? await this.db.workflows.findById(wfId, "id, primary_media_id, workflow_type").catch(() => null)
+                        ? await this.db.workflows.findById(wfId, "id, workflow_type").catch(() => null)
                         : null;
                     const hasSidecar = await this._hasSidecarEntity(wfId, workflowRecord);
 
@@ -1458,8 +1442,6 @@ export class WorkflowMediaService {
                         }
                         if (this.db.workflows?.updatePrimaryMedia) {
                             await this.db.workflows.updatePrimaryMedia(wfId, null).catch(() => null);
-                        } else if (this.db.workflows?.updateFields) {
-                            await this.db.workflows.updateFields(wfId, { primary_media_id: null }).catch(() => null);
                         }
                     } else {
                         // Empty plain workflow: delete workflow container
@@ -1476,8 +1458,6 @@ export class WorkflowMediaService {
                     }
                     if (this.db.workflows?.updatePrimaryMedia) {
                         await this.db.workflows.updatePrimaryMedia(wfId, null).catch(() => null);
-                    } else if (this.db.workflows?.updateFields) {
-                        await this.db.workflows.updateFields(wfId, { primary_media_id: null }).catch(() => null);
                     }
                 }
             }

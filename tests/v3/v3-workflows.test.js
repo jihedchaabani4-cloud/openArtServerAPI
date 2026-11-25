@@ -91,13 +91,10 @@ describe("V3 Declarative Workflows & Internal Engine", () => {
     assert.equal(typeof createJobExecutionContext, "function");
     assert.equal(Object.keys(V3_WORKFLOWS).length, 7);
     assert.equal(getV3Workflow("image-generation-v3"), imageGenerationV3);
-    assert.equal(getV3Workflow("image-generation-v1"), imageGenerationV3);
     assert.equal(getV3Workflow("imageGeneration"), imageGenerationV3);
     assert.equal(getV3Workflow("video-generation-v3"), videoGenerationV3);
-    assert.equal(getV3Workflow("video-generation-v1"), videoGenerationV3);
     assert.equal(getV3Workflow("videoGeneration"), videoGenerationV3);
     assert.equal(getV3Workflow("character-sheet-v3"), characterSheetV3);
-    assert.equal(getV3Workflow("character-sheet-v1"), characterSheetV3);
     assert.equal(getV3Workflow("characterSheet"), characterSheetV3);
 
     const imageRelightV3 = V3_WORKFLOWS["image-relight-v3"];
@@ -136,6 +133,19 @@ describe("V3 Declarative Workflows & Internal Engine", () => {
     assert.equal(imageAnglesV3.nodes.at(-1).inputs.media_role, "output");
     assert.equal(imageAnglesV3.nodes.at(-1).inputs.save_type, "workflow_output");
     assert.deepEqual(imageAnglesV3.requiredInputs, ["prompt", "source_image_url"]);
+
+    // Every V3 workflow containing base.resolve_references wires verify_ownership with fail-closed default true
+    for (const wf of Object.values(V3_WORKFLOWS)) {
+      for (const node of wf.nodes) {
+        if (node.type === "base.resolve_references") {
+          assert.deepEqual(
+            node.inputs.verify_ownership,
+            { fromInput: "verify_ownership", default: true },
+            `${wf.id}.${node.id} must wire verify_ownership with default: true`
+          );
+        }
+      }
+    }
   });
 
   it("compiles and executes imageGenerationV3 end-to-end across 4 sequential nodes", async () => {
@@ -212,6 +222,64 @@ describe("V3 Declarative Workflows & Internal Engine", () => {
     assert.equal(res.terminalOutputs.save_media.saved_media.role, "output");
     assert.equal(res.terminalOutputs.save_media.saved_media.save_type, "workflow_output");
     assert.equal(res.wavesExecuted, 4);
+  });
+
+  it("enforces ownership by default in base.resolve_references (verify_ownership: true) and skips duplicate worker ownership calls when verify_ownership: false", async () => {
+    const reg = createDefaultV3NodeRegistry();
+    const baseCtx = createMockNodeExecutionContext();
+
+    // 1. Default (verify_ownership omitted -> true): ownership checks MUST run in ResolveRefsNode
+    let defaultOwnCalls = 0;
+    const defaultExec = new WorkflowExecutor(reg);
+    const defaultRes = await defaultExec.execute({
+      workflow: imageGenerationV3,
+      input: {
+        prompt: "portrait",
+        model: "nanobana_2",
+        characters: ["char-luna"],
+        media_id: "media-own-default",
+      },
+      context: {
+        ...baseCtx,
+        assertOwns: async () => {
+          defaultOwnCalls += 1;
+          return true;
+        },
+        assertOwnsAny: async () => {
+          defaultOwnCalls += 1;
+          return true;
+        },
+      },
+    });
+    assert.equal(defaultRes.status, "completed");
+    assert.ok(defaultOwnCalls >= 1, "omitting verify_ownership must fail-closed and run ownership checks");
+
+    // 2. Verified service caller (verify_ownership: false): 0 duplicate ownership checks in worker
+    let verifiedOwnCalls = 0;
+    const verifiedExec = new WorkflowExecutor(reg);
+    const verifiedRes = await verifiedExec.execute({
+      workflow: imageGenerationV3,
+      input: {
+        prompt: "portrait",
+        model: "nanobana_2",
+        characters: ["char-luna"],
+        verify_ownership: false,
+        media_id: "media-own-skipped",
+      },
+      context: {
+        ...baseCtx,
+        assertOwns: async () => {
+          verifiedOwnCalls += 1;
+          return true;
+        },
+        assertOwnsAny: async () => {
+          verifiedOwnCalls += 1;
+          return true;
+        },
+      },
+    });
+    assert.equal(verifiedRes.status, "completed");
+    assert.equal(verifiedOwnCalls, 0, "passing verify_ownership: false must skip duplicate worker ownership checks");
   });
 
   it("compiles and executes videoGenerationV3 end-to-end across 4 sequential nodes", async () => {

@@ -210,7 +210,7 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
     };
 
     await engine.execute({
-      useCaseId: "image-generation-v1",
+      useCaseId: "image-generation-v3",
       input: { workflow_id: "wf-1", media_id: "m-1" },
       userId: "00000000-0000-0000-0000-000000000001",
     });
@@ -230,7 +230,7 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
     await assert.rejects(
       async () => {
         await engine.execute({
-          useCaseId: "image-generation-v1",
+          useCaseId: "image-generation-v3",
           input: { workflow_id: "wf-2", media_id: "m-2" },
           userId: "00000000-0000-0000-0000-000000000001",
         });
@@ -250,7 +250,7 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
     });
 
     const result = await engine.execute({
-      useCaseId: "image-generation-v1",
+      useCaseId: "image-generation-v3",
       input: {
         prompt: "A beautiful mountain landscape at sunset",
         model: "gpt-image-2",
@@ -279,7 +279,7 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
     });
 
     const result = await engine.execute({
-      useCaseId: "video-generation-v1",
+      useCaseId: "video-generation-v3",
       input: {
         prompt: "A drone shot flying over waves crashing on rocks",
         model: "wan_3_0",
@@ -308,7 +308,7 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
     });
 
     const result = await engine.execute({
-      useCaseId: "character-sheet-v1",
+      useCaseId: "character-sheet-v3",
       input: {
         prompt: "Futuristic cyberpunk warrior with cybernetic arm",
         name: "CyberHero",
@@ -380,7 +380,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
     });
 
     const legacyPayload = {
-      useCaseId: "image-generation-v1",
+      useCaseId: "image-generation-v3",
       input: {
         prompt: "test unverified input targets",
         model: "nanobana_2",
@@ -434,7 +434,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
     const engine = new ExecutionEngine();
 
     const result = await engine.execute({
-      useCaseId: "image-generation-v1",
+      useCaseId: "image-generation-v3",
       input: {
         prompt: "four variations of cat",
         model: "nanobana_2",
@@ -494,7 +494,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         };
 
         const payload = {
-          useCaseId: "image-generation-v1",
+          useCaseId: "image-generation-v3",
           input: {
             prompt: "error test prompt",
             model: "nanobana_2",
@@ -1014,7 +1014,7 @@ describe("Execution Error & Hook Propagation Boundary Tests (BUG-01 / V3)", () =
     await assert.rejects(
       async () => {
         await engine.execute({
-          useCaseId: "image-generation-v1",
+          useCaseId: "image-generation-v3",
           input: {
             workflow_id: "wf-bug01-media",
             media_id: "media-placeholder-1",
@@ -1042,7 +1042,7 @@ describe("Execution Error & Hook Propagation Boundary Tests (BUG-01 / V3)", () =
     await assert.rejects(
       async () => {
         await engine.execute({
-          useCaseId: "image-generation-v1",
+          useCaseId: "image-generation-v3",
           input: {
             workflow_id: "wf-bug01-e2e",
             media_id: "media-placeholder-e2e",
@@ -1246,7 +1246,7 @@ describe("Sprint R2: ExecutionEngine Failure Hook Propagation", () => {
 
     try {
       await service.launch({
-        useCaseId: "image-generation-v1",
+        useCaseId: "image-generation-v3",
         input: {
           prompt: "A neon cyborg cat",
           model: "nanobana_2",
@@ -1291,7 +1291,7 @@ describe("Sprint R2: ExecutionEngine Failure Hook Propagation", () => {
     let caughtError = null;
     try {
       await service.execute({
-        useCaseId: "image-generation-v1",
+        useCaseId: "image-generation-v3",
         input: {
           serverMediaIds: ["media-standalone-1", "media-standalone-2"],
         },

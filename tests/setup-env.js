@@ -21,12 +21,10 @@ process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY || "placeholder-gemini-t
 process.env.FAL_KEY = process.env.FAL_KEY || "placeholder-fal-test-key";
 process.env.HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || "placeholder-hf-test-key";
 
-// Hermetic In-Memory Storage & Run Repository Mocking
+// Hermetic In-Memory Storage & WorkflowMedia Mocking
 const { supabase, supabaseAdmin } = await import("#shared/db/supabase.js");
-const { RunRepository } = await import("../src/systems/generation/internal/db/RunRepository.js");
 const { WorkflowMediaRepository } = await import("#media/tools");
 
-RunRepository.useMemoryFallback = true;
 WorkflowMediaRepository.enableTestMemoryFallback();
 
 const inMemoryStorage = new Map();

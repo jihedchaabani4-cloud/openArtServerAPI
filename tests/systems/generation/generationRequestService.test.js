@@ -1,8 +1,6 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { GenerationRequestService } from "#generation/tools";
-import { V1StorageBridge } from "#media/tools";
-import { RunRepository } from "../../../src/systems/generation/internal/db/RunRepository.js";
 import { AppError, redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared";
 import express from "express";
 import http from "node:http";
@@ -61,13 +59,15 @@ describe("GenerationRequestService unit tests", () => {
             db: mockDb,
             executionEngine: mockExecutionEngine,
             folderService: mockFolderService,
+            assertOwns: async () => true,
+            assertOwnsAny: async () => true,
         });
 
         const result = await service.requestGeneration({
             userId: "user-1",
             mediaType: "image",
             stepId: "image_generation",
-            useCaseId: "image-generation-v1",
+            useCaseId: "image-generation-v3",
             prompt: "A beautiful cinematic landscape",
             model: "nanobana_pro",
             projectId: "proj-123",
@@ -91,7 +91,7 @@ describe("GenerationRequestService unit tests", () => {
         assert.equal(createdWorkflows[0].folder_id, "folder-abc");
         assert.equal(createdMedia.length, 1);
         assert.equal(createdMedia[0].step_id, "image_generation");
-        assert.equal(enqueuedPayload.useCaseId, "image-generation-v1");
+        assert.equal(enqueuedPayload.useCaseId, "image-generation-v3");
         assert.equal(enqueuedPayload.userId, "user-1");
     });
 
@@ -129,13 +129,15 @@ describe("GenerationRequestService unit tests", () => {
                 db: mockDb,
                 executionEngine: mockExecutionEngine,
                 folderService: mockFolderService,
+                assertOwns: async () => true,
+                assertOwnsAny: async () => true,
             });
 
             const result = await service.requestGeneration({
                 userId: "user-1",
                 mediaType: "video",
                 stepId: "video_generation",
-                useCaseId: "video-generation-v1",
+                useCaseId: "video-generation-v3",
                 prompt: "A cinematic slow motion scene",
                 model: "seedance_2_5",
                 projectId: "proj-123",
@@ -191,6 +193,8 @@ describe("GenerationRequestService unit tests", () => {
             db: mockDb,
             executionEngine: mockExecutionEngine,
             folderService: mockFolderService,
+            assertOwns: async () => true,
+            assertOwnsAny: async () => true,
         });
 
         await assert.rejects(
@@ -199,7 +203,7 @@ describe("GenerationRequestService unit tests", () => {
                     userId: "user-1",
                     mediaType: "image",
                     stepId: "image_generation",
-                    useCaseId: "image-generation-v1",
+                    useCaseId: "image-generation-v3",
                     prompt: "A neon cityscape",
                     model: "nanobana_pro",
                     projectId: "proj-123",
@@ -271,13 +275,15 @@ describe("GenerationRequestService unit tests", () => {
             db: mockDb,
             executionEngine: mockExecutionEngine,
             folderService: { validateAndAssertUsable: async (fid) => fid },
+            assertOwns: async () => true,
+            assertOwnsAny: async () => true,
         });
 
         const result = await service.requestGeneration({
             userId: "user-atomic-1",
             mediaType: "video",
             stepId: "video_generation",
-            useCaseId: "video-generation-v1",
+            useCaseId: "video-generation-v3",
             prompt: "Cinematic ocean waves at sunset",
             model: "seedance_2_5",
             projectId: "proj-atomic-1",
@@ -344,13 +350,15 @@ describe("GenerationRequestService unit tests", () => {
                 launch: async (args) => ({ jobId: "job-fb", executionId: args.executionId, cost: { totalCredits: 5 } }),
             },
             folderService: { validateAndAssertUsable: async () => null },
+            assertOwns: async () => true,
+            assertOwnsAny: async () => true,
         });
 
         const result = await service.requestGeneration({
             userId: "user-fb-1",
             mediaType: "image",
             stepId: "image_generation",
-            useCaseId: "image-generation-v1",
+            useCaseId: "image-generation-v3",
             prompt: "Fallback mountain",
             model: "nanobana_pro",
             projectId: "proj-fb-1",
@@ -365,14 +373,119 @@ describe("GenerationRequestService unit tests", () => {
         assert.ok(createdMedia);
         assert.ok(linked);
     });
+
+    it("enforces 1x fail-fast ownership gate (project, references, MEDIA_PARAM_KEYS, inline tags), resolves default video 16:9 mediaMeta, and forwards verify_ownership: false", async () => {
+        const ownershipCalls = [];
+        let createdCount = 0;
+        let launchedArgs = null;
+
+        const mockDb = {
+            workflows: {
+                createWorkflow: async (wf) => {
+                    createdCount += 1;
+                    return wf;
+                },
+            },
+            media: {
+                createMedia: async (m) => {
+                    createdCount += 1;
+                    return m;
+                },
+                updateMedia: async () => {},
+            },
+            workflowMedia: { linkMedia: async () => {} },
+        };
+
+        const service = new GenerationRequestService({
+            db: mockDb,
+            executionEngine: {
+                launch: async (args) => {
+                    launchedArgs = args;
+                    return { jobId: "job-own-1", executionId: args.executionId, cost: { totalCredits: 10 } };
+                },
+            },
+            folderService: { validateAndAssertUsable: async () => null },
+            assertOwns: async (type, id, uid) => {
+                ownershipCalls.push({ fn: "assertOwns", type, id, uid });
+                if (id === "proj-foreign") throw new AppError("Project not found", 404);
+                return { id };
+            },
+            assertOwnsAny: async (types, id, uid) => {
+                ownershipCalls.push({ fn: "assertOwnsAny", types, id, uid });
+                if (id === "char-foreign") throw new AppError("Reference not found", 404);
+                return { id };
+            },
+        });
+
+        // 1. Foreign inline <character:id> fails fast BEFORE placeholder creation
+        await assert.rejects(
+            () =>
+                service.requestGeneration({
+                    userId: "user-1",
+                    mediaType: "image",
+                    body: {
+                        prompt: "Portrait of <character:char-foreign> in neon rain",
+                        model: "nanobana_pro",
+                        project_id: "proj-1",
+                    },
+                }),
+            (err) => err.statusCode === 404
+        );
+        assert.equal(createdCount, 0, "must not create placeholders when inline entity ownership fails");
+        assert.equal(launchedArgs, null, "must not launch job when inline entity ownership fails");
+
+        // 2. Raw URL in nested parameters fails fast with 400 DIRECT_URL_NOT_ALLOWED
+        await assert.rejects(
+            () =>
+                service.requestGeneration({
+                    userId: "user-1",
+                    mediaType: "image",
+                    body: {
+                        prompt: "A forest",
+                        model: "nanobana_pro",
+                        project_id: "proj-1",
+                        parameters: { images: ["https://evil.example/img.png"] },
+                    },
+                }),
+            (err) => err.statusCode === 400 && err.code === "DIRECT_URL_NOT_ALLOWED"
+        );
+        assert.equal(createdCount, 0);
+
+        // 3. Valid video request resolves default 16:9 aspect ratio, verifies each ID once, and sets verify_ownership: false
+        ownershipCalls.length = 0;
+        const result = await service.requestGeneration({
+            userId: "user-1",
+            mediaType: "video",
+            body: {
+                prompt: "Soaring eagle with <character:char-1> and <element:elem-1>",
+                model: "wan_3_0",
+                project_id: "proj-1",
+                references: ["wf-ref-1", "wf-ref-1"],
+                parameters: { input_image: "media-in-1" },
+            },
+        });
+
+        assert.equal(result.ok, true);
+        assert.ok(launchedArgs);
+        assert.equal(launchedArgs.input.aspect_ratio, "16:9");
+        assert.equal(launchedArgs.input.verify_ownership, false);
+        assert.deepEqual(
+            ownershipCalls.map((c) => `${c.fn}:${c.type || c.types.join("|")}:${c.id}`),
+            [
+                "assertOwns:project:proj-1",
+                "assertOwnsAny:workflow|character|element|media:wf-ref-1",
+                "assertOwnsAny:character|workflow:char-1",
+                "assertOwnsAny:element|workflow:elem-1",
+                "assertOwnsAny:workflow|media:media-in-1",
+            ]
+        );
+    });
 });
 }
 
 // ─── Source: generationWithFolder.test.js ───
 {
 process.env.NODE_ENV = "test";
-
-const v1StorageBridge = new V1StorageBridge({ db });
 
 describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-T8)", () => {
   let server;
@@ -647,20 +760,6 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
       assert.equal(workflows[0].folder_id, "00000000-0000-4000-8000-000000000001");
     });
   });
-
-  describe("Worker Resiliency: deleted folder fallback", () => {
-    it("falls back to folder_id = null when target folder is deleted before worker creates placeholder", async () => {
-      const { workflow } = await v1StorageBridge.createV1Placeholder({
-        projectId: "proj-A",
-        userId: "user-A",
-        folderId: "deleted-folder-123",
-        displayName: "Worker Workflow",
-      });
-
-      assert.ok(workflow);
-      assert.equal(workflow.folder_id, null, "Deleted folder must fall back to folder_id = null");
-    });
-  });
 });
 }
 
@@ -689,179 +788,6 @@ after(async () => {
     await redisConnection.quit().catch(() => redisConnection.disconnect());
     await workerRedisConnection.quit().catch(() => workerRedisConnection.disconnect());
   } catch {}
-});
-
-describe("F2.2-a — RunRepository Target Columns & Fallback Invariants (Supabase Mocked)", () => {
-  let originalClientOverride;
-  let originalUseMemoryFallback;
-
-  beforeEach(() => {
-    originalClientOverride = RunRepository.clientOverride;
-    originalUseMemoryFallback = RunRepository.useMemoryFallback;
-    RunRepository.useMemoryFallback = false;
-  });
-
-  afterEach(() => {
-    RunRepository.clientOverride = originalClientOverride;
-    RunRepository.useMemoryFallback = originalUseMemoryFallback;
-  });
-
-  it("TEST 1: createRun writes metadata, v1_workflow_id, and target_media_ids to Supabase columns", async () => {
-    let capturedTable = null;
-    let capturedInsert = null;
-
-    const mockSupabase = {
-      from: (table) => {
-        capturedTable = table;
-        return {
-          insert: (payload) => {
-            capturedInsert = payload;
-            return {
-              select: () => ({
-                single: async () => ({
-                  data: {
-                    ...payload,
-                    run_id: payload.run_id || "mock-run-id",
-                  },
-                  error: null,
-                }),
-              }),
-            };
-          },
-        };
-      },
-    };
-
-    RunRepository.clientOverride = mockSupabase;
-    const repo = new RunRepository();
-
-    const created = await repo.createRun({
-      run_id: "test-run-cols-1",
-      workflow_id: "image-generation-v1",
-      workflow_version: "1.0.0",
-      user_id: "user-123",
-      status: "pending",
-      input: { prompt: "a cat" },
-      execution_plan: { nodes: [] },
-      v1_workflow_id: "wf-v1-uuid-111",
-      target_media_ids: ["media-uuid-222"],
-      metadata: { billingAccumulator: [] },
-    });
-
-    assert.strictEqual(capturedTable, "v2_workflow_runs");
-    assert.ok(capturedInsert, "Supabase insert payload must be provided");
-    assert.strictEqual(capturedInsert.v1_workflow_id, "wf-v1-uuid-111", "v1_workflow_id must be written as column");
-    assert.deepStrictEqual(capturedInsert.target_media_ids, ["media-uuid-222"], "target_media_ids must be written as column");
-    assert.deepStrictEqual(capturedInsert.metadata, { billingAccumulator: [] }, "metadata must be written as column");
-
-    // Also assert normalized read properties on returned run
-    assert.strictEqual(created.v1_workflow_id, "wf-v1-uuid-111");
-    assert.deepStrictEqual(created.target_media_ids, ["media-uuid-222"]);
-  });
-
-  it("TEST 2: getRun returns normalized row reading new columns directly", async () => {
-    const mockSupabase = {
-      from: () => ({
-        select: () => ({
-          eq: () => ({
-            maybeSingle: async () => ({
-              data: {
-                run_id: "test-run-cols-2",
-                workflow_id: "video-generation-v1",
-                workflow_version: "1.0.0",
-                v1_workflow_id: "wf-v1-direct-888",
-                target_media_ids: ["media-direct-999"],
-                metadata: { key: "val" },
-                execution_plan: {},
-              },
-              error: null,
-            }),
-          }),
-        }),
-      }),
-    };
-
-    RunRepository.clientOverride = mockSupabase;
-    const repo = new RunRepository();
-
-    const run = await repo.getRun("test-run-cols-2");
-    assert.ok(run);
-    assert.strictEqual(run.v1_workflow_id, "wf-v1-direct-888");
-    assert.deepStrictEqual(run.target_media_ids, ["media-direct-999"]);
-    assert.strictEqual(run.targetWorkflowId, "wf-v1-direct-888");
-    assert.deepStrictEqual(run.targetMediaIds, ["media-direct-999"]);
-  });
-
-  it("TEST 3: getRun backward compatibility: row with null columns falls back to execution_plan targets", async () => {
-    const mockSupabase = {
-      from: () => ({
-        select: () => ({
-          eq: () => ({
-            maybeSingle: async () => ({
-              data: {
-                run_id: "test-run-legacy-3",
-                workflow_id: "image-generation-v1",
-                workflow_version: "1.0.0",
-                v1_workflow_id: null,
-                target_media_ids: [],
-                metadata: {},
-                execution_plan: {
-                  targetWorkflowId: "wf-legacy-fallback-444",
-                  targetMediaIds: ["media-legacy-fallback-555"],
-                },
-              },
-              error: null,
-            }),
-          }),
-        }),
-      }),
-    };
-
-    RunRepository.clientOverride = mockSupabase;
-    const repo = new RunRepository();
-
-    const run = await repo.getRun("test-run-legacy-3");
-    assert.ok(run);
-    assert.strictEqual(run.v1_workflow_id, "wf-legacy-fallback-444", "Must fall back to execution_plan.targetWorkflowId");
-    assert.deepStrictEqual(run.target_media_ids, ["media-legacy-fallback-555"], "Must fall back to execution_plan.targetMediaIds");
-    assert.strictEqual(run.targetWorkflowId, "wf-legacy-fallback-444");
-    assert.deepStrictEqual(run.targetMediaIds, ["media-legacy-fallback-555"]);
-  });
-
-  it("TEST 4: getRun fail-closed: run with neither column nor execution_plan targets fails closed in node persistence", async () => {
-    const mockSupabase = {
-      from: () => ({
-        select: () => ({
-          eq: () => ({
-            maybeSingle: async () => ({
-              data: {
-                run_id: "test-run-empty-4",
-                workflow_id: "image-generation-v1",
-                workflow_version: "1.0.0",
-                v1_workflow_id: null,
-                target_media_ids: [],
-                metadata: {},
-                execution_plan: {},
-                input: {
-                  workflow_id: "spoofed-wf-input",
-                  media_id: "spoofed-media-input",
-                },
-              },
-              error: null,
-            }),
-          }),
-        }),
-      }),
-    };
-
-    RunRepository.clientOverride = mockSupabase;
-    const repo = new RunRepository();
-
-    const run = await repo.getRun("test-run-empty-4");
-    assert.ok(run);
-    assert.strictEqual(run.v1_workflow_id, null, "Must NOT fall back to run.input.workflow_id");
-    assert.deepStrictEqual(run.target_media_ids, [], "Must NOT fall back to run.input.media_id");
-  });
 });
 
 describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () => {
@@ -968,6 +894,7 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
     assert.deepStrictEqual(capturedPrepare.input.serverMediaIds, ["media-char-placeholder-777"], "serverMediaIds must include placeholder media ID");
     assert.strictEqual(capturedPrepare.input.serverWorkflowId, "char-wf-888", "serverWorkflowId must be set");
     assert.strictEqual(capturedPrepare.input.serverProjectId, "proj-111", "serverProjectId must be set");
+    assert.strictEqual(capturedPrepare.input.verify_ownership, false, "verified character sheet dispatch must set verify_ownership: false");
     assert.strictEqual(capturedPrepare.serverContext?.workflowId, "char-wf-888", "serverContext.workflowId must be set");
     assert.deepStrictEqual(capturedPrepare.serverContext?.mediaIds, ["media-char-placeholder-777"], "serverContext.mediaIds must include placeholder media");
   });

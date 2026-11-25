@@ -38,7 +38,6 @@ promptRouter.post("/optimize", requireAuth, rateLimit("promptOptimization"), wor
 export const v2WorkflowsRouter = express.Router();
 v2WorkflowsRouter.get("/health", workflowsController.getWorkflowHealth);
 v2WorkflowsRouter.post("/run", requireAuth, workflowsController.runWorkflowDisabled);
-v2WorkflowsRouter.get("/runs/:run_id", requireAuth, workflowsController.getWorkflowRunById);
 
 // ── Workflows Router (V1 CRUD & Library) ───────────────────────────
 export const workflowsRouter = express.Router();

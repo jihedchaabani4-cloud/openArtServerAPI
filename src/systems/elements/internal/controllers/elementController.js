@@ -8,13 +8,13 @@
 
 import { randomUUID } from "node:crypto";
 import { getElementService, getElementMediaService } from "../services/serviceAccessor.js";
-import { assertOwns } from "#identity/tools";
 import { moveItemToTrash } from "#workspace/tools";
-import { createLogger } from "#shared";
+import { createLogger, safePublicRouteError } from "#shared";
 
 const elementLogger = createLogger("elements:controller");
+const SERVER_FAULT_PUBLIC_MESSAGE = "An unexpected error occurred. Please try again later.";
 
-// ─── Logging helpers ──────────────────────────────────────────────────────────
+// ─── Logging & error response helpers ─────────────────────────────────────────
 
 function structuredLog({ traceId, operation, durationMs, status, errorCode, message } = {}) {
     const entry = {
@@ -33,27 +33,42 @@ function logOk(traceId, operation, start) {
 }
 
 function logErr(traceId, operation, start, err) {
-    const statusCode = err.statusCode || 500;
-    elementLogger.error(structuredLog({ traceId, operation, durationMs: Date.now() - start, status: "error", errorCode: statusCode, message: err.message }), `${operation} error`);
+    const statusCode = err?.statusCode || 500;
+    elementLogger.error(structuredLog({ traceId, operation, durationMs: Date.now() - start, status: "error", errorCode: statusCode, message: err?.message }), `${operation} error`);
     return statusCode;
+}
+
+function sendElementError(res, traceId, operation, start, err) {
+    const statusCode = logErr(traceId, operation, start, err);
+    const { errorCode, publicMessage } = safePublicRouteError(err, { statusCode });
+    const isServerFault = statusCode >= 500 || err?.category === "SERVER_FAULT";
+    const clientCode = isServerFault
+        ? "INTERNAL_ERROR"
+        : (err?.code || errorCode || "REQUEST_ERROR");
+    const clientMessage = isServerFault ? SERVER_FAULT_PUBLIC_MESSAGE : publicMessage;
+
+    return res.status(statusCode).json({
+        error: true,
+        code: clientCode,
+        category: err?.category || (isServerFault ? "SERVER_FAULT" : "USER_FAULT"),
+        message: clientMessage,
+        traceId,
+    });
 }
 
 // ─── POST /api/v2/elements ────────────────────────────────────────────────────
 
-/** Create a new Element. Body: { name, description?, projectId, tags?, userId? } */
+/** Create a new Element. Body: { name, description?, projectId, tags? } */
 export async function createElement(req, res) {
     const traceId = randomUUID();
     const start   = Date.now();
     const op      = "POST /api/v2/elements";
 
     try {
-        const { name, description, tags, element_type, type, images, imageUrls, sourceImages } = req.body;
-        const projectId = req.body.projectId || req.body.project_id;
-        const userId = req.user?.id || req.body.userId;
-
-        if (projectId && userId) {
-            await assertOwns("project", projectId, userId);
-        }
+        const body = req.body || {};
+        const { name, description, tags, element_type, type, images, imageUrls, sourceImages } = body;
+        const projectId = body.projectId || body.project_id;
+        const userId = req.user?.id;
 
         const elementService = getElementService();
         const result = await elementService.createElement({
@@ -72,18 +87,7 @@ export async function createElement(req, res) {
         logOk(traceId, op, start);
         return res.status(201).json({ status: "created", ...result });
     } catch (err) {
-        const isServerFault = (err.statusCode >= 500) || (err.category === "SERVER_FAULT");
-        const clientCode = isServerFault ? "INTERNAL_ERROR" : (err.code || "REQUEST_ERROR");
-        const clientMessage = isServerFault
-            ? "An unexpected error occurred. Please try again later."
-            : err.message;
-        return res.status(logErr(traceId, op, start, err)).json({
-            error: true,
-            code: clientCode,
-            category: err.category || (isServerFault ? "SERVER_FAULT" : "USER_FAULT"),
-            message: clientMessage,
-            traceId,
-        });
+        return sendElementError(res, traceId, op, start, err);
     }
 }
 
@@ -97,17 +101,13 @@ export async function listProjectElements(req, res) {
 
     try {
         const userId = req.user?.id;
-        if (userId) {
-            await assertOwns("project", req.params.projectId, userId);
-        }
-
         const elementService = getElementService();
-        const elements = await elementService.listProjectElements(req.params.projectId);
+        const elements = await elementService.listProjectElements(req.params.projectId, { userId });
 
         logOk(traceId, op, start);
         return res.json({ status: "success", count: elements.length, elements });
     } catch (err) {
-        return res.status(logErr(traceId, op, start, err)).json({ error: true, message: err.message });
+        return sendElementError(res, traceId, op, start, err);
     }
 }
 
@@ -121,12 +121,8 @@ export async function getElementById(req, res) {
 
     try {
         const userId = req.user?.id;
-        if (userId) {
-            await assertOwns("element", req.params.id, userId);
-        }
-
         const elementService = getElementService();
-        const element = await elementService.getElementById(req.params.id);
+        const element = await elementService.getElementById(req.params.id, { userId });
 
         if (!element) {
             elementLogger.warn(structuredLog({ traceId, operation: op, durationMs: Date.now() - start, status: "not_found", errorCode: 404 }), "Element not found");
@@ -136,7 +132,7 @@ export async function getElementById(req, res) {
         logOk(traceId, op, start);
         return res.json({ status: "success", element });
     } catch (err) {
-        return res.status(logErr(traceId, op, start, err)).json({ error: true, message: err.message });
+        return sendElementError(res, traceId, op, start, err);
     }
 }
 
@@ -150,17 +146,13 @@ export async function updateElement(req, res) {
 
     try {
         const userId = req.user?.id;
-        if (userId) {
-            await assertOwns("element", req.params.id, userId);
-        }
-
         const elementService = getElementService();
         const updated = await elementService.updateElement(req.params.id, req.body || {}, userId);
 
         logOk(traceId, op, start);
         return res.json({ status: "success", element: updated });
     } catch (err) {
-        return res.status(logErr(traceId, op, start, err)).json({ error: true, message: err.message });
+        return sendElementError(res, traceId, op, start, err);
     }
 }
 
@@ -189,7 +181,7 @@ export async function deleteElement(req, res) {
             ...(result?.trashed ? { trashed: true } : {}),
         });
     } catch (err) {
-        return res.status(logErr(traceId, op, start, err)).json({ error: true, message: err.message });
+        return sendElementError(res, traceId, op, start, err);
     }
 }
 
@@ -202,19 +194,12 @@ export async function addImageToElement(req, res) {
     const op      = "POST /api/v2/elements/:id/images";
 
     try {
-        const imageUrl = req.body?.imageUrl;
-        const mediaId = req.body?.mediaId || req.body?.workflowId || req.body?.workflow_id;
-        const projectId = req.body.projectId || req.body.project_id;
-        const userId = req.user?.id || req.body.userId;
+        const body = req.body || {};
+        const imageUrl = body.imageUrl;
+        const mediaId = body.mediaId || body.workflowId || body.workflow_id;
+        const projectId = body.projectId || body.project_id;
+        const userId = req.user?.id;
         const file   = req.file;
-
-        if (!imageUrl && !file && !mediaId) {
-            return res.status(400).json({ error: true, message: "imageUrl, file, or mediaId is required" });
-        }
-
-        if (userId) {
-            await assertOwns("element", req.params.id, userId);
-        }
 
         const elementMediaService = getElementMediaService();
         const result = await elementMediaService.addReferenceMedia({
@@ -224,7 +209,7 @@ export async function addImageToElement(req, res) {
         logOk(traceId, op, start);
         return res.status(201).json({ status: "created", media: result.media });
     } catch (err) {
-        return res.status(logErr(traceId, op, start, err)).json({ error: true, message: err.message });
+        return sendElementError(res, traceId, op, start, err);
     }
 }
 
@@ -239,20 +224,16 @@ export async function removeImageFromElement(req, res) {
     try {
         const { id, mediaId } = req.params;
         const userId = req.user?.id;
-        if (userId) {
-            await assertOwns("element", id, userId);
-        }
 
         const elementMediaService = getElementMediaService();
-        const result = await elementMediaService.removeReferenceMedia({ elementId: id, mediaId, userId: req.user?.id, req });
+        const result = await elementMediaService.removeReferenceMedia({ elementId: id, mediaId, userId });
 
         logOk(traceId, op, start);
         return res.json({ status: "success", ...result });
     } catch (err) {
-        return res.status(logErr(traceId, op, start, err)).json({ error: true, message: err.message });
+        return sendElementError(res, traceId, op, start, err);
     }
 }
-
 
 // ─── POST /api/v2/elements/analyze ───────────────────────────────────────────
 
@@ -263,14 +244,8 @@ export async function analyzeElement(req, res) {
     const op      = "POST /api/v2/elements/analyze";
 
     try {
-        const { projectId, workflowId, imageUrls = [], elementName, elementType } = req.body;
+        const { projectId, workflowId, imageUrls = [], elementName, elementType } = req.body || {};
         const userId = req.user?.id;
-        if (userId && projectId) {
-            await assertOwns("project", projectId, userId);
-        }
-        if (userId && workflowId) {
-            await assertOwns("workflow", workflowId, userId);
-        }
 
         const elementService = getElementService();
         const result = await elementService.analyzeElement({
@@ -285,18 +260,7 @@ export async function analyzeElement(req, res) {
         logOk(traceId, op, start);
         return res.json({ status: "success", ...result });
     } catch (err) {
-        const isServerFault = (err.statusCode >= 500) || (err.category === "SERVER_FAULT");
-        const clientCode = isServerFault ? "INTERNAL_ERROR" : (err.code || "REQUEST_ERROR");
-        const clientMessage = isServerFault
-            ? "An unexpected error occurred. Please try again later."
-            : err.message;
-        return res.status(logErr(traceId, op, start, err)).json({
-            error: true,
-            code: clientCode,
-            category: err.category || (isServerFault ? "SERVER_FAULT" : "USER_FAULT"),
-            message: clientMessage,
-            traceId,
-        });
+        return sendElementError(res, traceId, op, start, err);
     }
 }
 
@@ -309,13 +273,13 @@ export async function buildPrompt(req, res) {
     const op      = "POST /api/v2/elements/build-prompt";
 
     try {
-        const { userPrompt, elements = [], elementIds = [], projectId } = req.body;
+        const { userPrompt, elements = [], elementIds = [], projectId } = req.body || {};
         const elementService = getElementService();
         const payload = await elementService.buildPromptPayload({ userPrompt, elements, elementIds, projectId });
 
         logOk(traceId, op, start);
         return res.json({ status: "success", ...payload });
     } catch (err) {
-        return res.status(logErr(traceId, op, start, err)).json({ error: true, message: err.message });
+        return sendElementError(res, traceId, op, start, err);
     }
 }

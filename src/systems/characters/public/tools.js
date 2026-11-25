@@ -96,20 +96,13 @@ export async function getCharacterPromptContext({
         mediaRepository,
     });
 
-    let referenceMediaUrls = visualMedia.map((m) => m.url);
-    let sheetImages = visualMedia
+    const referenceMediaUrls = visualMedia.map((m) => m.url);
+    const sheetImages = visualMedia
         .filter((m) => m.isPrimary || SHEET_ROLES.has(String(m.role || "").toLowerCase()))
         .map((m) => m.url);
-    let detailImages = visualMedia
+    const detailImages = visualMedia
         .filter((m) => !sheetImages.includes(m.url))
         .map((m) => m.url);
-
-    // Compatibility fallback only when workflow_media returned nothing and an in-memory mock supplies legacy field
-    if (referenceMediaUrls.length === 0) {
-        referenceMediaUrls = extractValidHttpUrls(char.reference_media_urls);
-        sheetImages = [...referenceMediaUrls];
-        detailImages = [];
-    }
 
     return {
         id: char.id || characterId,
@@ -150,39 +143,6 @@ export async function validateCharacterExists({ characterId, userId = null } = {
     return true;
 }
 
-/**
- * Attaches the generated character turnaround sheet result.
- *
- * @param {object} input
- * @param {string} input.characterId
- * @param {string} input.mediaId
- * @param {string} [input.sheetUrl]
- * @param {string} [input.userId]
- * @returns {Promise<object>}
- */
-export async function attachCharacterSheetResult({ characterId, mediaId, sheetUrl = null, userId = null } = {}) {
-    if (!characterId) {
-        throw new CharactersValidationError("characterId is required", { field: "characterId" });
-    }
-    if (!mediaId) {
-        throw new CharactersValidationError("mediaId is required", { field: "mediaId" });
-    }
-
-    if (userId) {
-        await identityTools.assertOwns("character", characterId, userId);
-    }
-
-    const patch = {
-        primary_media_id: mediaId,
-        updated_at: new Date().toISOString(),
-    };
-    if (sheetUrl) {
-        patch.sheet_url = sheetUrl;
-    }
-
-    return characterRepository.updateCharacterFields(characterId, patch);
-}
-
 // ── Facade & Service Re-exports ──────────────────────────────────────────────
 
 export {
@@ -202,7 +162,6 @@ export {
 export default {
     getCharacterPromptContext,
     validateCharacterExists,
-    attachCharacterSheetResult,
     CharacterService,
     CharacterMediaService,
     CharacterGenerationService,

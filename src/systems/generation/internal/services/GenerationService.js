@@ -39,7 +39,6 @@ export class GenerationService {
      * @param {import("../../db/ProjectRepository.js").ProjectRepository}          deps.db.projects
      * @param {import("../../db/WorkflowRepository.js").WorkflowRepository}        deps.db.workflows
      * @param {import("../../db/MediaRepository.js").MediaRepository}              deps.db.media
-     * @param {import("../../db/GenerationConfigRepository.js").GenerationConfigRepository} deps.db.configs
      */
     constructor({ db }) {
         this.db = db;
@@ -167,48 +166,6 @@ export class GenerationService {
             allSelectedMedia.push(...capped);
         }
 
-        const configIds = [...new Set(
-            allSelectedMedia.map((m) => m?.generation_config_id).filter(Boolean)
-        )];
-
-        let configMap = new Map();
-
-        if (configIds.length > 0 && typeof this.db.configs?.findByIdsWithReferences === "function") {
-            const configs = await this.db.configs.findByIdsWithReferences(configIds);
-            configMap = new Map(
-                (configs || []).map((c) => [
-                    c.id,
-                    {
-                        id: c.id,
-                        prompt: c.prompt || "",
-                        model: isModelHidden(c.model) ? null : (c.model || ""),
-                        aspect_ratio: c.aspect_ratio || null,
-                        generation_type: c.generation_type || null,
-                        seed: c.seed ?? null,
-                        visibility: c.visibility || "PRIVATE",
-                        references: (c.references || [])
-                            .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-                            .map((ref) => ({
-                                id: ref.id,
-                                position: ref.position ?? 0,
-                                input_type: ref.input_type || null,
-                                ref_media_id: ref.ref_media_id || null,
-                                ref_media: ref.ref_media
-                                    ? {
-                                        id: ref.ref_media.id,
-                                        url: ref.ref_media.url,
-                                        width: ref.ref_media.width,
-                                        height: ref.ref_media.height,
-                                        status: ref.ref_media.status,
-                                        create_time: ref.ref_media.create_time,
-                                    }
-                                    : null,
-                            })),
-                    },
-                ])
-            );
-        }
-
         const formatGenerationInfo = (cfg, id) => {
             if (!cfg) return null;
             return {
@@ -236,7 +193,6 @@ export class GenerationService {
                 workflowId: wfId,
                 role: mediaItem.role || mediaItem.mediaRole || null,
                 mediaRole: mediaItem.mediaRole || mediaItem.role || null,
-                generation_config_id: mediaItem.generation_config_id ?? null,
                 generation_config: mediaItem.generation_config ?? null,
                 generationConfig: mediaItem.generation_config ?? null,
                 step_id: mediaItem.step_id ?? null,
@@ -256,17 +212,15 @@ export class GenerationService {
             const media = primaryMediaByWorkflowId.get(workflow.id) || null;
             const primaryMediaId = media?.mediaId || media?.media_id || media?.id || null;
             const rawCandidates = cappedCandidatesByWorkflow.get(workflow.id) || [];
-            const configSourceMedia = media || rawCandidates.find((c) => c?.generation_config || c?.generation_config_id) || null;
+            const configSourceMedia = media || rawCandidates.find((c) => c?.generation_config) || null;
             const generationInfo = configSourceMedia?.generation_config
                 ? formatGenerationInfo(configSourceMedia.generation_config, configSourceMedia.id)
-                : (configSourceMedia?.generation_config_id
-                    ? configMap.get(configSourceMedia.generation_config_id) || null
-                    : null);
+                : null;
 
             const candidates = rawCandidates.map((candidate) => {
                 const candidateConfig = candidate?.generation_config
                     ? formatGenerationInfo(candidate.generation_config, candidate.id)
-                    : (candidate?.generation_config_id ? configMap.get(candidate.generation_config_id) : null) || generationInfo;
+                    : generationInfo;
                 const formatted = formatMediaEntry(candidate, workflow.id, candidateConfig?.aspect_ratio);
                 if (candidate?.generation_config) {
                     formatted.generation_info = candidateConfig;

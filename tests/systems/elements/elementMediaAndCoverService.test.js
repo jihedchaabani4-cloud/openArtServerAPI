@@ -389,9 +389,10 @@ describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMedia
             assert.equal(workflowsStore[0].primary_media_id, "00000000-0000-0000-0000-000000000077", "workflows.primary_media_id updated explicitly");
         });
 
-        it("sheet failure mid-way leaves workflows.primary_media_id NOT pointing to a deleted media (restored to previous)", async () => {
+        it("sheet failure mid-way leaves primary NOT pointing to a deleted media (restored to previous)", async () => {
             const OLD_SHEET_MEDIA_ID = "00000000-0000-0000-0000-000000000088";
             workflowsStore[0].primary_media_id = OLD_SHEET_MEDIA_ID;
+            mockDb.workflowMedia.getPrimaryMedia = async () => ({ media_id: OLD_SHEET_MEDIA_ID });
 
             let rollbackCalledWithHandle = null;
             mockWorkflowMediaService.rollbackAttachedMedia = async (handle) => {
@@ -416,78 +417,6 @@ describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMedia
 
             assert.equal(workflowsStore[0].primary_media_id, OLD_SHEET_MEDIA_ID, "Rollback must restore established primary_media_id");
             assert.ok(rollbackCalledWithHandle, "WorkflowMediaService.rollbackAttachedMedia must be called on post-attach error");
-        });
-    });
-
-    describe("3. ingestElementSources (@deprecated)", () => {
-        it("delegates multiple files upload and attach to mediaUploadService and workflowMediaService", async () => {
-            const res = await service.ingestElementSources({
-                workflowId: WORKFLOW_ID,
-                sourceImages: ["https://example.com/1.png", "https://example.com/2.png"],
-                projectId: PROJECT_ID,
-                userId: USER_ID,
-            });
-
-            assert.equal(uploadCalls.length, 1);
-            assert.equal(uploadCalls[0].policy, ELEMENT_SOURCES_UPLOAD_POLICY);
-            assert.equal(uploadCalls[0].policy.storageFolder, "element-sheets");
-            assert.equal(attachCalls.length, 1);
-            assert.equal(attachCalls[0].role, "detail");
-            assert.equal(attachCalls[0].maxAllowed, 6);
-            assert.equal(attachCalls[0].setPrimary, true);
-            assert.equal(res.mediaRecords.length, 2);
-        });
-
-        it("batch failure mid-way rolls back everything created in the call", async () => {
-            let rollbackInvoked = false;
-            let discardedStorage = [];
-
-            mockWorkflowMediaService.attachMediaItems = async ({ items, workflowId }) => {
-                const handle = {
-                    workflowId,
-                    role: "detail",
-                    entries: items.map((it, idx) => ({
-                        kind: "uploaded",
-                        mediaId: `new-media-${idx}`,
-                        storageKey: it.uploadedFile?.storageKey,
-                        mediaCreatedInCall: true,
-                        linkCreatedInCall: idx === 0,
-                    })),
-                };
-
-                const res = await mockWorkflowMediaService.rollbackAttachedMedia(handle);
-                rollbackInvoked = res.complete;
-                throw new CrudServiceError("Mid-way failure in batch attachment", {
-                    statusCode: 500,
-                    errorCode: "ATTACH_BATCH_FAILED",
-                });
-            };
-
-            mockWorkflowMediaService.rollbackAttachedMedia = async (handle) => {
-                const keys = handle.entries.map((e) => e.storageKey).filter(Boolean);
-                discardedStorage.push(...keys);
-                return {
-                    complete: true,
-                    unlinkedMediaIds: handle.entries.filter((e) => e.linkCreatedInCall).map((e) => e.mediaId),
-                    deletedMediaIds: handle.entries.filter((e) => e.mediaCreatedInCall).map((e) => e.mediaId),
-                    discardedStorageKeys: keys,
-                    skippedStorageKeys: [],
-                    discardFailedKeys: [],
-                };
-            };
-
-            await assert.rejects(
-                () => service.ingestElementSources({
-                    workflowId: WORKFLOW_ID,
-                    sourceImages: ["https://example.com/1.png", "https://example.com/2.png"],
-                    projectId: PROJECT_ID,
-                    userId: USER_ID,
-                }),
-                (err) => err instanceof CrudServiceError && err.statusCode === 500
-            );
-
-            assert.equal(rollbackInvoked, true, "Rollback must execute with complete === true");
-            assert.ok(discardedStorage.length > 0, "Uploaded storage keys must be discarded on mid-way failure");
         });
     });
 
@@ -613,65 +542,6 @@ describe("ElementMediaService — Migrated to MediaUploadService & WorkflowMedia
             );
         });
     });
-});
-}
-
-// ─── Source: elementMediaServiceWorkflowMediaLink.test.js ───
-{
-describe("Ticket 04: ElementMediaService workflow_media link hardening", () => {
-  it("ingestElementSources always links workflow_media even when mediaIngestionService is present", async () => {
-    const linkCalls = [];
-    const mockDb = {
-      workflows: {
-        updatePrimaryMedia: async () => ({}),
-      },
-      workflowMedia: {
-        linkMedia: async (payload) => {
-          linkCalls.push(payload);
-          return payload;
-        },
-      },
-    };
-
-    const service = new ElementMediaService({
-      db: mockDb,
-      storageService: {},
-      mediaUploadService: {
-        upload: async ({ files }) => ({
-          uploaded: [{ id: "media-ingested-1", url: "https://storage.example.com/sheet.png", storageKey: "sheet.png" }],
-        }),
-        discard: async () => ({}),
-      },
-      workflowMediaService: {
-        attachMediaItems: async ({ workflowId, items, role }) => {
-          for (const item of items) {
-            linkCalls.push({
-              workflowId,
-              mediaId: item.uploadedFile.id,
-              role,
-            });
-          }
-          return {
-            attached: items.map((it) => ({ media: it.uploadedFile, is_primary: true })),
-          };
-        },
-      },
-      authService: {
-        verifyWorkflowOwnership: async () => true,
-      },
-    });
-
-    await service.ingestElementSources({
-      workflowId: "elem-wf-1",
-      sourceImages: ["https://example.com/source.png"],
-      projectId: "proj-1",
-      userId: "user-1",
-    });
-
-    assert.equal(linkCalls.length, 1, "Must call linkMedia on workflowMedia");
-    assert.equal(linkCalls[0].workflowId, "elem-wf-1");
-    assert.equal(linkCalls[0].mediaId, "media-ingested-1");
-  });
 });
 }
 
@@ -1283,35 +1153,6 @@ describe("Element Maximum 6 Reference Media Boundary & Enforcement", () => {
 
         const afterReAdd = await repo.findByWorkflow(WORKFLOW_ID);
         assert.equal(afterReAdd.length, 6, "Count should be back to 6");
-    });
-
-    it("3. ingestElementSources rejects payloads with more than 6 source images", async () => {
-        const sevenImages = [
-            "https://example.com/1.png",
-            "https://example.com/2.png",
-            "https://example.com/3.png",
-            "https://example.com/4.png",
-            "https://example.com/5.png",
-            "https://example.com/6.png",
-            "https://example.com/7.png",
-        ];
-
-        await assert.rejects(
-            async () => {
-                await mediaService.ingestElementSources({
-                    workflowId: WORKFLOW_ID,
-                    sourceImages: sevenImages,
-                    projectId: PROJECT_ID,
-                    userId: "user-limit",
-                });
-            },
-            (err) => {
-                assert.equal(err.statusCode, 400);
-                assert.equal(err.errorCode, "LIMIT_EXCEEDED");
-                assert.match(err.message, /Maximum 6 reference images allowed/i);
-                return true;
-            }
-        );
     });
 
     it("4. assertUploadAllowed passes when slots remain, providing accurate capacity metrics", async () => {

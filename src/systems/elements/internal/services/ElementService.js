@@ -16,6 +16,7 @@
 
 import { randomUUID } from "node:crypto";
 import { crudOperationLog, CrudServiceError, createLogger } from "#shared";
+import { assertOwns } from "#identity/tools";
 import { elementRepository } from "../db/ElementRepository.js";
 import { MediaRepository, WorkflowMediaRepository } from "#media/tools";
 import { ElementMediaService } from "./ElementMediaService.js";
@@ -62,6 +63,7 @@ export class ElementService {
         mediaService          = null,
         elementMediaService   = null,
         analysisService       = null,
+        assertOwns: assertOwnsFn = assertOwns,
     } = {}) {
         this.db = {
             elements:      db?.elements      || elementRepository,
@@ -75,7 +77,8 @@ export class ElementService {
             throw new Error("ElementService requires mediaService (ElementMediaService)");
         }
         this.mediaService          = resolvedMediaService;
-        this.analysisService = analysisService || new ElementAnalysisService();
+        this.analysisService       = analysisService || new ElementAnalysisService();
+        this.assertOwns            = assertOwnsFn || assertOwns;
     }
 
     // ── CREATE ─────────────────────────────────────────────────────────────────
@@ -94,7 +97,14 @@ export class ElementService {
 
         try {
             validateCreateInputs({ name, projectId: pId });
-            const safeUserId = userId || "anonymous";
+
+            if (!userId || userId === "anonymous") {
+                throw new CrudServiceError("Authentication required", {
+                    statusCode: 401, errorCode: "UNAUTHORIZED", operation: "createElement",
+                });
+            }
+
+            await this.assertOwns("project", pId, userId);
 
             const initialImages = Array.isArray(images)
                 ? images
@@ -111,7 +121,7 @@ export class ElementService {
                 project_id:    pId,
                 workflow_type: "ELEMENT_SHEET",
                 display_name:  name.trim(),
-                user_id:       userId || (safeUserId !== "anonymous" ? safeUserId : null),
+                user_id:       userId,
             });
 
             // 2. Persist element domain record
@@ -128,30 +138,18 @@ export class ElementService {
             let primaryMedia = null;
             let storageUrls = [];
 
-            if (initialImages.length > 0) {
-                if (this.mediaService?.ingestElementSources) {
-                    const ingested = await this.mediaService.ingestElementSources({
-                        workflowId: workflow.id,
-                        sourceImages: initialImages,
+            if (initialImages.length > 0 && this.mediaService?.addReferenceMedia) {
+                for (let i = 0; i < initialImages.length; i++) {
+                    const added = await this.mediaService.addReferenceMedia({
+                        elementId: element.id,
+                        source: initialImages[i],
                         projectId: pId,
-                        userId: safeUserId,
+                        userId,
                     });
-                    mediaRecords = ingested.mediaRecords || [];
-                    primaryMedia = ingested.primaryMedia || mediaRecords[0] || null;
-                    storageUrls = ingested.storageUrls || [];
-                } else if (this.mediaService?.addReferenceMedia) {
-                    for (let i = 0; i < initialImages.length; i++) {
-                        const added = await this.mediaService.addReferenceMedia({
-                            elementId: element.id,
-                            source: initialImages[i],
-                            projectId: pId,
-                            userId: safeUserId,
-                        });
-                        if (added?.media) {
-                            mediaRecords.push(added.media);
-                            if (i === 0) primaryMedia = added.media;
-                            if (added.url) storageUrls.push(added.url);
-                        }
+                    if (added?.media) {
+                        mediaRecords.push(added.media);
+                        if (i === 0) primaryMedia = added.media;
+                        if (added.url) storageUrls.push(added.url);
                     }
                 }
             }
@@ -159,7 +157,7 @@ export class ElementService {
             // 4. Background vision analysis if initial images were attached
             if (this.analysisService && storageUrls.length > 0) {
                 this.analysisService
-                    .analyzeElement({ projectId: pId, workflowId: workflow.id, imageUrls: storageUrls, elementName: name.trim(), elementType, userId: safeUserId })
+                    .analyzeElement({ projectId: pId, workflowId: workflow.id, imageUrls: storageUrls, elementName: name.trim(), elementType, userId })
                     .catch((err) => logger.warn({ message: err.message }, "[ElementService] Background vision analysis error"));
             }
 
@@ -202,11 +200,15 @@ export class ElementService {
     /**
      * List all elements for a project with cover thumbnail URL resolved from is_primary.
      */
-    async listProjectElements(projectId) {
+    async listProjectElements(projectId, { userId = null } = {}) {
         const traceId = randomUUID();
         const start   = Date.now();
 
         try {
+            if (userId) {
+                await this.assertOwns("project", projectId, userId);
+            }
+
             const elements = await this.db.elements.list({ projectId });
 
             const workflowIds = elements.map((el) => el.workflow_id).filter(Boolean);
@@ -256,10 +258,14 @@ export class ElementService {
     /**
      * Retrieve full element details with reference image URLs and cover resolved from is_primary.
      */
-    async getElementById(id) {
+    async getElementById(id, { userId = null } = {}) {
         const traceId = randomUUID();
 
         try {
+            if (userId) {
+                await this.assertOwns("element", id, userId);
+            }
+
             const element = await this.db.elements.resolveRecord(id);
             if (!element) return null;
 
@@ -349,6 +355,10 @@ export class ElementService {
     async updateElement(id, patchData = {}, userId = null) {
         const traceId = randomUUID();
         const start   = Date.now();
+
+        if (userId) {
+            await this.assertOwns("element", id, userId);
+        }
 
         const existing = await this.db.elements.resolveRecord(id);
         if (!existing) {
@@ -509,6 +519,12 @@ export class ElementService {
      * Trigger Vision AI analysis for an element (delegates to ElementAnalysisService).
      */
     async analyzeElement({ projectId, workflowId, imageUrls, elementName, elementType, userId = null }) {
+        if (userId && projectId) {
+            await this.assertOwns("project", projectId, userId);
+        }
+        if (userId && workflowId) {
+            await this.assertOwns("workflow", workflowId, userId);
+        }
         return this.analysisService.analyzeElement({
             projectId,
             workflowId,
@@ -583,11 +599,11 @@ const defaultInstance = new ElementService({
 
 // ─── Named function exports (for controller imports) ──────────────────────────
 
-export const createElement             = (params)         => defaultInstance.createElement(params);
-export const listProjectElements       = (projectId)      => defaultInstance.listProjectElements(projectId);
-export const getElementById            = (id)             => defaultInstance.getElementById(id);
-export const updateElement             = (id, patchData)  => defaultInstance.updateElement(id, patchData);
-export const deleteElement             = (id, userId)     => defaultInstance.deleteElement(id, userId);
+export const createElement             = (params)                => defaultInstance.createElement(params);
+export const listProjectElements       = (projectId, options)    => defaultInstance.listProjectElements(projectId, options);
+export const getElementById            = (id, options)           => defaultInstance.getElementById(id, options);
+export const updateElement             = (id, patchData, userId) => defaultInstance.updateElement(id, patchData, userId);
+export const deleteElement             = (id, userId)            => defaultInstance.deleteElement(id, userId);
 export const analyzeElement            = (params)         => defaultInstance.analyzeElement(params);
 export const getElementContextForPrompt = (params)        => defaultInstance.getElementContextForPrompt(params);
 export const addImageToElement         = (params)         => defaultInstance.addImageToElement(params);

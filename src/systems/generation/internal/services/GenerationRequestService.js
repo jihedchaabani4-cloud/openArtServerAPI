@@ -14,13 +14,34 @@ import {
     createGenerationPlaceholderAtomic,
     appendMediaToWorkflow,
     calculateAspectRatio,
+    resolveMediaMetadata,
 } from "#media/tools";
-import { toMediaIdList } from "#identity/tools";
+import { assertOwns, assertOwnsAny, toMediaIdList } from "#identity/tools";
 import { validateModelInputs, getModelSchema } from "#models/tools";
 import { assertAllowedMediaType } from "../v3/nodes/base/resolveRefsNode.js";
+import {
+    IMAGE_EDIT_MODELS,
+    extractInlineEntityIds,
+    assertNoRawUrls,
+    parseRelightRequest,
+    parseAnglesRequest,
+    parseRemoveBackgroundRequest,
+    parseImageEditRequest,
+} from "./imageEditContract.js";
 
 const logger = createLogger("generation_request_service");
+export const MEDIA_PARAM_KEYS = [
+    "input_image",
+    "image_url",
+    "mask",
+    "last_frame",
+    "input_video",
+    "images",
+    "reference_images",
+    "reference_videos",
+];
 const ARRAY_MEDIA_PARAM_KEYS = ["images", "reference_images", "reference_videos"];
+const RAW_HTTP_URL_REGEX = /https?:\/\//i;
 const SECRET_PARAM_PATTERN = /secret|token|password|auth|bearer|api[_-]?key/i;
 const CLIENT_BATCH_KEYS = new Set(["count", "outputCount", "output_count"]);
 const BILLING_ERROR_CODES = new Set(["INSUFFICIENT_FUNDS", "INSUFFICIENT_CREDITS", "BILLING_HOLD_REQUIRED"]);
@@ -39,6 +60,83 @@ const UNEDITABLE_SHEET_WORKFLOW_TYPES = new Set([
     "ELEMENT_SHEET",
 ]);
 
+const GENERATION_MEDIA_DEFAULTS = Object.freeze({
+    image: Object.freeze({
+        stepId: "image_generation",
+        useCaseId: "image-generation-v3",
+        forbiddenSourceFields: Object.freeze(["image_url", "source", "input_image", "source_url"]),
+        directSourceMessage:
+            "Direct image sources are not permitted. Upload the asset via /api/assets/upload and pass the returned workflow_id in parameters.input_image.",
+        referencesDirectUrlMessage:
+            "Direct image URLs are not permitted in references. Use workflow IDs only.",
+        defaultAspectRatio: null,
+        defaultMessages: Object.freeze({
+            started: "Image generation started.",
+            addCredits: "Add credits to generate your image.",
+        }),
+    }),
+    video: Object.freeze({
+        stepId: "video_generation",
+        useCaseId: "video-generation-v3",
+        forbiddenSourceFields: Object.freeze([
+            "image_url",
+            "source",
+            "input_image",
+            "source_url",
+            "video_url",
+            "input_video",
+        ]),
+        directSourceMessage:
+            "Direct media sources are not permitted. Upload the asset via /api/assets/upload and pass the returned workflow_id in parameters.",
+        referencesDirectUrlMessage:
+            "Direct URLs are not permitted in references. Use workflow IDs only.",
+        defaultAspectRatio: "16:9",
+        defaultMessages: Object.freeze({
+            started: "Video generation started.",
+            addCredits: "Add credits to generate your video.",
+        }),
+    }),
+});
+
+const IMAGE_EDIT_DEFAULTS = Object.freeze({
+    relight: Object.freeze({
+        stepId: "image_relight",
+        useCaseId: "image-relight-v3",
+        parse: parseRelightRequest,
+        defaultMessages: Object.freeze({
+            started: "Image relight started.",
+            addCredits: "Add credits to relight your image.",
+        }),
+    }),
+    angles: Object.freeze({
+        stepId: "image_angles",
+        useCaseId: "image-angles-v3",
+        parse: parseAnglesRequest,
+        defaultMessages: Object.freeze({
+            started: "Image angle adjustment started.",
+            addCredits: "Add credits to adjust your image angle.",
+        }),
+    }),
+    remove_background: Object.freeze({
+        stepId: "image_remove_background",
+        useCaseId: "image-remove-background-v3",
+        parse: parseRemoveBackgroundRequest,
+        defaultMessages: Object.freeze({
+            started: "Background removal started.",
+            addCredits: "Add credits to remove background from your image.",
+        }),
+    }),
+    edit: Object.freeze({
+        stepId: "image_edit",
+        useCaseId: "image-edit-v3",
+        parse: parseImageEditRequest,
+        defaultMessages: Object.freeze({
+            started: "Image edit started.",
+            addCredits: "Add credits to edit your image.",
+        }),
+    }),
+});
+
 export class GenerationRequestService {
     /**
      * @param {Object} deps
@@ -48,14 +146,80 @@ export class GenerationRequestService {
      * @param {Object} deps.folderService
      * @param {Function} [deps.modelValidator]
      * @param {Object|null} [deps.redis]
+     * @param {Function} [deps.assertOwns]
+     * @param {Function} [deps.assertOwnsAny]
      */
-    constructor({ db, executionEngine, useCaseService, folderService, modelValidator = validateModelInputs, redis = undefined }) {
+    constructor({
+        db,
+        executionEngine,
+        useCaseService,
+        folderService,
+        modelValidator = validateModelInputs,
+        redis = undefined,
+        assertOwns: assertOwnsFn = assertOwns,
+        assertOwnsAny: assertOwnsAnyFn = assertOwnsAny,
+    }) {
         this.db = db;
         this.executionEngine = executionEngine || useCaseService;
         this.folderService = folderService;
         this.modelValidator = modelValidator;
         this.redis = redis !== undefined ? redis : (envConfig.isTest ? null : redisConnection);
+        this.assertOwns = assertOwnsFn;
+        this.assertOwnsAny = assertOwnsAnyFn;
         this._inFlightEditWorkflows = new Set();
+    }
+
+    /**
+     * Normalizes a list of resource IDs and rejects any raw HTTP(S) URLs.
+     */
+    _parseNonUrlResourceIds(rawList, directUrlMessage) {
+        const sanitized = [];
+        for (const id of toMediaIdList(rawList)) {
+            if (RAW_HTTP_URL_REGEX.test(id)) {
+                throw new AppError(directUrlMessage, 400, { code: "DIRECT_URL_NOT_ALLOWED" });
+            }
+            sanitized.push(id);
+        }
+        return sanitized;
+    }
+
+    /**
+     * Single-pass fail-fast ownership verification for references, characters, elements,
+     * inline `<character:id>`/`<element:id>` prompt tags, and media parameter keys.
+     */
+    async _assertReferencesAndEntitiesOwned({
+        userId,
+        prompt = "",
+        references = [],
+        characters = [],
+        elements = [],
+        parameters = null,
+    }) {
+        const { characterIds: inlineCharIds, elementIds: inlineElemIds } = extractInlineEntityIds(prompt);
+        const allRefIds = [...new Set(references)];
+        const allCharIds = [...new Set([...characters, ...inlineCharIds])];
+        const allElemIds = [...new Set([...elements, ...inlineElemIds])];
+
+        for (const refId of allRefIds) {
+            await this.assertOwnsAny(["workflow", "character", "element", "media"], refId, userId);
+        }
+        for (const charId of allCharIds) {
+            await this.assertOwnsAny(["character", "workflow"], charId, userId);
+        }
+        for (const elemId of allElemIds) {
+            await this.assertOwnsAny(["element", "workflow"], elemId, userId);
+        }
+
+        if (parameters && typeof parameters === "object") {
+            const seenMediaParamIds = new Set();
+            for (const field of MEDIA_PARAM_KEYS) {
+                for (const mediaRefId of toMediaIdList(parameters[field])) {
+                    if (!mediaRefId || seenMediaParamIds.has(mediaRefId)) continue;
+                    seenMediaParamIds.add(mediaRefId);
+                    await this.assertOwnsAny(["workflow", "media"], mediaRefId, userId);
+                }
+            }
+        }
     }
 
     /**
@@ -258,50 +422,145 @@ export class GenerationRequestService {
         mediaType,
         stepId,
         useCaseId,
+        body = null,
         prompt,
         model,
         projectId,
         folderId,
         references = [],
+        characters = [],
+        elements = [],
         parameters = {},
-        mediaMeta = {},
-        defaultMessages = {},
+        mediaMeta = null,
+        defaultMessages = null,
     }) {
         let workflowId = null;
         let mediaId = null;
         let serverMediaIds = [];
 
-        // 1. Enforce folder usability if folderId is provided (security & tenancy check first)
-        const validatedFolderId = this.folderService?.validateAndAssertUsable
-            ? await this.folderService.validateAndAssertUsable(folderId, userId, projectId)
-            : folderId;
+        const mediaDefaults = GENERATION_MEDIA_DEFAULTS[mediaType] || GENERATION_MEDIA_DEFAULTS.image;
+        const resolvedStepId = stepId || mediaDefaults.stepId;
+        const resolvedUseCaseId = useCaseId || mediaDefaults.useCaseId;
+        const resolvedDefaultMessages = defaultMessages || mediaDefaults.defaultMessages;
 
-        // 2. Prepare and resolve model parameters & media keys
-        const resolvedParams = parameters && typeof parameters === "object" ? { ...parameters } : {};
+        let resolvedPrompt = prompt;
+        let resolvedModel = model;
+        let resolvedProjectId = projectId;
+        let resolvedFolderId = folderId ?? null;
+        let rawReferences = references;
+        let rawCharacters = characters;
+        let rawElements = elements;
+        let rawParameters = parameters;
+
+        if (body !== null && body !== undefined) {
+            if (typeof body !== "object" || Array.isArray(body)) {
+                throw new AppError("Request body must be a JSON object.", 400, { code: "INVALID_BODY" });
+            }
+            if (mediaDefaults.forbiddenSourceFields.some((field) => Boolean(body[field]))) {
+                throw new AppError(mediaDefaults.directSourceMessage, 400, {
+                    code: "DIRECT_URL_NOT_ALLOWED",
+                });
+            }
+            resolvedPrompt = body.prompt;
+            resolvedProjectId = body.project_id || body.projectId || null;
+            resolvedModel = body.model || body.model_name || "";
+            rawReferences = body.references ?? [];
+            rawCharacters = body.characters ?? [];
+            rawElements = body.elements ?? [];
+            rawParameters = body.parameters ?? {};
+            resolvedFolderId =
+                body.folder_id ||
+                body.folderId ||
+                body.collection_id ||
+                body.collectionId ||
+                null;
+        }
+
+        // 1. Validate required request fields & reject raw URLs before any DB/ownership checks
+        const trimmedPrompt = typeof resolvedPrompt === "string" ? resolvedPrompt.trim() : "";
+        if (!trimmedPrompt) {
+            throw new AppError("prompt is required", 400, { code: "MISSING_PROMPT" });
+        }
+        if (!resolvedProjectId) {
+            throw new AppError("project_id is required", 400, { code: "MISSING_PROJECT_ID" });
+        }
+        const chosenModel = typeof resolvedModel === "string" ? resolvedModel.trim() : "";
+        if (!chosenModel) {
+            throw new AppError("model is required", 400, { code: "MISSING_MODEL" });
+        }
+
+        const sanitizedReferences = this._parseNonUrlResourceIds(
+            rawReferences,
+            mediaDefaults.referencesDirectUrlMessage
+        );
+        const sanitizedCharacters = this._parseNonUrlResourceIds(
+            rawCharacters,
+            "Direct URLs are not permitted in characters. Use resource IDs only."
+        );
+        const sanitizedElements = this._parseNonUrlResourceIds(
+            rawElements,
+            "Direct URLs are not permitted in elements. Use resource IDs only."
+        );
+
+        const safeParameters = rawParameters && typeof rawParameters === "object" ? rawParameters : {};
+        assertNoRawUrls(
+            safeParameters,
+            "",
+            (path) => `Parameter "${path}": direct URLs are not permitted. Use a workflow ID instead.`
+        );
+
+        // 2. Single fail-fast ownership gate (project + references + MEDIA_PARAM_KEYS + inline entity tags)
+        await this.assertOwns("project", resolvedProjectId, userId);
+        await this._assertReferencesAndEntitiesOwned({
+            userId,
+            prompt: trimmedPrompt,
+            references: sanitizedReferences,
+            characters: sanitizedCharacters,
+            elements: sanitizedElements,
+            parameters: safeParameters,
+        });
+
+        // 3. Enforce folder usability if folderId is provided
+        const validatedFolderId = this.folderService?.validateAndAssertUsable
+            ? await this.folderService.validateAndAssertUsable(resolvedFolderId, userId, resolvedProjectId)
+            : resolvedFolderId;
+
+        // 4. Resolve media metadata (when not explicitly supplied by caller) and prepare model parameters
+        const hasExplicitMediaMeta =
+            mediaMeta && typeof mediaMeta === "object" && Object.keys(mediaMeta).length > 0;
+        const metaSource = body
+            ? { ...body, parameters: safeParameters }
+            : { parameters: safeParameters };
+        const resolvedMediaMeta = hasExplicitMediaMeta
+            ? mediaMeta
+            : (mediaDefaults.defaultAspectRatio
+                ? resolveMediaMetadata(metaSource, mediaDefaults.defaultAspectRatio)
+                : resolveMediaMetadata(metaSource));
+
+        const resolvedParams = { ...safeParameters };
         for (const arrayKey of ARRAY_MEDIA_PARAM_KEYS) {
             if (resolvedParams[arrayKey] !== undefined && resolvedParams[arrayKey] !== null) {
                 resolvedParams[arrayKey] = toMediaIdList(resolvedParams[arrayKey]);
             }
         }
-        if (mediaMeta?.aspect_ratio && !resolvedParams.aspect_ratio) {
-            const schema = this._getOptionalModelSchema(model);
+        if (resolvedMediaMeta?.aspect_ratio && !resolvedParams.aspect_ratio) {
+            const schema = this._getOptionalModelSchema(chosenModel);
             if (schema?.parameters?.aspect_ratio) {
-                resolvedParams.aspect_ratio = mediaMeta.aspect_ratio;
+                resolvedParams.aspect_ratio = resolvedMediaMeta.aspect_ratio;
             }
         }
 
-        // 2b-4. Strip secrets & client batch params, validate against schema, and build config
-        const trimmedPrompt = (prompt || "").trim();
+        // 5. Strip secrets & client batch params, validate against schema, and build config
         const preValidationParams = this._filterClientParams(resolvedParams);
         const { cleanInput, sanitizedParams } = this._validateAndSanitizeParams({
-            model,
+            model: chosenModel,
             validationInput: { prompt: trimmedPrompt, ...preValidationParams },
         });
 
         const initialGenerationConfig = {
             prompt: cleanInput.prompt || trimmedPrompt,
-            model,
-            aspect_ratio: cleanInput.aspect_ratio || mediaMeta?.aspect_ratio || "1:1",
+            model: chosenModel,
+            aspect_ratio: cleanInput.aspect_ratio || resolvedMediaMeta?.aspect_ratio || "1:1",
             parameters: sanitizedParams,
             created_at: new Date().toISOString(),
         };
@@ -310,20 +569,20 @@ export class GenerationRequestService {
             const requestedWorkflowId = randomUUID();
             const requestedMediaId = randomUUID();
 
-            // 5-6. Atomically create Workflow + single Media placeholder (with pre-persisted generation_config)
-            //      + workflow_media primary link in 1 DB hop via create_generation_placeholder_atomic RPC
-            //      (with safe multi-step fallback for mock db objects / pre-migration environments).
+            // 6. Atomically create Workflow + single Media placeholder (with pre-persisted generation_config)
+            //    + workflow_media primary link in 1 DB hop via create_generation_placeholder_atomic RPC
+            //    (with safe multi-step fallback for mock db objects / pre-migration environments).
             const placeholder = await createGenerationPlaceholderAtomic(this.db, {
                 workflowId: requestedWorkflowId,
                 mediaId: requestedMediaId,
-                projectId,
+                projectId: resolvedProjectId,
                 userId,
-                displayName: (prompt || "").slice(0, 60),
+                displayName: (resolvedPrompt || "").slice(0, 60),
                 workflowType: "GENERATION",
                 folderId: validatedFolderId,
-                stepId,
-                width: mediaMeta.width,
-                height: mediaMeta.height,
+                stepId: resolvedStepId,
+                width: resolvedMediaMeta.width,
+                height: resolvedMediaMeta.height,
                 generationConfig: initialGenerationConfig,
                 operation: `${mediaType}Generation:linkWorkflowMedia`,
             });
@@ -331,35 +590,38 @@ export class GenerationRequestService {
             workflowId = placeholder.workflowId || requestedWorkflowId;
             mediaId = placeholder.mediaId || requestedMediaId;
             serverMediaIds = [mediaId];
-            logger.info({ workflowId, mediaId, projectId, mediaType, atomic: placeholder.atomic }, `Workflow and media placeholder created`);
+            logger.info({ workflowId, mediaId, projectId: resolvedProjectId, mediaType, atomic: placeholder.atomic }, `Workflow and media placeholder created`);
 
-            // 7. Prepare ExecutionEngine runtime input
+            // 7. Prepare ExecutionEngine runtime input (ownership already verified fail-fast above)
             const runtimeInput = {
                 prompt: cleanInput.prompt || trimmedPrompt,
-                model,
-                aspect_ratio: cleanInput.aspect_ratio || mediaMeta.aspect_ratio,
-                width: mediaMeta.width,
-                height: mediaMeta.height,
-                references,
+                model: chosenModel,
+                aspect_ratio: cleanInput.aspect_ratio || resolvedMediaMeta.aspect_ratio,
+                width: resolvedMediaMeta.width,
+                height: resolvedMediaMeta.height,
+                references: sanitizedReferences,
+                characters: sanitizedCharacters,
+                elements: sanitizedElements,
                 parameters: sanitizedParams,
-                project_id: projectId,
+                verify_ownership: false,
+                project_id: resolvedProjectId,
                 workflow_id: workflowId,
                 media_id: mediaId,
                 serverWorkflowId: workflowId,
                 serverMediaIds,
-                serverProjectId: projectId,
+                serverProjectId: resolvedProjectId,
             };
 
             // 8. Credit reservation & Redis job dispatch via ExecutionEngine
             const { taskId, hasSufficientCredits, creditErrorMsg, calculatedCost } =
                 await this._launchWithBillingCompensation({
-                    useCaseId,
+                    useCaseId: resolvedUseCaseId,
                     runtimeInput,
                     userId,
                     workflowId,
                     mediaId,
                     serverMediaIds,
-                    projectId,
+                    projectId: resolvedProjectId,
                     label: "workflow",
                 });
 
@@ -368,14 +630,14 @@ export class GenerationRequestService {
                 status: hasSufficientCredits ? "processing" : "saved",
                 needsCredits: !hasSufficientCredits,
                 message: hasSufficientCredits
-                    ? (defaultMessages.started || `${mediaType} generation started.`)
-                    : (creditErrorMsg || defaultMessages.addCredits || `Add credits to generate your ${mediaType}.`),
+                    ? (resolvedDefaultMessages.started || `${mediaType} generation started.`)
+                    : (creditErrorMsg || resolvedDefaultMessages.addCredits || `Add credits to generate your ${mediaType}.`),
                 cost: calculatedCost,
                 workflowId,
                 mediaId,
                 mediaIds: serverMediaIds,
                 taskId,
-                project_id: projectId,
+                project_id: resolvedProjectId,
                 session_id: null,
                 workflow: {
                     id: workflowId,
@@ -558,10 +820,12 @@ export class GenerationRequestService {
     }
 
     /**
-     * Executes an in-place image edit request (e.g. relight, angles) on an existing workflow.
+     * Executes an in-place image edit request (e.g. relight, angles, remove_background, edit)
+     * on an existing workflow.
      *
-     * Appends a new placeholder media row into the same parent workflow, flips `is_primary = true`
-     * immediately on creation, reserves credits, and launches the corresponding V3 use case.
+     * Accepts either raw HTTP `body` (parsed via `imageEditContract`) or pre-parsed fields
+     * for direct service callers. Enforces workflow + reference/entity/inline-tag ownership
+     * fail-fast before acquiring the edit lock or appending a placeholder media row.
      */
     async requestImageEdit({
         userId,
@@ -569,7 +833,9 @@ export class GenerationRequestService {
         editType,
         stepId,
         useCaseId,
+        body = null,
         model,
+        schema = undefined,
         prompt,
         userPrompt = "",
         references = [],
@@ -578,14 +844,69 @@ export class GenerationRequestService {
         editSettings = {},
         templateVars = null,
         parameters = {},
-        defaultMessages = {},
+        defaultMessages = null,
     }) {
-        // 1. Workflow lookup & Trash check
-        const workflow = typeof this.db?.workflows?.findById === "function"
-            ? await this.db.workflows.findById(workflowId)
-            : (typeof this.db?.workflows?.getWorkflow === "function"
-                ? await this.db.workflows.getWorkflow(workflowId)
-                : null);
+        const editDefaults = IMAGE_EDIT_DEFAULTS[editType] || null;
+        const resolvedStepId = stepId || editDefaults?.stepId;
+        const resolvedUseCaseId = useCaseId || editDefaults?.useCaseId;
+        const resolvedDefaultMessages = defaultMessages || editDefaults?.defaultMessages || {};
+
+        let resolvedWorkflowId = workflowId;
+        let resolvedModel = model;
+        let resolvedSchema = schema;
+        let resolvedPrompt = prompt;
+        let resolvedUserPrompt = userPrompt;
+        let resolvedReferences = references;
+        let resolvedCharacters = characters;
+        let resolvedElements = elements;
+        let resolvedEditSettings = editSettings;
+        let resolvedTemplateVars = templateVars;
+        let resolvedParameters = parameters;
+
+        if (body !== null && body !== undefined) {
+            if (!editDefaults?.parse) {
+                throw new AppError(`Unsupported image edit type "${editType}".`, 400, {
+                    code: "UNSUPPORTED_EDIT_TYPE",
+                });
+            }
+            const parsed = editDefaults.parse(body);
+            resolvedWorkflowId = parsed.workflowId;
+            resolvedModel = parsed.model ?? resolvedModel ?? IMAGE_EDIT_MODELS[editType];
+            resolvedSchema = parsed.schema;
+            resolvedPrompt = parsed.prompt;
+            resolvedUserPrompt = parsed.userPrompt ?? "";
+            resolvedReferences = parsed.references ?? [];
+            resolvedCharacters = parsed.characters ?? [];
+            resolvedElements = parsed.elements ?? [];
+            resolvedEditSettings = parsed.editSettings ?? {};
+            resolvedTemplateVars = parsed.templateVars ?? null;
+            resolvedParameters = parsed.parameters ?? {};
+        }
+
+        // 1. Single fail-fast ownership gate (workflow + references/characters/elements/inline tags)
+        const ownedWorkflow = await this.assertOwns("workflow", resolvedWorkflowId, userId);
+
+        const normalizedReferences = Array.isArray(resolvedReferences) ? resolvedReferences : [];
+        const normalizedCharacters = Array.isArray(resolvedCharacters) ? resolvedCharacters : [];
+        const normalizedElements = Array.isArray(resolvedElements) ? resolvedElements : [];
+
+        await this._assertReferencesAndEntitiesOwned({
+            userId,
+            prompt: resolvedPrompt,
+            references: normalizedReferences,
+            characters: normalizedCharacters,
+            elements: normalizedElements,
+        });
+
+        // 2. Workflow lookup (reuses ownedWorkflow when available) & Trash check
+        const workflow =
+            ownedWorkflow && typeof ownedWorkflow === "object" && ownedWorkflow.project_id
+                ? ownedWorkflow
+                : (typeof this.db?.workflows?.findById === "function"
+                    ? await this.db.workflows.findById(resolvedWorkflowId)
+                    : (typeof this.db?.workflows?.getWorkflow === "function"
+                        ? await this.db.workflows.getWorkflow(resolvedWorkflowId)
+                        : null));
 
         if (!workflow) {
             throw new AppError("Workflow not found", 404, { code: "WORKFLOW_NOT_FOUND" });
@@ -600,24 +921,24 @@ export class GenerationRequestService {
             );
         }
 
-        if (await this._isWorkflowTrashed(workflowId, userId)) {
+        if (await this._isWorkflowTrashed(resolvedWorkflowId, userId)) {
             throw new AppError("Cannot edit media inside a trashed workflow", 409, {
                 code: "WORKFLOW_TRASHED",
             });
         }
 
-        const editLock = await this._acquireWorkflowEditLock(workflowId);
+        const editLock = await this._acquireWorkflowEditLock(resolvedWorkflowId);
         let newMediaId = null;
 
         try {
-            // 2. Server-Resolved Source Media Lookup (with non-bricking fallback when primary is failed/saved)
-            const primaryMedia = await this._resolveEditableSourceMedia(workflowId);
+            // 3. Server-Resolved Source Media Lookup (with non-bricking fallback when primary is failed/saved)
+            const primaryMedia = await this._resolveEditableSourceMedia(resolvedWorkflowId);
             const sourceMediaId = primaryMedia.id || primaryMedia.media_id;
 
             // Enforce single canonical media-type check before mutating DB/primary or holding credits
             assertAllowedMediaType(primaryMedia, ["image"], sourceMediaId);
 
-            // 3. Dimension & Aspect Ratio Inheritance + Model Validation
+            // 4. Dimension & Aspect Ratio Inheritance + Model Validation
             const width = Number(primaryMedia.width) > 0 ? Number(primaryMedia.width) : 1024;
             const height = Number(primaryMedia.height) > 0 ? Number(primaryMedia.height) : 1024;
 
@@ -627,14 +948,13 @@ export class GenerationRequestService {
                 calculateAspectRatio(width, height) ||
                 "1:1";
 
-            const resolvedParams = parameters && typeof parameters === "object" ? { ...parameters } : {};
+            const resolvedParams = resolvedParameters && typeof resolvedParameters === "object"
+                ? { ...resolvedParameters }
+                : {};
             let inheritedAspectRatio = rawDerivedAspectRatio;
 
-            const modelSchema = this._getOptionalModelSchema(model);
-
-            const normalizedReferences = Array.isArray(references) ? references : [];
-            const normalizedCharacters = Array.isArray(characters) ? characters : [];
-            const normalizedElements = Array.isArray(elements) ? elements : [];
+            const modelSchema =
+                resolvedSchema !== undefined ? resolvedSchema : this._getOptionalModelSchema(resolvedModel);
 
             if (!resolvedParams.aspect_ratio) {
                 const arDef = modelSchema?.parameters?.aspect_ratio;
@@ -654,7 +974,7 @@ export class GenerationRequestService {
             }
 
             const preValidationParams = this._filterClientParams(resolvedParams, ["images", "input_image", "prompt"]);
-            const trimmedEditPrompt = (prompt || "").trim();
+            const trimmedEditPrompt = (resolvedPrompt || "").trim();
             const isRemoveBackground = editType === "remove_background";
             const validationPayload = isRemoveBackground
                 ? {
@@ -667,21 +987,21 @@ export class GenerationRequestService {
                     prompt: trimmedEditPrompt,
                 };
             const { cleanInput, sanitizedParams } = this._validateAndSanitizeParams({
-                model,
+                model: resolvedModel,
                 validationInput: validationPayload,
                 omitFromSanitized: isRemoveBackground ? ["input_image"] : [],
             });
 
             const finalPrompt = cleanInput.prompt || trimmedEditPrompt;
-            const trimmedUserPrompt = typeof userPrompt === "string" ? userPrompt.trim() : "";
+            const trimmedUserPrompt = typeof resolvedUserPrompt === "string" ? resolvedUserPrompt.trim() : "";
 
             const initialGenerationConfig = {
                 prompt: finalPrompt,
                 ...(trimmedUserPrompt ? { user_prompt: trimmedUserPrompt } : {}),
-                model,
+                model: resolvedModel,
                 edit_type: editType,
                 source_media_id: sourceMediaId,
-                edit_settings: editSettings,
+                edit_settings: resolvedEditSettings,
                 aspect_ratio: cleanInput.aspect_ratio || inheritedAspectRatio || "1:1",
                 parameters: sanitizedParams,
                 created_at: new Date().toISOString(),
@@ -689,14 +1009,14 @@ export class GenerationRequestService {
 
             const modelMaxReferences = Number(modelSchema?.parameters?.images?.max);
 
-            // 4. In-Place Placeholder Append + Immediate `is_primary = true` Swap
+            // 5. In-Place Placeholder Append + Immediate `is_primary = true` Swap
             const requestedMediaId = randomUUID();
             const createdMedia = await appendMediaToWorkflow(this.db, {
-                workflow_id: workflowId,
+                workflow_id: resolvedWorkflowId,
                 mediaData: {
                     id: requestedMediaId,
                     project_id: workflow.project_id,
-                    step_id: stepId,
+                    step_id: resolvedStepId,
                     url: null,
                     width,
                     height,
@@ -709,14 +1029,14 @@ export class GenerationRequestService {
             newMediaId = createdMedia?.id || requestedMediaId;
             const serverMediaIds = [newMediaId];
             logger.info(
-                { workflowId, mediaId: newMediaId, sourceMediaId, projectId: workflow.project_id, editType },
+                { workflowId: resolvedWorkflowId, mediaId: newMediaId, sourceMediaId, projectId: workflow.project_id, editType },
                 "In-place image edit placeholder appended and promoted to primary"
             );
 
-            // 5. Launch V3 Workflow via ExecutionEngine & Apply Billing/Dispatch Compensation
+            // 6. Launch V3 Workflow via ExecutionEngine & Apply Billing/Dispatch Compensation
             const runtimeInput = {
                 prompt: finalPrompt,
-                model,
+                model: resolvedModel,
                 source_image_url: primaryMedia.url,
                 source_media_id: sourceMediaId,
                 aspect_ratio: cleanInput.aspect_ratio || inheritedAspectRatio,
@@ -729,24 +1049,25 @@ export class GenerationRequestService {
                     ? { max_references: modelMaxReferences }
                     : {}),
                 parameters: sanitizedParams,
-                edit_settings: editSettings,
-                ...(templateVars && typeof templateVars === "object"
-                    ? { template_vars: templateVars }
+                edit_settings: resolvedEditSettings,
+                ...(resolvedTemplateVars && typeof resolvedTemplateVars === "object"
+                    ? { template_vars: resolvedTemplateVars }
                     : {}),
+                verify_ownership: false,
                 project_id: workflow.project_id,
-                workflow_id: workflowId,
+                workflow_id: resolvedWorkflowId,
                 media_id: newMediaId,
-                serverWorkflowId: workflowId,
+                serverWorkflowId: resolvedWorkflowId,
                 serverMediaIds,
                 serverProjectId: workflow.project_id,
             };
 
             const { taskId, hasSufficientCredits, creditErrorMsg, calculatedCost } =
                 await this._launchWithBillingCompensation({
-                    useCaseId,
+                    useCaseId: resolvedUseCaseId,
                     runtimeInput,
                     userId,
-                    workflowId,
+                    workflowId: resolvedWorkflowId,
                     mediaId: newMediaId,
                     serverMediaIds,
                     projectId: workflow.project_id,
@@ -754,16 +1075,16 @@ export class GenerationRequestService {
                     logMeta: { editType },
                 });
 
-            // 6. Return DTO
+            // 7. Return DTO
             return {
                 ok: true,
                 status: hasSufficientCredits ? "processing" : "saved",
                 needsCredits: !hasSufficientCredits,
                 message: hasSufficientCredits
-                    ? (defaultMessages.started || `Image ${editType} started.`)
-                    : (creditErrorMsg || defaultMessages.addCredits || `Add credits to ${editType} your image.`),
+                    ? (resolvedDefaultMessages.started || `Image ${editType} started.`)
+                    : (creditErrorMsg || resolvedDefaultMessages.addCredits || `Add credits to ${editType} your image.`),
                 cost: calculatedCost,
-                workflowId,
+                workflowId: resolvedWorkflowId,
                 mediaId: newMediaId,
                 sourceMediaId,
                 mediaIds: serverMediaIds,
@@ -771,7 +1092,7 @@ export class GenerationRequestService {
                 project_id: workflow.project_id,
                 session_id: null,
                 workflow: {
-                    id: workflowId,
+                    id: resolvedWorkflowId,
                     primary_media_id: newMediaId,
                     media_ids: serverMediaIds,
                     workflow_type: workflow.workflow_type || "GENERATION",

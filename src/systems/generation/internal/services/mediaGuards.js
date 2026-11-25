@@ -7,7 +7,6 @@
  * - Media must be completed and have a URL
  * - If workflow_id is provided, media must belong to that workflow
  * - If project_id is provided, media must belong to that project
- * - If session_id is provided, media's workflow must belong to that session
  */
 import { getGenerationServices } from "./serviceAccessor.js";
 
@@ -15,7 +14,6 @@ export async function assertMediaUsable({
     media_id,
     workflow_id = null,
     project_id = null,
-    session_id = null,
 }, options = {}) {
     const { allowProcessing = false } = options;
     const db = options.db || getGenerationServices().db;
@@ -82,13 +80,6 @@ export async function assertMediaUsable({
 
     if (project_id && media.project_id !== project_id) {
         const err = new Error("Media does not belong to this project");
-        err.statusCode = 403;
-        throw err;
-    }
-
-    const wfSessionId = media.workflow?.session_id ?? null;
-    if (session_id && wfSessionId && wfSessionId !== session_id) {
-        const err = new Error("Media does not belong to this session");
         err.statusCode = 403;
         throw err;
     }

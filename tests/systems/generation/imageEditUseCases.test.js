@@ -35,15 +35,68 @@ function createMockRes() {
   return res;
 }
 
+function createControllerBackedEditService({
+  primaryMedia = {
+    id: "media-orig",
+    url: "https://cdn.example.com/workflows/wf-1/primary.png",
+    status: "success",
+    width: 1024,
+    height: 1024,
+    generation_config: { aspect_ratio: "1:1" },
+  },
+} = {}) {
+  const launchCalls = [];
+  const createdMedia = [];
+  const service = new GenerationRequestService({
+    db: {
+      workflows: {
+        findById: async (id) => db.workflows.findById(id),
+      },
+      trash: {
+        getTrashedWorkflowIdSet: async () => new Set(),
+      },
+      workflowMedia: {
+        getPrimaryMedia: async () => primaryMedia,
+        linkMedia: async (link) => link,
+        setPrimaryMedia: async (args) => args,
+      },
+      media: {
+        createMedia: async (m) => {
+          createdMedia.push(m);
+          return m;
+        },
+        updateMedia: async (id, patch) => ({ id, ...patch }),
+      },
+    },
+    executionEngine: {
+      launch: async (args) => {
+        launchCalls.push(args);
+        return {
+          jobId: "job-ctrl-edit",
+          executionId: args.executionId,
+          cost: { totalCredits: 13 },
+        };
+      },
+    },
+    folderService: {},
+  });
+  return { service, launchCalls, createdMedia };
+}
+
 describe("In-Place Image Edit Controllers & Router Boundary (relightImage, changeImageAngle)", () => {
   let originalRequestImageEdit;
   let originalFindById;
   let originalGetWorkflow;
   let originalFindByMedia;
   let originalFindByUser;
+  let controllerHarness;
 
   beforeEach(() => {
     originalRequestImageEdit = generationRequestService.requestImageEdit;
+    controllerHarness = createControllerBackedEditService();
+    generationRequestService.requestImageEdit = controllerHarness.service.requestImageEdit.bind(
+      controllerHarness.service
+    );
     if (db.workflows) {
       originalFindById = db.workflows.findById;
       originalGetWorkflow = db.workflows.getWorkflow;
@@ -108,12 +161,6 @@ describe("In-Place Image Edit Controllers & Router Boundary (relightImage, chang
 
     for (const { name, fn, validExtra } of handlers) {
       it(`${name} rejects client model / model_name with 400 MODEL_LOCKED`, async () => {
-        let calledService = false;
-        generationRequestService.requestImageEdit = async () => {
-          calledService = true;
-          return { ok: true };
-        };
-
         for (const extra of [{ model: "nanobana_2" }, { model_name: "gpt-image-2" }]) {
           const res = createMockRes();
           await fn(
@@ -126,7 +173,8 @@ describe("In-Place Image Edit Controllers & Router Boundary (relightImage, chang
           assert.equal(res.getStatus(), 400);
           assert.equal(res.getPayload().ok, false);
           assert.equal(res.getPayload().code, "MODEL_LOCKED");
-          assert.equal(calledService, false);
+          assert.equal(controllerHarness.createdMedia.length, 0);
+          assert.equal(controllerHarness.launchCalls.length, 0);
         }
       });
 
@@ -188,12 +236,6 @@ describe("In-Place Image Edit Controllers & Router Boundary (relightImage, chang
       });
 
       it(`${name} enforces workflow ownership before mutating anything`, async () => {
-        let calledService = false;
-        generationRequestService.requestImageEdit = async () => {
-          calledService = true;
-          return { ok: true };
-        };
-
         // Workflow belongs to user-owner, caller is user-attacker
         db.workflows.findById = async () => ({
           id: "wf-secret",
@@ -213,26 +255,14 @@ describe("In-Place Image Edit Controllers & Router Boundary (relightImage, chang
 
         assert.equal(res.getStatus(), 404, "assertOwns must fail closed with 404 to prevent enumeration");
         assert.equal(res.getPayload().ok, false);
-        assert.equal(calledService, false, "service must not be called when ownership check fails");
+        assert.equal(controllerHarness.createdMedia.length, 0, "placeholder must not be created when ownership check fails");
+        assert.equal(controllerHarness.launchCalls.length, 0, "job must not launch when ownership check fails");
       });
     }
   });
 
   describe("relightImage validation & delegation", () => {
     it("accepts valid flat relight controls and delegates to generationRequestService.requestImageEdit with locked nanobana_2", async () => {
-      let capturedArgs = null;
-      generationRequestService.requestImageEdit = async (args) => {
-        capturedArgs = args;
-        return {
-          ok: true,
-          status: "processing",
-          needsCredits: false,
-          workflowId: args.workflowId,
-          mediaId: "media-relight-new",
-          sourceMediaId: "media-orig",
-        };
-      };
-
       const res = createMockRes();
       await relightImage(
         {
@@ -255,16 +285,19 @@ describe("In-Place Image Edit Controllers & Router Boundary (relightImage, chang
 
       assert.equal(res.getStatus(), 200);
       assert.equal(res.getPayload().ok, true);
-      assert.equal(res.getPayload().mediaId, "media-relight-new");
-      assert.ok(capturedArgs);
-      assert.equal(capturedArgs.userId, "user-owner");
-      assert.equal(capturedArgs.workflowId, "wf-relight-1");
-      assert.equal(capturedArgs.editType, "relight");
-      assert.equal(capturedArgs.stepId, "image_relight");
-      assert.equal(capturedArgs.useCaseId, "image-relight-v3");
-      assert.equal(capturedArgs.model, "nanobana_2");
-      assert.equal(capturedArgs.userPrompt, "Dramatic rim highlight on hair");
-      assert.deepEqual(capturedArgs.editSettings, {
+      assert.ok(res.getPayload().mediaId);
+      assert.equal(controllerHarness.launchCalls.length, 1);
+      const launched = controllerHarness.launchCalls[0];
+      const createdCfg = controllerHarness.createdMedia[0].generation_config;
+      assert.equal(launched.userId, "user-owner");
+      assert.equal(launched.useCaseId, "image-relight-v3");
+      assert.equal(launched.input.workflow_id, "wf-relight-1");
+      assert.equal(launched.input.model, "nanobana_2");
+      assert.equal(launched.input.verify_ownership, false);
+      assert.equal(controllerHarness.createdMedia[0].step_id, "image_relight");
+      assert.equal(createdCfg.edit_type, "relight");
+      assert.equal(createdCfg.user_prompt, "Dramatic rim highlight on hair");
+      assert.deepEqual(createdCfg.edit_settings, {
         light_type: "hard",
         brightness: 85,
         color: "#FFAA33",
@@ -273,21 +306,15 @@ describe("In-Place Image Edit Controllers & Router Boundary (relightImage, chang
         tilt: 45,
         distance: 60,
       });
-      assert.deepEqual(capturedArgs.parameters, { resolution: "2k" });
-      assert.match(capturedArgs.prompt, /hard light/i);
-      assert.match(capturedArgs.prompt, /brightness 85%/);
-      assert.match(capturedArgs.prompt, /color #FFAA33/);
-      assert.match(capturedArgs.prompt, /distance 60\/100/);
-      assert.match(capturedArgs.prompt, /Dramatic rim highlight on hair/);
+      assert.equal(launched.input.parameters.resolution, "2k");
+      assert.match(launched.input.prompt, /hard light/i);
+      assert.match(launched.input.prompt, /brightness 85%/);
+      assert.match(launched.input.prompt, /color #FFAA33/);
+      assert.match(launched.input.prompt, /distance 60\/100/);
+      assert.match(launched.input.prompt, /Dramatic rim highlight on hair/);
     });
 
     it("accepts boundary values and optional distance omitted", async () => {
-      let capturedArgs = null;
-      generationRequestService.requestImageEdit = async (args) => {
-        capturedArgs = args;
-        return { ok: true, status: "processing" };
-      };
-
       const res = createMockRes();
       await relightImage(
         {
@@ -306,8 +333,9 @@ describe("In-Place Image Edit Controllers & Router Boundary (relightImage, chang
       );
 
       assert.equal(res.getStatus(), 200);
-      assert.equal("distance" in capturedArgs.editSettings, false);
-      assert.deepEqual(capturedArgs.editSettings, {
+      const editSettings = controllerHarness.createdMedia[0].generation_config.edit_settings;
+      assert.equal("distance" in editSettings, false);
+      assert.deepEqual(editSettings, {
         light_type: "soft",
         brightness: 0,
         color: "#000000",
@@ -356,19 +384,6 @@ describe("In-Place Image Edit Controllers & Router Boundary (relightImage, chang
 
   describe("changeImageAngle validation & delegation", () => {
     it("accepts valid rotation, tilt, zoom, and optional prompt, delegating to requestImageEdit with locked nanobana_2", async () => {
-      let capturedArgs = null;
-      generationRequestService.requestImageEdit = async (args) => {
-        capturedArgs = args;
-        return {
-          ok: true,
-          status: "processing",
-          needsCredits: false,
-          workflowId: args.workflowId,
-          mediaId: "media-angle-new",
-          sourceMediaId: "media-orig",
-        };
-      };
-
       const res = createMockRes();
       await changeImageAngle(
         {
@@ -386,27 +401,24 @@ describe("In-Place Image Edit Controllers & Router Boundary (relightImage, chang
 
       assert.equal(res.getStatus(), 200);
       assert.equal(res.getPayload().ok, true);
-      assert.ok(capturedArgs);
-      assert.equal(capturedArgs.editType, "angles");
-      assert.equal(capturedArgs.stepId, "image_angles");
-      assert.equal(capturedArgs.useCaseId, "image-angles-v3");
-      assert.equal(capturedArgs.model, "nanobana_2");
-      assert.deepEqual(capturedArgs.editSettings, {
+      assert.equal(controllerHarness.launchCalls.length, 1);
+      const launched = controllerHarness.launchCalls[0];
+      const createdCfg = controllerHarness.createdMedia[0].generation_config;
+      assert.equal(createdCfg.edit_type, "angles");
+      assert.equal(controllerHarness.createdMedia[0].step_id, "image_angles");
+      assert.equal(launched.useCaseId, "image-angles-v3");
+      assert.equal(launched.input.model, "nanobana_2");
+      assert.equal(launched.input.verify_ownership, false);
+      assert.deepEqual(createdCfg.edit_settings, {
         rotation: -180,
         tilt: 90,
         zoom: 10,
       });
-      assert.match(capturedArgs.prompt, /rotation -180 degrees, tilt 90 degrees, zoom 10\/10/);
-      assert.match(capturedArgs.prompt, /Keep crisp focus on face/);
+      assert.match(launched.input.prompt, /rotation -180 degrees, tilt 90 degrees, zoom 10\/10/);
+      assert.match(launched.input.prompt, /Keep crisp focus on face/);
     });
 
     it("allows (0, 0, 0) camera pose when a non-empty prompt is provided", async () => {
-      let capturedArgs = null;
-      generationRequestService.requestImageEdit = async (args) => {
-        capturedArgs = args;
-        return { ok: true, status: "processing" };
-      };
-
       const res = createMockRes();
       await changeImageAngle(
         {
@@ -423,7 +435,11 @@ describe("In-Place Image Edit Controllers & Router Boundary (relightImage, chang
       );
 
       assert.equal(res.getStatus(), 200);
-      assert.deepEqual(capturedArgs.editSettings, { rotation: 0, tilt: 0, zoom: 0 });
+      assert.deepEqual(controllerHarness.createdMedia[0].generation_config.edit_settings, {
+        rotation: 0,
+        tilt: 0,
+        zoom: 0,
+      });
     });
 
     it("rejects all-zero no-op (0, 0, 0 without prompt) and out-of-range values with 400", async () => {
@@ -559,6 +575,8 @@ describe("GenerationRequestService.requestImageEdit behavioral tests", () => {
       db: mockDb,
       executionEngine: mockExecutionEngine,
       folderService: {},
+      assertOwns: async () => true,
+      assertOwnsAny: async () => true,
     });
 
     return {
@@ -1277,6 +1295,8 @@ describe("GenerationRequestService.requestImageEdit behavioral tests", () => {
         },
       },
       folderService: {},
+      assertOwns: async () => true,
+      assertOwnsAny: async () => true,
     });
 
     // Call 1: hits INSUFFICIENT_CREDITS -> saved placeholder MUST remain is_primary = true
@@ -1361,6 +1381,8 @@ describe("GenerationRequestService.requestImageEdit behavioral tests", () => {
         },
       },
       folderService: {},
+      assertOwns: async () => true,
+      assertOwnsAny: async () => true,
     });
 
     // Call 1: fails -> failed placeholder MUST remain is_primary = true
@@ -1439,7 +1461,7 @@ describe("POST /api/images/remove-background — Direct & Guided Bria Models + P
 
     const wfId = "wf-rmbg-ctrl-1";
     const userId = "user-rmbg-ctrl-1";
-    const calls = [];
+    const harness = createControllerBackedEditService();
 
     const origRequestImageEdit = generationRequestService.requestImageEdit;
     const origFindById = db.workflows.findById;
@@ -1447,18 +1469,7 @@ describe("POST /api/images/remove-background — Direct & Guided Bria Models + P
     const origFindByUser = db.projects.findByUser;
 
     try {
-      generationRequestService.requestImageEdit = async (args) => {
-        calls.push(args);
-        return {
-          ok: true,
-          status: "processing",
-          needsCredits: false,
-          workflowId: args.workflowId,
-          mediaId: "media-rmbg-new",
-          sourceMediaId: "media-rmbg-src",
-          cost: args.model === "bria_remove_background_guided" ? 4 : 3,
-        };
-      };
+      generationRequestService.requestImageEdit = harness.service.requestImageEdit.bind(harness.service);
       db.workflows.findById = async (id) =>
         id === wfId ? { id: wfId, project_id: "proj-rmbg-1", user_id: userId } : null;
       db.workflows.getWorkflow = db.workflows.findById;
@@ -1469,10 +1480,10 @@ describe("POST /api/images/remove-background — Direct & Guided Bria Models + P
       const res1 = createMockRes();
       await removeImageBackground({ user: { id: userId }, body: { workflow_id: wfId } }, res1);
       assert.equal(res1.getStatus(), 200);
-      assert.equal(calls[0].model, "bria_remove_background_3_0");
-      assert.equal(calls[0].useCaseId, "image-remove-background-v3");
-      assert.equal(calls[0].editType, "remove_background");
-      assert.equal(calls[0].parameters.preserve_alpha, true);
+      assert.equal(harness.launchCalls[0].input.model, "bria_remove_background_3_0");
+      assert.equal(harness.launchCalls[0].useCaseId, "image-remove-background-v3");
+      assert.equal(harness.createdMedia[0].generation_config.edit_type, "remove_background");
+      assert.equal(harness.launchCalls[0].input.parameters.preserve_alpha, true);
 
       // 2. Guided model with alias + prompt
       const res2 = createMockRes();
@@ -1489,9 +1500,9 @@ describe("POST /api/images/remove-background — Direct & Guided Bria Models + P
         res2
       );
       assert.equal(res2.getStatus(), 200);
-      assert.equal(calls[1].model, "bria_remove_background_guided");
-      assert.equal(calls[1].prompt, "keep only the jacket");
-      assert.equal(calls[1].parameters.preserve_alpha, false);
+      assert.equal(harness.launchCalls[1].input.model, "bria_remove_background_guided");
+      assert.equal(harness.launchCalls[1].input.prompt, "keep only the jacket");
+      assert.equal(harness.launchCalls[1].input.parameters.preserve_alpha, false);
 
       // 3. Rejects unsupported model (e.g. nanobana_2)
       const resBadModel = createMockRes();
@@ -1552,7 +1563,7 @@ describe("POST /api/images/edit — General In-Place Image Edit (Dynamic Edit-Ca
     const wfId = "wf-edit-ctrl-1";
     const refWfId = "wf-ref-ctrl-2";
     const userId = "user-edit-ctrl-1";
-    const calls = [];
+    const harness = createControllerBackedEditService();
 
     const origRequestImageEdit = generationRequestService.requestImageEdit;
     const origFindById = db.workflows.findById;
@@ -1560,18 +1571,7 @@ describe("POST /api/images/edit — General In-Place Image Edit (Dynamic Edit-Ca
     const origFindByUser = db.projects.findByUser;
 
     try {
-      generationRequestService.requestImageEdit = async (args) => {
-        calls.push(args);
-        return {
-          ok: true,
-          status: "processing",
-          needsCredits: false,
-          workflowId: args.workflowId,
-          mediaId: "media-edit-new",
-          sourceMediaId: "media-edit-src",
-          cost: 13,
-        };
-      };
+      generationRequestService.requestImageEdit = harness.service.requestImageEdit.bind(harness.service);
       db.workflows.findById = async (id) =>
         id === wfId || id === refWfId ? { id, project_id: "proj-edit-1", user_id: userId } : null;
       db.workflows.getWorkflow = db.workflows.findById;
@@ -1593,12 +1593,12 @@ describe("POST /api/images/edit — General In-Place Image Edit (Dynamic Edit-Ca
         res1
       );
       assert.equal(res1.getStatus(), 200);
-      assert.equal(calls[0].model, "nanobana_2");
-      assert.equal(calls[0].useCaseId, "image-edit-v3");
-      assert.equal(calls[0].editType, "edit");
-      assert.equal(calls[0].stepId, "image_edit");
-      assert.deepEqual(calls[0].references, [refWfId]);
-      assert.equal(calls[0].parameters.resolution, "2k");
+      assert.equal(harness.launchCalls[0].input.model, "nanobana_2");
+      assert.equal(harness.launchCalls[0].useCaseId, "image-edit-v3");
+      assert.equal(harness.createdMedia[0].generation_config.edit_type, "edit");
+      assert.equal(harness.createdMedia[0].step_id, "image_edit");
+      assert.deepEqual(harness.launchCalls[0].input.references, [refWfId]);
+      assert.equal(harness.launchCalls[0].input.parameters.resolution, "2k");
 
       // 2. Explicit edit-capable model (gpt_image_2 / nanobana_pro)
       const res2 = createMockRes();
@@ -1610,7 +1610,7 @@ describe("POST /api/images/edit — General In-Place Image Edit (Dynamic Edit-Ca
         res2
       );
       assert.equal(res2.getStatus(), 200);
-      assert.equal(calls[1].model, "nanobana_pro");
+      assert.equal(harness.launchCalls[1].input.model, "nanobana_pro");
 
       // 3. Rejects non-edit-capable image model (seedream_v5)
       const resSeedream = createMockRes();
@@ -1674,8 +1674,9 @@ describe("POST /api/images/edit — General In-Place Image Edit (Dynamic Edit-Ca
       assert.equal(resBadElemUrl.getStatus(), 400);
       assert.equal(resBadElemUrl.getPayload().code, "DIRECT_URL_NOT_ALLOWED");
 
-      // 8. Rejects unowned inline <character:id> tag BEFORE calling requestImageEdit (no failed placeholder dirtied)
-      const callsBeforeForeignInline = calls.length;
+      // 8. Rejects unowned inline <character:id> tag BEFORE creating placeholder or launching (no failed placeholder dirtied)
+      const createdBeforeForeignInline = harness.createdMedia.length;
+      const launchesBeforeForeignInline = harness.launchCalls.length;
       const resForeignInline = createMockRes();
       await editImage(
         {
@@ -1685,7 +1686,8 @@ describe("POST /api/images/edit — General In-Place Image Edit (Dynamic Edit-Ca
         resForeignInline
       );
       assert.ok(resForeignInline.getStatus() === 403 || resForeignInline.getStatus() === 404);
-      assert.equal(calls.length, callsBeforeForeignInline, "requestImageEdit must NOT be called when inline tag ownership fails");
+      assert.equal(harness.createdMedia.length, createdBeforeForeignInline, "placeholder must NOT be created when inline tag ownership fails");
+      assert.equal(harness.launchCalls.length, launchesBeforeForeignInline, "job must NOT be launched when inline tag ownership fails");
     } finally {
       generationRequestService.requestImageEdit = origRequestImageEdit;
       db.workflows.findById = origFindById;
@@ -1697,7 +1699,7 @@ describe("POST /api/images/edit — General In-Place Image Edit (Dynamic Edit-Ca
   it("enforces model.parameters.images.max - 1 cap upfront on POST /api/images/edit (400 TOO_MANY_REFERENCES)", async () => {
     const wfId = "wf-edit-cap-1";
     const userId = "user-edit-cap-1";
-    const calls = [];
+    const harness = createControllerBackedEditService();
 
     const origRequestImageEdit = generationRequestService.requestImageEdit;
     const origFindById = db.workflows.findById;
@@ -1705,18 +1707,7 @@ describe("POST /api/images/edit — General In-Place Image Edit (Dynamic Edit-Ca
     const origFindByUser = db.projects.findByUser;
 
     try {
-      generationRequestService.requestImageEdit = async (args) => {
-        calls.push(args);
-        return {
-          ok: true,
-          status: "processing",
-          needsCredits: false,
-          workflowId: args.workflowId,
-          mediaId: "media-cap-ok",
-          sourceMediaId: "media-cap-src",
-          cost: 13,
-        };
-      };
+      generationRequestService.requestImageEdit = harness.service.requestImageEdit.bind(harness.service);
       db.workflows.findById = async (id) => ({ id, project_id: "proj-cap-1", user_id: userId });
       db.workflows.getWorkflow = db.workflows.findById;
       db.projects.findByUser = async (uid, pid) =>
@@ -1738,7 +1729,7 @@ describe("POST /api/images/edit — General In-Place Image Edit (Dynamic Edit-Ca
         resOk13
       );
       assert.equal(resOk13.getStatus(), 200);
-      assert.equal(calls.length, 1);
+      assert.equal(harness.launchCalls.length, 1);
 
       // 14 additional references across references + characters + elements exceeds nanobana_2 cap (13) -> 400
       const resTooManyNano = createMockRes();
@@ -1877,6 +1868,7 @@ describe("POST /api/images/edit — General In-Place Image Edit (Dynamic Edit-Ca
 
       assert.equal(res.getStatus(), 200);
       assert.ok(launchedArgs, "ExecutionEngine.launch must be called");
+      assert.equal(launchedArgs.input.verify_ownership, false, "verified edit dispatch must set verify_ownership: false");
       assert.deepEqual(launchedArgs.input.references, [refWfId]);
       assert.deepEqual(launchedArgs.input.characters, [charId]);
       assert.deepEqual(launchedArgs.input.elements, [elemId]);
@@ -1884,13 +1876,20 @@ describe("POST /api/images/edit — General In-Place Image Edit (Dynamic Edit-Ca
       // Execute full 4-node imageEditV3 DAG with the exact runtime input forwarded by requestImageEdit
       const executor = new WorkflowExecutor(createDefaultV3NodeRegistry());
       let capturedGenerateImages = null;
+      let workerOwnershipCalls = 0;
       const execResult = await executor.execute({
         workflow: imageEditV3,
         input: launchedArgs.input,
         context: {
           userId,
-          assertOwns: async () => true,
-          assertOwnsAny: async () => true,
+          assertOwns: async () => {
+            workerOwnershipCalls += 1;
+            return true;
+          },
+          assertOwnsAny: async () => {
+            workerOwnershipCalls += 1;
+            return true;
+          },
           getCharacterPromptContext: async ({ characterId }) => {
             if (characterId !== charId) throw new Error("Character not found");
             return {
@@ -1947,6 +1946,7 @@ describe("POST /api/images/edit — General In-Place Image Edit (Dynamic Edit-Ca
       });
 
       assert.equal(execResult.status, "completed");
+      assert.equal(workerOwnershipCalls, 0, "worker ResolveRefsNode must perform 0 duplicate ownership calls when verify_ownership: false");
       const resolved = execResult.nodeOutputs.resolve_refs;
       assert.equal(resolved.status, "success");
       assert.deepEqual(resolved.reference_urls, [

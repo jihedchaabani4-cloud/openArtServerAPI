@@ -97,7 +97,7 @@ describe("imageController and videoController unit tests", () => {
             assert.ok(capturedArgs);
             assert.equal(capturedArgs.mediaType, "image");
             assert.equal(capturedArgs.stepId, "image_generation");
-            assert.equal(capturedArgs.useCaseId, "image-generation-v1");
+            assert.equal(capturedArgs.useCaseId, "image-generation-v3");
             assert.equal(payload.ok, true);
             assert.equal(payload.workflowId, "wf-img-1");
         });
@@ -166,7 +166,7 @@ describe("imageController and videoController unit tests", () => {
             assert.match(payload.message, /Direct media sources are not permitted/);
         });
 
-        it("delegates to generationRequestService with video configuration and default 16:9 aspect ratio", async () => {
+        it("delegates to generationRequestService with video configuration", async () => {
             let capturedArgs = null;
             generationRequestService.requestGeneration = async (args) => {
                 capturedArgs = args;
@@ -195,10 +195,11 @@ describe("imageController and videoController unit tests", () => {
 
             await generateVideo(req, res);
             assert.ok(capturedArgs);
+            assert.equal(capturedArgs.userId, "user-1");
             assert.equal(capturedArgs.mediaType, "video");
             assert.equal(capturedArgs.stepId, "video_generation");
-            assert.equal(capturedArgs.useCaseId, "video-generation-v1");
-            assert.equal(capturedArgs.mediaMeta.aspect_ratio, "16:9");
+            assert.equal(capturedArgs.useCaseId, "video-generation-v3");
+            assert.deepEqual(capturedArgs.body, req.body);
             assert.equal(payload.ok, true);
             assert.equal(payload.workflowId, "wf-vid-1");
         });

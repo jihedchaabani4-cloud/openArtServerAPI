@@ -720,7 +720,7 @@ describe("Billing Business System — Public Contract & Capabilities (Phase 2.1)
 describe("D2.3 — GraphCompiler & ExecutionEngine Black-Box Launch Contract Tests", () => {
   it("TEST 1: GraphCompiler.compile returns a minimal DAG plan (activeNodeIds, activeNodes, waves) without duplicating large inputs", () => {
     const compiler = new GraphCompiler(createDefaultV3NodeRegistry());
-    const plan = compiler.compile(getV3Workflow("video-generation-v1"));
+    const plan = compiler.compile(getV3Workflow("video-generation-v3"));
     assert.strictEqual(plan.workflowId, "video-generation-v3");
     assert.ok(Array.isArray(plan.activeNodeIds) && plan.activeNodeIds.length === 4);
     assert.ok(Array.isArray(plan.waves) && plan.waves.length >= 4);
@@ -745,7 +745,7 @@ describe("D2.3 — GraphCompiler & ExecutionEngine Black-Box Launch Contract Tes
     });
 
     const result = await engine.launch({
-      useCaseId: "video-generation-v1",
+      useCaseId: "video-generation-v3",
       userId: "user-test-d23",
       executionId: "run-d23-test",
       workflowId: "wf-d23-test",

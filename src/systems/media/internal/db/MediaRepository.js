@@ -279,18 +279,16 @@ export class MediaRepository {
      * Used by GenerationService.getAssets.
      * @param {string}  projectId
      * @param {Object}  opts
-     * @param {string}  [opts.sessionId]  - optional workflow session filter
      * @param {number}  [opts.limit=30]
      * @param {number}  [opts.offset=0]
      */
-    async findByProjectPaginated(projectId, { sessionId, limit = 30, offset = 0 } = {}) {
+    async findByProjectPaginated(projectId, { limit = 30, offset = 0 } = {}) {
         let query = this.client()
             .from(this.tableName)
             .select("id, url, width, height, step_id, create_time, generation_config")
             .eq("project_id", projectId)
             .order("create_time", { ascending: false })
             .range(Number(offset), Number(offset) + Number(limit) - 1);
-        // Note: session_id filtering on media goes through workflow join; kept as-is per original controller behaviour
         const { data, error } = await query;
         if (error) throw error;
         return data || [];

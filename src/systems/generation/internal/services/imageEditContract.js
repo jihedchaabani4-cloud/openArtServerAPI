@@ -181,11 +181,22 @@ function isPlainObject(value) {
     return proto === Object.prototype || proto === null;
 }
 
-function assertNoRawUrls(value, path = "parameters") {
+function getOptionalModelSchema(model) {
+    try {
+        return getModelSchema(model);
+    } catch {
+        return null;
+    }
+}
+
+export function assertNoRawUrls(value, path = "parameters", formatMessage = null) {
     if (typeof value === "string") {
         if (RAW_HTTP_URL_REGEX.test(value)) {
+            const msg = typeof formatMessage === "function"
+                ? formatMessage(path)
+                : `Parameter "${path}": direct URLs are not permitted. Provide workflow_id only.`;
             throw badRequest(
-                `Parameter "${path}": direct URLs are not permitted. Provide workflow_id only.`,
+                msg,
                 "DIRECT_URL_NOT_ALLOWED",
                 path
             );
@@ -195,14 +206,14 @@ function assertNoRawUrls(value, path = "parameters") {
 
     if (Array.isArray(value)) {
         for (let i = 0; i < value.length; i += 1) {
-            assertNoRawUrls(value[i], `${path}[${i}]`);
+            assertNoRawUrls(value[i], `${path}[${i}]`, formatMessage);
         }
         return;
     }
 
     if (value && typeof value === "object") {
         for (const [key, nested] of Object.entries(value)) {
-            assertNoRawUrls(nested, `${path}.${key}`);
+            assertNoRawUrls(nested, path ? `${path}.${key}` : key, formatMessage);
         }
     }
 }
@@ -482,9 +493,12 @@ export function parseRelightRequest(body) {
     };
 
     const templateVars = buildRelightTemplateVars(editSettings, userPrompt);
+    const model = IMAGE_EDIT_MODELS.relight;
 
     return {
         workflowId,
+        model,
+        schema: getOptionalModelSchema(model),
         editSettings,
         templateVars,
         prompt: renderTextTemplate(IMAGE_RELIGHT_PROMPT_TEMPLATE, templateVars).text,
@@ -540,9 +554,12 @@ export function parseAnglesRequest(body) {
     };
 
     const templateVars = buildAnglesTemplateVars(editSettings, userPrompt);
+    const model = IMAGE_EDIT_MODELS.angles;
 
     return {
         workflowId,
+        model,
+        schema: getOptionalModelSchema(model),
         editSettings,
         templateVars,
         prompt: renderTextTemplate(IMAGE_ANGLES_PROMPT_TEMPLATE, templateVars).text,
@@ -636,6 +653,7 @@ export function parseRemoveBackgroundRequest(body) {
     return {
         workflowId,
         model,
+        schema,
         editSettings,
         prompt: userPrompt,
         userPrompt,
@@ -733,6 +751,7 @@ export function parseImageEditRequest(body) {
     return {
         workflowId,
         model,
+        schema,
         prompt,
         userPrompt: prompt,
         references,
@@ -751,6 +770,8 @@ export default {
     getRemoveBackgroundModels,
     getEditableImageModels,
     getModelMaxEditReferences,
+    extractInlineEntityIds,
+    assertNoRawUrls,
     assertEditReferenceCap,
     validateCommonEditRejection,
     parseRelightRequest,

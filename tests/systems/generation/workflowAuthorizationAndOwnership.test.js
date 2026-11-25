@@ -986,11 +986,10 @@ describe("Workflow user_id Persistence, updateFolderId Hardening, and UUID Valid
         return { id: "elem-wf-1", ...data };
       };
 
-      const origIngest = elementService.mediaService.ingestElementSources;
-      elementService.mediaService.ingestElementSources = async () => ({
-        mediaRecords: [{ id: "m-1" }],
-        primaryMedia: { id: "m-1" },
-        storageUrls: [],
+      const origAddRef = elementService.mediaService.addReferenceMedia;
+      elementService.mediaService.addReferenceMedia = async () => ({
+        media: { id: "m-1" },
+        url: null,
       });
       const origAnalysis = elementService.analysisService;
       elementService.analysisService = null;
@@ -1009,7 +1008,7 @@ describe("Workflow user_id Persistence, updateFolderId Hardening, and UUID Valid
         assert.equal(createdWf.user_id, "00000000-0000-0000-0000-000000000001", "user_id must be populated from authenticated user");
       } finally {
         db.workflows.createWorkflow = origCreate;
-        elementService.mediaService.ingestElementSources = origIngest;
+        elementService.mediaService.addReferenceMedia = origAddRef;
         elementService.analysisService = origAnalysis;
         db.elements.create = origElCreate;
       }

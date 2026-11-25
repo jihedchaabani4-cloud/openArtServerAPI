@@ -10,7 +10,6 @@ import { GenerationService } from "../internal/services/GenerationService.js";
 import { GenerationRequestService } from "../internal/services/GenerationRequestService.js";
 import { WorkflowService } from "../internal/services/WorkflowService.js";
 import { WorkflowRepository } from "../internal/db/WorkflowRepository.js";
-import { GenerationConfigRepository } from "../internal/db/GenerationConfigRepository.js";
 import { ExecutionEngine } from "../internal/v3/core/ExecutionEngine.js";
 import { JobExecutionContext, createJobExecutionContext } from "../internal/v3/core/JobExecutionContext.js";
 import { setGenerationServices } from "../internal/services/serviceAccessor.js";
@@ -35,7 +34,6 @@ export {
     GenerationRequestService,
     WorkflowService,
     WorkflowRepository,
-    GenerationConfigRepository,
     ExecutionEngine,
     JobExecutionContext,
     createJobExecutionContext,

@@ -66,14 +66,23 @@ describe("System 7: Elements (#elements/tools & #elements/api)", () => {
                 name: "Cyber Katana",
                 description: "A neon blade emitting high-frequency plasma.",
                 guidelines: "Keep blade blue and hilt carbon fiber.",
-                reference_images: ["https://cdn.art/blade1.png", "https://cdn.art/blade2.png"],
             };
 
             const origResolve = elementRepository.resolveRecord;
             elementRepository.resolveRecord = async (id) => (id === "elem-1" ? mockRecord1 : null);
 
+            const mockWorkflowMediaRepo = {
+                findByWorkflow: async () => [
+                    { id: "m-blade-1", url: "https://cdn.art/blade1.png", status: "success", role: "sheet", is_primary: true },
+                    { id: "m-blade-2", url: "https://cdn.art/blade2.png", status: "success", role: "detail", is_primary: false },
+                ],
+            };
+
             try {
-                const res = await getElementPromptContext({ elementIds: ["elem-1"] });
+                const res = await getElementPromptContext({
+                    elementIds: ["elem-1"],
+                    workflowMediaRepository: mockWorkflowMediaRepo,
+                });
                 assert.equal(res.elements.length, 1);
                 assert.equal(res.elements[0].name, "Cyber Katana");
                 assert.equal(res.elements[0].guidelines, "Keep blade blue and hilt carbon fiber.");
@@ -362,10 +371,12 @@ describe("Element PATCH /api/v2/elements/:id Partial Update Contract", () => {
         });
     }
 
+    const allowAllOwnership = async () => true;
+
     it("1. Single-field update (name only): changes name and workflow display_name, preserves omitted description and Cover", async () => {
         const mockDb = createMockDb();
         const mediaService = createTestMediaService(mockDb);
-        const elementService = new ElementService({ db: mockDb, mediaService });
+        const elementService = new ElementService({ db: mockDb, mediaService, assertOwns: allowAllOwnership });
 
         const { element } = await elementService.createElement({
             name: "Initial Name",
@@ -396,7 +407,7 @@ describe("Element PATCH /api/v2/elements/:id Partial Update Contract", () => {
     it("2. Single-field update (description only): changes description, preserves omitted name and Cover", async () => {
         const mockDb = createMockDb();
         const mediaService = createTestMediaService(mockDb);
-        const elementService = new ElementService({ db: mockDb, mediaService });
+        const elementService = new ElementService({ db: mockDb, mediaService, assertOwns: allowAllOwnership });
 
         const { element } = await elementService.createElement({
             name: "Steady Name",
@@ -422,7 +433,7 @@ describe("Element PATCH /api/v2/elements/:id Partial Update Contract", () => {
     it("3. Multi-field update: updates name, description, and guidelines together; preserves omitted coverMediaId", async () => {
         const mockDb = createMockDb();
         const mediaService = createTestMediaService(mockDb);
-        const elementService = new ElementService({ db: mockDb, mediaService });
+        const elementService = new ElementService({ db: mockDb, mediaService, assertOwns: allowAllOwnership });
 
         const { element } = await elementService.createElement({
             name: "Original Name",
@@ -452,7 +463,7 @@ describe("Element PATCH /api/v2/elements/:id Partial Update Contract", () => {
     it("4. Atomic Cover change via coverMediaId: switches primary media when mediaId belongs to workflow", async () => {
         const mockDb = createMockDb();
         const mediaService = createTestMediaService(mockDb);
-        const elementService = new ElementService({ db: mockDb, mediaService });
+        const elementService = new ElementService({ db: mockDb, mediaService, assertOwns: allowAllOwnership });
 
         const { element } = await elementService.createElement({
             name: "Vehicle",
@@ -484,7 +495,7 @@ describe("Element PATCH /api/v2/elements/:id Partial Update Contract", () => {
     it("5. coverMediaId validation: rejects mediaId that does NOT belong to the Element workflow with 400", async () => {
         const mockDb = createMockDb();
         const mediaService = createTestMediaService(mockDb);
-        const elementService = new ElementService({ db: mockDb, mediaService });
+        const elementService = new ElementService({ db: mockDb, mediaService, assertOwns: allowAllOwnership });
 
         const { element } = await elementService.createElement({
             name: "Artifact",
@@ -507,7 +518,7 @@ describe("Element PATCH /api/v2/elements/:id Partial Update Contract", () => {
     it("6. Explicit coverMediaId: null clears the Cover relation; returns primary_media_url: null", async () => {
         const mockDb = createMockDb();
         const mediaService = createTestMediaService(mockDb);
-        const elementService = new ElementService({ db: mockDb, mediaService });
+        const elementService = new ElementService({ db: mockDb, mediaService, assertOwns: allowAllOwnership });
 
         const { element } = await elementService.createElement({
             name: "Relic",
@@ -531,7 +542,7 @@ describe("Element PATCH /api/v2/elements/:id Partial Update Contract", () => {
     it("7. Never confuse omitted coverMediaId (undefined) with explicit coverMediaId: null", async () => {
         const mockDb = createMockDb();
         const mediaService = createTestMediaService(mockDb);
-        const elementService = new ElementService({ db: mockDb, mediaService });
+        const elementService = new ElementService({ db: mockDb, mediaService, assertOwns: allowAllOwnership });
 
         const { element } = await elementService.createElement({
             name: "Gauntlet",
@@ -711,5 +722,220 @@ describe("Ticket 0.2 Unit Test: promptBuilderProService purity and ElementServic
     ]);
     assert.equal(result.scenePrompt, "Warrior wearing ready for battle");
   });
+});
+}
+
+// ─── Phase 2a: Thin Controller, Single-Pass Ownership & Safe Error Formatting ───
+{
+describe("Phase 2a: Elements Thin Controller & Single-Pass Service Ownership", () => {
+    function createMockRes() {
+        const state = { statusCode: 200, body: null };
+        const res = {
+            status(code) {
+                state.statusCode = code;
+                return this;
+            },
+            json(payload) {
+                state.body = payload;
+                return this;
+            },
+        };
+        return { res, state };
+    }
+
+    it("ElementService enforces ownership exactly once across create, list, get, update, and analyze", async () => {
+        const ownershipCalls = [];
+        const trackedAssertOwns = async (resourceType, id, userId) => {
+            ownershipCalls.push({ resourceType, id, userId });
+            if (userId === "attacker") {
+                const err = new Error(`${resourceType} not found`);
+                err.statusCode = 404;
+                throw err;
+            }
+            return { id };
+        };
+
+        const mockDb = {
+            workflows: {
+                createWorkflow: async (p) => ({ id: "wf-own-1", ...p }),
+                getPrimaryMediaUrl: async () => null,
+                updateFields: async () => ({}),
+            },
+            elements: {
+                create: async (p) => ({ id: "00000000-0000-0000-0000-000000000055", ...p }),
+                list: async () => [{ id: "00000000-0000-0000-0000-000000000055", name: "Crown", workflow_id: "wf-own-1" }],
+                resolveRecord: async (id) => ({ id, name: "Crown", workflow_id: "wf-own-1" }),
+                update: async (id, patch) => ({ id, workflow_id: "wf-own-1", ...patch }),
+            },
+            media: { findByWorkflow: async () => [] },
+            workflowMedia: { findByWorkflowIds: async () => [] },
+        };
+
+        let analysisCalls = 0;
+        const service = new ElementService({
+            db: mockDb,
+            mediaService: {},
+            analysisService: {
+                analyzeElement: async () => {
+                    analysisCalls++;
+                    return { success: true, description: "Analyzed", keywords: [] };
+                },
+            },
+            assertOwns: trackedAssertOwns,
+        });
+
+        await service.createElement({ name: "Crown", projectId: "proj-own", userId: "owner-1" });
+        await service.listProjectElements("proj-own", { userId: "owner-1" });
+        await service.getElementById("00000000-0000-0000-0000-000000000055", { userId: "owner-1" });
+        await service.updateElement("00000000-0000-0000-0000-000000000055", { name: "Gold Crown" }, "owner-1");
+        await service.analyzeElement({ projectId: "proj-own", workflowId: "wf-own-1", imageUrls: ["https://cdn.art/1.png"], userId: "owner-1" });
+
+        assert.deepEqual(ownershipCalls, [
+            { resourceType: "project", id: "proj-own", userId: "owner-1" },
+            { resourceType: "project", id: "proj-own", userId: "owner-1" },
+            { resourceType: "element", id: "00000000-0000-0000-0000-000000000055", userId: "owner-1" },
+            { resourceType: "element", id: "00000000-0000-0000-0000-000000000055", userId: "owner-1" },
+            { resourceType: "project", id: "proj-own", userId: "owner-1" },
+            { resourceType: "workflow", id: "wf-own-1", userId: "owner-1" },
+        ]);
+        assert.equal(analysisCalls, 1);
+
+        // Foreign user rejected fail-closed with 404 before analysis runs
+        await assert.rejects(
+            () => service.createElement({ name: "Stolen", projectId: "proj-own", userId: "attacker" }),
+            (err) => err.statusCode === 404
+        );
+        await assert.rejects(
+            () => service.listProjectElements("proj-own", { userId: "attacker" }),
+            (err) => err.statusCode === 404
+        );
+        await assert.rejects(
+            () => service.getElementById("00000000-0000-0000-0000-000000000055", { userId: "attacker" }),
+            (err) => err.statusCode === 404
+        );
+        await assert.rejects(
+            () => service.updateElement("00000000-0000-0000-0000-000000000055", { name: "Hacked" }, "attacker"),
+            (err) => err.statusCode === 404
+        );
+        await assert.rejects(
+            () => service.analyzeElement({ projectId: "proj-own", workflowId: "wf-own-1", userId: "attacker" }),
+            (err) => err.statusCode === 404
+        );
+        assert.equal(analysisCalls, 1, "analysisService must not run when ownership check fails");
+
+        // Unauthenticated createElement rejected with 401
+        await assert.rejects(
+            () => service.createElement({ name: "NoAuth", projectId: "proj-own", userId: null }),
+            (err) => err.statusCode === 401
+        );
+    });
+
+    it("Controllers ignore spoofed req.body.userId and mask 5xx errors via safePublicRouteError helper", async () => {
+        const { createElement, addImageToElement, listProjectElements } = await import("#elements/api");
+        const { elementService } = await import("../../../src/container.js");
+
+        // 1. createElement ignores req.body.userId when req.user is missing -> 401 fail-closed
+        {
+            const { res, state } = createMockRes();
+            await createElement(
+                { user: null, body: { name: "Spoofed", projectId: "proj-1", userId: "victim-user" } },
+                res
+            );
+            assert.equal(state.statusCode, 401);
+            assert.equal(state.body.error, true);
+            assert.equal(state.body.code, "UNAUTHORIZED");
+        }
+
+        // 2. addImageToElement ignores req.body.userId when req.user is missing -> 401 fail-closed
+        {
+            const { res, state } = createMockRes();
+            await addImageToElement(
+                {
+                    user: null,
+                    params: { id: "00000000-0000-0000-0000-000000000055" },
+                    body: { imageUrl: "https://example.com/a.png", userId: "victim-user" },
+                },
+                res
+            );
+            assert.equal(state.statusCode, 401);
+            assert.equal(state.body.error, true);
+            assert.equal(state.body.code, "UNAUTHORIZED");
+        }
+
+        // 3. 5xx errors in listProjectElements are safely masked (no internal leak)
+        const origList = elementService.listProjectElements;
+        elementService.listProjectElements = async () => {
+            throw new Error("raw postgres connection string secret://db");
+        };
+        try {
+            const { res, state } = createMockRes();
+            await listProjectElements({ user: { id: "user-1" }, params: { projectId: "proj-1" } }, res);
+            assert.equal(state.statusCode, 500);
+            assert.equal(state.body.error, true);
+            assert.equal(state.body.code, "INTERNAL_ERROR");
+            assert.equal(state.body.category, "SERVER_FAULT");
+            assert.equal(state.body.message, "An unexpected error occurred. Please try again later.");
+            assert.ok(state.body.traceId);
+            assert.doesNotMatch(state.body.message, /secret:\/\/db/);
+        } finally {
+            elementService.listProjectElements = origList;
+        }
+    });
+
+    it("addImageToElement & removeImageFromElement verify ownership ONCE (via ElementMediaService) and fail closed on unowned/unauthenticated", async () => {
+        const { addImageToElement, removeImageFromElement } = await import("#elements/api");
+        const { elementMediaService, db } = await import("../../../src/container.js");
+
+        const origAdd = elementMediaService.addReferenceMedia;
+        const origRemove = elementMediaService.removeReferenceMedia;
+        const origResolve = db.elements.resolveRecord;
+        let resolveCount = 0;
+        db.elements.resolveRecord = async () => {
+            resolveCount++;
+            return null;
+        };
+
+        let capturedAddArgs = null;
+        let capturedRemoveArgs = null;
+        elementMediaService.addReferenceMedia = async (args) => {
+            capturedAddArgs = args;
+            return { ok: true, media: { id: "m-1", url: "https://cdn.art/1.png" } };
+        };
+        elementMediaService.removeReferenceMedia = async (args) => {
+            capturedRemoveArgs = args;
+            return { ok: true, deletedMediaId: args.mediaId };
+        };
+
+        try {
+            const addRes = createMockRes();
+            await addImageToElement(
+                {
+                    user: { id: "auth-user-1" },
+                    params: { id: "00000000-0000-0000-0000-000000000055" },
+                    body: { imageUrl: "https://cdn.art/1.png", userId: "spoofed-body-user" },
+                },
+                addRes.res
+            );
+            assert.equal(addRes.state.statusCode, 201);
+            assert.equal(capturedAddArgs.userId, "auth-user-1", "Must pass req.user.id, never req.body.userId");
+
+            const remRes = createMockRes();
+            await removeImageFromElement(
+                {
+                    user: { id: "auth-user-1" },
+                    params: { id: "00000000-0000-0000-0000-000000000055", mediaId: "m-1" },
+                },
+                remRes.res
+            );
+            assert.equal(remRes.state.statusCode, 200);
+            assert.equal(capturedRemoveArgs.userId, "auth-user-1");
+            assert.equal("req" in capturedRemoveArgs, false, "Must not pass Express req into service");
+            assert.equal(resolveCount, 0, "Controller must not run duplicate assertOwns before ElementMediaService");
+        } finally {
+            elementMediaService.addReferenceMedia = origAdd;
+            elementMediaService.removeReferenceMedia = origRemove;
+            db.elements.resolveRecord = origResolve;
+        }
+    });
 });
 }

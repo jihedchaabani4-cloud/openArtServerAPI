@@ -9,7 +9,7 @@
  */
 export const characterSheetV3 = Object.freeze({
   id: "character-sheet-v3",
-  aliases: Object.freeze(["character-sheet-v1", "characterSheet"]),
+  aliases: Object.freeze(["characterSheet"]),
   name: "Character Turnaround Sheet V3",
   version: "3.0.0",
   category: "character",
@@ -27,6 +27,7 @@ export const characterSheetV3 = Object.freeze({
         characters: { fromInput: "characters", default: [] },
         elements: { fromInput: "elements", default: [] },
         allowedMediaTypes: ["image"],
+        verify_ownership: { fromInput: "verify_ownership", default: true },
       },
     },
     {

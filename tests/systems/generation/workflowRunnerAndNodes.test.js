@@ -155,7 +155,7 @@ describe("F2 — Server-Side Workflow Context & Failure Handling Boundary Tests 
     await assert.rejects(
       async () => {
         await engine.execute({
-          useCaseId: "image-generation-v1",
+          useCaseId: "image-generation-v3",
           input: { prompt: "Test prompt", media_id: "m-1" },
           userId: "user-test-f2b",
         });
@@ -889,13 +889,15 @@ describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", ()
       db: mockDb,
       executionEngine: mockExecutionEngine,
       folderService: mockFolderService,
+      assertOwns: async () => true,
+      assertOwnsAny: async () => true,
     });
 
     const result = await service.requestGeneration({
       userId: "user-test-1",
       mediaType: "image",
       stepId: "image_generation",
-      useCaseId: "image-generation-v1",
+      useCaseId: "image-generation-v3",
       prompt: "A majestic red panda in the bamboo forest",
       model: "nanobana_pro",
       projectId: "proj-100",
@@ -1161,13 +1163,15 @@ describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", ()
       db: mockDb,
       executionEngine: mockExecutionEngine,
       folderService: { validateAndAssertUsable: async () => null },
+      assertOwns: async () => true,
+      assertOwnsAny: async () => true,
     });
 
     await service.requestGeneration({
       userId: "user-1",
       mediaType: "image",
       stepId: "image_generation",
-      useCaseId: "image-generation-v1",
+      useCaseId: "image-generation-v3",
       prompt: "Second generation prompt (edited)",
       model: "nanobana_pro",
       projectId: "proj-1",
@@ -1208,6 +1212,8 @@ describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", ()
       db: mockDb,
       executionEngine: mockExecutionEngine,
       folderService: { validateAndAssertUsable: async () => null },
+      assertOwns: async () => true,
+      assertOwnsAny: async () => true,
     });
 
     await assert.rejects(
@@ -1216,7 +1222,7 @@ describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", ()
           userId: "user-1",
           mediaType: "image",
           stepId: "image_generation",
-          useCaseId: "image-generation-v1",
+          useCaseId: "image-generation-v3",
           prompt: "A cat",
           model: "nanobana_pro",
           projectId: "proj-1",
@@ -1235,7 +1241,7 @@ describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", ()
           userId: "user-1",
           mediaType: "image",
           stepId: "image_generation",
-          useCaseId: "image-generation-v1",
+          useCaseId: "image-generation-v3",
           prompt: "A cat",
           model: "nanobana_pro",
           projectId: "proj-1",
@@ -1373,13 +1379,15 @@ describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", ()
       db: mockDb,
       executionEngine: { launch: async () => ({ jobId: "job-secret" }) },
       folderService: { validateAndAssertUsable: async () => null },
+      assertOwns: async () => true,
+      assertOwnsAny: async () => true,
     });
 
     await service.requestGeneration({
       userId: "user-1",
       mediaType: "video",
       stepId: "video_generation",
-      useCaseId: "video-generation-v1",
+      useCaseId: "video-generation-v3",
       prompt: "A secret garden",
       model: "wan_3_0",
       projectId: "proj-1",

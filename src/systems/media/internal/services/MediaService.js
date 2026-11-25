@@ -11,22 +11,26 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { createLogger } from "#shared";
+import { AppError, createLogger } from "#shared";
+import { MediaNotFoundError } from "../errors.js";
 
 const mediaLogger = createLogger("media_service");
 
 export class MediaService {
     /**
      * @param {Object} deps
-     * @param {Object} [deps.mediaRepo] - MediaRepository instance
-     * @param {Object} [deps.db]        - Repository map containing db.media
+     * @param {Object} [deps.mediaRepo]      - MediaRepository instance
+     * @param {Object} [deps.db]             - Repository map containing db.media (and optional db.projects)
+     * @param {Function} [deps.assertOwnsFn] - Optional ownership assertion override (e.g. #identity/tools assertOwns)
      */
-    constructor({ mediaRepo = null, db = null } = {}) {
+    constructor({ mediaRepo = null, db = null, assertOwnsFn = null } = {}) {
         const resolvedRepo = mediaRepo || db?.media;
         if (!resolvedRepo || typeof resolvedRepo.createMedia !== "function") {
             throw new Error("MediaService requires mediaRepo (or db.media) implementing createMedia.");
         }
         this.mediaRepo = resolvedRepo;
+        this.db = db || null;
+        this.assertOwnsFn = typeof assertOwnsFn === "function" ? assertOwnsFn : null;
     }
 
     /**
@@ -35,7 +39,6 @@ export class MediaService {
      *
      * @param {Object} params
      * @param {string} [params.projectId]
-     * @param {string} [params.generationConfigId]
      * @param {string} [params.stepId="upload"]
      * @param {string} params.url
      * @param {number} [params.width=1024]
@@ -52,7 +55,7 @@ export class MediaService {
         height = 1024,
         status = "success",
         errorMessage = null,
-        generationConfigId = undefined,
+        generationConfigId: _ignoredGenConfigId = undefined,
         ...extra
     } = {}) {
         const traceId = randomUUID();
@@ -66,11 +69,9 @@ export class MediaService {
             workflow_type: _ignoredWfType,
             is_primary: _ignoredIsPrimaryCol,
             isPrimary: _ignoredIsPrimaryProp,
-            generation_config_id: extraGenConfigId,
+            generation_config_id: _ignoredGenConfigIdCol,
             ...restExtra
         } = extra;
-
-        const resolvedGenerationConfigId = generationConfigId ?? extraGenConfigId;
 
         try {
             const mediaRecord = await this.mediaRepo.createMedia({
@@ -81,7 +82,6 @@ export class MediaService {
                 height: Number(height) || 1024,
                 status,
                 error_message: errorMessage,
-                ...(resolvedGenerationConfigId !== undefined ? { generation_config_id: resolvedGenerationConfigId } : {}),
                 ...restExtra,
             });
 
@@ -112,6 +112,78 @@ export class MediaService {
             );
             throw err;
         }
+    }
+
+    _toMediaDto(record) {
+        return {
+            id: record.id,
+            url: record.url,
+            width: record.width,
+            height: record.height,
+            status: record.status,
+            stepId: record.step_id,
+            projectId: record.project_id,
+            createTime: record.create_time,
+            errorMessage: record.error_message,
+        };
+    }
+
+    /**
+     * Retrieve a canonical media record by its UUID after verifying fail-closed ownership.
+     *
+     * @param {Object} params
+     * @param {string} params.mediaId
+     * @param {string} params.userId
+     * @returns {Promise<Object>} Plain media DTO
+     */
+    async getOwnedMedia({ mediaId, userId } = {}) {
+        const normalizedId = typeof mediaId === "string" ? mediaId.trim() : "";
+        if (!normalizedId) {
+            throw new MediaNotFoundError("Media not found");
+        }
+        if (!userId) {
+            throw new AppError("Authentication required", 401);
+        }
+
+        if (this.assertOwnsFn) {
+            await this.assertOwnsFn("media", normalizedId, userId);
+            const record = await this.mediaRepo.findById(normalizedId);
+            if (!record) {
+                throw new MediaNotFoundError("Media not found");
+            }
+            return this._toMediaDto(record);
+        }
+
+        let owned = false;
+
+        if (typeof this.mediaRepo.findMediaOwnershipRecord === "function") {
+            const ownership = await this.mediaRepo.findMediaOwnershipRecord(normalizedId);
+            const project = Array.isArray(ownership?.project) ? ownership.project[0] : ownership?.project;
+            if (project?.user_id && project.user_id === userId) {
+                owned = true;
+            }
+        }
+
+        const record = await this.mediaRepo.findById(normalizedId);
+        if (!record) {
+            throw new MediaNotFoundError("Media not found");
+        }
+
+        if (!owned && record.user_id && record.user_id === userId) {
+            owned = true;
+        }
+        if (!owned && record.project_id && typeof this.db?.projects?.findByUser === "function") {
+            const matches = await this.db.projects.findByUser(userId, record.project_id);
+            if (Array.isArray(matches) && matches.length > 0) {
+                owned = true;
+            }
+        }
+
+        if (!owned) {
+            throw new MediaNotFoundError("Media not found");
+        }
+
+        return this._toMediaDto(record);
     }
 
     /**

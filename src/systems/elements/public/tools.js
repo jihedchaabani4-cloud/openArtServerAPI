@@ -100,14 +100,7 @@ export async function getElementPromptContext({
             mediaRepository,
         });
 
-        let urls = visualMedia.map((m) => m.url);
-
-        // Compatibility fallback only when workflow_media returned nothing and an in-memory mock supplies legacy fields
-        if (urls.length === 0) {
-            urls = extractValidHttpUrls(
-                Array.isArray(record.reference_images) ? record.reference_images : record.reference_media_urls
-            );
-        }
+        const urls = visualMedia.map((m) => m.url);
 
         elements.push({
             id: record.id,

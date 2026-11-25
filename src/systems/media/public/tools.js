@@ -16,8 +16,6 @@ import {
 import {
     markMediaStatus,
     markMediaFailed as internalMarkMediaFailed,
-    createWorkflowWithMedia,
-    createWorkflowWithMediaAtomic,
     createGenerationPlaceholderAtomic,
     appendMediaToWorkflow,
 } from "../internal/db/workflowMediaOps.js";
@@ -76,9 +74,7 @@ import {
     hasInFlightMedia,
     areAllWorkflowMediaFailed,
     failWorkflowPendingMedia,
-    normalizeNodeMediaOutputs,
 } from "../internal/services/MediaLifecycleService.js";
-import { V1StorageBridge } from "../internal/services/v1StorageBridge.js";
 import {
     resolveMediaMetadata,
     calculateAspectRatio,
@@ -86,6 +82,7 @@ import {
 import {
     setMediaServices,
     getMediaRepository as getAccessorMediaRepository,
+    getMediaService as getAccessorMediaService,
 } from "../internal/services/serviceAccessor.js";
 import {
     MediaError,
@@ -113,14 +110,12 @@ const mediaToolsLogger = createLogger("media-tools");
 let _workflowMediaRepo = null;
 let _storageService = null;
 let _mediaUploadService = null;
-let _mediaService = null;
 let _assetUploadService = null;
 
 export function configureMedia(services = {}) {
     if (services.assetUploadService) _assetUploadService = services.assetUploadService;
     if (services.storageService) _storageService = services.storageService;
     if (services.mediaUploadService) _mediaUploadService = services.mediaUploadService;
-    if (services.mediaService) _mediaService = services.mediaService;
     if (services.workflowMediaRepository) _workflowMediaRepo = services.workflowMediaRepository;
     else if (services.db?.workflowMedia) _workflowMediaRepo = services.db.workflowMedia;
     setMediaServices(services);
@@ -157,10 +152,7 @@ export function getMediaUploadService() {
 }
 
 export function getMediaService() {
-    if (!_mediaService) {
-        _mediaService = new MediaService({ mediaRepo: getMediaRepository() });
-    }
-    return _mediaService;
+    return getAccessorMediaService();
 }
 
 export function getSaveTypeRegistry() {
@@ -928,8 +920,6 @@ export {
     createMediaInWorkflow,
     linkWorkflowMediaForCreatedRow,
     markMediaStatus,
-    createWorkflowWithMedia,
-    createWorkflowWithMediaAtomic,
     createGenerationPlaceholderAtomic,
     appendMediaToWorkflow,
     WORKFLOW_MEDIA_ROLES,
@@ -971,7 +961,6 @@ export {
     // Services
     MediaService,
     MediaWorkflowLifecycleService,
-    V1StorageBridge,
     MEDIA_WORKFLOW_STATUS,
     MEDIA_IN_FLIGHT_STATUSES,
     isMediaInFlight,
@@ -981,7 +970,6 @@ export {
     resolveMediaMetadata,
     calculateAspectRatio,
     failWorkflowPendingMedia,
-    normalizeNodeMediaOutputs,
 
     // Typed Errors
     MediaError,

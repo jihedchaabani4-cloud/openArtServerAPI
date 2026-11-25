@@ -52,7 +52,7 @@ flowchart TD
     end
 
     subgraph INFRA["Shared Infrastructure"]
-        Redis[("Redis / BullMQ Queue: v2-workflow-jobs")]
+        Redis[("Redis / BullMQ Queue: workflow-jobs")]
         Supabase[("Supabase PostgreSQL + Storage")]
         AIProviders["External AI Providers (Gemini LLM, fal, WaveSpeed, OpenAI...)"]
     end
@@ -135,7 +135,7 @@ sequenceDiagram
     participant Eng as ExecutionEngine
     participant Bill as "#billing/tools (WalletService)"
     participant Med as "#media/tools (MediaRepo)"
-    participant Q as "Redis BullMQ (v2-workflow-jobs)"
+    participant Q as "Redis BullMQ (workflow-jobs)"
     participant W as useCaseWorker
     participant Exec as WorkflowExecutor
     participant AI as "#models/tools (LLM + Provider)"
@@ -260,16 +260,14 @@ apiOpenArt/
             │   ├── WorkflowService.js                   # Workflow CRUD + entity sync handlers
             │   ├── WorkflowAuthorizationService.js      # Ownership verification helpers
             │   ├── WorkflowMediaService.js              # Media attachment & ordering inside workflows
-            │   ├── jobQueueService.js                   # BullMQ queue producer (v2-workflow-jobs)
+            │   ├── jobQueueService.js                   # BullMQ queue producer (workflow-jobs)
             │   ├── mediaGuards.js                       # Media safety/state guards
             │   └── serviceAccessor.js                   # DI holder configured by src/container.js
             ├── db/                                      # Exclusive table owners (Rule R12)
             │   ├── generationClient.js                  # Supabase client wrapper
             │   ├── BaseRepository.js                    # Shared CRUD helpers
             │   ├── WorkflowRepository.js                # public.workflow owner
-            │   ├── GenerationConfigRepository.js        # Config lookup helpers
-            │   ├── RunRepository.js                     # V2 workflow_runs reader
-            │   └── dbMap.js                             # Legacy repository aggregator helper
+            │   └── dbMap.js                             # Repository aggregator helper
             ├── workers/                                 # BullMQ consumers
             │   ├── worker.js                            # Starts useCaseWorker + 5m ReservationReaper
             │   └── useCaseWorker.js                     # processUseCaseJob + assertWorkerConfigured + crash handler
@@ -315,11 +313,10 @@ apiOpenArt/
 | `/api/prompt` | `POST /optimize` | `requireAuth`, `rateLimit("promptOptimization")` | `workflowsController.optimizePrompt` | Synchronous LLM prompt optimization |
 | `/api/v2/workflows` | `GET /health` | — | `workflowsController.getWorkflowHealth` | Workflow engine health |
 | `/api/v2/workflows` | `POST /run` | `requireAuth` | `workflowsController.runWorkflowDisabled` | Disabled direct arbitrary run endpoint |
-| `/api/v2/workflows` | `GET /runs/:run_id` | `requireAuth` | `workflowsController.getWorkflowRunById` | Inspect workflow run status (ownership-checked) |
 | `/api/workflows` | `GET /library`, `GET /library/:workflow_id`, `GET /assets/:project_id`, `GET /project-data/:project_id`, `GET /workflow-by-media/:media_id` | `requireAuth` | Query & project controllers | Read library, assets, and project canvas data |
 | `/api/workflows` | `POST /detach-media`, `PATCH /workflows/*`, `PATCH /items/:id/like`, `DELETE /workflows/*`, `DELETE /items/:id`, `DELETE /media/:media_id` | `requireAuth` | Mutation & workflow controllers | Workflow/media mutations, likes, primary media, soft/hard delete |
 
-*(Note: Character sheet generation enters via System 6 `#characters/api` -> `CharacterGenerationService.enqueueSheetGeneration()` -> `ExecutionEngine.launch({ useCaseId: "character-sheet-v1" })`.)*
+*(Note: Character sheet generation enters via System 6 `#characters/api` -> `CharacterGenerationService.enqueueSheetGeneration()` -> `ExecutionEngine.launch({ useCaseId: "character-sheet-v3" })`.)*
 
 ---
 

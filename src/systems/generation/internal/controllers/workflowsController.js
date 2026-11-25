@@ -266,21 +266,3 @@ export const runWorkflowDisabled = (req, res) => {
     });
 };
 
-// ── GET /api/v2/workflows/runs/:run_id ────────────────────────────────────────
-export const getWorkflowRunById = async (req, res) => {
-    try {
-        const runId = req.params.run_id;
-        const { run } = await WorkflowService.getWorkflowRun({ runId, userId: req.user?.id });
-        return res.json({ run });
-    } catch (err) {
-        if (err.statusCode === 404) {
-            return res.status(404).json({ code: "RUN_NOT_FOUND", message: "Run not found" });
-        }
-        return res.status(err.statusCode || 500).json({
-            ok: false,
-            code: err.code || "INTERNAL_ERROR",
-            message: err.message,
-        });
-    }
-};
-

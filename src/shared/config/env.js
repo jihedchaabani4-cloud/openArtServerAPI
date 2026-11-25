@@ -82,9 +82,6 @@ export const envConfig = {
   get assetListMaxLimit() {
     return Number(process.env.ASSET_LIST_MAX_LIMIT || 200);
   },
-  get enableV2WorkflowRunEndpoint() {
-    return process.env.ENABLE_V2_WORKFLOW_RUN_ENDPOINT === "true";
-  },
   get lemonWebhookSecret() {
     return process.env.LEMON_WEBHOOK_SECRET || "";
   },

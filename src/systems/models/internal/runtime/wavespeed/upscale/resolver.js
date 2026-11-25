@@ -35,8 +35,4 @@ export function resolveUpscaleRoute(binding, semanticInput = {}, context = {}) {
   return evaluateWaveSpeedRoutes(binding, routes, normalizedInput, "upscale");
 }
 
-export const WaveSpeedUpscaleResolver = {
-  resolve: resolveUpscaleRoute,
-};
-
 export default resolveUpscaleRoute;

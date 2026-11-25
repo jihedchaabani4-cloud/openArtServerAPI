@@ -28,7 +28,3 @@ export function getGenerationServices() {
 export function getExecutionEngine() {
     return _services.executionEngine;
 }
-
-export function getDefaultDb() {
-    return _services.db;
-}

@@ -39,15 +39,6 @@ export function resolveProviderRoute(providerId, binding, semanticInput = {}, co
 }
 
 /**
- * Register a custom provider resolver (e.g. for extensions or mock providers).
- * @param {string} providerId
- * @param {Function} resolverFn
- */
-export function registerProviderResolver(providerId, resolverFn) {
-  providerResolvers.set(providerId, resolverFn);
-}
-
-/**
  * Provider Runtime Registry (Phase 1 — Zero Silent Fallback)
  *
  * Maps providerId to runnerFn based on explicit provider manifest declaration.

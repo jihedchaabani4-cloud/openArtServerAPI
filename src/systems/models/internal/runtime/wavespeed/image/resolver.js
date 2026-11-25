@@ -26,7 +26,3 @@ export function resolveImageRoute(binding, semanticInput = {}, context = {}) {
 
   return evaluateWaveSpeedRoutes(binding, routes, semanticInput, "image");
 }
-
-export const WaveSpeedImageResolver = {
-  resolve: resolveImageRoute,
-};

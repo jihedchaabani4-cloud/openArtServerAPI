@@ -2,7 +2,7 @@
  * Express HTTP request logger & BullMQ worker logger middlewares.
  */
 import { randomUUID } from "node:crypto";
-import { runWithContext, getContext } from "./context.js";
+import { runWithContext } from "./context.js";
 import { createLogger } from "./index.js";
 import { LogEvents } from "./events.js";
 import { LogErrorCodes } from "./errors.js";

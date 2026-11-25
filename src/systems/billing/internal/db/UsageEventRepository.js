@@ -7,7 +7,6 @@
  * the financial transactions ledger. It never touches wallet balances.
  */
 import { createLogger } from "#shared";
-import { getBillingSupabaseAdminClient } from "./billingClient.js";
 
 const logger = createLogger("usage-event-repo");
 

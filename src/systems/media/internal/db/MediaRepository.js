@@ -245,17 +245,6 @@ export class MediaRepository {
         return data;
     }
 
-    async updateFields(id, fields) {
-        const { data, error } = await this.client()
-            .from(this.tableName)
-            .update(fields)
-            .eq("id", id)
-            .select()
-            .single();
-        if (error) throw error;
-        return data;
-    }
-
     async updateMedia(id, fields) {
         return this.updateFields(id, fields);
     }

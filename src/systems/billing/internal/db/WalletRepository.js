@@ -5,7 +5,6 @@
  */
 import { WalletError } from "../errors.js";
 import { createLogger } from "#shared";
-import { getBillingSupabaseAdminClient } from "./billingClient.js";
 
 const logger = createLogger("wallet_repo");
 

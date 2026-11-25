@@ -2,7 +2,6 @@ import "dotenv/config";
 import {
     WalletService,
     FailedOpsService,
-    UsageEventRepository,
     configureBilling,
     createWalletService,
     createFailedOpsService,

@@ -1,6 +1,5 @@
 import { getGenerationServices } from "../services/serviceAccessor.js";
 import { WorkflowService } from "../services/WorkflowService.js";
-import { db } from "../db/dbMap.js";
 import { promptService } from "#models/tools";
 import { createLogger } from "#shared";
 

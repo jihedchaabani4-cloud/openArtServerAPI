@@ -4,7 +4,6 @@
  * TransactionRepository (System 3: Billing & Wallet)
  */
 import { WalletError } from "../errors.js";
-import { getBillingSupabaseAdminClient } from "./billingClient.js";
 
 export class TransactionRepository {
     /**

@@ -12,10 +12,6 @@ export function getCharacterService() {
     return _characterService;
 }
 
-export function getCharacterMediaService() {
-    return _characterMediaService;
-}
-
 export function getTrashService() {
     return _trashService;
 }

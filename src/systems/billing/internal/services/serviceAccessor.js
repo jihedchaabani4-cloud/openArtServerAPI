@@ -68,14 +68,6 @@ export function getRedisConnection() {
     return _defaultRedisConnection;
 }
 
-export function getDefaultPackageFetcher() {
-    return _defaultPackageFetcher;
-}
-
-export function getDefaultCreditPackageRepo() {
-    return _defaultCreditPackageRepo;
-}
-
 export function getDefaultWalletService() {
     return _defaultWalletService;
 }

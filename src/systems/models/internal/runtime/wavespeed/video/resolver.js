@@ -41,7 +41,3 @@ export function resolveVideoRoute(binding, semanticInput = {}, context = {}) {
 
   return evaluateWaveSpeedRoutes(binding, routes, normalizedInput, "video");
 }
-
-export const WaveSpeedVideoResolver = {
-  resolve: resolveVideoRoute,
-};

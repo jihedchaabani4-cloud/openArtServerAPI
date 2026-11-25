@@ -4,7 +4,6 @@ import { envConfig } from "#shared";
 import {
   BindingNotFoundError,
   BindingModelMismatchError,
-  UnsupportedCapabilityError,
   NoEligibleBindingError,
 } from "../errors.js";
 

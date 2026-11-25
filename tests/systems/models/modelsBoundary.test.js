@@ -1005,7 +1005,6 @@ describe("Sealed Models Subsystem Architecture", () => {
       const genericFiles = [
         path.join(apiRoot, "src", "systems", "models", "internal", "execution", "modelRunner.js"),
         path.join(apiRoot, "src", "systems", "models", "internal", "execution", "runtimeExecutor.js"),
-        path.join(apiRoot, "src", "systems", "models", "internal", "runtime", "routeResolver.js"),
       ];
 
       const forbiddenBranchPatterns = [

@@ -5,7 +5,6 @@
  */
 import { BillingError, BillingConfigurationError } from "../errors.js";
 import { createLogger } from "#shared";
-import { getBillingSupabaseAdminClient } from "./billingClient.js";
 
 const logger = createLogger("credit-package-repo");
 

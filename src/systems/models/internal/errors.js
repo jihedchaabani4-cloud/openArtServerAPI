@@ -165,8 +165,6 @@ export class UnknownOperationError extends ModelsSystemError {
     }
 }
 
-export const OperationNotFoundError = UnknownOperationError;
-
 export class BindingNotFoundError extends ModelsSystemError {
     constructor(bindingId, modelId = null, operation = null) {
         const detail = modelId && operation ? ` for model "${modelId}" (${operation})` : "";
@@ -279,17 +277,6 @@ export class ProviderContentPolicyError extends ModelsSystemError {
             safeMessage: "Content couldn't be generated",
             statusCode: 422,
             code: "PROVIDER_CONTENT_POLICY_ERROR"
-        });
-    }
-}
-
-export class ProviderMalformedResponseError extends ModelsSystemError {
-    constructor(message) {
-        super(message, {
-            retryable: false,
-            safeMessage: "Unexpected provider response",
-            statusCode: 500,
-            code: "PROVIDER_MALFORMED_RESPONSE"
         });
     }
 }

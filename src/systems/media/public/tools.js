@@ -27,7 +27,6 @@ import {
     inferWorkflowMediaRole,
 } from "../internal/db/workflowMediaRole.js";
 import {
-    getMediaSupabaseClient,
     getMediaSupabaseAdminClient,
 } from "../internal/db/mediaClient.js";
 import { StorageService } from "../internal/storage/StorageService.js";

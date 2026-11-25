@@ -3,7 +3,6 @@
  *
  * FailedOpsRepository (System 3: Billing & Wallet)
  */
-import { getBillingSupabaseAdminClient } from "./billingClient.js";
 
 export class FailedOpsRepository {
     /**

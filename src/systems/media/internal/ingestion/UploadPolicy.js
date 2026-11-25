@@ -47,6 +47,14 @@ export const DEFAULT_UPLOAD_POLICY = freezePolicy({
     },
 });
 
+export const GENERATED_OUTPUT_UPLOAD_POLICY = freezePolicy({
+    ...DEFAULT_UPLOAD_POLICY,
+    maxImageSize: 50 * MB,
+    maxVideoSize: 150 * MB,
+    maxDimensionPx: 8192,
+    preserveOriginal: true,
+});
+
 export const ELEMENT_REFERENCE_UPLOAD_POLICY = freezePolicy({
     ...DEFAULT_UPLOAD_POLICY,
     allowedTypes: ["image"],
@@ -84,6 +92,7 @@ export const CHARACTER_DETAIL_UPLOAD_POLICY = freezePolicy({
 
 export const UPLOAD_POLICIES = Object.freeze({
     DEFAULT_UPLOAD_POLICY,
+    GENERATED_OUTPUT_UPLOAD_POLICY,
     ELEMENT_REFERENCE_UPLOAD_POLICY,
     ELEMENT_SHEET_UPLOAD_POLICY,
     ELEMENT_SOURCES_UPLOAD_POLICY,

@@ -1,16 +1,16 @@
 /**
  * System 1: Generation & Workflows — Base Repository (Internal)
  */
-import { supabase } from "./generationClient.js";
+import { supabase, supabaseAdmin } from "./generationClient.js";
 
 export class BaseRepository {
     constructor(tableName, client = null) {
         this.tableName = tableName;
-        this.dbClient = client;
+        this.dbClient = client && typeof client.from === "function" ? client : null;
     }
 
     client() {
-        return this.dbClient || supabase;
+        return this.dbClient || supabaseAdmin || supabase;
     }
 
     async findById(id, select = "*") {

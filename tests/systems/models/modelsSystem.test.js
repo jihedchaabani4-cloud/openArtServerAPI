@@ -616,6 +616,58 @@ describe("Models Error Classification, Circuit Breaker, Retry-After Fast-Fail, a
       assert.strictEqual(attempts, 2);
       assert.deepStrictEqual(sleeps, [1000]);
     });
+
+    it("RuntimeExecutor fails fast by default (0 retries) when maxRetries is omitted", async () => {
+      const executor = new RuntimeExecutor();
+      let attempts = 0;
+      const sleeps = [];
+
+      await assert.rejects(
+        async () => {
+          await executor.execute({
+            provider: { id: "wavespeed" },
+            binding: { id: "nanobana_2:wavespeed" },
+            providerPayload: {},
+            credential: "k",
+            modelId: "nanobana_2",
+            bindingId: "nanobana_2:wavespeed",
+            options: {
+              sleeper: async (ms) => {
+                sleeps.push(ms);
+              },
+              providerExecutor: async () => {
+                attempts += 1;
+                const err = new Error("WaveSpeed 504 timeout");
+                err.statusCode = 504;
+                err.retryable = true;
+                throw err;
+              },
+            },
+          });
+        },
+        (err) => err.statusCode === 504
+      );
+
+      assert.strictEqual(attempts, 1, "RuntimeExecutor must execute only once by default (maxRetries=0)");
+      assert.strictEqual(sleeps.length, 0, "RuntimeExecutor must not sleep when failing fast by default");
+    });
+
+    it("WaveSpeed bindings cap polling timeouts at 180s for image/remove-bg/upscale and 600s for video", async () => {
+      const { getRegistry } = await import("../../../src/systems/models/internal/registry/modelRegistry.js");
+      const { models, bindings } = getRegistry();
+
+      for (const [, binding] of bindings) {
+        if (binding.providerId !== "wavespeed") continue;
+        const model = models.get(binding.modelId);
+        const timeout = binding.pollingConfig?.timeout;
+        assert.strictEqual(typeof timeout, "number", `${binding.modelId} wavespeed binding must declare numeric pollingConfig.timeout`);
+        if (model?.domain === "video") {
+          assert.ok(timeout <= 600, `WaveSpeed video binding ${binding.modelId} timeout must be <= 600s (got ${timeout}s)`);
+        } else {
+          assert.ok(timeout <= 180, `WaveSpeed image binding ${binding.modelId} timeout must be <= 180s (got ${timeout}s)`);
+        }
+      }
+    });
   });
 
   describe("4. P2-2 & P2-3: LTX short initial poll delay and providerJobId logging", () => {

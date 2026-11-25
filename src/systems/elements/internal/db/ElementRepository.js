@@ -8,7 +8,7 @@
  * Feature: 018-element-reference-system
  */
 
-import { supabase } from "./elementClient.js";
+import { supabase, supabaseAdmin } from "./elementClient.js";
 import { trashRepository } from "#workspace/tools";
 import { createLogger } from "#shared";
 
@@ -62,11 +62,18 @@ function buildPatch(updates = {}) {
 // ─── Repository class ──────────────────────────────────────────────────────────
 
 export class ElementRepository {
+    constructor(client = null) {
+        this.dbClient = client && typeof client.from === "function" ? client : null;
+    }
+
+    client() {
+        return this.dbClient || supabaseAdmin || supabase;
+    }
 
     // ── Reads ──────────────────────────────────────────────────────────────────
 
     async findById(id) {
-        const { data, error } = await supabase
+        const { data, error } = await this.client()
             .from("element")
             .select("*")
             .eq("id", id)
@@ -77,7 +84,7 @@ export class ElementRepository {
 
     async findByWorkflowId(workflowId) {
         if (!workflowId) return null;
-        const { data, error } = await supabase
+        const { data, error } = await this.client()
             .from("element")
             .select("*")
             .eq("workflow_id", workflowId)
@@ -89,7 +96,7 @@ export class ElementRepository {
     async #getActiveProjectWorkflowIds(projectId) {
         if (!projectId) return [];
 
-        const { data: workflows, error: wfErr } = await supabase
+        const { data: workflows, error: wfErr } = await this.client()
             .from("workflow")
             .select("id")
             .eq("project_id", projectId);
@@ -100,7 +107,7 @@ export class ElementRepository {
 
         const trashedSet = await trashRepository.getTrashedWorkflowIdSet({
             workflowIds: candidateIds,
-            client: supabase,
+            client: this.client(),
         });
         return trashedSet.size > 0
             ? candidateIds.filter((id) => !trashedSet.has(id))
@@ -111,7 +118,7 @@ export class ElementRepository {
         const workflowIds = await this.#getActiveProjectWorkflowIds(projectId);
         if (!workflowIds.length) return null;
 
-        const { data, error } = await supabase
+        const { data, error } = await this.client()
             .from("element")
             .select("*")
             .in("workflow_id", workflowIds)
@@ -125,7 +132,7 @@ export class ElementRepository {
         const workflowIds = await this.#getActiveProjectWorkflowIds(projectId);
         if (!workflowIds.length) return [];
 
-        const { data, error } = await supabase
+        const { data, error } = await this.client()
             .from("element")
             .select("*")
             .in("workflow_id", workflowIds)
@@ -137,7 +144,7 @@ export class ElementRepository {
     async findByWorkflowIds(workflowIds = []) {
         const ids = Array.isArray(workflowIds) ? workflowIds.filter(Boolean) : [];
         if (!ids.length) return [];
-        const { data, error } = await supabase
+        const { data, error } = await this.client()
             .from("element")
             .select("*")
             .in("workflow_id", ids);
@@ -169,7 +176,7 @@ export class ElementRepository {
             ...(payload.element_type ? { element_type: payload.element_type } : {}),
         };
 
-        const { data, error } = await supabase
+        const { data, error } = await this.client()
             .from("element")
             .insert(insertPayload)
             .select()
@@ -184,7 +191,7 @@ export class ElementRepository {
             return this.resolveRecord(idOrWorkflowId);
         }
 
-        let query = supabase.from("element").update(patch);
+        let query = this.client().from("element").update(patch);
 
         if (UUID_RE.test(String(idOrWorkflowId))) {
             query = query.or(`id.eq.${idOrWorkflowId},workflow_id.eq.${idOrWorkflowId}`);
@@ -211,7 +218,7 @@ export class ElementRepository {
     }
 
     async deleteById(idOrWorkflowId) {
-        let query = supabase.from("element").delete();
+        let query = this.client().from("element").delete();
 
         if (UUID_RE.test(String(idOrWorkflowId))) {
             query = query.or(`id.eq.${idOrWorkflowId},workflow_id.eq.${idOrWorkflowId}`);

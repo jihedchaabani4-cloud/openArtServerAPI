@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getGenerationServices } from "../services/serviceAccessor.js";
 import {
   IMAGE_EDIT_MODELS,
+  extractInlineEntityIds,
   parseRelightRequest,
   parseAnglesRequest,
   parseRemoveBackgroundRequest,
@@ -315,13 +316,17 @@ export async function editImage(req, res) {
 
     await assertOwns("workflow", parsed.workflowId, userId);
 
+    const { characterIds: inlineCharIds, elementIds: inlineElemIds } = extractInlineEntityIds(parsed.prompt);
+    const allCharacterIds = [...new Set([...parsed.characters, ...inlineCharIds])];
+    const allElementIds = [...new Set([...parsed.elements, ...inlineElemIds])];
+
     for (const refId of parsed.references) {
       await assertOwnsAny(["workflow", "character", "element", "media"], refId, userId);
     }
-    for (const charId of parsed.characters) {
+    for (const charId of allCharacterIds) {
       await assertOwnsAny(["character", "workflow"], charId, userId);
     }
-    for (const elemId of parsed.elements) {
+    for (const elemId of allElementIds) {
       await assertOwnsAny(["element", "workflow"], elemId, userId);
     }
 

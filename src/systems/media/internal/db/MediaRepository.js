@@ -1,16 +1,17 @@
-import { supabase } from "./mediaClient.js";
+import { supabase, supabaseAdmin } from "./mediaClient.js";
 import { createLogger } from "#shared";
 import { MEDIA_IN_FLIGHT_STATUSES } from "../services/mediaStatus.js";
 
 const mediaRepositoryLogger = createLogger("media_repository");
 
 export class MediaRepository {
-    constructor() {
+    constructor(client = null) {
+        this.dbClient = client && typeof client.from === "function" ? client : null;
         this.tableName = "media";
     }
 
     client() {
-        return supabase;
+        return this.dbClient || supabaseAdmin || supabase;
     }
 
     async findById(id, select = "*") {

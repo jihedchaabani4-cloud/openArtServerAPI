@@ -618,6 +618,185 @@ describe("GenerationRequestService.requestImageEdit behavioral tests", () => {
     assert.equal(createdMedia.length, 0);
   });
 
+  it("throws 400 UNSUPPORTED_WORKFLOW_TYPE for CHARACTER, CHARACTER_SHEET, ELEMENT, and ELEMENT_SHEET workflows without mutating media or primary", async () => {
+    for (const workflowType of ["CHARACTER", "CHARACTER_SHEET", "ELEMENT", "ELEMENT_SHEET", "character_sheet"]) {
+      const { service, createdMedia, primarySwaps, launchCalls } = createEditMocks({
+        workflow: {
+          id: "wf-edit-1",
+          project_id: "proj-1",
+          user_id: "user-1",
+          workflow_type: workflowType,
+        },
+      });
+
+      await assert.rejects(
+        () => service.requestImageEdit(baseEditRequest),
+        (err) => {
+          assert.equal(err.statusCode, 400);
+          assert.equal(err.code, "UNSUPPORTED_WORKFLOW_TYPE");
+          return true;
+        }
+      );
+
+      assert.equal(createdMedia.length, 0, `${workflowType} must not create placeholder media`);
+      assert.equal(primarySwaps.length, 0, `${workflowType} must not overwrite is_primary`);
+      assert.equal(launchCalls.length, 0, `${workflowType} must not launch ExecutionEngine`);
+    }
+  });
+
+  it("throws 400 UNSUPPORTED_MEDIA_TYPE before creating placeholder or swapping is_primary when primary media is a video (including extensionless video_generation and remove_background)", async () => {
+    const videoCases = [
+      {
+        label: "mp4 edit",
+        primaryMedia: { id: "m-vid-1", url: "https://cdn.example.com/clip.mp4", status: "success", width: 1280, height: 720 },
+        req: baseEditRequest,
+      },
+      {
+        label: "extensionless video_generation on remove_background",
+        primaryMedia: { id: "m-vid-2", url: "https://cdn.example.com/signed/asset-99", status: "success", step_id: "video_generation", width: 1280, height: 720 },
+        req: {
+          ...baseEditRequest,
+          editType: "remove_background",
+          stepId: "image_remove_background",
+          useCaseId: "image-remove-background-v3",
+          model: "bria_remove_background_3_0",
+          prompt: "",
+        },
+      },
+    ];
+
+    for (const tc of videoCases) {
+      const { service, createdMedia, primarySwaps, launchCalls } = createEditMocks({
+        primaryMedia: tc.primaryMedia,
+      });
+      await assert.rejects(
+        () => service.requestImageEdit(tc.req),
+        (err) => {
+          assert.equal(err.statusCode, 400, tc.label);
+          assert.equal(err.code, "UNSUPPORTED_MEDIA_TYPE", tc.label);
+          return true;
+        }
+      );
+      assert.equal(createdMedia.length, 0, `${tc.label}: must not create placeholder`);
+      assert.equal(primarySwaps.length, 0, `${tc.label}: must not overwrite video card is_primary`);
+      assert.equal(launchCalls.length, 0, `${tc.label}: must not launch job`);
+    }
+  });
+
+  it("prevents concurrent double-click race on the same workflowId with 409 EDIT_ALREADY_IN_PROGRESS and releases lock cleanly", async () => {
+    let releaseFirstLaunch;
+    const firstLaunchStarted = new Promise((resolve) => {
+      releaseFirstLaunch = resolve;
+    });
+    let unblockFirstLaunch;
+    const waitFirstLaunch = new Promise((resolve) => {
+      unblockFirstLaunch = resolve;
+    });
+
+    const { service, createdMedia, launchCalls } = createEditMocks({
+      launchImpl: async (args) => {
+        releaseFirstLaunch();
+        await waitFirstLaunch;
+        return { jobId: "job-first", executionId: args.executionId, cost: { totalCredits: 13 } };
+      },
+    });
+
+    const firstPromise = service.requestImageEdit(baseEditRequest);
+    await firstLaunchStarted;
+
+    // Concurrent second request on the same workflowId must fail immediately with 409 EDIT_ALREADY_IN_PROGRESS
+    await assert.rejects(
+      () => service.requestImageEdit(baseEditRequest),
+      (err) => {
+        assert.equal(err.statusCode, 409);
+        assert.equal(err.code, "EDIT_ALREADY_IN_PROGRESS");
+        return true;
+      }
+    );
+
+    unblockFirstLaunch();
+    const firstResult = await firstPromise;
+    assert.equal(firstResult.ok, true);
+    assert.equal(createdMedia.length, 1, "only the first request may create a placeholder");
+    assert.equal(launchCalls.length, 1, "only the first request may launch a job");
+  });
+
+  it("enforces cross-instance Redis NX PX lock (lock:workflow-edit:<workflowId>) and releases via atomic Lua token check", async () => {
+    const store = new Map();
+    const setCalls = [];
+    const evalCalls = [];
+
+    const mockRedis = {
+      status: "ready",
+      set: async (key, value, pxFlag, ttlMs, nxFlag) => {
+        setCalls.push({ key, value, pxFlag, ttlMs, nxFlag });
+        if (nxFlag === "NX" && store.has(key)) return null;
+        store.set(key, value);
+        return "OK";
+      },
+      eval: async (_script, _numKeys, key, token) => {
+        evalCalls.push({ key, token });
+        if (store.get(key) === token) {
+          store.delete(key);
+          return 1;
+        }
+        return 0;
+      },
+    };
+
+    let releaseFirstLaunch;
+    const firstLaunchStarted = new Promise((resolve) => {
+      releaseFirstLaunch = resolve;
+    });
+    let unblockFirstLaunch;
+    const waitFirstLaunch = new Promise((resolve) => {
+      unblockFirstLaunch = resolve;
+    });
+
+    const instance1 = createEditMocks({
+      launchImpl: async (args) => {
+        releaseFirstLaunch();
+        await waitFirstLaunch;
+        return { jobId: "job-redis-1", executionId: args.executionId, cost: { totalCredits: 13 } };
+      },
+    });
+    instance1.service.redis = mockRedis;
+
+    const instance2 = createEditMocks();
+    instance2.service.redis = mockRedis;
+
+    // Instance 1 acquires Redis lock
+    const p1 = instance1.service.requestImageEdit(baseEditRequest);
+    await firstLaunchStarted;
+
+    assert.equal(setCalls.length, 1);
+    assert.equal(setCalls[0].key, "lock:workflow-edit:wf-edit-1");
+    assert.equal(setCalls[0].pxFlag, "PX");
+    assert.equal(setCalls[0].ttlMs, 15000);
+    assert.equal(setCalls[0].nxFlag, "NX");
+
+    // Instance 2 hits the same Redis lock and fails fast with 409 EDIT_ALREADY_IN_PROGRESS
+    await assert.rejects(
+      () => instance2.service.requestImageEdit(baseEditRequest),
+      (err) => {
+        assert.equal(err.statusCode, 409);
+        assert.equal(err.code, "EDIT_ALREADY_IN_PROGRESS");
+        return true;
+      }
+    );
+    assert.equal(instance2.createdMedia.length, 0);
+    assert.equal(instance2.launchCalls.length, 0);
+
+    // Instance 1 completes and atomically releases its own token via Lua eval
+    unblockFirstLaunch();
+    const res1 = await p1;
+    assert.equal(res1.ok, true);
+    assert.equal(evalCalls.length, 1);
+    assert.equal(evalCalls[0].key, "lock:workflow-edit:wf-edit-1");
+    assert.equal(evalCalls[0].token, setCalls[0].value);
+    assert.equal(store.has("lock:workflow-edit:wf-edit-1"), false);
+  });
+
   it("throws 400 PRIMARY_MEDIA_NOT_FOUND when workflow has no primary media", async () => {
     const { service, createdMedia } = createEditMocks({ primaryMedia: null });
     await assert.rejects(
@@ -1494,6 +1673,19 @@ describe("POST /api/images/edit — General In-Place Image Edit (Dynamic Edit-Ca
       );
       assert.equal(resBadElemUrl.getStatus(), 400);
       assert.equal(resBadElemUrl.getPayload().code, "DIRECT_URL_NOT_ALLOWED");
+
+      // 8. Rejects unowned inline <character:id> tag BEFORE calling requestImageEdit (no failed placeholder dirtied)
+      const callsBeforeForeignInline = calls.length;
+      const resForeignInline = createMockRes();
+      await editImage(
+        {
+          user: { id: userId },
+          body: { workflow_id: wfId, prompt: "Place <character:foreign-char-999> in the scene" },
+        },
+        resForeignInline
+      );
+      assert.ok(resForeignInline.getStatus() === 403 || resForeignInline.getStatus() === 404);
+      assert.equal(calls.length, callsBeforeForeignInline, "requestImageEdit must NOT be called when inline tag ownership fails");
     } finally {
       generationRequestService.requestImageEdit = origRequestImageEdit;
       db.workflows.findById = origFindById;

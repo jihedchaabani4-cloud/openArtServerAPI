@@ -2,9 +2,13 @@
  * ProfileRepository
  * Owns exclusive DB access for the `profiles` table per Rule 5 & Rule 12.
  */
-import { supabase } from "#shared/db/supabase.js";
+import { supabase, supabaseAdmin } from "#shared/db/supabase.js";
 
 export const ProfileRepository = {
+  client() {
+    return supabaseAdmin || supabase;
+  },
+
   /**
    * Upsert a user profile record to avoid race conditions on first login.
    *
@@ -13,7 +17,7 @@ export const ProfileRepository = {
    * @returns {Promise<Object|null>}
    */
   async upsertProfile(userId, extra = {}) {
-    const { data, error } = await supabase
+    const { data, error } = await this.client()
       .from("profiles")
       .upsert({ id: userId, ...extra }, { onConflict: ["id"] });
 
@@ -28,7 +32,7 @@ export const ProfileRepository = {
    * @returns {Promise<Object|null>}
    */
   async findById(userId) {
-    const { data, error } = await supabase
+    const { data, error } = await this.client()
       .from("profiles")
       .select("id, email, display_name, avatar_url, created_at, updated_at")
       .eq("id", userId)

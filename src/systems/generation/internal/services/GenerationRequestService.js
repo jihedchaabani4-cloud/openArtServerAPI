@@ -9,7 +9,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { AppError, createLogger } from "#shared";
+import { AppError, createLogger, envConfig, redisConnection } from "#shared";
 import {
     createGenerationPlaceholderAtomic,
     appendMediaToWorkflow,
@@ -18,9 +18,24 @@ import {
 import { toMediaIdList } from "#identity/tools";
 import { validateModelInputs, getModelSchema } from "#models/tools";
 import { assertEditReferenceCap } from "./imageEditContract.js";
+import { assertAllowedMediaType } from "../v3/nodes/base/resolveRefsNode.js";
 
 const logger = createLogger("generation_request_service");
 const ARRAY_MEDIA_PARAM_KEYS = ["images", "reference_images", "reference_videos"];
+const EDIT_LOCK_TTL_MS = 15_000;
+const RELEASE_LOCK_LUA = `
+  if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+  else
+    return 0
+  end
+`;
+const UNEDITABLE_SHEET_WORKFLOW_TYPES = new Set([
+    "CHARACTER",
+    "CHARACTER_SHEET",
+    "ELEMENT",
+    "ELEMENT_SHEET",
+]);
 
 export class GenerationRequestService {
     /**
@@ -30,12 +45,75 @@ export class GenerationRequestService {
      * @param {Object} [deps.useCaseService]
      * @param {Object} deps.folderService
      * @param {Function} [deps.modelValidator]
+     * @param {Object|null} [deps.redis]
      */
-    constructor({ db, executionEngine, useCaseService, folderService, modelValidator = validateModelInputs }) {
+    constructor({ db, executionEngine, useCaseService, folderService, modelValidator = validateModelInputs, redis = undefined }) {
         this.db = db;
         this.executionEngine = executionEngine || useCaseService;
         this.folderService = folderService;
         this.modelValidator = modelValidator;
+        this.redis = redis !== undefined ? redis : (envConfig.isTest ? null : redisConnection);
+        this._inFlightEditWorkflows = new Set();
+    }
+
+    /**
+     * Acquires a short-lived exclusive edit lock per workflowId (in-process + Redis NX PX when ready)
+     * to prevent concurrent double-click race conditions from creating duplicate placeholders & credit holds.
+     */
+    async _acquireWorkflowEditLock(workflowId) {
+        if (this._inFlightEditWorkflows.has(workflowId)) {
+            throw new AppError("An edit is already in progress for this workflow", 409, {
+                code: "EDIT_ALREADY_IN_PROGRESS",
+            });
+        }
+        this._inFlightEditWorkflows.add(workflowId);
+
+        const lockKey = `lock:workflow-edit:${workflowId}`;
+        const token = randomUUID();
+        let redisAcquired = false;
+
+        const canUseRedis =
+            this.redis &&
+            typeof this.redis.set === "function" &&
+            (this.redis.status === undefined || this.redis.status === "ready");
+
+        if (canUseRedis) {
+            try {
+                const res = await this.redis.set(lockKey, token, "PX", EDIT_LOCK_TTL_MS, "NX");
+                if (res !== "OK") {
+                    this._inFlightEditWorkflows.delete(workflowId);
+                    throw new AppError("An edit is already in progress for this workflow", 409, {
+                        code: "EDIT_ALREADY_IN_PROGRESS",
+                    });
+                }
+                redisAcquired = true;
+            } catch (err) {
+                if (err instanceof AppError) throw err;
+                logger.warn(
+                    { workflowId, err: err?.message },
+                    "Workflow edit Redis lock unavailable; falling back to in-process edit guard"
+                );
+            }
+        }
+
+        return {
+            release: async () => {
+                this._inFlightEditWorkflows.delete(workflowId);
+                if (!redisAcquired) return;
+                try {
+                    if (typeof this.redis.eval === "function") {
+                        await this.redis.eval(RELEASE_LOCK_LUA, 1, lockKey, token);
+                    } else if (typeof this.redis.del === "function") {
+                        await this.redis.del(lockKey);
+                    }
+                } catch (releaseErr) {
+                    logger.warn(
+                        { workflowId, err: releaseErr?.message },
+                        "Failed to release workflow edit Redis lock"
+                    );
+                }
+            },
+        };
     }
 
     /**
@@ -454,126 +532,141 @@ export class GenerationRequestService {
             throw new AppError("Workflow not found", 404, { code: "WORKFLOW_NOT_FOUND" });
         }
 
+        const workflowType = String(workflow.workflow_type || workflow.workflowType || "").trim().toUpperCase();
+        if (UNEDITABLE_SHEET_WORKFLOW_TYPES.has(workflowType)) {
+            throw new AppError(
+                `In-place image edits are not supported on "${workflowType}" workflows. Edit generated or uploaded image workflows instead.`,
+                400,
+                { code: "UNSUPPORTED_WORKFLOW_TYPE" }
+            );
+        }
+
         if (await this._isWorkflowTrashed(workflowId, userId)) {
             throw new AppError("Cannot edit media inside a trashed workflow", 409, {
                 code: "WORKFLOW_TRASHED",
             });
         }
 
-        // 2. Server-Resolved Source Media Lookup (with non-bricking fallback when primary is failed/saved)
-        const primaryMedia = await this._resolveEditableSourceMedia(workflowId);
-        const sourceMediaId = primaryMedia.id || primaryMedia.media_id;
-
-        // 3. Dimension & Aspect Ratio Inheritance + Model Validation
-        const width = Number(primaryMedia.width) > 0 ? Number(primaryMedia.width) : 1024;
-        const height = Number(primaryMedia.height) > 0 ? Number(primaryMedia.height) : 1024;
-
-        const rawDerivedAspectRatio =
-            (typeof primaryMedia.generation_config?.aspect_ratio === "string" &&
-                primaryMedia.generation_config.aspect_ratio.trim()) ||
-            calculateAspectRatio(width, height) ||
-            "1:1";
-
-        const resolvedParams = parameters && typeof parameters === "object" ? { ...parameters } : {};
-        let inheritedAspectRatio = rawDerivedAspectRatio;
-
-        let modelSchema = null;
-        try {
-            modelSchema = getModelSchema(model);
-        } catch {
-            // Unknown model will be handled by this.modelValidator below
-        }
-
-        const normalizedReferences = Array.isArray(references) ? references : [];
-        const normalizedCharacters = Array.isArray(characters) ? characters : [];
-        const normalizedElements = Array.isArray(elements) ? elements : [];
-
-        if (modelSchema && editType !== "remove_background") {
-            assertEditReferenceCap({
-                model,
-                schema: modelSchema,
-                workflowId,
-                references: normalizedReferences,
-                characters: normalizedCharacters,
-                elements: normalizedElements,
-                prompt,
-            });
-        }
-
-        if (!resolvedParams.aspect_ratio) {
-            const arDef = modelSchema?.parameters?.aspect_ratio;
-            if (arDef) {
-                const allowedValues = Array.isArray(arDef.values) ? arDef.values.map(String) : null;
-                if (!allowedValues || allowedValues.length === 0 || allowedValues.includes(String(rawDerivedAspectRatio))) {
-                    resolvedParams.aspect_ratio = rawDerivedAspectRatio;
-                    inheritedAspectRatio = rawDerivedAspectRatio;
-                } else {
-                    const fallbackRatio = arDef.default || "1:1";
-                    resolvedParams.aspect_ratio = fallbackRatio;
-                    inheritedAspectRatio = fallbackRatio;
-                }
-            }
-        } else {
-            inheritedAspectRatio = resolvedParams.aspect_ratio;
-        }
-
-        const SECRET_PATTERN = /secret|token|password|auth|bearer|api[_-]?key/i;
-        const STRIPPED_EDIT_KEYS = new Set(["count", "outputCount", "output_count", "images", "input_image", "prompt"]);
-        const preValidationParams = {};
-        for (const [k, v] of Object.entries(resolvedParams)) {
-            if (!SECRET_PATTERN.test(k) && !STRIPPED_EDIT_KEYS.has(k)) {
-                preValidationParams[k] = v;
-            }
-        }
-
-        let cleanInput;
-        const trimmedEditPrompt = (prompt || "").trim();
-        const isRemoveBackground = editType === "remove_background";
-        try {
-            const validationPayload = isRemoveBackground
-                ? {
-                    ...preValidationParams,
-                    input_image: primaryMedia.url,
-                    ...(trimmedEditPrompt ? { prompt: trimmedEditPrompt } : {}),
-                }
-                : {
-                    ...preValidationParams,
-                    prompt: trimmedEditPrompt,
-                };
-            cleanInput = this.modelValidator(model, validationPayload);
-        } catch (valErr) {
-            const statusCode = valErr.statusCode || 400;
-            const appErr = new AppError(valErr.message, statusCode);
-            appErr.code = valErr.code || "VALIDATION_ERROR";
-            appErr.field = valErr.field;
-            throw appErr;
-        }
-
-        const sanitizedParams = {};
-        for (const [k, v] of Object.entries(cleanInput)) {
-            if (k !== "prompt" && (!isRemoveBackground || k !== "input_image")) {
-                sanitizedParams[k] = v;
-            }
-        }
-
-        const finalPrompt = cleanInput.prompt || trimmedEditPrompt;
-        const trimmedUserPrompt = typeof userPrompt === "string" ? userPrompt.trim() : "";
-
-        const initialGenerationConfig = {
-            prompt: finalPrompt,
-            ...(trimmedUserPrompt ? { user_prompt: trimmedUserPrompt } : {}),
-            model,
-            edit_type: editType,
-            source_media_id: sourceMediaId,
-            edit_settings: editSettings,
-            aspect_ratio: cleanInput.aspect_ratio || inheritedAspectRatio || "1:1",
-            parameters: sanitizedParams,
-            created_at: new Date().toISOString(),
-        };
-
+        const editLock = await this._acquireWorkflowEditLock(workflowId);
         let newMediaId = null;
 
         try {
+            // 2. Server-Resolved Source Media Lookup (with non-bricking fallback when primary is failed/saved)
+            const primaryMedia = await this._resolveEditableSourceMedia(workflowId);
+            const sourceMediaId = primaryMedia.id || primaryMedia.media_id;
+
+            // Enforce single canonical media-type check before mutating DB/primary or holding credits
+            assertAllowedMediaType(primaryMedia, ["image"], sourceMediaId);
+
+            // 3. Dimension & Aspect Ratio Inheritance + Model Validation
+            const width = Number(primaryMedia.width) > 0 ? Number(primaryMedia.width) : 1024;
+            const height = Number(primaryMedia.height) > 0 ? Number(primaryMedia.height) : 1024;
+
+            const rawDerivedAspectRatio =
+                (typeof primaryMedia.generation_config?.aspect_ratio === "string" &&
+                    primaryMedia.generation_config.aspect_ratio.trim()) ||
+                calculateAspectRatio(width, height) ||
+                "1:1";
+
+            const resolvedParams = parameters && typeof parameters === "object" ? { ...parameters } : {};
+            let inheritedAspectRatio = rawDerivedAspectRatio;
+
+            let modelSchema = null;
+            try {
+                modelSchema = getModelSchema(model);
+            } catch {
+                // Unknown model will be handled by this.modelValidator below
+            }
+
+            const normalizedReferences = Array.isArray(references) ? references : [];
+            const normalizedCharacters = Array.isArray(characters) ? characters : [];
+            const normalizedElements = Array.isArray(elements) ? elements : [];
+
+            if (modelSchema && editType !== "remove_background") {
+                assertEditReferenceCap({
+                    model,
+                    schema: modelSchema,
+                    workflowId,
+                    references: normalizedReferences,
+                    characters: normalizedCharacters,
+                    elements: normalizedElements,
+                    prompt,
+                });
+            }
+
+            if (!resolvedParams.aspect_ratio) {
+                const arDef = modelSchema?.parameters?.aspect_ratio;
+                if (arDef) {
+                    const allowedValues = Array.isArray(arDef.values) ? arDef.values.map(String) : null;
+                    if (!allowedValues || allowedValues.length === 0 || allowedValues.includes(String(rawDerivedAspectRatio))) {
+                        resolvedParams.aspect_ratio = rawDerivedAspectRatio;
+                        inheritedAspectRatio = rawDerivedAspectRatio;
+                    } else {
+                        const fallbackRatio = arDef.default || "1:1";
+                        resolvedParams.aspect_ratio = fallbackRatio;
+                        inheritedAspectRatio = fallbackRatio;
+                    }
+                }
+            } else {
+                inheritedAspectRatio = resolvedParams.aspect_ratio;
+            }
+
+            const SECRET_PATTERN = /secret|token|password|auth|bearer|api[_-]?key/i;
+            const STRIPPED_EDIT_KEYS = new Set(["count", "outputCount", "output_count", "images", "input_image", "prompt"]);
+            const preValidationParams = {};
+            for (const [k, v] of Object.entries(resolvedParams)) {
+                if (!SECRET_PATTERN.test(k) && !STRIPPED_EDIT_KEYS.has(k)) {
+                    preValidationParams[k] = v;
+                }
+            }
+
+            let cleanInput;
+            const trimmedEditPrompt = (prompt || "").trim();
+            const isRemoveBackground = editType === "remove_background";
+            try {
+                const validationPayload = isRemoveBackground
+                    ? {
+                        ...preValidationParams,
+                        input_image: primaryMedia.url,
+                        ...(trimmedEditPrompt ? { prompt: trimmedEditPrompt } : {}),
+                    }
+                    : {
+                        ...preValidationParams,
+                        prompt: trimmedEditPrompt,
+                    };
+                cleanInput = this.modelValidator(model, validationPayload);
+            } catch (valErr) {
+                const statusCode = valErr.statusCode || 400;
+                const appErr = new AppError(valErr.message, statusCode);
+                appErr.code = valErr.code || "VALIDATION_ERROR";
+                appErr.field = valErr.field;
+                throw appErr;
+            }
+
+            const sanitizedParams = {};
+            for (const [k, v] of Object.entries(cleanInput)) {
+                if (k !== "prompt" && (!isRemoveBackground || k !== "input_image")) {
+                    sanitizedParams[k] = v;
+                }
+            }
+
+            const finalPrompt = cleanInput.prompt || trimmedEditPrompt;
+            const trimmedUserPrompt = typeof userPrompt === "string" ? userPrompt.trim() : "";
+
+            const initialGenerationConfig = {
+                prompt: finalPrompt,
+                ...(trimmedUserPrompt ? { user_prompt: trimmedUserPrompt } : {}),
+                model,
+                edit_type: editType,
+                source_media_id: sourceMediaId,
+                edit_settings: editSettings,
+                aspect_ratio: cleanInput.aspect_ratio || inheritedAspectRatio || "1:1",
+                parameters: sanitizedParams,
+                created_at: new Date().toISOString(),
+            };
+
+            const modelMaxReferences = Number(modelSchema?.parameters?.images?.max);
+
             // 4. In-Place Placeholder Append + Immediate `is_primary = true` Swap
             const requestedMediaId = randomUUID();
             const createdMedia = await appendMediaToWorkflow(this.db, {
@@ -610,6 +703,9 @@ export class GenerationRequestService {
                 references: normalizedReferences,
                 characters: normalizedCharacters,
                 elements: normalizedElements,
+                ...(Number.isInteger(modelMaxReferences) && modelMaxReferences >= 1
+                    ? { max_references: modelMaxReferences }
+                    : {}),
                 parameters: sanitizedParams,
                 edit_settings: editSettings,
                 ...(templateVars && typeof templateVars === "object"
@@ -716,6 +812,8 @@ export class GenerationRequestService {
                 }).catch(() => {});
             }
             throw err;
+        } finally {
+            await editLock.release();
         }
     }
 }

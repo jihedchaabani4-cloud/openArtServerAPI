@@ -35,7 +35,7 @@ export class RuntimeExecutor {
     bindingId,
     options = {},
   }) {
-    const maxRetries = options.maxRetries ?? 2;
+    const maxRetries = options.maxRetries ?? 0;
     const initialBackoffMs = options.initialBackoffMs ?? 150;
     const isStreaming = Boolean(binding.streaming && options.onStreamChunk);
     const attemptsTotal = isStreaming ? 1 : maxRetries + 1;

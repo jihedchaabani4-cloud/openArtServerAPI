@@ -35,7 +35,7 @@ import {
   registerProviderRunner,
   unregisterProviderRunner,
 } from "../../src/systems/models/internal/runtime/providerRuntimeRegistry.js";
-import { WorkflowMediaRepository, getWorkflowPrimaryMedia } from "#media/tools";
+import { WorkflowMediaRepository, getWorkflowPrimaryMedia, persistExternalMedia, GENERATED_OUTPUT_UPLOAD_POLICY, MediaUploadService } from "#media/tools";
 
 describe("V3 Base Nodes Suite", () => {
   it("registers the 7 pure base.* nodes and 0 custom.* nodes into a frozen registry", () => {
@@ -164,11 +164,13 @@ describe("V3 Base Nodes Suite", () => {
     ]);
   });
 
-  it("base.resolve_references exposes the simplified 6-input / 5-output contract and enforces strict ownership when enabled", async () => {
+  it("base.resolve_references exposes the 8-input / 5-output contract (including allowedMediaTypes and maxReferences) and enforces strict ownership when enabled", async () => {
     assert.deepEqual(ResolveRefsNode.INPUT_TYPES.required, {});
     assert.deepEqual(Object.keys(ResolveRefsNode.INPUT_TYPES.optional).sort(), [
+      "allowedMediaTypes",
       "characters",
       "elements",
+      "maxReferences",
       "media_id",
       "prompt",
       "references",
@@ -181,6 +183,8 @@ describe("V3 Base Nodes Suite", () => {
       elements: { type: "ARRAY", default: [] },
       media_id: { type: "STRING" },
       verify_ownership: { type: "BOOLEAN", default: true },
+      allowedMediaTypes: { type: "ARRAY" },
+      maxReferences: { type: "INT" },
     });
     for (const removedInput of ["style", "template_suffix"]) {
       assert.equal(ResolveRefsNode.INPUT_TYPES.required[removedInput], undefined);
@@ -422,6 +426,277 @@ describe("V3 Base Nodes Suite", () => {
     assert.equal(capturedInput.params.images.length, 14, "nanobana_2 must cap images at 14");
     assert.equal(capturedInput.params.images[0], "https://cdn.example.com/ref-1.png", "@image1 source preserved");
     assert.equal(new Set(capturedInput.params.images).size, 14, "all capped URLs must be unique");
+  });
+
+  it("base.resolve_references with allowedMediaTypes: ['image'] rejects video URLs/media with non-retryable UNSUPPORTED_MEDIA_TYPE while accepting images", async () => {
+    // 1. Accepts images cleanly
+    const okRes = await ResolveRefsNode.execute(
+      {
+        prompt: "Relight portrait",
+        media_id: "https://cdn.example.com/photo.png",
+        references: ["https://cdn.example.com/style-ref.webp"],
+        allowedMediaTypes: ["image"],
+      },
+      { userId: "u-img-1", assertOwnsAny: async () => true }
+    );
+    assert.equal(okRes.status, "success");
+    assert.equal(okRes.reference_urls.length, 2);
+
+    // 2. Rejects video URL extension (.mp4, .webm, .mov, .m4v) on source_image_url / references
+    for (const badUrl of [
+      "https://cdn.example.com/clip.mp4?token=abc",
+      "https://cdn.example.com/clip.webm",
+      "https://cdn.example.com/clip.mov",
+      "https://cdn.example.com/clip.m4v",
+    ]) {
+      await assert.rejects(
+        () =>
+          ResolveRefsNode.execute(
+            { prompt: "Edit", media_id: badUrl, allowedMediaTypes: ["image"] },
+            { userId: "u-img-1" }
+          ),
+        (err) => {
+          assert.ok(err instanceof GenerationError);
+          assert.equal(err.code, "UNSUPPORTED_MEDIA_TYPE");
+          assert.equal(err.statusCode, 400);
+          assert.equal(err.retryable, false);
+          assert.equal(err.billingAction, "REFUND_HOLD");
+          return true;
+        }
+      );
+    }
+
+    // 3. Rejects extensionless video media detected by mime_type: "video/mp4"
+    await assert.rejects(
+      () =>
+        ResolveRefsNode.execute(
+          { prompt: "Edit", references: ["media-vid-mime"], allowedMediaTypes: ["image"] },
+          {
+            userId: "u-img-1",
+            assertOwnsAny: async () => true,
+            getMediaUrls: async () => [
+              {
+                mediaId: "media-vid-mime",
+                url: "https://cdn.example.com/signed/asset-1",
+                status: "success",
+                mime_type: "video/mp4",
+              },
+            ],
+          }
+        ),
+      (err) => err instanceof GenerationError && err.code === "UNSUPPORTED_MEDIA_TYPE" && err.retryable === false
+    );
+
+    // 4. Rejects extensionless video workflow detected by step_id: "video_generation"
+    await assert.rejects(
+      () =>
+        ResolveRefsNode.execute(
+          { prompt: "Edit", references: ["wf-video-1"], allowedMediaTypes: ["image"] },
+          {
+            userId: "u-img-1",
+            assertOwnsAny: async () => true,
+            getMediaUrls: async () => [],
+            getCharacterPromptContext: async () => {
+              throw new Error("Character not found");
+            },
+            getElementPromptContext: async () => {
+              throw new Error("Element not found");
+            },
+            getWorkflowPrimaryMedia: async () => ({
+              mediaId: "m-vid-1",
+              url: "https://cdn.example.com/signed/asset-2",
+              status: "success",
+              step_id: "video_generation",
+            }),
+          }
+        ),
+      (err) => err instanceof GenerationError && err.code === "UNSUPPORTED_MEDIA_TYPE" && err.retryable === false
+    );
+  });
+
+  it("base.resolve_references with allowedMediaTypes: ['video'] accepts video and rejects images", async () => {
+    const okVideo = await ResolveRefsNode.execute(
+      {
+        prompt: "Extend this shot by 5 seconds",
+        media_id: "https://cdn.example.com/clips/scene-1.mp4",
+        references: ["wf-video-ref"],
+        allowedMediaTypes: ["video"],
+      },
+      {
+        userId: "u-vid-1",
+        assertOwnsAny: async () => true,
+        getMediaUrls: async () => [],
+        getCharacterPromptContext: async () => {
+          throw new Error("Character not found");
+        },
+        getElementPromptContext: async () => {
+          throw new Error("Element not found");
+        },
+        getWorkflowPrimaryMedia: async () => ({
+          mediaId: "m-vid-ref",
+          url: "https://cdn.example.com/signed/video-asset",
+          status: "success",
+          media_type: "video",
+        }),
+      }
+    );
+    assert.equal(okVideo.status, "success");
+    assert.deepEqual(okVideo.reference_urls, [
+      "https://cdn.example.com/clips/scene-1.mp4",
+      "https://cdn.example.com/signed/video-asset",
+    ]);
+
+    await assert.rejects(
+      () =>
+        ResolveRefsNode.execute(
+          {
+            prompt: "Extend video",
+            media_id: "https://cdn.example.com/photos/still.png",
+            allowedMediaTypes: ["video"],
+          },
+          { userId: "u-vid-1" }
+        ),
+      (err) => {
+        assert.ok(err instanceof GenerationError);
+        assert.equal(err.code, "UNSUPPORTED_MEDIA_TYPE");
+        assert.equal(err.statusCode, 400);
+        assert.equal(err.retryable, false);
+        return true;
+      }
+    );
+  });
+
+  it("base.resolve_references batches media lookups, propagates 5xx DB errors, caps maxReferences before [Reference Guide], and respects verify_ownership: false", async () => {
+    // 1. Batches media lookups into 1 getMediaUrls call and caps maxReferences before building [Reference Guide]
+    let mediaUrlBatchCalls = 0;
+    const capped = await ResolveRefsNode.execute(
+      {
+        prompt: "Combine references",
+        media_id: "https://cdn.example.com/src.png",
+        references: ["m-1", "m-2", "m-3", "m-4"],
+        maxReferences: 3,
+        verify_ownership: false,
+      },
+      {
+        userId: "user-cap",
+        getMediaUrls: async (ids) => {
+          mediaUrlBatchCalls++;
+          assert.deepEqual(ids, ["m-1", "m-2", "m-3", "m-4"], "must batch all media/auto IDs into a single getMediaUrls call");
+          return ids.map((id) => ({ mediaId: id, url: `https://cdn.example.com/${id}.png`, status: "success" }));
+        },
+      }
+    );
+    assert.equal(mediaUrlBatchCalls, 1);
+    assert.deepEqual(capped.reference_urls, [
+      "https://cdn.example.com/src.png",
+      "https://cdn.example.com/m-1.png",
+      "https://cdn.example.com/m-2.png",
+    ]);
+    assert.ok(!capped.prepared_prompt.includes("@image4"), "[Reference Guide] must not reference truncated @image4+");
+
+    // 2. Respects verify_ownership: false in Steps 1 and 2 (passes userId: null to character/element tools)
+    const capturedUserIds = [];
+    const noOwnerRes = await ResolveRefsNode.execute(
+      { prompt: "Scene", characters: ["c-1"], elements: ["e-1"], verify_ownership: false },
+      {
+        userId: "user-admin",
+        getCharacterPromptContext: async ({ userId }) => {
+          capturedUserIds.push({ kind: "character", userId });
+          return { name: "Hero", referenceMediaUrls: ["https://cdn.example.com/hero.png"] };
+        },
+        getElementPromptContext: async ({ userId }) => {
+          capturedUserIds.push({ kind: "element", userId });
+          return { elements: [{ id: "e-1", name: "Shield", referenceMediaUrls: ["https://cdn.example.com/shield.png"] }] };
+        },
+      }
+    );
+    assert.equal(noOwnerRes.status, "success");
+    assert.deepEqual(capturedUserIds, [
+      { kind: "character", userId: null },
+      { kind: "element", userId: null },
+    ]);
+
+    // 3. Propagates transient 5xx DB errors instead of silently dropping references
+    await assert.rejects(
+      () =>
+        ResolveRefsNode.execute(
+          { prompt: "Scene", references: ["m-db-err"], verify_ownership: false },
+          {
+            getMediaUrls: async () => {
+              const err = new Error("Supabase connection timeout");
+              err.statusCode = 503;
+              throw err;
+            },
+          }
+        ),
+      /Supabase connection timeout/
+    );
+  });
+
+  it("persistExternalMedia uses GENERATED_OUTPUT_UPLOAD_POLICY so 4K/8K PNG outputs are not downscaled to 2048px WebP", async () => {
+    let capturedPolicy = null;
+    const saved = await persistExternalMedia({
+      mediaId: "m-4k-1",
+      source: "https://wavespeed.example.com/render-8k.png",
+      userId: "u-4k-1",
+      mediaRepository: {
+        findById: async () => ({ id: "m-4k-1", status: "processing", generation_config: {} }),
+        updateMedia: async (id, patch) => ({ id, ...patch }),
+      },
+      workflowMediaRepository: {
+        isMediaLinkedToWorkflow: async () => true,
+        linkMedia: async (l) => l,
+      },
+      uploadService: {
+        upload: async ({ policy }) => {
+          capturedPolicy = policy;
+          return {
+            uploaded: [
+              {
+                url: "https://supabase.example.com/storage/v1/object/public/generated_images/u-4k-1/uploads/render-8k.png",
+                storageKey: "u-4k-1/uploads/render-8k.png",
+                width: 7680,
+                height: 4320,
+              },
+            ],
+          };
+        },
+      },
+    });
+    assert.equal(capturedPolicy, GENERATED_OUTPUT_UPLOAD_POLICY);
+    assert.equal(capturedPolicy.preserveOriginal, true);
+    assert.equal(saved.width, 7680);
+    assert.equal(saved.height, 4320);
+
+    // Verify MediaUploadService._prepareUploadPayload skips resize when preserveOriginal === true
+    const dummyStorage = {
+      upload: async () => "https://cdn.example.com/out.png",
+      deleteFiles: async () => ({ failures: [] }),
+      buildKey: () => "k",
+      validateFolder: () => "uploads",
+    };
+    const uploadSvc = new MediaUploadService({ storageService: dummyStorage });
+    const rawBuf = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    const prepared = await uploadSvc._prepareUploadPayload(
+      {
+        buffer: rawBuf,
+        originalName: "render-4k.png",
+        inspection: {
+          type: "image",
+          width: 4096,
+          height: 4096,
+          sizeBytes: 4,
+          detectedMime: "image/png",
+          ratio: "1:1",
+          format: "PNG",
+        },
+      },
+      GENERATED_OUTPUT_UPLOAD_POLICY
+    );
+    assert.equal(prepared.width, 4096, "4K PNG must NOT be resized to 2048px");
+    assert.equal(prepared.height, 4096);
+    assert.equal(prepared.mimeType, "image/png", "PNG must NOT be converted to lossy WebP");
+    assert.equal(prepared.buffer, rawBuf);
   });
 
   it("base.llm exposes the minimal 4-input / 4-output contract and SKILL.md registry re-exports", () => {

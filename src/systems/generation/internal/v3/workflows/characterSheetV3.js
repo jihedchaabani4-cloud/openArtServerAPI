@@ -37,6 +37,7 @@ export const characterSheetV3 = Object.freeze({
         references: { fromInput: "references", default: [] },
         characters: { fromInput: "characters", default: [] },
         elements: { fromInput: "elements", default: [] },
+        allowedMediaTypes: ["image"],
       },
     },
     {

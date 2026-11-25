@@ -298,6 +298,7 @@ export class MediaUploadService {
     async _prepareUploadPayload({ buffer, originalName, inspection }, policy) {
         const maxDim = policy.maxDimensionPx || 2048;
         const needsResize =
+            policy.preserveOriginal !== true &&
             inspection.type === "image" &&
             (inspection.width > maxDim || inspection.height > maxDim);
 

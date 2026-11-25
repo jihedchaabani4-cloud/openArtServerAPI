@@ -18,3 +18,4 @@ cookies.txt
 login.json
 edit_request.json
 *.cookie
+scripts/.load-test-*.json

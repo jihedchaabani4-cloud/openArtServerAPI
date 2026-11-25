@@ -16,7 +16,7 @@ import express from "express";
 import http from "node:http";
 import apiRouter from "../../src/api/routes.js";
 import { extractRoutes } from "../../scripts/dump-routes.js";
-import { supabase } from "#shared/db/supabase.js";
+import { supabase, supabaseAdmin } from "#shared/db/supabase.js";
 import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared";
 
 // ─── Source: containerWiringBoundary.test.js ───
@@ -435,13 +435,15 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
   let origDbTrashDeleteByWorkflowAndUser;
 
   let origSupabaseFrom;
+  let origSupabaseAdminFrom;
 
   beforeEach(() => {
     origDevAuthBypass = process.env.DEV_AUTH_BYPASS;
     process.env.DEV_AUTH_BYPASS = "false";
 
     origSupabaseFrom = supabase.from;
-    supabase.from = (table) => {
+    origSupabaseAdminFrom = supabaseAdmin.from;
+    const mockFrom = (table) => {
       if (table === "project") {
         return {
           select: () => ({
@@ -492,6 +494,8 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
       if (origSupabaseFrom) return origSupabaseFrom.call(supabase, table);
       return {};
     };
+    supabase.from = mockFrom;
+    supabaseAdmin.from = mockFrom;
 
     origRunRepoGetRun = RunRepository.prototype.getRun;
     RunRepository.prototype.getRun = async (runId) => {
@@ -607,6 +611,9 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     }
     if (origSupabaseFrom) {
       supabase.from = origSupabaseFrom;
+    }
+    if (origSupabaseAdminFrom) {
+      supabaseAdmin.from = origSupabaseAdminFrom;
     }
   });
 

@@ -59,6 +59,7 @@ import {
 } from "../internal/ingestion/sizeLimitedStorage.js";
 import {
     DEFAULT_UPLOAD_POLICY,
+    GENERATED_OUTPUT_UPLOAD_POLICY,
     ELEMENT_REFERENCE_UPLOAD_POLICY,
     ELEMENT_SHEET_UPLOAD_POLICY,
     ELEMENT_SOURCES_UPLOAD_POLICY,
@@ -321,7 +322,7 @@ export async function persistExternalMedia({
 
         const uploadResult = await uploader.upload({
             files: [source],
-            policy: DEFAULT_UPLOAD_POLICY,
+            policy: GENERATED_OUTPUT_UPLOAD_POLICY,
             userId,
             folder,
         });
@@ -630,6 +631,9 @@ export async function getMediaUrls(mediaIds = []) {
         status: r.status || "unknown",
         width: r.width,
         height: r.height,
+        ...(r.step_id ? { stepId: r.step_id, step_id: r.step_id } : {}),
+        ...(r.mime_type ? { mimeType: r.mime_type, mime_type: r.mime_type } : {}),
+        ...(r.media_type ? { mediaType: r.media_type, media_type: r.media_type } : {}),
     }));
 }
 
@@ -652,6 +656,9 @@ export async function getMediaById(mediaId) {
         height: record.height,
         status: record.status,
         stepId: record.step_id,
+        ...(record.step_id ? { step_id: record.step_id } : {}),
+        ...(record.mime_type ? { mimeType: record.mime_type, mime_type: record.mime_type } : {}),
+        ...(record.media_type ? { mediaType: record.media_type, media_type: record.media_type } : {}),
         projectId: record.project_id,
         createTime: record.create_time,
         errorMessage: record.error_message,
@@ -726,6 +733,9 @@ async function loadHydratedWorkflowMedia(workflowId, { workflowMediaRepository =
 
 function toWorkflowVisualDto(item) {
     const mediaId = item.id || item.media_id || null;
+    const stepId = item.step_id || item.stepId || null;
+    const mimeType = item.mime_type || item.mimeType || null;
+    const mediaType = item.media_type || item.mediaType || null;
     return {
         mediaId,
         id: mediaId,
@@ -735,6 +745,9 @@ function toWorkflowVisualDto(item) {
         status: item.status,
         width: item.width ?? null,
         height: item.height ?? null,
+        ...(stepId ? { stepId, step_id: stepId } : {}),
+        ...(mimeType ? { mimeType, mime_type: mimeType } : {}),
+        ...(mediaType ? { mediaType, media_type: mediaType } : {}),
     };
 }
 
@@ -940,6 +953,7 @@ export {
     getActiveUploadsCountForTest,
     getInFlightBytesForTest,
     DEFAULT_UPLOAD_POLICY,
+    GENERATED_OUTPUT_UPLOAD_POLICY,
     ELEMENT_REFERENCE_UPLOAD_POLICY,
     ELEMENT_SHEET_UPLOAD_POLICY,
     ELEMENT_SOURCES_UPLOAD_POLICY,

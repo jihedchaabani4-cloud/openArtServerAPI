@@ -1261,11 +1261,17 @@ describe("Canonical Primary-Media Persistence & WorkflowMedia Contract", () => {
         assert.equal(result.mediaRecords[0].id, "media-elem-1");
     });
 
-    it("WorkflowMediaRepository & BaseRepository route to supabaseAdmin to bypass RLS in server operations", async () => {
-        const repo = new WorkflowMediaRepository();
-        const client = repo.client();
+    it("WorkflowMediaRepository & all server repositories route to supabaseAdmin to bypass RLS in background operations", async () => {
         const { supabaseAdmin } = await import("#shared/db/supabase.js");
-        assert.equal(client, supabaseAdmin, "WorkflowMediaRepository.client() must return supabaseAdmin");
+        const { ProfileRepository } = await import("../../../src/systems/identity/internal/db/ProfileRepository.js");
+        const wfMediaRepo = new WorkflowMediaRepository();
+
+        assert.equal(wfMediaRepo.client(), supabaseAdmin, "WorkflowMediaRepository.client() must return supabaseAdmin");
+        assert.equal(db.media.client(), supabaseAdmin, "MediaRepository.client() must return supabaseAdmin");
+        assert.equal(db.elements.client(), supabaseAdmin, "ElementRepository.client() must return supabaseAdmin");
+        assert.equal(db.workflows.client(), supabaseAdmin, "WorkflowRepository/BaseRepository.client() must return supabaseAdmin");
+        assert.equal(db.projects.client(), supabaseAdmin, "ProjectRepository.client() must return supabaseAdmin");
+        assert.equal(ProfileRepository.client(), supabaseAdmin, "ProfileRepository.client() must return supabaseAdmin");
     });
 });
 }

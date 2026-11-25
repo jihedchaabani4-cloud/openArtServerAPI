@@ -39,6 +39,7 @@ export const imageAnglesV3 = Object.freeze({
         prompt: { fromInput: "prompt" },
         media_id: { fromInput: "source_image_url" },
         references: { fromInput: "references", default: [] },
+        allowedMediaTypes: ["image"],
       },
     },
     {

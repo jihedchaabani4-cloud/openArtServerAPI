@@ -89,21 +89,43 @@ export async function processUseCaseJob(job) {
 }
 
 /**
+ * BullMQ worker configuration for long-running generation jobs (WaveSpeed/LTX).
+ * - `lockDuration: 300_000` (5 min) with `lockRenewTime: 60_000` (1 min) prevents false stalls
+ *   during Redis blips or CPU-heavy image processing.
+ * - `maxStalledCount: 0` fails closed so a stalled worker NEVER re-runs a paid generation twice;
+ *   BullMQ emits `failed` and `handleUseCaseWorkerFailure` rolls back the credit hold cleanly.
+ */
+export const USECASE_WORKER_OPTIONS = Object.freeze({
+  concurrency: 10,
+  lockDuration: 300_000,
+  lockRenewTime: 60_000,
+  stalledInterval: 60_000,
+  maxStalledCount: 0,
+  removeOnComplete: { count: 100 },
+  removeOnFail: { count: 500 },
+});
+
+/**
  * Dedicated Generation & Workflow Execution Worker
  */
 export const useCaseWorker = envConfig.isTest
   ? Object.assign(new EventEmitter(), { close: async () => {} })
   : new Worker(USECASE_QUEUE_NAME, wrapWorkerJob("usecase-worker", processUseCaseJob), {
       connection: workerRedisConnection,
-      concurrency: 10,
-      removeOnComplete: { count: 100 },
-      removeOnFail: { count: 500 },
+      ...USECASE_WORKER_OPTIONS,
     });
 
 useCaseWorker.on("error", (err) => {
   workerLogger.error(
     { event: "usecase_worker.error", err: err?.message || String(err) },
     `[UseCaseWorker] Redis worker error: ${err?.message || String(err)}`
+  );
+});
+
+useCaseWorker.on("stalled", (jobId) => {
+  workerLogger.warn(
+    { event: "usecase_worker.stalled", jobId },
+    `[UseCaseWorker] Job #${jobId} stalled (maxStalledCount=0; failing closed without re-execution)`
   );
 });
 

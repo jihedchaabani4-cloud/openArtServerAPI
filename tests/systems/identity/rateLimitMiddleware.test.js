@@ -5,7 +5,7 @@ import http from "node:http";
 import express from "express";
 import cookieParser from "cookie-parser";
 import { identityRouter as authRouter } from "#identity/api";
-import { supabase } from "#shared/db/supabase.js";
+import { supabase, supabaseAdmin } from "#shared/db/supabase.js";
 import { walletService, characterService, elementService } from "../../../src/container.js";
 import { redisConnection, workerRedisConnection } from "#shared";
 import { rateLimit, resetLimitersForTest, setLimiterForTest, walletRateLimit } from "#identity/tools";
@@ -354,7 +354,8 @@ describe("RC1.4-D1 — Auth Rate Limiting Boundary Tests", () => {
       };
 
       const origFrom = supabase.from;
-      supabase.from = (table) => {
+      const origAdminFrom = supabaseAdmin.from;
+      const mockFrom = (table) => {
         if (table === "profiles") {
           return {
             upsert: async () => ({ data: [{ id: "mock-user-id" }], error: null }),
@@ -363,6 +364,10 @@ describe("RC1.4-D1 — Auth Rate Limiting Boundary Tests", () => {
         if (origFrom) return origFrom.call(supabase, table);
         return {};
       };
+      supabase.from = mockFrom;
+      supabaseAdmin.from = mockFrom;
+      supabaseAdmin.__origFromForRateLimitTest = origAdminFrom;
+      supabase.__origFromForRateLimitTest = origFrom;
     }
 
     app = express();
@@ -380,6 +385,14 @@ describe("RC1.4-D1 — Auth Rate Limiting Boundary Tests", () => {
     if (supabase?.auth) {
       if (origSignInWithPassword) supabase.auth.signInWithPassword = origSignInWithPassword;
       if (origSignUp) supabase.auth.signUp = origSignUp;
+    }
+    if (supabase?.__origFromForRateLimitTest) {
+      supabase.from = supabase.__origFromForRateLimitTest;
+      delete supabase.__origFromForRateLimitTest;
+    }
+    if (supabaseAdmin?.__origFromForRateLimitTest) {
+      supabaseAdmin.from = supabaseAdmin.__origFromForRateLimitTest;
+      delete supabaseAdmin.__origFromForRateLimitTest;
     }
     if (walletService) {
       if (origEnsureWallet) walletService.ensureWallet = origEnsureWallet;

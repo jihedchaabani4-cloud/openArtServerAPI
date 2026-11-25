@@ -151,6 +151,7 @@ export async function invokeModelGeneration({
       params,
       ...(references !== undefined ? { references } : {}),
       userId: ctx.userId || "system",
+      maxRetries: 0,
       idempotencyKey: ctx.runId && ctx.nodeId ? `node:${ctx.runId}:${ctx.nodeId}` : undefined,
     });
   } catch (err) {

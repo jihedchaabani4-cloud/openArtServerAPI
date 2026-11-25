@@ -1,5 +1,4 @@
 import { BaseRepository } from "./BaseRepository.js";
-import { supabase } from "./generationClient.js";
 import { trashRepository } from "#workspace/tools";
 import { createLogger } from "#shared";
 
@@ -34,7 +33,7 @@ export class WorkflowRepository extends BaseRepository {
 
         const { select = "*" } = options;
 
-        const { data: created, error } = await supabase
+        const { data: created, error } = await this.client()
             .from(this.tableName)
             .insert(newWorkflow)
             .select(select)
@@ -45,7 +44,7 @@ export class WorkflowRepository extends BaseRepository {
     }
 
     async getWorkflow(id) {
-        const { data, error } = await supabase
+        const { data, error } = await this.client()
             .from(this.tableName)
             .select("*")
             .eq("id", id)
@@ -102,7 +101,7 @@ export class WorkflowRepository extends BaseRepository {
 
     async findByProject(project_id, options = {}) {
         const { select = "*", order = { column: "create_time", ascending: false }, partitioned = false } = options;
-        let query = supabase.from(this.tableName).select(select);
+        let query = this.client().from(this.tableName).select(select);
         if (order) query = query.order(order.column, { ascending: order.ascending });
         query = query.eq("project_id", project_id);
         let { data, error } = await query;
@@ -114,7 +113,7 @@ export class WorkflowRepository extends BaseRepository {
                 .map((s) => s.trim())
                 .filter((s) => s !== "primary_media_id")
                 .join(", ");
-            let fallbackQuery = supabase.from(this.tableName).select(fallbackSelect);
+            let fallbackQuery = this.client().from(this.tableName).select(fallbackSelect);
             if (order) fallbackQuery = fallbackQuery.order(order.column, { ascending: order.ascending });
             fallbackQuery = fallbackQuery.eq("project_id", project_id);
             const fallbackRes = await fallbackQuery;

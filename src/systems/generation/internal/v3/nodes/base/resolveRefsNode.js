@@ -5,7 +5,106 @@ import { assertOwns, assertOwnsAny } from "#identity/tools";
 import { GenerationError } from "../../../errors.js";
 
 const INLINE_TAG_REGEX = /<(character|element):([^>\s]+)>/gi;
+const VIDEO_EXTENSION_REGEX = /\.(?:mp4|webm|mov|m4v)(?:$|[?#])/i;
 const INACTIVE_MEDIA_STATUSES = new Set(["failed", "saved", "processing", "pending", "queued", "uploading", "in_progress", "starting"]);
+
+export function normalizeAllowedMediaTypes(raw) {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const normalized = raw
+    .map((t) => (typeof t === "string" ? t.trim().toLowerCase() : ""))
+    .filter(Boolean);
+  return normalized.length > 0 ? new Set(normalized) : null;
+}
+
+export function inferMediaType({
+  url = "",
+  mimeType = null,
+  mime_type = null,
+  stepId = null,
+  step_id = null,
+  mediaType = null,
+  media_type = null,
+} = {}) {
+  const explicitType = String(mediaType || media_type || "").trim().toLowerCase();
+  if (explicitType === "video" || explicitType === "image" || explicitType === "audio") {
+    return explicitType;
+  }
+
+  const mime = String(mimeType || mime_type || "").trim().toLowerCase();
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("audio/")) return "audio";
+
+  const step = String(stepId || step_id || "").trim().toLowerCase();
+  if (step === "video_generation" || step.startsWith("video_")) return "video";
+
+  if (typeof url === "string" && url.trim()) {
+    const trimmed = url.trim();
+    try {
+      const pathname = new URL(trimmed).pathname;
+      if (VIDEO_EXTENSION_REGEX.test(pathname)) return "video";
+    } catch {
+      if (VIDEO_EXTENSION_REGEX.test(trimmed)) return "video";
+    }
+  }
+
+  return "image";
+}
+
+function toUnsupportedMediaTypeError({ detectedType, allowedTypes, resourceId = null, url = null }) {
+  const allowedList = [...allowedTypes].join(", ");
+  return new GenerationError({
+    code: "UNSUPPORTED_MEDIA_TYPE",
+    message: `Unsupported media type "${detectedType}"${resourceId ? ` for resource "${resourceId}"` : ""}. Allowed media types: ${allowedList}.`,
+    userMessage: `This workflow only supports ${allowedList} media.`,
+    status: 400,
+    statusCode: 400,
+    category: "USER_FAULT",
+    retryable: false,
+    billingAction: "REFUND_HOLD",
+    isInternal: false,
+    context: {
+      detectedType,
+      allowedMediaTypes: [...allowedTypes],
+      ...(resourceId ? { resourceId } : {}),
+      ...(url ? { url } : {}),
+    },
+  });
+}
+
+export function assertAllowedMediaType(mediaInfo, allowedMediaTypes, resourceId = null) {
+  const allowedSet =
+    allowedMediaTypes instanceof Set ? allowedMediaTypes : normalizeAllowedMediaTypes(allowedMediaTypes);
+  if (!allowedSet) return;
+  const info = typeof mediaInfo === "string" ? { url: mediaInfo } : (mediaInfo || {});
+  const detectedType = inferMediaType(info);
+  if (!allowedSet.has(detectedType)) {
+    throw toUnsupportedMediaTypeError({
+      detectedType,
+      allowedTypes: allowedSet,
+      resourceId,
+      url: typeof info.url === "string" ? info.url.trim() : null,
+    });
+  }
+}
+
+function isProbeMissError(err) {
+  if (!err) return true;
+  const status = Number(err.statusCode || err.status || 0);
+  const code = String(err.code || err.errorCode || "").toUpperCase();
+  if (status >= 500) return false;
+  if (
+    status === 404 ||
+    status === 403 ||
+    status === 400 ||
+    code.includes("NOT_FOUND") ||
+    code.includes("UNAUTHORIZED") ||
+    code.includes("FORBIDDEN")
+  ) {
+    return true;
+  }
+  return /not found|does not exist|not a (character|element)/i.test(String(err.message || ""));
+}
 const isHttpUrl = (v) => {
   if (typeof v !== "string") return false;
   const trimmed = v.trim();
@@ -133,6 +232,8 @@ export const ResolveRefsNode = {
       elements: { type: "ARRAY", default: [] },
       media_id: { type: "STRING" },
       verify_ownership: { type: "BOOLEAN", default: true },
+      allowedMediaTypes: { type: "ARRAY" },
+      maxReferences: { type: "INT" },
     },
   },
 
@@ -188,12 +289,25 @@ export const ResolveRefsNode = {
     const entityById = new Map();
     const mediaEntityByUrl = new Map();
     const referenceUrls = [];
+    const allowedMediaTypeSet = normalizeAllowedMediaTypes(inputs.allowedMediaTypes);
+    const rawMaxRefs = Number(inputs.maxReferences);
+    const maxReferences = Number.isInteger(rawMaxRefs) && rawMaxRefs >= 1 ? rawMaxRefs : null;
+    const effectiveLookupUserId = verifyOwnership ? userId : null;
+
+    const assertMediaAllowed = (mediaInfo, resourceId = null) => {
+      assertAllowedMediaType(mediaInfo, allowedMediaTypeSet, resourceId);
+    };
 
     const registerReferenceUrl = (url) => {
       if (!isHttpUrl(url)) return null;
       const cleanUrl = url.trim();
       let idx = referenceUrls.indexOf(cleanUrl);
-      if (idx === -1) idx = referenceUrls.push(cleanUrl) - 1;
+      if (idx === -1) {
+        if (maxReferences !== null && referenceUrls.length >= maxReferences) {
+          return null;
+        }
+        idx = referenceUrls.push(cleanUrl) - 1;
+      }
       return `@image${idx + 1}`;
     };
 
@@ -207,11 +321,13 @@ export const ResolveRefsNode = {
       }
     };
 
-    const addMediaEntity = (id, url, name = "Image Reference", extraAliasIds = []) => {
+    const addMediaEntity = (id, url, name = "Image Reference", extraAliasIds = [], mediaMeta = null) => {
       if (!isHttpUrl(url)) return;
       const cleanUrl = url.trim();
+      assertMediaAllowed({ ...(mediaMeta && typeof mediaMeta === "object" ? mediaMeta : {}), url: cleanUrl }, id);
       const alreadyRegistered = referenceUrls.includes(cleanUrl);
-      registerReferenceUrl(cleanUrl);
+      const tag = registerReferenceUrl(cleanUrl);
+      if (!tag) return;
       if (alreadyRegistered) {
         const existing = mediaEntityByUrl.get(cleanUrl);
         if (existing) {
@@ -235,9 +351,19 @@ export const ResolveRefsNode = {
       addEntity(entity, extraAliasIds);
     };
 
+    const registerEntityUrls = (rawUrls, resourceId) => {
+      const kept = [];
+      for (const url of rawUrls) {
+        assertMediaAllowed({ url }, resourceId);
+        if (registerReferenceUrl(url)) {
+          kept.push(url);
+        }
+      }
+      return kept;
+    };
+
     const addCharacterEntity = (id, src, fallbackName = "Character", extraAliasIds = []) => {
-      const urls = extractUrls(src);
-      urls.forEach(registerReferenceUrl);
+      const urls = registerEntityUrls(extractUrls(src), src.id || id);
       addEntity(
         {
           id: src.id || id,
@@ -247,16 +373,15 @@ export const ResolveRefsNode = {
           description: src.description || "",
           visualTraits: Array.isArray(src.visualTraits) ? src.visualTraits : formatTraits(src.traits),
           imageUrls: urls,
-          sheetImages: Array.isArray(src.sheetImages) ? src.sheetImages : urls,
-          detailImages: Array.isArray(src.detailImages) ? src.detailImages : [],
+          sheetImages: Array.isArray(src.sheetImages) ? src.sheetImages.filter((u) => urls.includes(u)) : urls,
+          detailImages: Array.isArray(src.detailImages) ? src.detailImages.filter((u) => urls.includes(u)) : [],
         },
         [id, ...extraAliasIds]
       );
     };
 
     const addElementEntity = (id, src, extraAliasIds = []) => {
-      const urls = extractUrls(src);
-      urls.forEach(registerReferenceUrl);
+      const urls = registerEntityUrls(extractUrls(src), src.id || id);
       addEntity(
         {
           id: src.id || id,
@@ -281,17 +406,26 @@ export const ResolveRefsNode = {
         loadedMediaUrl = mId;
         addMediaEntity("source_image", mId, "Source Image");
       } else if (await checkOwnership(["media", "workflow"], mId, { strictFlag: ctx.strictMediaLoad === true })) {
-        let record = await getMediaByIdFn(mId).catch(() => null);
+        let record = await getMediaByIdFn(mId).catch((err) => {
+          if (isProbeMissError(err)) return null;
+          throw err;
+        });
         if (!isUsableMediaRecord(record)) {
-          const list = await getMediaUrlsFn([mId]).catch(() => []);
+          const list = await getMediaUrlsFn([mId]).catch((err) => {
+            if (isProbeMissError(err)) return [];
+            throw err;
+          });
           record = Array.isArray(list) ? list.find(isUsableMediaRecord) || null : null;
         }
         if (!isUsableMediaRecord(record)) {
-          record = await getWorkflowPrimaryMediaFn(mId).catch(() => null);
+          record = await getWorkflowPrimaryMediaFn(mId).catch((err) => {
+            if (isProbeMissError(err)) return null;
+            throw err;
+          });
         }
         if (isUsableMediaRecord(record)) {
           loadedMediaUrl = record.url.trim();
-          addMediaEntity(record.id || record.mediaId || mId, loadedMediaUrl, "Media Reference", [mId]);
+          addMediaEntity(record.id || record.mediaId || mId, loadedMediaUrl, "Media Reference", [mId], record);
         }
       }
     }
@@ -313,7 +447,7 @@ export const ResolveRefsNode = {
       if (!charId || seenCharIds.has(charId)) continue;
       seenCharIds.add(charId);
       if (!(await checkOwnership(["character", "workflow"], charId, { useSingleAssertOwns: true }))) continue;
-      const charCtx = await getCharacterFn({ characterId: charId, userId });
+      const charCtx = await getCharacterFn({ characterId: charId, userId: effectiveLookupUserId });
       if (charCtx) addCharacterEntity(charId, charCtx);
     }
 
@@ -337,7 +471,7 @@ export const ResolveRefsNode = {
         if (await checkOwnership(["element", "workflow"], eId)) verifiedElemIds.push(eId);
       }
       if (verifiedElemIds.length > 0) {
-        const elemResult = await getElementFn({ elementIds: verifiedElemIds, userId });
+        const elemResult = await getElementFn({ elementIds: verifiedElemIds, userId: effectiveLookupUserId });
         for (const elem of elemResult?.elements || []) addElementEntity(elem.id, elem);
       }
     }
@@ -348,81 +482,146 @@ export const ResolveRefsNode = {
       const parsedRef = parseReferenceDescriptor(ref);
       if (!parsedRef) continue;
       if (parsedRef.kind === "inline_entity") {
-        extractUrls(parsedRef.entity).forEach(registerReferenceUrl);
-        addEntity(parsedRef.entity);
+        const keptUrls = registerEntityUrls(
+          extractUrls(parsedRef.entity),
+          parsedRef.entity.id || parsedRef.entity.name || null
+        );
+        addEntity({ ...parsedRef.entity, imageUrls: keptUrls });
       } else if (parsedRef.kind === "url") {
-        addMediaEntity(parsedRef.url, parsedRef.url, parsedRef.name);
+        addMediaEntity(parsedRef.url, parsedRef.url, parsedRef.name, [], typeof ref === "object" ? ref : null);
       } else {
         refDescriptorsToLookup.push(parsedRef);
       }
     }
 
-    const effectiveLookupUserId = verifyOwnership ? userId : null;
+    // Deduplicate pending descriptors before ownership + parallel lookup
+    const uniquePendingRefs = [];
+    const seenPendingIds = new Set();
+    for (const desc of refDescriptorsToLookup) {
+      if (entityById.has(desc.id) || seenPendingIds.has(desc.id)) continue;
+      seenPendingIds.add(desc.id);
+      uniquePendingRefs.push(desc);
+    }
 
-    const tryResolveAsMedia = async (refId) => {
-      const mediaRows = await getMediaUrlsFn([refId]).catch(() => []);
-      const validRows = Array.isArray(mediaRows) ? mediaRows.filter(isUsableMediaRecord) : [];
-      if (validRows.length === 0) return false;
-      for (const m of validRows) {
-        addMediaEntity(m.mediaId || m.id || refId, m.url, "Image Reference", [refId]);
-      }
-      return true;
-    };
-
-    const tryResolveAsCharacter = async (refId) => {
-      const charCtx = await getCharacterFn({ characterId: refId, userId: effectiveLookupUserId }).catch(() => null);
-      if (!charCtx || typeof charCtx !== "object") return false;
-      addCharacterEntity(refId, charCtx);
-      return true;
-    };
-
-    const tryResolveAsElement = async (refId) => {
-      const elemRes = await getElementFn({ elementIds: [refId], userId: effectiveLookupUserId }).catch(() => null);
-      const matched = Array.isArray(elemRes?.elements) ? elemRes.elements : [];
-      if (matched.length === 0) return false;
-      for (const elem of matched) {
-        addElementEntity(elem.id || refId, elem, [refId]);
-      }
-      return true;
-    };
-
-    const tryResolveAsWorkflow = async (refId) => {
-      const wfMedia = await getWorkflowPrimaryMediaFn(refId).catch(() => null);
-      if (!isUsableMediaRecord(wfMedia)) return false;
-      addMediaEntity(refId, wfMedia.url, "Image Reference", [wfMedia.mediaId || wfMedia.id].filter(Boolean));
-      return true;
-    };
-
-    for (const { kind, id: refId } of refDescriptorsToLookup) {
-      if (entityById.has(refId)) continue;
-
+    // Ownership checks (parallel when relaxed; sequential when strictOwnership so first error is deterministic)
+    const verifiedRefs = [];
+    for (const desc of uniquePendingRefs) {
       const ownershipTypes =
-        kind === "character"
+        desc.kind === "character"
           ? ["character", "workflow"]
-          : kind === "element"
+          : desc.kind === "element"
             ? ["element", "workflow"]
-            : kind === "workflow"
+            : desc.kind === "workflow"
               ? ["workflow"]
-              : kind === "media"
+              : desc.kind === "media"
                 ? ["media", "workflow"]
                 : ["media", "workflow", "character", "element"];
+      if (await checkOwnership(ownershipTypes, desc.id)) {
+        verifiedRefs.push(desc);
+      }
+    }
 
-      if (!(await checkOwnership(ownershipTypes, refId))) continue;
+    // Single batched media lookup for all media/auto IDs to eliminate N+1 media round-trips
+    const mediaBatchIds = verifiedRefs
+      .filter((d) => d.kind === "media" || d.kind === "auto")
+      .map((d) => d.id);
+    const mediaByIdMap = new Map();
+    if (mediaBatchIds.length > 0) {
+      const batchRows = await getMediaUrlsFn(mediaBatchIds).catch((err) => {
+        if (isProbeMissError(err)) return [];
+        throw err;
+      });
+      for (const m of Array.isArray(batchRows) ? batchRows : []) {
+        if (!isUsableMediaRecord(m)) continue;
+        const key = String(m.mediaId || m.id || (mediaBatchIds.length === 1 ? mediaBatchIds[0] : ""));
+        if (key) {
+          if (!mediaByIdMap.has(key)) mediaByIdMap.set(key, []);
+          mediaByIdMap.get(key).push(m);
+        }
+      }
+    }
 
+    const resolveSingleRef = async ({ kind, id: refId }) => {
       if (kind === "media") {
-        await tryResolveAsMedia(refId);
-      } else if (kind === "character") {
-        await tryResolveAsCharacter(refId);
-      } else if (kind === "element") {
-        await tryResolveAsElement(refId);
-      } else if (kind === "workflow") {
-        await tryResolveAsWorkflow(refId);
-      } else {
-        // Auto-detect untyped ID across media -> character -> element -> workflow
-        if (await tryResolveAsMedia(refId)) continue;
-        if (await tryResolveAsCharacter(refId)) continue;
-        if (await tryResolveAsElement(refId)) continue;
-        await tryResolveAsWorkflow(refId);
+        const rows = mediaByIdMap.get(refId) || [];
+        return rows.length > 0 ? { resolvedKind: "media", refId, rows } : null;
+      }
+
+      if (kind === "character") {
+        const charCtx = await getCharacterFn({ characterId: refId, userId: null }).catch((err) => {
+          if (isProbeMissError(err)) return null;
+          throw err;
+        });
+        return charCtx && typeof charCtx === "object" ? { resolvedKind: "character", refId, charCtx } : null;
+      }
+
+      if (kind === "element") {
+        const elemRes = await getElementFn({ elementIds: [refId], userId: null }).catch((err) => {
+          if (isProbeMissError(err)) return null;
+          throw err;
+        });
+        const matched = Array.isArray(elemRes?.elements) ? elemRes.elements : [];
+        return matched.length > 0 ? { resolvedKind: "element", refId, elements: matched } : null;
+      }
+
+      if (kind === "workflow") {
+        const wfMedia = await getWorkflowPrimaryMediaFn(refId);
+        return isUsableMediaRecord(wfMedia) ? { resolvedKind: "workflow", refId, wfMedia } : null;
+      }
+
+      // kind === "auto": media (already batched) -> character -> element -> workflow
+      const batchedMedia = mediaByIdMap.get(refId);
+      if (batchedMedia && batchedMedia.length > 0) {
+        return { resolvedKind: "media", refId, rows: batchedMedia };
+      }
+
+      const charCtx = await getCharacterFn({ characterId: refId, userId: null }).catch((err) => {
+        if (isProbeMissError(err)) return null;
+        throw err;
+      });
+      if (charCtx && typeof charCtx === "object") {
+        return { resolvedKind: "character", refId, charCtx };
+      }
+
+      const elemRes = await getElementFn({ elementIds: [refId], userId: null }).catch((err) => {
+        if (isProbeMissError(err)) return null;
+        throw err;
+      });
+      const matchedElements = Array.isArray(elemRes?.elements) ? elemRes.elements : [];
+      if (matchedElements.length > 0) {
+        return { resolvedKind: "element", refId, elements: matchedElements };
+      }
+
+      const wfMedia = await getWorkflowPrimaryMediaFn(refId);
+      if (isUsableMediaRecord(wfMedia)) {
+        return { resolvedKind: "workflow", refId, wfMedia };
+      }
+
+      return null;
+    };
+
+    // Resolve all verified refs in parallel while registering results in deterministic input order
+    const resolvedRefResults = await Promise.all(verifiedRefs.map(resolveSingleRef));
+    for (const outcome of resolvedRefResults) {
+      if (!outcome || entityById.has(outcome.refId)) continue;
+      if (outcome.resolvedKind === "media") {
+        for (const m of outcome.rows) {
+          addMediaEntity(m.mediaId || m.id || outcome.refId, m.url, "Image Reference", [outcome.refId], m);
+        }
+      } else if (outcome.resolvedKind === "character") {
+        addCharacterEntity(outcome.refId, outcome.charCtx);
+      } else if (outcome.resolvedKind === "element") {
+        for (const elem of outcome.elements) {
+          addElementEntity(elem.id || outcome.refId, elem, [outcome.refId]);
+        }
+      } else if (outcome.resolvedKind === "workflow") {
+        addMediaEntity(
+          outcome.refId,
+          outcome.wfMedia.url,
+          "Image Reference",
+          [outcome.wfMedia.mediaId || outcome.wfMedia.id].filter(Boolean),
+          outcome.wfMedia
+        );
       }
     }
 

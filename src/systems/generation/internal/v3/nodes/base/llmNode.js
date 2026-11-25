@@ -65,9 +65,9 @@ export const LlmNode = {
   },
 
   retryPolicy: {
-    maxAttempts: 2,
-    backoffMs: 1000,
-    retryableCategories: ["UPSTREAM_FAULT", "RATE_LIMIT"],
+    maxAttempts: 1,
+    backoffMs: 0,
+    retryableCategories: [],
   },
 
   estimateCost(plannedInputs = {}) {
@@ -114,6 +114,7 @@ export const LlmNode = {
         jsonMode: useJsonMode,
         userId: ctx.userId || null,
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+        ...(ctx.executeLLM ? {} : { maxRetries: 0 }),
       });
     } catch (err) {
       if (err?.code === "BILLING_CONTEXT_MISSING") {

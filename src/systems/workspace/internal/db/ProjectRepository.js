@@ -2,16 +2,16 @@
  * System 8: Workspace — Project Database Repository (Internal)
  * Persistence layer for `project` table.
  */
-import { supabase } from "./workspaceClient.js";
+import { supabase, supabaseAdmin } from "./workspaceClient.js";
 
 export class ProjectRepository {
     constructor(client = null) {
-        this.dbClient = client;
+        this.dbClient = client && typeof client.from === "function" ? client : null;
         this.tableName = "project";
     }
 
     client() {
-        return this.dbClient || supabase;
+        return this.dbClient || supabaseAdmin || supabase;
     }
 
 

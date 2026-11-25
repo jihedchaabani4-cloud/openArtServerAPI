@@ -30,6 +30,22 @@ function normalizeMediaStatus(status, url) {
     return status || (url ? "success" : "processing");
 }
 
+function isUploadMediaItem({ wf, role, config, stepId }) {
+    const isExplicitUpload =
+        role === "original" ||
+        config?.generation_type === "UPLOAD" ||
+        stepId === "CAE" ||
+        stepId === "upload";
+    if (isExplicitUpload) return true;
+    if (wf?.workflow_type !== "UPLOAD") return false;
+    const isEditedOrGenerated = Boolean(
+        config ||
+        role === "output" ||
+        (typeof stepId === "string" && stepId.trim() !== "")
+    );
+    return !isEditedOrGenerated;
+}
+
 export class ProjectReadService {
     constructor({ db, folderService = null }) {
         this.db = db;
@@ -318,17 +334,19 @@ export class ProjectReadService {
                 const owningWf = workflowsByPrimaryMediaId.get(m.id) || trashedByPrimaryMediaId.get(m.id);
                 if (owningWf) {
                     mediaWorkflowId = owningWf.id;
-                    mediaRole = owningWf.workflow_type === "UPLOAD" ? "original" : "output";
+                    const looksEdited = Boolean(
+                        config &&
+                        config.generation_type !== "UPLOAD" &&
+                        m.step_id !== "upload" &&
+                        m.step_id !== "CAE"
+                    );
+                    mediaRole = owningWf.workflow_type === "UPLOAD" && !looksEdited ? "original" : "output";
                 }
             }
 
             const isTrashedMedia = trashedWorkflowIdSet.has(mediaWorkflowId);
             const wf = isTrashedMedia ? trashedWorkflowMap.get(mediaWorkflowId) : workflowMap.get(mediaWorkflowId);
-            const isUpload = wf?.workflow_type === "UPLOAD" ||
-                             mediaRole === "original" ||
-                             config?.generation_type === "UPLOAD" ||
-                             m.step_id === "CAE" ||
-                             m.step_id === "upload";
+            const isUpload = isUploadMediaItem({ wf, role: mediaRole, config, stepId: m.step_id });
 
             const imageGenerationImageInputs = isUpload
                 ? undefined
@@ -433,6 +451,8 @@ export class ProjectReadService {
                                   workflowId: mediaWorkflowId,
                                   aspectRatio: config.aspect_ratio || resolvedRatio,
                                   url: m.url,
+                                  ...(config.edit_type ? { editType: config.edit_type } : {}),
+                                  ...(config.source_media_id ? { sourceMediaId: config.source_media_id } : {}),
                               }
                             : null,
                     userUploadedImage: isUpload ? { aspectRatio: resolvedRatio } : undefined,
@@ -468,10 +488,12 @@ export class ProjectReadService {
                         ? trashedWorkflowMap.get(otherRel.workflow_id)
                         : workflowMap.get(otherRel.workflow_id);
                     const authenticStepId = m.step_id;
-                    const isOtherUpload = linkedWf?.workflow_type === "UPLOAD" ||
-                                         otherRel.role === "original" ||
-                                         m.step_id === "CAE" ||
-                                         m.step_id === "upload";
+                    const isOtherUpload = isUploadMediaItem({
+                        wf: linkedWf,
+                        role: otherRel.role,
+                        config,
+                        stepId: m.step_id,
+                    });
 
                     const otherMediaObj = {
                         ...mediaObject,

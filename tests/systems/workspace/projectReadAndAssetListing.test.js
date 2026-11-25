@@ -70,19 +70,23 @@ describe("ProjectReadService - Primary Media Fallback & Items Attachment", () =>
 
     it("selects generation_config when loading all project media", async () => {
         const originalFrom = supabase.from;
+        const originalAdminFrom = supabaseAdmin.from;
         let selectedColumns = "";
-        supabase.from = () => ({
+        const mockFrom = () => ({
             select(columns) {
                 selectedColumns = columns;
                 return { eq: () => ({ order: async () => ({ data: [], error: null }) }) };
             },
         });
+        supabase.from = mockFrom;
+        supabaseAdmin.from = mockFrom;
 
         try {
             await new MediaRepository().findByProjectAll("project-id");
             assert.match(selectedColumns, /generation_config/);
         } finally {
             supabase.from = originalFrom;
+            supabaseAdmin.from = originalAdminFrom;
         }
     });
 
@@ -93,7 +97,8 @@ describe("ProjectReadService - Primary Media Fallback & Items Attachment", () =>
         const targetWorkflowId = "44444444-4444-4444-8444-444444444444";
 
         const origFrom = supabase.from;
-        supabase.from = (table) => {
+        const origAdminFrom = supabaseAdmin.from;
+        const mockFrom = (table) => {
             if (table === "project") {
                 return {
                     select: () => ({
@@ -151,11 +156,14 @@ describe("ProjectReadService - Primary Media Fallback & Items Attachment", () =>
                     select: () => ({
                         in: async () => ({ data: [], error: null }),
                         eq: async () => ({ data: [], error: null }),
+                        or: async () => ({ data: [], error: null }),
                     }),
                 };
             }
             return origFrom.call(supabase, table);
         };
+        supabase.from = mockFrom;
+        supabaseAdmin.from = mockFrom;
 
         try {
             const mockDb = {
@@ -203,7 +211,106 @@ describe("ProjectReadService - Primary Media Fallback & Items Attachment", () =>
             assert.equal(resolvedWorkflow.media.length, 1);
         } finally {
             supabase.from = origFrom;
+            supabaseAdmin.from = origAdminFrom;
         }
+    });
+
+    it("returns generatedImage metadata for edited media inside an UPLOAD workflow while preserving userUploadedImage on the original upload", async () => {
+        const projectId = "11111111-1111-4111-8111-111111111111";
+        const userId = "22222222-2222-4222-8222-222222222222";
+        const workflowId = "55555555-5555-4555-8555-555555555555";
+        const originalMediaId = "66666666-6666-4666-8666-666666666666";
+        const editedMediaId = "77777777-7777-4777-8777-777777777777";
+
+        const service = new ProjectReadService({
+            db: {
+                projects: { findById: async () => ({ id: projectId, user_id: userId, project_name: "Edit Upload Project" }) },
+                workflows: {
+                    findByProject: async () => ({
+                        active: [{
+                            id: workflowId,
+                            project_id: projectId,
+                            display_name: "portrait_upload.png",
+                            workflow_type: "UPLOAD",
+                            create_time: "2026-11-25T07:00:00Z",
+                        }],
+                        trashed: [],
+                    }),
+                },
+                media: {
+                    findByProjectAll: async () => [
+                        {
+                            id: originalMediaId,
+                            project_id: projectId,
+                            status: "success",
+                            url: "https://cdn.example.com/uploads/portrait.png",
+                            width: 1024,
+                            height: 1536,
+                            step_id: "upload",
+                            create_time: "2026-11-25T07:00:00Z",
+                            generation_config: null,
+                        },
+                        {
+                            id: editedMediaId,
+                            project_id: projectId,
+                            status: "success",
+                            url: "https://cdn.example.com/edits/portrait-relit.png",
+                            width: 1024,
+                            height: 1536,
+                            step_id: "image_relight",
+                            create_time: "2026-11-25T07:05:00Z",
+                            generation_config: {
+                                prompt: "Warm golden studio relight",
+                                model: "nanobana_2",
+                                edit_type: "relight",
+                                source_media_id: originalMediaId,
+                                aspect_ratio: "2:3",
+                                parameters: { resolution: "1k" },
+                            },
+                        },
+                    ],
+                },
+                workflowMedia: {
+                    findRelationsByWorkflowIds: async () => [
+                        {
+                            workflow_id: workflowId,
+                            media_id: originalMediaId,
+                            role: "original",
+                            is_primary: false,
+                        },
+                        {
+                            workflow_id: workflowId,
+                            media_id: editedMediaId,
+                            role: "output",
+                            is_primary: true,
+                        },
+                    ],
+                },
+                characters: { findByProjectOrWorkflowIds: async () => [] },
+                elements: { findByWorkflowIds: async () => [] },
+            },
+        });
+
+        const projectData = await service.getProjectData({ projectId, userId });
+        const origDto = projectData.media.find((m) => m.id === originalMediaId);
+        const editDto = projectData.media.find((m) => m.id === editedMediaId);
+
+        assert.ok(origDto, "original uploaded media must be present");
+        assert.equal(origDto.image.generatedImage, null);
+        assert.deepEqual(origDto.image.userUploadedImage, { aspectRatio: "2:3" });
+
+        assert.ok(editDto, "edited media inside UPLOAD workflow must be present");
+        assert.equal(editDto.is_primary, true);
+        assert.equal(editDto.image.userUploadedImage, undefined, "edited output must not be tagged as userUploadedImage");
+        assert.ok(editDto.image.generatedImage, "edited output inside UPLOAD workflow must expose generatedImage metadata");
+        assert.equal(editDto.image.generatedImage.prompt, "Warm golden studio relight");
+        assert.equal(editDto.image.generatedImage.modelNameType, "nanobana_2");
+        assert.equal(editDto.image.generatedImage.workflowId, workflowId);
+        assert.equal(editDto.image.generatedImage.aspectRatio, "2:3");
+        assert.equal(editDto.image.generatedImage.url, "https://cdn.example.com/edits/portrait-relit.png");
+        assert.equal(editDto.image.generatedImage.editType, "relight");
+        assert.equal(editDto.image.generatedImage.sourceMediaId, originalMediaId);
+        assert.deepEqual(editDto.mediaMetadata.requestData.imageGenerationRequestData, {});
     });
 });
 }
@@ -1077,7 +1184,8 @@ describe("Asset Listing with Folder Filters & Pagination (Task F-T7)", () => {
 
     it("returns folder_id and folderId on workflows in /api/workflows/project-data/:projectId", async () => {
       const origFrom = supabase.from;
-      supabase.from = (table) => {
+      const origAdminFrom = supabaseAdmin.from;
+      const mockFrom = (table) => {
         if (table === "project") {
           return {
             select: () => ({
@@ -1108,6 +1216,8 @@ describe("Asset Listing with Folder Filters & Pagination (Task F-T7)", () => {
         }
         return origFrom?.call(supabase, table);
       };
+      supabase.from = mockFrom;
+      supabaseAdmin.from = mockFrom;
 
       const origFindByProject = db.workflows.findByProject;
       db.workflows.findByProject = async (projectId, options = {}) => {
@@ -1145,13 +1255,15 @@ describe("Asset Listing with Folder Filters & Pagination (Task F-T7)", () => {
         assert.equal(wfInFolder.metadata?.folder_id, "folder-root-1", "metadata must have folder_id");
       } finally {
         supabase.from = origFrom;
+        supabaseAdmin.from = origAdminFrom;
         db.workflows.findByProject = origFindByProject;
       }
     });
 
     it("returns folders and collections with color and description in /api/workflows/project-data/:projectId", async () => {
       const origFrom = supabase.from;
-      supabase.from = (table) => {
+      const origAdminFrom = supabaseAdmin.from;
+      const mockFrom = (table) => {
         if (table === "project") {
           return {
             select: () => ({
@@ -1182,6 +1294,8 @@ describe("Asset Listing with Folder Filters & Pagination (Task F-T7)", () => {
         }
         return origFrom?.call(supabase, table);
       };
+      supabase.from = mockFrom;
+      supabaseAdmin.from = mockFrom;
 
       const origFindByProject = db.workflows.findByProject;
       db.workflows.findByProject = async () => [];
@@ -1224,6 +1338,7 @@ describe("Asset Listing with Folder Filters & Pagination (Task F-T7)", () => {
         assert.equal(folder.description, "All creative assets");
       } finally {
         supabase.from = origFrom;
+        supabaseAdmin.from = origAdminFrom;
         db.workflows.findByProject = origFindByProject;
         db.folders.listByProject = origListByProject;
       }

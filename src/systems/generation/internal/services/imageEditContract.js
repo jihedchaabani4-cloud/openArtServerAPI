@@ -40,8 +40,38 @@ const FORBIDDEN_SOURCE_FIELDS = Object.freeze([
 const ALLOWED_LIGHT_TYPES = new Set(["soft", "hard"]);
 const HEX_COLOR_REGEX = /^#[0-9A-Fa-f]{6}$/;
 const RAW_HTTP_URL_REGEX = /https?:\/\//i;
-const INLINE_ENTITY_TAG_REGEX = /<(?:character|element):([^>\s]+)>/gi;
+const INLINE_ENTITY_TAG_REGEX = /<(character|element):([^>\s]+)>/gi;
 const MAX_PROMPT_LENGTH = 2000;
+
+/**
+ * Extracts unique inline `<character:id>` and `<element:id>` resource IDs from a prompt.
+ *
+ * @param {string} prompt
+ * @returns {{ characterIds: string[], elementIds: string[] }}
+ */
+export function extractInlineEntityIds(prompt) {
+    const characterIds = [];
+    const elementIds = [];
+    if (typeof prompt !== "string" || !prompt.includes("<")) {
+        return { characterIds, elementIds };
+    }
+    const seenChars = new Set();
+    const seenElems = new Set();
+    for (const [, kind, rawId] of prompt.matchAll(INLINE_ENTITY_TAG_REGEX)) {
+        const id = rawId.trim();
+        if (!id) continue;
+        if (kind.toLowerCase() === "character") {
+            if (!seenChars.has(id)) {
+                seenChars.add(id);
+                characterIds.push(id);
+            }
+        } else if (!seenElems.has(id)) {
+            seenElems.add(id);
+            elementIds.push(id);
+        }
+    }
+    return { characterIds, elementIds };
+}
 
 /**
  * Returns the maximum number of additional reference inputs allowed for an edit model,
@@ -122,11 +152,9 @@ export function assertEditReferenceCap({
     for (const r of Array.isArray(references) ? references : []) addCandidate(r);
     for (const c of Array.isArray(characters) ? characters : []) addCandidate(c);
     for (const e of Array.isArray(elements) ? elements : []) addCandidate(e);
-    if (typeof prompt === "string" && prompt) {
-        for (const [, rawId] of prompt.matchAll(INLINE_ENTITY_TAG_REGEX)) {
-            addCandidate(rawId);
-        }
-    }
+    const { characterIds: inlineCharIds, elementIds: inlineElemIds } = extractInlineEntityIds(prompt);
+    for (const cId of inlineCharIds) addCandidate(cId);
+    for (const eId of inlineElemIds) addCandidate(eId);
 
     if (uniqueAdditional.size > maxAdditionalRefs) {
         throw badRequest(

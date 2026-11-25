@@ -5,7 +5,7 @@
 import { supabase, supabaseAdmin } from "#shared/db/supabase.js";
 
 export function getElementDbClient() {
-  return supabase;
+  return supabaseAdmin || supabase;
 }
 
 export { supabase, supabaseAdmin };

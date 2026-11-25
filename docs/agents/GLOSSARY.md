@@ -42,9 +42,15 @@ The mandatory financial safety protocol for billable AI operations managed betwe
 ### 4-Layer Composable V3 Architecture
 The locked separation of responsibilities across the V3 Generation & Edit Engine so Base Nodes remain composable into future Composite Nodes and User Workflows:
 - **Layer 1 — API & Intake Guards**: HTTP intake, auth, ownership, rate limits, domain validation, and concurrency guards (`GenerationRequestService`).
-- **Layer 2 — Execution Engine (`ExecutionEngine` & `WorkflowExecutor`)**: Sole owner of execution lifecycle, credit holds, heartbeats, centralized pre-node `holdExpired` enforcement, retries, settlement, and rollback.
+- **Layer 2 — Execution Engine (`ExecutionEngine` & `WorkflowExecutor`)**: Sole owner of execution lifecycle, credit holds, heartbeats, centralized pre-node `holdExpired` enforcement, settlement, and rollback.
 - **Layer 3 — Pure Base Nodes**: Stateless, single-responsibility DAG units with a strict `inputs -> execute() -> outputs` contract, zero billing or credit-hold awareness, and report-don't-decide typed error handling.
 - **Layer 4 — Storage & DB Tools**: Idempotent permanent object-storage persistence, real media dimension extraction, atomic DB completion guards, and compensating storage discard on commit failure.
+
+### Fail-Fast Generation Policy & Worker Lock Safety
+AI generation executions run single-attempt fail-fast (`maxAttempts: 1` on `ImageGenerateNode`, `VideoGenerateNode`, and `LlmNode`; `maxRetries: 0` default in `RuntimeExecutor`) while keeping status polling alive for already-submitted async provider jobs (capped at `180s` for WaveSpeed image/edit/upscale/remove-background and `600s` for video). On any failure or stall, `useCaseWorker.js` (`lockDuration: 300_000`, `lockRenewTime: 60_000`, `stalledInterval: 60_000`, `maxStalledCount: 0`) fails closed without re-executing the provider call, rolls back the credit hold, and marks only that job's pending media as `failed`.
+
+### Service-Role Repository Access
+All server-side database repositories across the 8 Business Systems default to `supabaseAdmin || supabase` so background workers (`useCaseWorker`, `walletWorker`, reapers) and HTTP services never fail under RLS in production while ownership checks are enforced explicitly at the service/controller boundary.
 
 ### Media & Save Types
 Assets stored and tracked by `src/systems/media/` (`media` and `workflow_media` tables) with declarative retention, quota, and storage bucket policies defined in `src/systems/media/internal/services/saveTypes.js`.

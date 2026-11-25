@@ -8,7 +8,15 @@ import {
   handleUseCaseWorkerFailure,
   processUseCaseJob,
   useCaseWorker,
+  USECASE_WORKER_OPTIONS,
 } from "../../../src/systems/generation/internal/workers/useCaseWorker.js";
+import {
+  WorkflowExecutor,
+  NodeRegistry,
+  ImageGenerateNode,
+  VideoGenerateNode,
+  LlmNode,
+} from "../../../src/systems/generation/internal/v3/index.js";
 import {
   JobQueueService,
   getUseCaseQueue,
@@ -378,6 +386,137 @@ describe("Queue and Worker Error Event Handlers", () => {
         assert.doesNotThrow(() => {
             useCaseWorker.emit("error", new Error("Simulated Redis disconnect on useCaseWorker"));
         });
+    });
+
+    it("useCaseWorker enforces long lock duration and fail-closed maxStalledCount=0", () => {
+        assert.equal(USECASE_WORKER_OPTIONS.lockDuration, 300_000);
+        assert.equal(USECASE_WORKER_OPTIONS.lockRenewTime, 60_000);
+        assert.equal(USECASE_WORKER_OPTIONS.stalledInterval, 60_000);
+        assert.equal(USECASE_WORKER_OPTIONS.maxStalledCount, 0);
+        assert.doesNotThrow(() => {
+            useCaseWorker.emit("stalled", "job-stalled-1");
+        });
+    });
+
+    it("V3 AI generation nodes enforce single-attempt fail-fast execution (zero automatic retries)", async () => {
+        assert.equal(ImageGenerateNode.retryPolicy.maxAttempts, 1);
+        assert.equal(VideoGenerateNode.retryPolicy.maxAttempts, 1);
+        assert.equal(LlmNode.retryPolicy.maxAttempts, 1);
+
+        const registry = new NodeRegistry();
+        registry.register(ImageGenerateNode);
+        registry.register(VideoGenerateNode);
+        registry.register(LlmNode);
+        registry.register({
+            type: "custom.sink",
+            category: "output",
+            OUTPUT_NODE: true,
+            CACHEABLE: false,
+            INPUT_TYPES: { required: { value: { type: "ANY" } }, optional: {} },
+            RETURN_TYPES: { status: "STRING" },
+            estimateCost: () => 0,
+            execute: async () => ({ status: "saved" }),
+        });
+        const executor = new WorkflowExecutor(registry, { sleepFn: async () => {} });
+
+        let imageAttempts = 0;
+        await assert.rejects(
+            () =>
+                executor.execute({
+                    workflow: {
+                        id: "fail-fast-image",
+                        nodes: [
+                            {
+                                id: "gen",
+                                type: "base.image_generate",
+                                inputs: { model: "nanobana-2", prompt: "test" },
+                            },
+                            {
+                                id: "sink",
+                                type: "custom.sink",
+                                inputs: { value: { fromNode: "gen", output: "image_url" } },
+                            },
+                        ],
+                    },
+                    context: {
+                        executeProvider: async () => {
+                            imageAttempts += 1;
+                            const err = new Error("WaveSpeed 503");
+                            err.statusCode = 503;
+                            err.retryable = true;
+                            throw err;
+                        },
+                    },
+                }),
+            /WaveSpeed 503/
+        );
+        assert.equal(imageAttempts, 1, "ImageGenerateNode must not retry failed upstream calls");
+
+        let videoAttempts = 0;
+        await assert.rejects(
+            () =>
+                executor.execute({
+                    workflow: {
+                        id: "fail-fast-video",
+                        nodes: [
+                            {
+                                id: "vid",
+                                type: "base.video_generate",
+                                inputs: { model: "wan_3_0", prompt: "test video" },
+                            },
+                            {
+                                id: "sink",
+                                type: "custom.sink",
+                                inputs: { value: { fromNode: "vid", output: "video_url" } },
+                            },
+                        ],
+                    },
+                    context: {
+                        executeProvider: async () => {
+                            videoAttempts += 1;
+                            const err = new Error("WaveSpeed 504 timeout");
+                            err.statusCode = 504;
+                            err.retryable = true;
+                            throw err;
+                        },
+                    },
+                }),
+            /WaveSpeed 504 timeout/
+        );
+        assert.equal(videoAttempts, 1, "VideoGenerateNode must not retry failed upstream calls");
+
+        let llmAttempts = 0;
+        await assert.rejects(
+            () =>
+                executor.execute({
+                    workflow: {
+                        id: "fail-fast-llm",
+                        nodes: [
+                            {
+                                id: "llm",
+                                type: "base.llm",
+                                inputs: { prompt: "check safety" },
+                            },
+                            {
+                                id: "sink",
+                                type: "custom.sink",
+                                inputs: { value: { fromNode: "llm", output: "text" } },
+                            },
+                        ],
+                    },
+                    context: {
+                        executeLLM: async () => {
+                            llmAttempts += 1;
+                            const err = new Error("Gemini 429");
+                            err.statusCode = 429;
+                            err.retryable = true;
+                            throw err;
+                        },
+                    },
+                }),
+            /Gemini 429/
+        );
+        assert.equal(llmAttempts, 1, "LlmNode must not retry failed upstream calls");
     });
 
     it("walletMaintenanceQueue handles error events without throwing or crashing", () => {

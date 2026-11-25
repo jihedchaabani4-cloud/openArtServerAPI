@@ -82,9 +82,9 @@ export const VideoGenerateNode = {
   },
 
   retryPolicy: {
-    maxAttempts: 2,
-    backoffMs: 1500,
-    retryableCategories: ["UPSTREAM_FAULT", "RATE_LIMIT"],
+    maxAttempts: 1,
+    backoffMs: 0,
+    retryableCategories: [],
   },
 
   estimateCost(plannedInputs = {}) {

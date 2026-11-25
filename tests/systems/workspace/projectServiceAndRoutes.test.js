@@ -7,7 +7,7 @@ import { projectService } from "../../../src/container.js";
 import { AppError, redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared";
 import express from "express";
 import http from "node:http";
-import { supabase } from "#shared/db/supabase.js";
+import { supabase, supabaseAdmin } from "#shared/db/supabase.js";
 
 // ─── Source: projectServiceAndRepository.test.js ───
 {
@@ -371,6 +371,7 @@ describe("Project Deletion with Folders Boundary & Cascade (7.7 & Acceptance Che
   let baseUrl;
   let origGetUser;
   let origFrom;
+  let origAdminFrom;
 
   let projects = [];
   let folders = [];
@@ -386,7 +387,8 @@ describe("Project Deletion with Folders Boundary & Cascade (7.7 & Acceptance Che
     };
 
     origFrom = supabase.from;
-    supabase.from = (table) => {
+    origAdminFrom = supabaseAdmin.from;
+    const mockFrom = (table) => {
       if (table === "media") {
         return {
           select: () => ({
@@ -433,6 +435,8 @@ describe("Project Deletion with Folders Boundary & Cascade (7.7 & Acceptance Che
       }
       return origFrom?.(table);
     };
+    supabase.from = mockFrom;
+    supabaseAdmin.from = mockFrom;
 
     const app = express();
     app.use(express.json());
@@ -447,6 +451,7 @@ describe("Project Deletion with Folders Boundary & Cascade (7.7 & Acceptance Che
   after(async () => {
     supabase.auth.getUser = origGetUser;
     supabase.from = origFrom;
+    supabaseAdmin.from = origAdminFrom;
     await Promise.allSettled([
       rateLimitRedisConnection?.quit().catch(() => rateLimitRedisConnection?.disconnect()),
       redisConnection?.quit().catch(() => redisConnection?.disconnect()),

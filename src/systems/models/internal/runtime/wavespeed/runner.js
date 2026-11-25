@@ -17,7 +17,7 @@ export async function run({ binding, payload, credential, options = {} }) {
 
   const pollingConfig = binding?.pollingConfig || {};
   const pollInterval = options.pollInterval ?? pollingConfig.pollInterval ?? 2.0;
-  const timeout = options.timeout ?? pollingConfig.timeout ?? 3600;
+  const timeout = options.timeout ?? pollingConfig.timeout ?? 600;
 
   // Allow injected client for testing/mocking
   const client =

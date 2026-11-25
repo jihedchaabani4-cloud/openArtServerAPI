@@ -291,7 +291,7 @@
   },
   "pollingConfig": {
     "pollInterval": 2.5,
-    "timeout": 3600
+    "timeout": 600
   },
   "version": "1.0.0"
 }

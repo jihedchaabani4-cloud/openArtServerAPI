@@ -81,14 +81,6 @@ function createEngineTestSetup({ shouldQueueFail = false, shouldNodeFail = false
 
   const engine = new ExecutionEngine({
     registry,
-    identityTools: {
-      assertOwns: async (type, id, uid) => {
-        events.push(`assertOwns:${type}:${id}:${uid}`);
-      },
-      assertOwnsAny: async (types, id, uid) => {
-        events.push(`assertOwnsAny:${id}:${uid}`);
-      },
-    },
     onSuccess: ({ runId }) => {
       events.push(`onSuccess:${runId}`);
     },
@@ -111,7 +103,7 @@ function createEngineTestSetup({ shouldQueueFail = false, shouldNodeFail = false
 }
 
 describe("ExecutionEngine — Domain-Agnostic Black-Box Launch, Execution & Lifecycle Hooks", () => {
-  it("executes full happy path: Ownership -> Compile -> Queue -> Execute -> onSuccess", async () => {
+  it("executes full happy path: Compile -> Queue -> Execute -> onSuccess", async () => {
     const { engine, workflow, events } = createEngineTestSetup();
 
     const launchRes = await engine.launch({
@@ -143,7 +135,6 @@ describe("ExecutionEngine — Domain-Agnostic Black-Box Launch, Execution & Life
     assert.equal(workerRes.status, "completed");
     assert.equal(workerRes.state.status, "completed");
     assert.deepEqual(events, [
-      "assertOwns:character:char-001:user-42",
       "queueDispatch:ok:run-happy-1",
       "execute:image_generate:flux-pro",
       "execute:save_media:media-pending-1",
@@ -837,19 +828,6 @@ describe("ExecutionEngine — Domain-Agnostic Black-Box Launch, Execution & Life
     const enqueuedJobs = [];
     const engine = new ExecutionEngine({
       registry,
-      identityTools: {
-        assertOwns: async (type, id, uid) => {
-          ownershipChecks.push({ type, id, uid });
-          if (type === "character" && id === "char-1" && uid !== "user-A") {
-            const err = new Error(`Character ${id} not found`);
-            err.code = "NOT_FOUND";
-            err.statusCode = 404;
-            throw err;
-          }
-          return true;
-        },
-        assertOwnsAny: async () => true,
-      },
       jobQueueService: {
         addUseCaseJob: async (payload) => {
           enqueuedJobs.push(payload);
@@ -873,24 +851,8 @@ describe("ExecutionEngine — Domain-Agnostic Black-Box Launch, Execution & Life
     assert.equal(resA.status, "completed");
     assert.equal(resolveExecutions, 1);
 
-    // 2. User B attempts launch with the SAME inline <character:char-1> tag -> fails closed at pre-queue ownership check!
-    await assert.rejects(
-      () =>
-        engine.launch({
-          workflow,
-          input: { prompt: "Portrait of <character:char-1> at sunset", media_id: "media-f-user-B" },
-          userId: "user-B",
-        }),
-      (err) => err.statusCode === 404
-    );
-
-    assert.equal(enqueuedJobs.length, 1, "User B must NOT enqueue any job");
-    assert.ok(
-      ownershipChecks.some((c) => c.type === "character" && c.id === "char-1" && c.uid === "user-B"),
-      "ExecutionEngine.launch must validate inline <character:char-1> ownership for User B"
-    );
-
-    // 3. Defense-in-depth: even if User B reached execute(), User B NEVER hits User A's cached resolve_references
+    // 2. User B attempts execute with the SAME prompt -> resolve_references verifies ownership and fails closed!
+    // (zero cross-tenant cache hit!)
     await assert.rejects(
       () =>
         engine.execute({

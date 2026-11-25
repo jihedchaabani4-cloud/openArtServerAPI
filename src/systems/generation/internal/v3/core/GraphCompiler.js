@@ -27,6 +27,8 @@ function arePortTypesCompatible(sourceType, targetType) {
   return false;
 }
 
+const COMPILED_PLAN_CACHE = new WeakMap();
+
 /**
  * GraphCompiler (Universal V3 Node Engine)
  *
@@ -35,6 +37,7 @@ function arePortTypesCompatible(sourceType, targetType) {
  * 2. Cycle detection (DFS visiting set)
  * 3. Port & required input validation (`INPUT_TYPES` vs `RETURN_TYPES`)
  * 4. Topological wave scheduling for parallel execution
+ * 5. O(1) Compiled Plan Caching for static frozen workflow blueprints
  */
 export class GraphCompiler {
   constructor(registry) {
@@ -46,6 +49,7 @@ export class GraphCompiler {
 
   /**
    * Compiles a workflow definition and computes its pruned execution plan and parallel waves.
+   * Caches results for frozen workflow blueprints in O(1).
    *
    * @param {Object} workflowDef
    * @returns {Object} Compiled plan with activeNodeIds, activeNodes, and waves
@@ -53,6 +57,10 @@ export class GraphCompiler {
   compile(workflowDef) {
     if (!workflowDef || typeof workflowDef !== "object" || !Array.isArray(workflowDef.nodes)) {
       throw new GenerationCompilationError("Invalid workflow definition: must include a nodes array");
+    }
+
+    if (Object.isFrozen(workflowDef) && COMPILED_PLAN_CACHE.has(workflowDef)) {
+      return COMPILED_PLAN_CACHE.get(workflowDef);
     }
 
     const nodesMap = new Map();
@@ -147,12 +155,18 @@ export class GraphCompiler {
     const waves = this.buildExecutionWaves(nodesMap, activeIds);
     const activeNodes = Array.from(activeIds).map((id) => nodesMap.get(id));
 
-    return {
+    const plan = {
       workflowId: workflowDef.id,
       activeNodeIds: Array.from(activeIds),
       activeNodes,
       waves,
     };
+
+    if (Object.isFrozen(workflowDef)) {
+      COMPILED_PLAN_CACHE.set(workflowDef, plan);
+    }
+
+    return plan;
   }
 
   /**

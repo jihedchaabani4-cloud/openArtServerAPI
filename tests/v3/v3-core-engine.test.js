@@ -354,6 +354,24 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
       assert.equal(defaultReg.get("base.save_media").CACHEABLE, false);
       assert.equal(defaultReg.get("base.resolve_references").CACHEABLE, true);
     });
+    it("caches compiled plans for frozen workflows returning identical plan in O(1)", () => {
+      const reg = createTestRegistry();
+      const compiler = new GraphCompiler(reg);
+      const frozenWf = Object.freeze({
+        id: "frozen-test-wf",
+        nodes: Object.freeze([
+          Object.freeze({
+            id: "out",
+            type: "base.save_media",
+            inputs: { media_id: "m1", asset_url: "https://example.com/asset.png" },
+          }),
+        ]),
+      });
+
+      const plan1 = compiler.compile(frozenWf);
+      const plan2 = compiler.compile(frozenWf);
+      assert.strictEqual(plan1, plan2, "Compiled plan must be cached and returned as identical reference in O(1)");
+    });
   });
 
   describe("WorkflowExecutor", () => {

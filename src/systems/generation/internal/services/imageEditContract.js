@@ -363,18 +363,6 @@ export function buildRelightTemplateVars(editSettings = {}, userPrompt = "") {
 }
 
 /**
- * Builds a deterministic relight prompt via `renderTextTemplate`.
- *
- * @param {Object} editSettings
- * @param {string} [userPrompt=""]
- * @returns {string}
- */
-export function buildRelightPrompt(editSettings = {}, userPrompt = "") {
-    const vars = buildRelightTemplateVars(editSettings, userPrompt);
-    return renderTextTemplate(IMAGE_RELIGHT_PROMPT_TEMPLATE, vars).text;
-}
-
-/**
  * Builds relative camera-movement template variables consumed by `image-angles-v3` (`base.text_template`).
  * Treats rotation/tilt/zoom strictly as relative deltas from `@image1`'s current camera viewpoint
  * (never assuming `@image1` is a front view). Zero/absent movements are omitted so their sentences drop.
@@ -410,18 +398,6 @@ export function buildAnglesTemplateVars(editSettings = {}, userPrompt = "") {
         ...(hasZoom ? { zoom } : {}),
         ...(note ? { user_prompt: note } : {}),
     };
-}
-
-/**
- * Builds a deterministic relative camera-movement prompt via `renderTextTemplate`.
- *
- * @param {Object} editSettings
- * @param {string} [userPrompt=""]
- * @returns {string}
- */
-export function buildAnglesPrompt(editSettings = {}, userPrompt = "") {
-    const vars = buildAnglesTemplateVars(editSettings, userPrompt);
-    return renderTextTemplate(IMAGE_ANGLES_PROMPT_TEMPLATE, vars).text;
 }
 
 /**
@@ -777,8 +753,6 @@ export default {
     getModelMaxEditReferences,
     assertEditReferenceCap,
     validateCommonEditRejection,
-    buildRelightPrompt,
-    buildAnglesPrompt,
     parseRelightRequest,
     parseAnglesRequest,
     parseRemoveBackgroundRequest,

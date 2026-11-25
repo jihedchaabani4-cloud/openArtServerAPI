@@ -111,30 +111,30 @@ describe("V3 Declarative Workflows & Internal Engine", () => {
     assert.equal(getV3Workflow("image-angles"), imageAnglesV3);
     assert.equal(getV3Workflow("imageAngles"), imageAnglesV3);
 
-    // Explicit workflow contracts
-    assert.equal(imageGenerationV3.mediaType, "image");
-    assert.equal(imageGenerationV3.mediaRole, "output");
-    assert.equal(imageGenerationV3.saveType, "workflow_output");
+    // Explicit workflow requiredInputs and terminal save_media configuration
+    assert.equal(imageGenerationV3.category, "image");
+    assert.equal(imageGenerationV3.nodes.at(-1).inputs.media_role, "output");
+    assert.equal(imageGenerationV3.nodes.at(-1).inputs.save_type, "workflow_output");
     assert.deepEqual(imageGenerationV3.requiredInputs, ["prompt"]);
 
-    assert.equal(videoGenerationV3.mediaType, "video");
-    assert.equal(videoGenerationV3.mediaRole, "output");
-    assert.equal(videoGenerationV3.saveType, "video_output");
+    assert.equal(videoGenerationV3.category, "video");
+    assert.equal(videoGenerationV3.nodes.at(-1).inputs.media_role, "output");
+    assert.equal(videoGenerationV3.nodes.at(-1).inputs.save_type, "video_output");
     assert.deepEqual(videoGenerationV3.requiredInputs, ["prompt"]);
 
-    assert.equal(characterSheetV3.mediaType, "image");
-    assert.equal(characterSheetV3.mediaRole, "sheet");
-    assert.equal(characterSheetV3.saveType, "character_sheet");
+    assert.equal(characterSheetV3.category, "character");
+    assert.equal(characterSheetV3.nodes.at(-1).inputs.media_role, "sheet");
+    assert.equal(characterSheetV3.nodes.at(-1).inputs.save_type, "character_sheet");
     assert.deepEqual(characterSheetV3.requiredInputs, ["prompt"]);
 
-    assert.equal(imageRelightV3.mediaType, "image");
-    assert.equal(imageRelightV3.mediaRole, "output");
-    assert.equal(imageRelightV3.saveType, "workflow_output");
+    assert.equal(imageRelightV3.category, "image");
+    assert.equal(imageRelightV3.nodes.at(-1).inputs.media_role, "output");
+    assert.equal(imageRelightV3.nodes.at(-1).inputs.save_type, "workflow_output");
     assert.deepEqual(imageRelightV3.requiredInputs, ["prompt", "source_image_url"]);
 
-    assert.equal(imageAnglesV3.mediaType, "image");
-    assert.equal(imageAnglesV3.mediaRole, "output");
-    assert.equal(imageAnglesV3.saveType, "workflow_output");
+    assert.equal(imageAnglesV3.category, "image");
+    assert.equal(imageAnglesV3.nodes.at(-1).inputs.media_role, "output");
+    assert.equal(imageAnglesV3.nodes.at(-1).inputs.save_type, "workflow_output");
     assert.deepEqual(imageAnglesV3.requiredInputs, ["prompt", "source_image_url"]);
   });
 
@@ -534,7 +534,7 @@ describe("V3 Declarative Workflows & Internal Engine", () => {
         workflow,
         input: {
           prompt: "hero portrait with reference",
-          model: workflow.mediaType === "video" ? "ltx_2_3_fast" : "gpt-image-2",
+          model: workflow.category === "video" ? "ltx_2_3_fast" : "gpt-image-2",
           characters: ["char-luna"],
           elements: ["elem-visor"],
           references: ["https://cdn.example.com/direct-ref.png"],

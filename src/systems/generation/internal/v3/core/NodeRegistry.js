@@ -60,11 +60,6 @@ export class NodeRegistry {
       category: "general",
       OUTPUT_NODE: false,
       estimateCost: () => 0,
-      retryPolicy: Object.freeze({
-        maxAttempts: 1,
-        backoffMs: 0,
-        retryableCategories: ["UPSTREAM_FAULT", "RATE_LIMIT"],
-      }),
       ...nodeDef,
       OUTPUT_NODE: Boolean(nodeDef.OUTPUT_NODE),
       CACHEABLE: nodeDef.CACHEABLE !== undefined ? Boolean(nodeDef.CACHEABLE) : !Boolean(nodeDef.OUTPUT_NODE),

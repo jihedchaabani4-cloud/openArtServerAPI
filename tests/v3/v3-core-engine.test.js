@@ -53,11 +53,6 @@ function createTestRegistry() {
       image_url: "IMAGE_URL",
       metadata: "JSON",
     },
-    retryPolicy: {
-      maxAttempts: 3,
-      backoffMs: 1,
-      retryableCategories: ["UPSTREAM_FAULT", "RATE_LIMIT"],
-    },
     estimateCost(plannedInputs) {
       return (plannedInputs.count ?? 1) * 10;
     },
@@ -278,33 +273,6 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
           }),
         /does not produce output "non_existent_port"/
       );
-    });
-
-    it("resolves nested dot-paths (e.g. parameters.count) via getValueByPath in resolveStaticAndInitialInputs", () => {
-      const reg = createTestRegistry();
-      const compiler = new GraphCompiler(reg);
-
-      const def = reg.get("base.image_generate");
-      const resolved = compiler.resolveStaticAndInitialInputs(
-        {
-          model: { fromInput: "parameters.model" },
-          prompt: { fromInput: "prompt" },
-          count: { fromInput: "parameters.count", default: 1 },
-        },
-        {
-          prompt: "nested test",
-          media_id: "m-nested",
-          parameters: {
-            model: "flux-pro",
-            count: 4,
-          },
-        },
-        def
-      );
-
-      assert.equal(resolved.model, "flux-pro");
-      assert.equal(resolved.count, 4);
-      assert.equal(resolved.prompt, "nested test");
     });
   });
 

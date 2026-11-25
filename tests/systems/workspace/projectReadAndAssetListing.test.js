@@ -90,12 +90,13 @@ describe("ProjectReadService - Primary Media Fallback & Items Attachment", () =>
         }
     });
 
-    it("defensively attributes media to workflow when workflow_media row is missing but primary_media_id is set", async () => {
+    it("attributes media to workflow strictly via workflow_media without falling back to dropped wf.primary_media_id", async () => {
         const projectId = "11111111-1111-4111-8111-111111111111";
         const userId = "22222222-2222-4222-8222-222222222222";
         const targetMediaId = "33333333-3333-4333-8333-333333333333";
         const targetWorkflowId = "44444444-4444-4444-8444-444444444444";
 
+        let workflowMediaRows = [];
         const origFrom = supabase.from;
         const origAdminFrom = supabaseAdmin.from;
         const mockFrom = (table) => {
@@ -131,7 +132,6 @@ describe("ProjectReadService - Primary Media Fallback & Items Attachment", () =>
                                         height: 600,
                                         step_id: "upload",
                                         create_time: new Date().toISOString(),
-                                        generation_config_id: null,
                                         generation_config: null,
                                     },
                                 ],
@@ -145,7 +145,7 @@ describe("ProjectReadService - Primary Media Fallback & Items Attachment", () =>
                 return {
                     select: () => ({
                         in: async () => ({
-                            data: [], // Simulate missing rows in workflow_media
+                            data: workflowMediaRows,
                             error: null,
                         }),
                     }),
@@ -174,7 +174,6 @@ describe("ProjectReadService - Primary Media Fallback & Items Attachment", () =>
                             project_id: pid,
                             display_name: "my_upload.jpg",
                             workflow_type: "UPLOAD",
-                            primary_media_id: targetMediaId,
                             folder_id: null,
                             create_time: new Date().toISOString(),
                         },
@@ -189,9 +188,26 @@ describe("ProjectReadService - Primary Media Fallback & Items Attachment", () =>
             };
 
             const service = new ProjectReadService({ db: mockDb });
+
+            // 1. Without a workflow_media row, media remains unlinked (no primary_media_id fallback)
+            const withoutLink = await service.getProjectData({ projectId, userId });
+            assert.equal(withoutLink.media.length, 1);
+            assert.equal(withoutLink.media[0].workflowId, null);
+            assert.equal(withoutLink.workflows[0].primary_media_id, "");
+            assert.equal(withoutLink.workflows[0].items.length, 0);
+
+            // 2. With canonical workflow_media row, media attributes cleanly and attaches to workflow.items
+            workflowMediaRows = [
+                {
+                    workflow_id: targetWorkflowId,
+                    media_id: targetMediaId,
+                    role: "original",
+                    is_primary: true,
+                    created_at: new Date().toISOString(),
+                },
+            ];
             const result = await service.getProjectData({ projectId, userId });
 
-            // 1. Verify media array has recovered workflowId
             assert.equal(result.media.length, 1);
             const resolvedMedia = result.media[0];
             assert.equal(resolvedMedia.id, targetMediaId);
@@ -201,10 +217,10 @@ describe("ProjectReadService - Primary Media Fallback & Items Attachment", () =>
             assert.equal(resolvedMedia.status, "success");
             assert.equal(resolvedMedia.url, "https://example.com/upload.jpg");
 
-            // 2. Verify workflows array has attached items
             assert.equal(result.workflows.length, 1);
             const resolvedWorkflow = result.workflows[0];
             assert.equal(resolvedWorkflow.id, targetWorkflowId);
+            assert.equal(resolvedWorkflow.primary_media_id, targetMediaId);
             assert.equal(resolvedWorkflow.items.length, 1);
             assert.equal(resolvedWorkflow.items[0].id, targetMediaId);
             assert.equal(resolvedWorkflow.items[0].url, "https://example.com/upload.jpg");

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createLogger, LogEvents, ErrorSystem, envConfig } from "#shared";
+import { createLogger, LogEvents, ErrorSystem } from "#shared";
 import { jobQueueService as defaultJobQueueService } from "../../services/jobQueueService.js";
 import { GraphCompiler } from "./GraphCompiler.js";
 import { WorkflowExecutor } from "./WorkflowExecutor.js";
@@ -27,7 +27,7 @@ function mergeServerContext(input = {}, serverContext = null) {
  * ExecutionEngine (Universal Black-Box V3 Core)
  *
  * Domain-agnostic execution & error coordinator (zero media coupling, zero billing coupling, zero entity coupling):
- * - `launch(...)`: validate contract required inputs, compile DAG, enqueue job.
+ * - `launch(...)`: validate required inputs, compile DAG, enqueue job with opaque `serverContext`.
  * - `execute(...)`: run compiled DAG inside an isolated `JobExecutionContext`, classify & sanitize
  *   any error, and notify external lifecycle hooks (`onSuccess` / `onFailure`).
  * - External domain concerns (such as marking pending media rows failed) attach via `onFailure(fn)`.
@@ -117,7 +117,7 @@ export class ExecutionEngine {
   }
 
   /**
-   * Phase 1: Synchronous Pre-Queue Launch (validate contract required inputs -> compile DAG -> enqueue job).
+   * Phase 1: Synchronous Pre-Queue Launch (validate required inputs -> compile DAG -> enqueue job).
    */
   async launch({
     workflow: workflowInput = null,
@@ -128,27 +128,13 @@ export class ExecutionEngine {
     executionId = null,
     idempotencyKey = null,
     traceId = null,
-    projectId = null,
     serverContext = null,
   } = {}) {
-    const workflow = this.resolveWorkflow(
-      workflowInput || useCaseId || (workflowId && getV3Workflow(workflowId) ? workflowId : null)
-    );
+    const workflow = this.resolveWorkflow(workflowInput || useCaseId || workflowId);
     const mergedInput = mergeServerContext(input, serverContext);
 
-    const effectiveWorkflowId =
-      workflowId || mergedInput.workflow_id || mergedInput.serverWorkflowId || mergedInput.workflowId || null;
-    const parentDbWorkflowId =
-      effectiveWorkflowId && !getV3Workflow(effectiveWorkflowId) ? effectiveWorkflowId : null;
-    const resolvedProjectId =
-      projectId || mergedInput.project_id || mergedInput.projectId || mergedInput.serverProjectId || null;
-
     // 1. Validate required inputs from workflow definition
-    const requiredInputs = Array.isArray(workflow.requiredInputs)
-      ? workflow.requiredInputs
-      : Array.isArray(workflow.contract?.requiredInputs)
-        ? workflow.contract.requiredInputs
-        : [];
+    const requiredInputs = Array.isArray(workflow.requiredInputs) ? workflow.requiredInputs : [];
     for (const reqField of requiredInputs) {
       const val = mergedInput[reqField];
       if (val === undefined || val === null || (typeof val === "string" && !val.trim())) {
@@ -167,15 +153,7 @@ export class ExecutionEngine {
     // 3. Fail-closed DAG compilation before queueing (cached in O(1) for static workflows)
     this.compiler.compile(workflow);
 
-    const effectiveServerContext = serverContext
-      ? {
-          ...serverContext,
-          ...(parentDbWorkflowId && !serverContext.workflowId ? { workflowId: parentDbWorkflowId } : {}),
-          ...(resolvedProjectId && !serverContext.projectId ? { projectId: resolvedProjectId } : {}),
-        }
-      : parentDbWorkflowId || resolvedProjectId
-        ? { workflowId: parentDbWorkflowId, projectId: resolvedProjectId }
-        : null;
+    const opaqueServerContext = serverContext ?? null;
 
     // 4. Enqueue 1 independent job
     if (!this.jobQueueService || typeof this.jobQueueService.addUseCaseJob !== "function") {
@@ -186,7 +164,7 @@ export class ExecutionEngine {
         workflowId: workflow.id,
         userId,
         input: mergedInput,
-        serverContext: effectiveServerContext,
+        serverContext: opaqueServerContext,
         errorCode: "QUEUE_NOT_CONFIGURED",
         errorMessage: "Job queue service is not configured",
         error: err,
@@ -205,7 +183,7 @@ export class ExecutionEngine {
         workflowRunId: runId,
         idempotencyKey: referenceId,
         traceId: effectiveTraceId,
-        serverContext: effectiveServerContext,
+        serverContext: opaqueServerContext,
       });
     } catch (dispatchErr) {
       const failMessage = `Queue dispatch failed: ${dispatchErr.message}`;
@@ -225,7 +203,7 @@ export class ExecutionEngine {
         workflowId: workflow.id,
         userId,
         input: mergedInput,
-        serverContext: effectiveServerContext,
+        serverContext: opaqueServerContext,
         errorCode: "QUEUE_DISPATCH_FAILED",
         errorMessage: failMessage,
         error: dispatchErr,
@@ -270,6 +248,7 @@ export class ExecutionEngine {
     executionId = null,
     runId = null,
     jobId = null,
+    serverContext = null,
     jobContext = null,
     nodeContext = {},
   } = {}) {
@@ -285,13 +264,8 @@ export class ExecutionEngine {
             jobId,
             userId,
             blueprintId: workflow.id,
-            workflowId: input?.serverWorkflowId || input?.workflow_id || null,
+            workflowId: nodeContext?.workflowId ?? null,
           });
-
-    const useExternalPersistence =
-      nodeContext?.useExternalPersistence !== undefined
-        ? Boolean(nodeContext.useExternalPersistence)
-        : !envConfig.isTest;
 
     try {
       jobCtx.markRunning();
@@ -302,7 +276,6 @@ export class ExecutionEngine {
         jobContext: jobCtx,
         context: {
           ...nodeContext,
-          useExternalPersistence,
           runId: jobCtx.identity.runId,
           executionId: jobCtx.identity.executionId,
           jobId: jobCtx.identity.jobId,
@@ -336,6 +309,7 @@ export class ExecutionEngine {
         workflowId: workflow.id,
         userId,
         input,
+        serverContext,
         result,
       });
 
@@ -375,6 +349,7 @@ export class ExecutionEngine {
         workflowId: workflow?.id,
         userId,
         input,
+        serverContext,
         nodeId: err?.nodeId || null,
         errorCode: failCode,
         errorMessage: failMsg,

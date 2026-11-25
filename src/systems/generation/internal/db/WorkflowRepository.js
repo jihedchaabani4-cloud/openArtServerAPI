@@ -104,24 +104,7 @@ export class WorkflowRepository extends BaseRepository {
         let query = this.client().from(this.tableName).select(select);
         if (order) query = query.order(order.column, { ascending: order.ascending });
         query = query.eq("project_id", project_id);
-        let { data, error } = await query;
-        if (error && typeof select === "string" && select.includes("primary_media_id")) {
-            // Graceful resilience: if primary_media_id column was dropped (ADR-0007),
-            // retry without primary_media_id rather than failing the entire project read.
-            const fallbackSelect = select
-                .split(",")
-                .map((s) => s.trim())
-                .filter((s) => s !== "primary_media_id")
-                .join(", ");
-            let fallbackQuery = this.client().from(this.tableName).select(fallbackSelect);
-            if (order) fallbackQuery = fallbackQuery.order(order.column, { ascending: order.ascending });
-            fallbackQuery = fallbackQuery.eq("project_id", project_id);
-            const fallbackRes = await fallbackQuery;
-            if (!fallbackRes.error) {
-                data = fallbackRes.data;
-                error = null;
-            }
-        }
+        const { data, error } = await query;
         if (error) throw error;
         const rows = data || [];
         if (!rows.length) {

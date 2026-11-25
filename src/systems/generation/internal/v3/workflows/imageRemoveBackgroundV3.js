@@ -11,18 +11,7 @@ export const imageRemoveBackgroundV3 = Object.freeze({
   name: "Image Remove Background V3",
   version: "3.0.0",
   category: "image",
-  mediaType: "image",
-  mediaRole: "output",
-  saveType: "workflow_output",
   requiredInputs: Object.freeze(["source_image_url"]),
-  contract: Object.freeze({
-    id: "image-remove-background-v3",
-    aliases: Object.freeze(["image-remove-background", "imageRemoveBackground", "remove-background"]),
-    mediaType: "image",
-    mediaRole: "output",
-    saveType: "workflow_output",
-    requiredInputs: Object.freeze(["source_image_url"]),
-  }),
   description:
     "Direct 2-node V3 background removal pipeline (zero LLM): executes the selected Bria remove-background model directly on the resolved source image and persists the output media.",
 

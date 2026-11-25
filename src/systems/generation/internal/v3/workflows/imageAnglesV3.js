@@ -16,18 +16,7 @@ export const imageAnglesV3 = Object.freeze({
   name: "Image Angles V3",
   version: "3.1.0",
   category: "image",
-  mediaType: "image",
-  mediaRole: "output",
-  saveType: "workflow_output",
   requiredInputs: Object.freeze(["prompt", "source_image_url"]),
-  contract: Object.freeze({
-    id: "image-angles-v3",
-    aliases: Object.freeze(["image-angles", "imageAngles"]),
-    mediaType: "image",
-    mediaRole: "output",
-    saveType: "workflow_output",
-    requiredInputs: Object.freeze(["prompt", "source_image_url"]),
-  }),
   description:
     "Zero-LLM 4-node V3 virtual camera angle pipeline: source image reference resolution, deterministic conditional text-template prompt synthesis (0 credits), server-locked nanobana_2 edit execution, and explicit media persistence.",
 

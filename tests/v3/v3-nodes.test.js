@@ -2080,7 +2080,6 @@ describe("V3 Base Nodes Suite", () => {
         ),
       (err) => {
         assert.equal(err.code, "HOLD_EXPIRED");
-        assert.equal(err.category, "HOLD_EXPIRED");
         assert.equal(err.statusCode, 409);
         assert.equal(err.retryable, false);
         return true;

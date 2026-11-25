@@ -13,18 +13,7 @@ export const imageGenerationV3 = Object.freeze({
   name: "Image Generation V3",
   version: "3.0.0",
   category: "image",
-  mediaType: "image",
-  mediaRole: "output",
-  saveType: "workflow_output",
   requiredInputs: Object.freeze(["prompt"]),
-  contract: Object.freeze({
-    id: "image-generation-v3",
-    aliases: Object.freeze(["image-generation-v1", "imageGeneration"]),
-    mediaType: "image",
-    mediaRole: "output",
-    saveType: "workflow_output",
-    requiredInputs: Object.freeze(["prompt"]),
-  }),
   description:
     "Declarative 4-node V3 image generation pipeline: reference & tag resolution, single-call LLM safety check + translation + image prompt preparation, image generation, and explicit media persistence.",
 

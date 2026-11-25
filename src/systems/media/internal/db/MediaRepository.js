@@ -42,9 +42,6 @@ export class MediaRepository {
      * @param {string} step_id - "CAE" for init/upload | "CAM", "CAU"... for edits
      */
     async createMedia({
-        workflow_id: _ignoredWorkflowId,
-        user_id: _ignoredUserId,
-        format: _ignoredFormat,
         project_id,
         step_id,
         url,
@@ -176,28 +173,8 @@ export class MediaRepository {
             .select("id, step_id, url, width, height, create_time, status, error_message, generation_config")
             .eq("project_id", project_id)
             .order("create_time", { ascending: false });
-        if (!error && data) return data;
-
-        const fallback = await this.client()
-            .from(this.tableName)
-            .select(`
-                id, step_id, url, width, height, create_time, status, error_message,
-                generation_config_id,
-                generation_config (
-                    id, prompt, model, aspect_ratio, generation_type, seed, visibility
-                )
-            `)
-            .eq("project_id", project_id)
-            .order("create_time", { ascending: false });
-        if (!fallback.error && fallback.data) return fallback.data;
-
-        const baseFallback = await this.client()
-            .from(this.tableName)
-            .select("id, step_id, url, width, height, create_time, status, error_message, generation_config_id")
-            .eq("project_id", project_id)
-            .order("create_time", { ascending: false });
-        if (baseFallback.error) throw baseFallback.error;
-        return baseFallback.data || [];
+        if (error) throw error;
+        return data || [];
     }
 
     /**
@@ -232,17 +209,6 @@ export class MediaRepository {
             role: relRow?.role || null,
             workflow: wf || null,
         };
-    }
-
-    async updateUrl(id, url) {
-        const { data, error } = await this.client()
-            .from(this.tableName)
-            .update({ url })
-            .eq("id", id)
-            .select()
-            .single();
-        if (error) throw error;
-        return data;
     }
 
     async updateMedia(id, fields) {

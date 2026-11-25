@@ -13,18 +13,7 @@ export const imageEditV3 = Object.freeze({
   name: "Image Edit V3",
   version: "3.0.0",
   category: "image",
-  mediaType: "image",
-  mediaRole: "output",
-  saveType: "workflow_output",
   requiredInputs: Object.freeze(["prompt", "source_image_url"]),
-  contract: Object.freeze({
-    id: "image-edit-v3",
-    aliases: Object.freeze(["image-edit", "imageEdit"]),
-    mediaType: "image",
-    mediaRole: "output",
-    saveType: "workflow_output",
-    requiredInputs: Object.freeze(["prompt", "source_image_url"]),
-  }),
   description:
     "Declarative 4-node V3 in-place image editing pipeline: source image & reference resolution, single-call LLM safety check + translation + targeted edit prompt synthesis, edit-capable image model execution, and explicit media persistence.",
 

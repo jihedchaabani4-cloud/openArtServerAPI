@@ -637,11 +637,6 @@ describe("D2.5 — Provider Error Semantics & Upstream Fault Mapping Boundary Te
       CACHEABLE: false,
       INPUT_TYPES: { required: { prompt: { type: "STRING" } } },
       RETURN_TYPES: { url: "STRING" },
-      retryPolicy: {
-        maxAttempts: 3,
-        backoffMs: 1500,
-        retryableCategories: ["UPSTREAM_FAULT", "RATE_LIMIT"],
-      },
       estimateCost: () => 0,
       async execute() {
         attempts++;

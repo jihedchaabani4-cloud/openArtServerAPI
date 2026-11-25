@@ -1,7 +1,4 @@
 import { BaseRepository } from "./BaseRepository.js";
-import { createLogger } from "#shared";
-
-const configRepositoryLogger = createLogger("generation_config_repository");
 
 export class GenerationConfigRepository extends BaseRepository {
     constructor(client = null) {
@@ -29,51 +26,6 @@ export class GenerationConfigRepository extends BaseRepository {
             .from(this.tableName)
             .insert({ prompt, prompt_optimise, model, aspect_ratio, generation_type, seed, visibility })
             .select()
-            .single();
-        if (error) throw error;
-        return data;
-    }
-
-    /**
-     * Creates a reference entry linked to a generation_config.
-     * position is 0-based (max 13 = 14 references).
-     *
-     * @param {string} input_type - "IMAGE_INPUT_TYPE_BASE_IMAGE" | "IMAGE_INPUT_TYPE_REFERENCE"
-     */
-    async createReference({ generation_config_id, position, input_type, ref_media_id }) {
-        configRepositoryLogger.debug({ generation_config_id, position, input_type, ref_media_id }, "Creating generation_config_reference");
-        const { data, error } = await this.client()
-            .from("generation_config_reference")
-            .insert({ generation_config_id, position, input_type, ref_media_id })
-            .select()
-            .single();
-        if (error) throw error;
-        return data;
-    }
-
-    async findReferencesByConfig(generation_config_id) {
-        const { data, error } = await this.client()
-            .from("generation_config_reference")
-            .select("*")
-            .eq("generation_config_id", generation_config_id)
-            .order("position", { ascending: true });
-        if (error) throw error;
-        return data;
-    }
-
-    /**
-     * Fetches a config with its references in one call.
-     */
-    async findConfigWithRefs(id) {
-        const { data, error } = await this.client()
-            .from(this.tableName)
-            .select(`
-                *,
-                references:generation_config_reference (
-                    id, position, input_type, ref_media_id
-                )
-            `)
-            .eq("id", id)
             .single();
         if (error) throw error;
         return data;

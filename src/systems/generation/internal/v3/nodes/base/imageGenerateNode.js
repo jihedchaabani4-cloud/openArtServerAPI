@@ -6,38 +6,13 @@ import {
 } from "../../../errors.js";
 import {
   extractNodeCostAmount,
+  normalizeImages,
+  normalizeParameters,
   invokeModelGeneration,
   extractImageOutput,
 } from "./mediaNodeHelpers.js";
 
 const logger = createLogger("v3.image_generate");
-
-function normalizeImages(rawImages) {
-  if (typeof rawImages === "string") {
-    const trimmed = rawImages.trim();
-    return trimmed ? [trimmed] : [];
-  }
-  if (rawImages && typeof rawImages === "object" && !Array.isArray(rawImages)) {
-    const trimmed = typeof rawImages.url === "string" ? rawImages.url.trim() : "";
-    return trimmed ? [trimmed] : [];
-  }
-  if (!Array.isArray(rawImages)) {
-    return [];
-  }
-  const seen = new Set();
-  const urls = [];
-  for (const item of rawImages) {
-    const raw = typeof item === "string" ? item : item?.url;
-    if (typeof raw === "string") {
-      const trimmed = raw.trim();
-      if (trimmed && !seen.has(trimmed)) {
-        seen.add(trimmed);
-        urls.push(trimmed);
-      }
-    }
-  }
-  return urls;
-}
 
 function getModelMaxImages(model) {
   try {
@@ -61,12 +36,6 @@ function capImagesForModel(images, model) {
     return images.slice(0, maxImages);
   }
   return images;
-}
-
-function normalizeParameters(rawParameters) {
-  return rawParameters && typeof rawParameters === "object" && !Array.isArray(rawParameters)
-    ? rawParameters
-    : {};
 }
 
 function isValidImageUrl(url) {
@@ -120,12 +89,6 @@ export const ImageGenerateNode = {
     image_url: "IMAGE_URL",
     assets: "ARRAY",
     metadata: "JSON",
-  },
-
-  retryPolicy: {
-    maxAttempts: 1,
-    backoffMs: 0,
-    retryableCategories: [],
   },
 
   estimateCost(plannedInputs = {}) {

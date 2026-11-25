@@ -73,7 +73,6 @@ export class JobQueueService {
    * @param {string} params.userId
    * @param {string} [params.executionId]
    * @param {string} [params.workflowRunId]
-   * @param {string} [params.billingHoldId]
    * @param {string} [params.idempotencyKey]
    * @param {string} [params.traceId]
    * @param {Object|null} [params.serverContext]

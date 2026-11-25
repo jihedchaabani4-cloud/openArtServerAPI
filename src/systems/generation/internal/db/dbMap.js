@@ -19,7 +19,6 @@ const fallbackDb = {
     media: getMediaRepository(),
     workflowMedia: getWorkflowMediaRepository(),
     configs: generationConfigRepository,
-    generationConfigs: generationConfigRepository,
     characters: characterRepository,
     elements: elementRepository,
     folders: folderRepository,

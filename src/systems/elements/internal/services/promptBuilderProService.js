@@ -104,45 +104,6 @@ export class PromptBuilderProService {
             scenePrompt,
         };
     }
-
-    /**
-     * Synchronous version (no @token resolution) — preserved for backward compat.
-     * @deprecated Use buildMultiElementPayload (async) for new code.
-     */
-    buildMultiElementPayloadSync({ userPrompt, elements = [] }) {
-        if (!userPrompt || typeof userPrompt !== "string") {
-            throw new Error("ERR_INVALID_PARAMS: userPrompt is required");
-        }
-
-        const promptParts     = [];
-        const referenceSheets = [];
-
-        promptParts.push(`Main Scene: ${userPrompt}`);
-
-        elements.forEach((elem, index) => {
-            const subjectIndex = index + 1;
-            const elemName     = elem.name || `Element ${subjectIndex}`;
-            const identityText = elem.description || elem.master_identity || elemName;
-            const rulesArray   = elem.rules || elem.consistency_rules || [];
-            const rulesStr     = Array.isArray(rulesArray) ? rulesArray.join(", ") : "";
-
-            promptParts.push(
-                `[Subject ${subjectIndex} - ${elemName}]: ${identityText}` +
-                (rulesStr ? ` (Key Rules: ${rulesStr})` : "")
-            );
-
-            const sheetUrl = elem.sheet_image || elem.reference_sheet_url;
-            if (sheetUrl) referenceSheets.push(sheetUrl);
-        });
-
-        promptParts.push("Global Style: Cohesive scene lighting, natural shadows, high resolution photorealistic composition.");
-
-        return {
-            compiled_prompt:  promptParts.join(" | "),
-            reference_sheets: referenceSheets,
-            negative_prompt:  "multi-panel split, grid layout, split screen, collage, frames, borders, watermark",
-        };
-    }
 }
 
 export default new PromptBuilderProService();

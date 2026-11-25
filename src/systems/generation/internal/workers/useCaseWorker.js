@@ -50,23 +50,6 @@ export async function processUseCaseJob(job) {
   } = job?.data || {};
 
   const runId = workflowRunId || executionId || null;
-  const mergedInput =
-    serverContext && typeof serverContext === "object"
-      ? {
-          ...input,
-          ...(serverContext.workflowId && !input.serverWorkflowId
-            ? { serverWorkflowId: serverContext.workflowId }
-            : {}),
-          ...(Array.isArray(serverContext.mediaIds) &&
-          serverContext.mediaIds.length > 0 &&
-          !input.serverMediaIds
-            ? { serverMediaIds: serverContext.mediaIds }
-            : {}),
-          ...(serverContext.projectId && !input.serverProjectId
-            ? { serverProjectId: serverContext.projectId }
-            : {}),
-        }
-      : input;
 
   workerLogger.debug(
     { useCaseId, workflowId, userId, executionId, workflowRunId, jobId: job?.id },
@@ -77,11 +60,12 @@ export async function processUseCaseJob(job) {
     ...(workflow ? { workflow } : {}),
     useCaseId,
     workflowId,
-    input: mergedInput,
+    input,
     userId,
     executionId: executionId || runId,
     runId,
     jobId: job?.id ?? null,
+    serverContext,
   });
 }
 

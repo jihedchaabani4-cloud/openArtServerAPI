@@ -183,18 +183,16 @@ if (failedOpsService) {
 }
 
 // ─── DB (new 7-table schema) ─────────────────────────────────────────────────
-const configRepo = new GenerationConfigRepository();
 export const db = {
-    projects:          new ProjectRepository(),
-    workflows:         new WorkflowRepository(),
-    media:             new MediaRepository(),
-    workflowMedia:     new WorkflowMediaRepository(),
-    configs:           configRepo,
-    generationConfigs: configRepo,
-    characters:        new CharacterRepository(),
-    elements:          new ElementRepository(),
-    folders:           new FolderRepository(),
-    trash:             new TrashRepository(),
+    projects:      new ProjectRepository(),
+    workflows:     new WorkflowRepository(),
+    media:         new MediaRepository(),
+    workflowMedia: new WorkflowMediaRepository(),
+    configs:       new GenerationConfigRepository(),
+    characters:    new CharacterRepository(),
+    elements:      new ElementRepository(),
+    folders:       new FolderRepository(),
+    trash:         new TrashRepository(),
 };
 setIdentityDb(db);
 

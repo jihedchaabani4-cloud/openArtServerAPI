@@ -152,9 +152,11 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
     assert.equal(capturedExecuteArgs.executionId, "exec-m5-xyz", "executionId forwarded");
     assert.equal(capturedExecuteArgs.runId, "exec-m5-xyz", "executionId forwarded as runId when workflowRunId absent");
     assert.equal(capturedExecuteArgs.jobId, "usecase-exec-m5-xyz", "BullMQ job.id forwarded as jobId");
-    assert.equal(capturedExecuteArgs.input.serverWorkflowId, "wf-m5-200", "serverContext.workflowId merged into input.serverWorkflowId");
-    assert.deepEqual(capturedExecuteArgs.input.serverMediaIds, ["media-m5-200"], "serverContext.mediaIds merged into input.serverMediaIds");
-    assert.equal(capturedExecuteArgs.input.serverProjectId, "proj-m5-200", "serverContext.projectId merged into input.serverProjectId");
+    assert.deepEqual(
+      capturedExecuteArgs.serverContext,
+      fakeJob.data.serverContext,
+      "serverContext must be forwarded opaquely to executionEngine.execute"
+    );
   });
 
   it("TEST 4 (Bootstrap): standalone root worker.js wires ExecutionEngine, Billing, Media, and Identity without index.js", () => {
@@ -365,10 +367,6 @@ describe("Queue and Worker Error Event Handlers", () => {
     });
 
     it("V3 AI generation nodes enforce single-attempt fail-fast execution (zero automatic retries)", async () => {
-        assert.equal(ImageGenerateNode.retryPolicy.maxAttempts, 1);
-        assert.equal(VideoGenerateNode.retryPolicy.maxAttempts, 1);
-        assert.equal(LlmNode.retryPolicy.maxAttempts, 1);
-
         const registry = new NodeRegistry();
         registry.register(ImageGenerateNode);
         registry.register(VideoGenerateNode);

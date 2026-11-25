@@ -13,18 +13,7 @@ export const characterSheetV3 = Object.freeze({
   name: "Character Turnaround Sheet V3",
   version: "3.0.0",
   category: "character",
-  mediaType: "image",
-  mediaRole: "sheet",
-  saveType: "character_sheet",
   requiredInputs: Object.freeze(["prompt"]),
-  contract: Object.freeze({
-    id: "character-sheet-v3",
-    aliases: Object.freeze(["character-sheet-v1", "characterSheet"]),
-    mediaType: "image",
-    mediaRole: "sheet",
-    saveType: "character_sheet",
-    requiredInputs: Object.freeze(["prompt"]),
-  }),
   description:
     "Declarative 5-node V3 character turnaround sheet pipeline: reference resolution, single-call LLM safety check + translation + 3-view character sheet skill, parallel character description extraction and sheet generation, and explicit media persistence.",
 

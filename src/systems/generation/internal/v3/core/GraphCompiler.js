@@ -224,38 +224,6 @@ export class GraphCompiler {
 
     return waves;
   }
-
-  /**
-   * Resolves static literals, default values, and `{ fromInput }` bindings for upfront cost preview.
-   * Supports nested dot-path lookups (e.g. "parameters.duration") via `getValueByPath`.
-   *
-   * @param {Object} rawInputs
-   * @param {Object} initialInput
-   * @param {Object} def
-   * @returns {Object}
-   */
-  resolveStaticAndInitialInputs(rawInputs, initialInput, def) {
-    const out = {};
-    for (const [k, spec] of Object.entries(def.INPUT_TYPES?.required || {})) {
-      if (spec.default !== undefined) out[k] = spec.default;
-    }
-    for (const [k, spec] of Object.entries(def.INPUT_TYPES?.optional || {})) {
-      if (spec.default !== undefined) out[k] = spec.default;
-    }
-    for (const [k, val] of Object.entries(rawInputs || {})) {
-      if (val && typeof val === "object" && val.fromInput) {
-        const resolved = getValueByPath(initialInput, val.fromInput);
-        if (resolved !== undefined) {
-          out[k] = resolved;
-        } else if (val.default !== undefined) {
-          out[k] = val.default;
-        }
-      } else if (!val || typeof val !== "object" || !val.fromNode) {
-        out[k] = val;
-      }
-    }
-    return out;
-  }
 }
 
 const FORBIDDEN_PATH_KEYS = new Set(["__proto__", "prototype", "constructor"]);

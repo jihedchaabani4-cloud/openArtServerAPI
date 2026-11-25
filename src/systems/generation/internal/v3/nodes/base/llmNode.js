@@ -1,11 +1,14 @@
 import { executeLLM, calculateCost } from "#models/tools";
 import {
-  GenerationError,
   GenerationValidationError,
   GenerationUpstreamError,
   GenerationSafetyError,
 } from "../../../errors.js";
-import { extractNodeCostAmount } from "./mediaNodeHelpers.js";
+import {
+  extractNodeCostAmount,
+  normalizeImages,
+  normalizeModelInvocationError,
+} from "./mediaNodeHelpers.js";
 import {
   LLM_SKILLS_REGISTRY,
   buildUnifiedLlmInstruction,
@@ -13,27 +16,6 @@ import {
 
 const DEFAULT_LLM_MODEL = "gemini-3.1-flash-lite";
 const DEFAULT_EMPTY_PROMPT_FALLBACK = "Process the attached images using the active skills.";
-
-function normalizeImages(rawImages) {
-  const items = Array.isArray(rawImages)
-    ? rawImages
-    : rawImages !== undefined && rawImages !== null
-      ? [rawImages]
-      : [];
-  const urls = [];
-  const seen = new Set();
-  for (const item of items) {
-    const raw = typeof item === "string" ? item : item?.url;
-    if (typeof raw === "string") {
-      const trimmed = raw.trim();
-      if (trimmed && !seen.has(trimmed)) {
-        seen.add(trimmed);
-        urls.push(trimmed);
-      }
-    }
-  }
-  return urls;
-}
 
 /**
  * LlmNode (`base.llm`)
@@ -62,12 +44,6 @@ export const LlmNode = {
     text: "STRING",
     json: "JSON",
     metadata: "JSON",
-  },
-
-  retryPolicy: {
-    maxAttempts: 1,
-    backoffMs: 0,
-    retryableCategories: [],
   },
 
   estimateCost(plannedInputs = {}) {
@@ -117,116 +93,10 @@ export const LlmNode = {
         ...(ctx.executeLLM ? {} : { maxRetries: 0 }),
       });
     } catch (err) {
-      if (err?.code === "BILLING_CONTEXT_MISSING") {
-        throw err;
-      }
-      if (
-        err?.code === "CONTENT_SAFETY_VIOLATION" ||
-        err?.code === "PROVIDER_CONTENT_POLICY_ERROR" ||
-        err?.is_safe === false ||
-        /safety violation|content policy|nsfw/i.test(err?.message || "")
-      ) {
-        if (err instanceof GenerationError && err.code === "CONTENT_SAFETY_VIOLATION") {
-          err.retryable = false;
-          err.statusCode = 422;
-          throw err;
-        }
-        throw new GenerationSafetyError(
-          err?.message || "Prompt violates content safety policy",
-          { field: "prompt" }
-        );
-      }
-
-      const rawCode = String(err?.code || err?.errorCode || "").toUpperCase();
-      const status = Number(err?.statusCode || err?.status || 0);
-      const msg = err?.message || "";
-      const isCircuitBreakerOpen = rawCode === "CIRCUIT_BREAKER_OPEN";
-      const isProviderQuota = rawCode === "PROVIDER_QUOTA_EXCEEDED";
-      const isRateLimit =
-        !isProviderQuota &&
-        (status === 429 ||
-          err?.category === "RATE_LIMIT" ||
-          rawCode === "RATE_LIMITED" ||
-          rawCode === "RATE_LIMIT_EXCEEDED" ||
-          rawCode === "PROVIDER_RATE_LIMITED" ||
-          /rate limit|429/i.test(msg));
-      const isTimeout =
-        status === 504 ||
-        status === 408 ||
-        /TIMEOUT/i.test(rawCode) ||
-        /timed out|timeout/i.test(msg);
-
-      if (requiresSafety) {
-        const isTransient =
-          isCircuitBreakerOpen ||
-          isRateLimit ||
-          isTimeout ||
-          isProviderQuota ||
-          err?.retryable === true ||
-          err?.category === "UPSTREAM_FAULT" ||
-          rawCode === "PROVIDER_TRANSIENT_ERROR" ||
-          rawCode === "PROVIDER_UNAVAILABLE" ||
-          status === 502 ||
-          status === 503;
-
-        if (isTransient) {
-          const category = isRateLimit ? "RATE_LIMIT" : "UPSTREAM_FAULT";
-          const statusCode = isRateLimit
-            ? 429
-            : status === 503 || isCircuitBreakerOpen || isProviderQuota
-              ? 503
-              : 502;
-          const unavailableErr = new GenerationUpstreamError(
-            `Safety verification temporarily unavailable (fail-closed): ${msg}`,
-            {
-              code: "SAFETY_CHECK_UNAVAILABLE",
-              category,
-              statusCode,
-              retryable: !isCircuitBreakerOpen && !isProviderQuota,
-              context: {
-                cause: msg,
-                ...(rawCode ? { upstreamCode: rawCode } : {}),
-              },
-            }
-          );
-          unavailableErr.code = "SAFETY_CHECK_UNAVAILABLE";
-          throw unavailableErr;
-        }
-
-        const failErr = new GenerationUpstreamError(
-          `Safety verification failed (fail-closed): ${msg}`,
-          {
-            code: "SAFETY_CHECK_FAILED",
-            category: "UPSTREAM_FAULT",
-            statusCode: 502,
-            retryable: false,
-            context: { cause: msg },
-          }
-        );
-        failErr.code = "SAFETY_CHECK_FAILED";
-        failErr.is_safe = false;
-        throw failErr;
-      }
-
-      const category =
-        !isProviderQuota &&
-        (isRateLimit || /quota/i.test(msg))
-          ? "RATE_LIMIT"
-          : "UPSTREAM_FAULT";
-      throw new GenerationUpstreamError(`LLM execution failed: ${msg}`, {
-        code:
-          category === "RATE_LIMIT"
-            ? "RATE_LIMIT_EXCEEDED"
-            : err?.code || "GENERATION_UPSTREAM_ERROR",
-        category,
-        statusCode:
-          category === "RATE_LIMIT"
-            ? 429
-            : status === 503 || isCircuitBreakerOpen || isProviderQuota
-              ? 503
-              : 502,
-        retryable: !isCircuitBreakerOpen && !isProviderQuota,
-        context: { model, cause: msg },
+      throw normalizeModelInvocationError(err, model, {
+        requiresSafety,
+        allowUserFault: false,
+        messagePrefix: requiresSafety ? "" : "LLM execution failed: ",
       });
     }
 

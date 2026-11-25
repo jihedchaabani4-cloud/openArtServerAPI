@@ -83,7 +83,7 @@ export class WorkflowExecutor {
             jobId: context?.jobId || null,
             userId: context?.userId || null,
             blueprintId: workflow?.id || null,
-            workflowId: input.workflow_id || input.serverWorkflowId || context?.workflowId || null,
+            workflowId: context?.workflowId ?? null,
           });
 
     const ownsCache = !(signatureCache instanceof Map);

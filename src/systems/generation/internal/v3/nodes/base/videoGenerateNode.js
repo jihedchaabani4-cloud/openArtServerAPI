@@ -5,15 +5,10 @@ import {
 } from "../../../errors.js";
 import {
   extractNodeCostAmount,
+  normalizeParameters,
   invokeModelGeneration,
   extractVideoOutput,
 } from "./mediaNodeHelpers.js";
-
-function normalizeParameters(rawParameters) {
-  return rawParameters && typeof rawParameters === "object" && !Array.isArray(rawParameters)
-    ? rawParameters
-    : {};
-}
 
 function normalizeOptionalUrl(rawUrl) {
   if (typeof rawUrl !== "string") {
@@ -79,12 +74,6 @@ export const VideoGenerateNode = {
     video_url: "VIDEO_URL",
     assets: "ARRAY",
     metadata: "JSON",
-  },
-
-  retryPolicy: {
-    maxAttempts: 1,
-    backoffMs: 0,
-    retryableCategories: [],
   },
 
   estimateCost(plannedInputs = {}) {

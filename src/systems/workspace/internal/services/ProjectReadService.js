@@ -272,18 +272,11 @@ export class ProjectReadService {
             }
         }
 
-        // Backward compatibility fallback for legacy wf.primary_media_id pins
-        for (const wf of [...(workflows || []), ...(rawTrashedWorkflows || [])]) {
-            if (wf?.primary_media_id && !primaryMediaByWorkflowId.has(wf.id)) {
-                primaryMediaByWorkflowId.set(wf.id, wf.primary_media_id);
-            }
-        }
-
         const formattedWorkflows = (workflows || []).map((wf) => {
             const elem = elementMap[wf.id] || {};
             const char = characterMap[wf.id] || {};
             const displayName = char.name || char.title || elem.name || wf.display_name || "Untitled Workflow";
-            const primaryMediaId = primaryMediaByWorkflowId.get(wf.id) || wf.primary_media_id || "";
+            const primaryMediaId = primaryMediaByWorkflowId.get(wf.id) || "";
 
             return {
                 id: wf.id,
@@ -308,16 +301,6 @@ export class ProjectReadService {
 
         const workflowMap = new Map((workflows || []).map((w) => [w.id, w]));
         const trashedWorkflowMap = new Map((rawTrashedWorkflows || []).map((w) => [w.id, w]));
-        const workflowsByPrimaryMediaId = new Map(
-            (workflows || [])
-                .filter((w) => primaryMediaByWorkflowId.has(w.id) || w?.primary_media_id)
-                .map((w) => [primaryMediaByWorkflowId.get(w.id) || w.primary_media_id, w])
-        );
-        const trashedByPrimaryMediaId = new Map(
-            (rawTrashedWorkflows || [])
-                .filter((w) => primaryMediaByWorkflowId.has(w.id) || w?.primary_media_id)
-                .map((w) => [primaryMediaByWorkflowId.get(w.id) || w.primary_media_id, w])
-        );
         const trashedMediaByWorkflowId = new Map();
 
         const formattedMedia = [];
@@ -327,22 +310,8 @@ export class ProjectReadService {
             const isVideo = m.url && /\.(mp4|webm|mov)$/i.test(m.url);
             const mRelations = relationsByMediaId.get(m.id) || [];
             const primaryRelation = mRelations[0] || null;
-            let mediaWorkflowId = primaryRelation?.workflow_id || null;
-            let mediaRole = primaryRelation?.role || null;
-
-            if (!mediaWorkflowId) {
-                const owningWf = workflowsByPrimaryMediaId.get(m.id) || trashedByPrimaryMediaId.get(m.id);
-                if (owningWf) {
-                    mediaWorkflowId = owningWf.id;
-                    const looksEdited = Boolean(
-                        config &&
-                        config.generation_type !== "UPLOAD" &&
-                        m.step_id !== "upload" &&
-                        m.step_id !== "CAE"
-                    );
-                    mediaRole = owningWf.workflow_type === "UPLOAD" && !looksEdited ? "original" : "output";
-                }
-            }
+            const mediaWorkflowId = primaryRelation?.workflow_id || null;
+            const mediaRole = primaryRelation?.role || null;
 
             const isTrashedMedia = trashedWorkflowIdSet.has(mediaWorkflowId);
             const wf = isTrashedMedia ? trashedWorkflowMap.get(mediaWorkflowId) : workflowMap.get(mediaWorkflowId);
@@ -542,7 +511,7 @@ export class ProjectReadService {
 
         const formattedTrashedWorkflows = (rawTrashedWorkflows || []).map((wf) => {
             const displayName = wf.display_name || "Untitled Workflow";
-            const primaryMediaId = primaryMediaByWorkflowId.get(wf.id) || wf.primary_media_id || "";
+            const primaryMediaId = primaryMediaByWorkflowId.get(wf.id) || "";
             const items = trashedMediaByWorkflowId.get(wf.id) || [];
 
             return {

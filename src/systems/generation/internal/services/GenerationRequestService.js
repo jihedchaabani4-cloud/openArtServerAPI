@@ -17,11 +17,13 @@ import {
 } from "#media/tools";
 import { toMediaIdList } from "#identity/tools";
 import { validateModelInputs, getModelSchema } from "#models/tools";
-import { assertEditReferenceCap } from "./imageEditContract.js";
 import { assertAllowedMediaType } from "../v3/nodes/base/resolveRefsNode.js";
 
 const logger = createLogger("generation_request_service");
 const ARRAY_MEDIA_PARAM_KEYS = ["images", "reference_images", "reference_videos"];
+const SECRET_PARAM_PATTERN = /secret|token|password|auth|bearer|api[_-]?key/i;
+const CLIENT_BATCH_KEYS = new Set(["count", "outputCount", "output_count"]);
+const BILLING_ERROR_CODES = new Set(["INSUFFICIENT_FUNDS", "INSUFFICIENT_CREDITS", "BILLING_HOLD_REQUIRED"]);
 const EDIT_LOCK_TTL_MS = 15_000;
 const RELEASE_LOCK_LUA = `
   if redis.call("get", KEYS[1]) == ARGV[1] then
@@ -117,6 +119,138 @@ export class GenerationRequestService {
     }
 
     /**
+     * Safely resolves a model schema if known (unknown models are reported by `this.modelValidator`).
+     */
+    _getOptionalModelSchema(model) {
+        try {
+            return getModelSchema(model);
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * Strips secret keys and client batch/override keys before schema validation.
+     */
+    _filterClientParams(rawParams, extraStripKeys = []) {
+        const blockedKeys = extraStripKeys.length > 0
+            ? new Set([...CLIENT_BATCH_KEYS, ...extraStripKeys])
+            : CLIENT_BATCH_KEYS;
+        const filtered = {};
+        for (const [k, v] of Object.entries(rawParams || {})) {
+            if (!SECRET_PARAM_PATTERN.test(k) && !blockedKeys.has(k)) {
+                filtered[k] = v;
+            }
+        }
+        return filtered;
+    }
+
+    /**
+     * Runs canonical model validation and builds normalized non-prompt parameters.
+     */
+    _validateAndSanitizeParams({ model, validationInput, omitFromSanitized = [] }) {
+        let cleanInput;
+        try {
+            cleanInput = this.modelValidator(model, validationInput);
+        } catch (valErr) {
+            const statusCode = valErr.statusCode || 400;
+            const appErr = new AppError(valErr.message, statusCode);
+            appErr.code = valErr.code || "VALIDATION_ERROR";
+            appErr.field = valErr.field;
+            throw appErr;
+        }
+
+        const omitted = new Set(["prompt", ...omitFromSanitized]);
+        const sanitizedParams = {};
+        for (const [k, v] of Object.entries(cleanInput)) {
+            if (!omitted.has(k)) {
+                sanitizedParams[k] = v;
+            }
+        }
+        return { cleanInput, sanitizedParams };
+    }
+
+    /**
+     * Best-effort placeholder status update during error/billing compensation.
+     */
+    async _updatePlaceholderStatusSafe(mediaId, status, errorMessage) {
+        if (mediaId && this.db?.media?.updateMedia) {
+            await this.db.media.updateMedia(mediaId, {
+                status,
+                error_message: errorMessage,
+            }).catch(() => {});
+        }
+    }
+
+    /**
+     * Launches a V3 workflow via ExecutionEngine and applies consistent billing ("saved")
+     * and queue dispatch failure (503 + "failed" placeholder) compensation.
+     */
+    async _launchWithBillingCompensation({
+        useCaseId,
+        runtimeInput,
+        userId,
+        workflowId,
+        mediaId,
+        serverMediaIds,
+        projectId,
+        label = "workflow",
+        logMeta = {},
+    }) {
+        let taskId = null;
+        let hasSufficientCredits = true;
+        let creditErrorMsg = null;
+        let calculatedCost = null;
+
+        try {
+            logger.debug({ workflowId, mediaId, useCase: useCaseId }, `Launching ${label} via ExecutionEngine`);
+            const prepared = await this.executionEngine.launch({
+                useCaseId,
+                input: runtimeInput,
+                userId,
+                executionId: randomUUID(),
+                traceId: workflowId,
+                projectId,
+                serverContext: {
+                    workflowId,
+                    mediaIds: serverMediaIds,
+                    projectId,
+                },
+            });
+
+            taskId = prepared.jobId || prepared.executionId || workflowId;
+            calculatedCost = prepared.cost?.totalCredits ?? null;
+            logger.info(
+                { calculatedCost, taskId, workflowId, mediaId, ...logMeta },
+                `Reserved ${calculatedCost} credits & enqueued ${label} job "${taskId}"`
+            );
+        } catch (serviceErr) {
+            if (BILLING_ERROR_CODES.has(serviceErr.code)) {
+                hasSufficientCredits = false;
+                creditErrorMsg = serviceErr.message;
+                logger.warn({ workflowId, mediaId, code: serviceErr.code }, `Billing error: ${serviceErr.message}`);
+            } else if (serviceErr.code === "QUEUE_DISPATCH_FAILED") {
+                logger.error({ workflowId, mediaId, code: serviceErr.code }, `Queue dispatch failed: ${serviceErr.message}`);
+                await this._updatePlaceholderStatusSafe(mediaId, "failed", serviceErr.message);
+                const dispatchError = new AppError(serviceErr.message, 503);
+                dispatchError.code = "QUEUE_DISPATCH_FAILED";
+                dispatchError.workflowId = workflowId;
+                dispatchError.mediaId = mediaId;
+                dispatchError.mediaIds = serverMediaIds;
+                throw dispatchError;
+            } else {
+                throw serviceErr;
+            }
+        }
+
+        if (!hasSufficientCredits) {
+            await this._updatePlaceholderStatusSafe(mediaId, "saved", creditErrorMsg || "Insufficient credits");
+        }
+
+        return { taskId, hasSufficientCredits, creditErrorMsg, calculatedCost };
+    }
+
+    /**
      * Executes the shared generation request lifecycle for single-output image and video workflows.
      */
     async requestGeneration({
@@ -150,51 +284,22 @@ export class GenerationRequestService {
             }
         }
         if (mediaMeta?.aspect_ratio && !resolvedParams.aspect_ratio) {
-            try {
-                const schema = getModelSchema(model);
-                if (schema?.parameters?.aspect_ratio) {
-                    resolvedParams.aspect_ratio = mediaMeta.aspect_ratio;
-                }
-            } catch {
-                // Unknown model will be handled by this.modelValidator below
+            const schema = this._getOptionalModelSchema(model);
+            if (schema?.parameters?.aspect_ratio) {
+                resolvedParams.aspect_ratio = mediaMeta.aspect_ratio;
             }
         }
 
-        // 2b. Strip secrets & client batch params BEFORE model validation
-        const SECRET_PATTERN = /secret|token|password|auth|bearer|api[_-]?key/i;
-        const CLIENT_BATCH_KEYS = new Set(["count", "outputCount", "output_count"]);
-        const preValidationParams = {};
-        for (const [k, v] of Object.entries(resolvedParams)) {
-            if (!SECRET_PATTERN.test(k) && !CLIENT_BATCH_KEYS.has(k)) {
-                preValidationParams[k] = v;
-            }
-        }
-
-        // 3. Validate and normalize input against the selected model's actual canonical schema BEFORE execution or DB mutations
-        let cleanInput;
-        try {
-            cleanInput = this.modelValidator(model, {
-                prompt: (prompt || "").trim(),
-                ...preValidationParams,
-            });
-        } catch (valErr) {
-            const statusCode = valErr.statusCode || 400;
-            const appErr = new AppError(valErr.message, statusCode);
-            appErr.code = valErr.code || "VALIDATION_ERROR";
-            appErr.field = valErr.field;
-            throw appErr;
-        }
-
-        // 4. Build sanitized initial generation configuration — cleanInput already excludes secrets & client batch keys
-        const sanitizedParams = {};
-        for (const [k, v] of Object.entries(cleanInput)) {
-            if (k !== "prompt") {
-                sanitizedParams[k] = v;
-            }
-        }
+        // 2b-4. Strip secrets & client batch params, validate against schema, and build config
+        const trimmedPrompt = (prompt || "").trim();
+        const preValidationParams = this._filterClientParams(resolvedParams);
+        const { cleanInput, sanitizedParams } = this._validateAndSanitizeParams({
+            model,
+            validationInput: { prompt: trimmedPrompt, ...preValidationParams },
+        });
 
         const initialGenerationConfig = {
-            prompt: cleanInput.prompt || (prompt || "").trim(),
+            prompt: cleanInput.prompt || trimmedPrompt,
             model,
             aspect_ratio: cleanInput.aspect_ratio || mediaMeta?.aspect_ratio || "1:1",
             parameters: sanitizedParams,
@@ -230,7 +335,7 @@ export class GenerationRequestService {
 
             // 7. Prepare ExecutionEngine runtime input
             const runtimeInput = {
-                prompt: cleanInput.prompt || (prompt || "").trim(),
+                prompt: cleanInput.prompt || trimmedPrompt,
                 model,
                 aspect_ratio: cleanInput.aspect_ratio || mediaMeta.aspect_ratio,
                 width: mediaMeta.width,
@@ -246,64 +351,17 @@ export class GenerationRequestService {
             };
 
             // 8. Credit reservation & Redis job dispatch via ExecutionEngine
-            let taskId = null;
-            let hasSufficientCredits = true;
-            let creditErrorMsg = null;
-            let calculatedCost = null;
-
-            try {
-                logger.debug({ workflowId, useCase: useCaseId }, "Launching workflow via ExecutionEngine");
-                const prepared = await this.executionEngine.launch({
+            const { taskId, hasSufficientCredits, creditErrorMsg, calculatedCost } =
+                await this._launchWithBillingCompensation({
                     useCaseId,
-                    input: runtimeInput,
+                    runtimeInput,
                     userId,
-                    executionId: randomUUID(),
-                    traceId: workflowId,
+                    workflowId,
+                    mediaId,
+                    serverMediaIds,
                     projectId,
-                    serverContext: {
-                        workflowId,
-                        mediaIds: serverMediaIds,
-                        projectId,
-                    },
+                    label: "workflow",
                 });
-
-                taskId = prepared.jobId || prepared.executionId || workflowId;
-                calculatedCost = prepared.cost?.totalCredits ?? null;
-                logger.info({ calculatedCost, taskId }, `Reserved ${calculatedCost} credits & enqueued job "${taskId}"`);
-            } catch (serviceErr) {
-                if (
-                    serviceErr.code === "INSUFFICIENT_FUNDS" ||
-                    serviceErr.code === "INSUFFICIENT_CREDITS" ||
-                    serviceErr.code === "BILLING_HOLD_REQUIRED"
-                ) {
-                    hasSufficientCredits = false;
-                    creditErrorMsg = serviceErr.message;
-                    logger.warn({ workflowId, code: serviceErr.code }, `Billing error: ${serviceErr.message}`);
-                } else if (serviceErr.code === "QUEUE_DISPATCH_FAILED") {
-                    logger.error({ workflowId, code: serviceErr.code }, `Queue dispatch failed: ${serviceErr.message}`);
-                    if (mediaId && this.db?.media?.updateMedia) {
-                        await this.db.media.updateMedia(mediaId, {
-                            status: "failed",
-                            error_message: serviceErr.message,
-                        }).catch(() => {});
-                    }
-                    const dispatchError = new AppError(serviceErr.message, 503);
-                    dispatchError.code = "QUEUE_DISPATCH_FAILED";
-                    dispatchError.workflowId = workflowId;
-                    dispatchError.mediaId = mediaId;
-                    dispatchError.mediaIds = serverMediaIds;
-                    throw dispatchError;
-                } else {
-                    throw serviceErr;
-                }
-            }
-
-            if (!hasSufficientCredits && mediaId && this.db?.media?.updateMedia) {
-                await this.db.media.updateMedia(mediaId, {
-                    status: "saved",
-                    error_message: creditErrorMsg || "Insufficient credits",
-                }).catch(() => {});
-            }
 
             return {
                 ok: true,
@@ -327,11 +385,12 @@ export class GenerationRequestService {
                 },
             };
         } catch (err) {
-            if (err.code !== "QUEUE_DISPATCH_FAILED" && mediaId && this.db?.media?.updateMedia) {
-                await this.db.media.updateMedia(mediaId, {
-                    status: "failed",
-                    error_message: err.message || `Failed to prepare ${mediaType} generation request`,
-                }).catch(() => {});
+            if (err.code !== "QUEUE_DISPATCH_FAILED") {
+                await this._updatePlaceholderStatusSafe(
+                    mediaId,
+                    "failed",
+                    err.message || `Failed to prepare ${mediaType} generation request`
+                );
             }
             throw err;
         }
@@ -571,28 +630,11 @@ export class GenerationRequestService {
             const resolvedParams = parameters && typeof parameters === "object" ? { ...parameters } : {};
             let inheritedAspectRatio = rawDerivedAspectRatio;
 
-            let modelSchema = null;
-            try {
-                modelSchema = getModelSchema(model);
-            } catch {
-                // Unknown model will be handled by this.modelValidator below
-            }
+            const modelSchema = this._getOptionalModelSchema(model);
 
             const normalizedReferences = Array.isArray(references) ? references : [];
             const normalizedCharacters = Array.isArray(characters) ? characters : [];
             const normalizedElements = Array.isArray(elements) ? elements : [];
-
-            if (modelSchema && editType !== "remove_background") {
-                assertEditReferenceCap({
-                    model,
-                    schema: modelSchema,
-                    workflowId,
-                    references: normalizedReferences,
-                    characters: normalizedCharacters,
-                    elements: normalizedElements,
-                    prompt,
-                });
-            }
 
             if (!resolvedParams.aspect_ratio) {
                 const arDef = modelSchema?.parameters?.aspect_ratio;
@@ -611,44 +653,24 @@ export class GenerationRequestService {
                 inheritedAspectRatio = resolvedParams.aspect_ratio;
             }
 
-            const SECRET_PATTERN = /secret|token|password|auth|bearer|api[_-]?key/i;
-            const STRIPPED_EDIT_KEYS = new Set(["count", "outputCount", "output_count", "images", "input_image", "prompt"]);
-            const preValidationParams = {};
-            for (const [k, v] of Object.entries(resolvedParams)) {
-                if (!SECRET_PATTERN.test(k) && !STRIPPED_EDIT_KEYS.has(k)) {
-                    preValidationParams[k] = v;
-                }
-            }
-
-            let cleanInput;
+            const preValidationParams = this._filterClientParams(resolvedParams, ["images", "input_image", "prompt"]);
             const trimmedEditPrompt = (prompt || "").trim();
             const isRemoveBackground = editType === "remove_background";
-            try {
-                const validationPayload = isRemoveBackground
-                    ? {
-                        ...preValidationParams,
-                        input_image: primaryMedia.url,
-                        ...(trimmedEditPrompt ? { prompt: trimmedEditPrompt } : {}),
-                    }
-                    : {
-                        ...preValidationParams,
-                        prompt: trimmedEditPrompt,
-                    };
-                cleanInput = this.modelValidator(model, validationPayload);
-            } catch (valErr) {
-                const statusCode = valErr.statusCode || 400;
-                const appErr = new AppError(valErr.message, statusCode);
-                appErr.code = valErr.code || "VALIDATION_ERROR";
-                appErr.field = valErr.field;
-                throw appErr;
-            }
-
-            const sanitizedParams = {};
-            for (const [k, v] of Object.entries(cleanInput)) {
-                if (k !== "prompt" && (!isRemoveBackground || k !== "input_image")) {
-                    sanitizedParams[k] = v;
+            const validationPayload = isRemoveBackground
+                ? {
+                    ...preValidationParams,
+                    input_image: primaryMedia.url,
+                    ...(trimmedEditPrompt ? { prompt: trimmedEditPrompt } : {}),
                 }
-            }
+                : {
+                    ...preValidationParams,
+                    prompt: trimmedEditPrompt,
+                };
+            const { cleanInput, sanitizedParams } = this._validateAndSanitizeParams({
+                model,
+                validationInput: validationPayload,
+                omitFromSanitized: isRemoveBackground ? ["input_image"] : [],
+            });
 
             const finalPrompt = cleanInput.prompt || trimmedEditPrompt;
             const trimmedUserPrompt = typeof userPrompt === "string" ? userPrompt.trim() : "";
@@ -691,7 +713,7 @@ export class GenerationRequestService {
                 "In-place image edit placeholder appended and promoted to primary"
             );
 
-            // 5. Launch V3 Workflow via ExecutionEngine
+            // 5. Launch V3 Workflow via ExecutionEngine & Apply Billing/Dispatch Compensation
             const runtimeInput = {
                 prompt: finalPrompt,
                 model,
@@ -719,69 +741,20 @@ export class GenerationRequestService {
                 serverProjectId: workflow.project_id,
             };
 
-            let taskId = null;
-            let hasSufficientCredits = true;
-            let creditErrorMsg = null;
-            let calculatedCost = null;
-
-            try {
-                logger.debug({ workflowId, mediaId: newMediaId, useCase: useCaseId }, "Launching image edit workflow via ExecutionEngine");
-                const prepared = await this.executionEngine.launch({
+            const { taskId, hasSufficientCredits, creditErrorMsg, calculatedCost } =
+                await this._launchWithBillingCompensation({
                     useCaseId,
-                    input: runtimeInput,
+                    runtimeInput,
                     userId,
-                    executionId: randomUUID(),
-                    traceId: workflowId,
+                    workflowId,
+                    mediaId: newMediaId,
+                    serverMediaIds,
                     projectId: workflow.project_id,
-                    serverContext: {
-                        workflowId,
-                        mediaIds: serverMediaIds,
-                        projectId: workflow.project_id,
-                    },
+                    label: "image edit workflow",
+                    logMeta: { editType },
                 });
 
-                taskId = prepared.jobId || prepared.executionId || workflowId;
-                calculatedCost = prepared.cost?.totalCredits ?? null;
-                logger.info(
-                    { calculatedCost, taskId, workflowId, mediaId: newMediaId, editType },
-                    `Reserved ${calculatedCost} credits & enqueued image edit job "${taskId}"`
-                );
-            } catch (serviceErr) {
-                if (
-                    serviceErr.code === "INSUFFICIENT_FUNDS" ||
-                    serviceErr.code === "INSUFFICIENT_CREDITS" ||
-                    serviceErr.code === "BILLING_HOLD_REQUIRED"
-                ) {
-                    hasSufficientCredits = false;
-                    creditErrorMsg = serviceErr.message;
-                    logger.warn({ workflowId, mediaId: newMediaId, code: serviceErr.code }, `Billing error: ${serviceErr.message}`);
-                } else if (serviceErr.code === "QUEUE_DISPATCH_FAILED") {
-                    logger.error({ workflowId, mediaId: newMediaId, code: serviceErr.code }, `Queue dispatch failed: ${serviceErr.message}`);
-                    if (newMediaId && this.db?.media?.updateMedia) {
-                        await this.db.media.updateMedia(newMediaId, {
-                            status: "failed",
-                            error_message: serviceErr.message,
-                        }).catch(() => {});
-                    }
-                    const dispatchError = new AppError(serviceErr.message, 503);
-                    dispatchError.code = "QUEUE_DISPATCH_FAILED";
-                    dispatchError.workflowId = workflowId;
-                    dispatchError.mediaId = newMediaId;
-                    dispatchError.mediaIds = serverMediaIds;
-                    throw dispatchError;
-                } else {
-                    throw serviceErr;
-                }
-            }
-
-            // 6. Compensation & Return DTO
-            if (!hasSufficientCredits && newMediaId && this.db?.media?.updateMedia) {
-                await this.db.media.updateMedia(newMediaId, {
-                    status: "saved",
-                    error_message: creditErrorMsg || "Insufficient credits",
-                }).catch(() => {});
-            }
-
+            // 6. Return DTO
             return {
                 ok: true,
                 status: hasSufficientCredits ? "processing" : "saved",
@@ -805,11 +778,12 @@ export class GenerationRequestService {
                 },
             };
         } catch (err) {
-            if (err.code !== "QUEUE_DISPATCH_FAILED" && newMediaId && this.db?.media?.updateMedia) {
-                await this.db.media.updateMedia(newMediaId, {
-                    status: "failed",
-                    error_message: err.message || `Failed to prepare image ${editType} request`,
-                }).catch(() => {});
+            if (err.code !== "QUEUE_DISPATCH_FAILED") {
+                await this._updatePlaceholderStatusSafe(
+                    newMediaId,
+                    "failed",
+                    err.message || `Failed to prepare image ${editType} request`
+                );
             }
             throw err;
         } finally {

@@ -13,18 +13,7 @@ export const videoGenerationV3 = Object.freeze({
   name: "Video Generation V3",
   version: "3.0.0",
   category: "video",
-  mediaType: "video",
-  mediaRole: "output",
-  saveType: "video_output",
   requiredInputs: Object.freeze(["prompt"]),
-  contract: Object.freeze({
-    id: "video-generation-v3",
-    aliases: Object.freeze(["video-generation-v1", "videoGeneration"]),
-    mediaType: "video",
-    mediaRole: "output",
-    saveType: "video_output",
-    requiredInputs: Object.freeze(["prompt"]),
-  }),
   description:
     "Declarative 4-node V3 video generation pipeline: reference & tag resolution, single-call LLM safety check + translation + video prompt preparation, video generation, and explicit media persistence.",
 

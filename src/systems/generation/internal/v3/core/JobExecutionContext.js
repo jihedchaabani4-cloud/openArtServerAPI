@@ -1,13 +1,12 @@
 import { randomUUID } from "node:crypto";
 
 /**
- * JobExecutionContext (V3 Execution Core)
+ * JobExecutionContext (Universal V3 Execution Core)
  *
- * Crisp, isolated per-job runtime context owning:
+ * Crisp, isolated per-run runtime context owning:
  * - Frozen `identity` (`executionId`, `runId`, `jobId`, `userId`, `blueprintId`, `workflowId`)
  * - Mutable lifecycle `state` (`created` -> `running` -> `completed` | `failed`)
- * - Per-job `cache` (`Map`) owned exclusively by this execution and cleared on `dispose()`
- * - Frozen `resources` (`billingHoldId`, `mediaId`, `mediaRole`, `saveType`)
+ * - Per-run `cache` (`Map`) owned exclusively by this execution and cleared on `dispose()`
  */
 export class JobExecutionContext {
   constructor({
@@ -17,10 +16,6 @@ export class JobExecutionContext {
     userId = null,
     blueprintId = null,
     workflowId = null,
-    billingHoldId = null,
-    mediaId = null,
-    mediaRole = "output",
-    saveType = "default",
   } = {}) {
     const resolvedExecutionId = executionId || runId || randomUUID();
     const resolvedRunId = runId || resolvedExecutionId;
@@ -39,17 +34,9 @@ export class JobExecutionContext {
       startedAt: null,
       finishedAt: null,
       error: null,
-      holdExpired: false,
     };
 
     this.cache = new Map();
-
-    this.resources = Object.freeze({
-      billingHoldId: billingHoldId || null,
-      mediaId: mediaId || null,
-      mediaRole: mediaRole || "output",
-      saveType: saveType || "default",
-    });
   }
 
   markRunning() {
@@ -71,11 +58,6 @@ export class JobExecutionContext {
     this.state.status = "failed";
     this.state.finishedAt = new Date().toISOString();
     this.state.error = err ?? null;
-    return this.state;
-  }
-
-  markHoldExpired() {
-    this.state.holdExpired = true;
     return this.state;
   }
 

@@ -81,11 +81,11 @@ export class JobQueueService {
    */
   async addUseCaseJob({
     useCaseId,
+    workflow = null,
     input,
-    userId,
+    userId = null,
     executionId = null,
     workflowRunId = null,
-    billingHoldId = null,
     idempotencyKey = null,
     traceId = null,
     serverContext = null,
@@ -114,11 +114,11 @@ export class JobQueueService {
           "run-usecase",
           {
             useCaseId,
+            ...(workflow ? { workflow } : {}),
             input,
             userId,
             executionId: finalExecutionId,
             workflowRunId: workflowRunId || finalExecutionId,
-            billingHoldId,
             idempotencyKey,
             traceId: traceId || finalExecutionId,
             serverContext: serverContext || null,

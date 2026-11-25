@@ -1,8 +1,8 @@
 import { NodeRegistry } from "./core/NodeRegistry.js";
 import { GraphCompiler } from "./core/GraphCompiler.js";
 import { JobExecutionContext, createJobExecutionContext } from "./core/JobExecutionContext.js";
-import { WorkflowExecutor, computeNodeSignature, isErrorRetryable } from "./core/WorkflowExecutor.js";
-import { ExecutionEngine, collectTargetMediaIds } from "./core/ExecutionEngine.js";
+import { WorkflowExecutor, computeNodeSignature } from "./core/WorkflowExecutor.js";
+import { ExecutionEngine } from "./core/ExecutionEngine.js";
 import {
   LLM_SKILLS_REGISTRY,
   normalizeSkillName,
@@ -40,9 +40,7 @@ export {
   createJobExecutionContext,
   WorkflowExecutor,
   computeNodeSignature,
-  isErrorRetryable,
   ExecutionEngine,
-  collectTargetMediaIds,
   ALL_V3_NODES,
   V3_BASE_NODES,
   V3_CUSTOM_NODES,

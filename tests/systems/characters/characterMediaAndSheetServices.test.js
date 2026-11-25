@@ -1689,7 +1689,7 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
     }
   });
 
-  it("5. Worker crash handler: refunds credits idempotently (exactly once on double failure / retry / timeout) and marks direct media failed", async () => {
+  it("5. Worker crash handler: notifies external failure hooks and marks ALL direct media failed", async () => {
     process.env.NODE_ENV = "test";
     const { handleUseCaseWorkerFailure, useCaseWorker } = await import("../../../src/systems/generation/internal/workers/useCaseWorker.js");
     const { executionEngine } = await import("../../../src/container.js");
@@ -1697,119 +1697,6 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
 
     const mediaTable = new Map();
     const targetMediaId = "media-crash-idem-1";
-    mediaTable.set(targetMediaId, { id: targetMediaId, status: "processing" });
-
-    const origRollbackHold = executionEngine.rollbackHold;
-    const { WalletService } = await import("#billing/tools");
-
-    // Part A: Real WalletService rollbackFallback and rollbackHoldIdempotent tests
-    const walletsTable = new Map();
-    const transactionsTable = new Map();
-
-    const mockSupabase = {
-      from: (tableName) => {
-        if (tableName === "wallets") {
-          return {
-            select: () => ({
-              eq: (col, val) => ({
-                single: async () => {
-                  const row = walletsTable.get(val);
-                  return row ? { data: { ...row }, error: null } : { data: null, error: { message: "Wallet not found" } };
-                },
-                maybeSingle: async () => {
-                  const row = walletsTable.get(val);
-                  return { data: row ? { ...row } : null, error: null };
-                },
-              }),
-            }),
-            update: (patch) => ({
-              eq: async (col, val) => {
-                const existing = walletsTable.get(val);
-                if (existing) {
-                  const updated = { ...existing, ...patch };
-                  walletsTable.set(val, updated);
-                  return { data: updated, error: null };
-                }
-                return { data: null, error: { message: "Wallet not found" } };
-              },
-            }),
-          };
-        }
-
-        if (tableName === "transactions") {
-          return {
-            select: (cols) => ({
-              eq: (col, val) => ({
-                maybeSingle: async () => {
-                  for (const tx of transactionsTable.values()) {
-                    if (tx[col] === val) return { data: { ...tx }, error: null };
-                  }
-                  return { data: null, error: null };
-                },
-                single: async () => {
-                  for (const tx of transactionsTable.values()) {
-                    if (tx[col] === val) return { data: { ...tx }, error: null };
-                  }
-                  return { data: null, error: { message: "Not found" } };
-                },
-              }),
-            }),
-            update: (patch) => ({
-              eq: (col1, val1) => ({
-                eq: (col2, val2) => ({
-                  select: () => ({
-                    single: async () => {
-                      const tx = transactionsTable.get(val1);
-                      // Atomic optimistic lock: col2 ("status") must equal val2 ("PENDING")
-                      if (tx && tx[col2] === val2) {
-                        const updated = { ...tx, ...patch };
-                        transactionsTable.set(val1, updated);
-                        return { data: updated, error: null };
-                      }
-                      return { data: null, error: { message: "Conflict or already modified" } };
-                    },
-                  }),
-                }),
-              }),
-            }),
-          };
-        }
-
-        throw new Error(`Unexpected table: ${tableName}`);
-      },
-      rpc: async () => ({ data: null, error: { message: "RPC not found in test mode", code: "PGRST202" } }),
-    };
-
-    const walletService = new WalletService("https://placeholder.supabase.co", "placeholder-key");
-    walletService.supabase = mockSupabase;
-    const walletId = "wallet-real-test-1";
-    const refId = "hold-ref-real-1";
-    walletsTable.set(walletId, { id: walletId, user_id: "user-1", balance: 50 });
-    transactionsTable.set("tx-1", {
-      id: "tx-1",
-      wallet_id: walletId,
-      reference_id: refId,
-      amount: 10,
-      status: "PENDING",
-      type: "HOLD",
-    });
-
-    // 1. Initial rollback: fails closed with BillingConfigurationError on PGRST202
-    await assert.rejects(
-      async () => walletService.rollback(refId),
-      (err) => err instanceof BillingConfigurationError || /PGRST202|missing/.test(err?.message)
-    );
-
-    // 2. rollbackHoldIdempotent: also fails closed on missing RPC
-    await assert.rejects(
-      async () => walletService.rollbackHoldIdempotent(refId),
-      (err) => err instanceof BillingConfigurationError || /PGRST202|missing/.test(err?.message)
-    );
-
-    // 3. Balance must remain untouched (50 credits, not refunded non-atomically)
-    assert.equal(walletsTable.get(walletId).balance, 50, "Balance must remain unchanged when RPC fails closed");
-
-    // Part B: Worker crash handler failure recovery marks ALL direct media failed via #media/tools markMediaFailed
     const targetMediaId2 = "media-crash-idem-2";
     mediaTable.set(targetMediaId, { id: targetMediaId, status: "processing" });
     mediaTable.set(targetMediaId2, { id: targetMediaId2, status: "processing" });
@@ -1825,16 +1712,14 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
     };
     configureMedia({ mediaRepo: mockMediaRepo });
 
-    const rollbackCalls = [];
-    executionEngine.rollbackHold = async (holdId, meta) => {
-      rollbackCalls.push({ holdId, meta });
-      return { rolledBack: true, referenceId: holdId };
-    };
+    const notifiedPayloads = [];
+    const unsubscribe = executionEngine.onFailure((payload) => {
+      notifiedPayloads.push(payload);
+    });
 
     const mockMultiMediaJob = {
       id: "job-crash-multi-1",
       data: {
-        billingHoldId: refId,
         serverContext: {
           workflowId: "wf-crash-multi-1",
           mediaIds: [targetMediaId, targetMediaId2],
@@ -1844,12 +1729,12 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
 
     try {
       await handleUseCaseWorkerFailure(mockMultiMediaJob, new Error("Crash"));
-      assert.equal(rollbackCalls.length, 1, "rollbackHold must be invoked for crashed job hold");
-      assert.equal(rollbackCalls[0].holdId, refId);
+      assert.equal(notifiedPayloads.length, 1, "External onFailure hook must be notified once");
+      assert.equal(notifiedPayloads[0].stage, "worker_crash");
       assert.equal(mediaTable.get(targetMediaId).status, "failed", "First media must be marked failed");
       assert.equal(mediaTable.get(targetMediaId2).status, "failed", "ALL direct media in mediaIds must be marked failed");
     } finally {
-      executionEngine.rollbackHold = origRollbackHold;
+      unsubscribe();
       configureMedia({ mediaRepo: origMediaRepo });
       await useCaseWorker?.close?.().catch(() => {});
       await redisConnection?.quit().catch(() => redisConnection?.disconnect());
@@ -1858,10 +1743,7 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
     }
   });
 
-  it("6. Scenario E (H9): Same user submits 2 character-sheet generations on the same Character -> 2 unique executionId/jobId/referenceId (no 409 DUPLICATE_TRANSACTION) & independent outputs", async () => {
-    const wallet = new InMemoryWalletService();
-    await wallet.setBalance("user-scenario-e", 200);
-
+  it("6. Scenario E (H9): Same user submits 2 character-sheet generations on the same Character -> 2 unique executionId/jobId & independent outputs", async () => {
     let mediaSeq = 0;
     const mediaRows = new Map();
     const queuedJobs = [];
@@ -1898,16 +1780,7 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
     };
 
     const engine = new ExecutionEngine({
-      walletService: wallet,
       identityTools: { assertOwns: async () => true, assertOwnsAny: async () => true },
-      mediaTools: {
-        createPendingMedia: async () => {
-          throw new Error("should reuse placeholder media created by CharacterGenerationService");
-        },
-        markMediaFailed: async ({ mediaId, errorMessage }) => {
-          await mockDb.media.updateMedia(mediaId, { status: "failed", error_message: errorMessage });
-        },
-      },
       jobQueueService: {
         addUseCaseJob: async (payload) => {
           const job = { id: `usecase-${payload.executionId}`, data: payload };
@@ -1949,7 +1822,6 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
     assert.notEqual(sheet1.executionId, sheet2.executionId, "2 sheets on same character must have distinct executionIds");
     assert.equal(queuedJobs.length, 2);
     assert.notEqual(queuedJobs[0].id, queuedJobs[1].id, "2 distinct BullMQ jobIds");
-    assert.notEqual(queuedJobs[0].data.billingHoldId, queuedJobs[1].data.billingHoldId, "2 distinct billing referenceIds");
     assert.notEqual(sheet1.placeholderMedia.id, sheet2.placeholderMedia.id, "2 distinct placeholder mediaIds");
 
     // Execute both jobs concurrently and verify independent outputs
@@ -1959,7 +1831,6 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
           useCaseId: job.data.useCaseId,
           input: job.data.input,
           userId: job.data.userId,
-          billingHoldId: job.data.billingHoldId,
           executionId: job.data.executionId,
           runId: job.data.workflowRunId,
           jobId: job.id,
@@ -1993,9 +1864,6 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
   });
 
   it("7. H10: CharacterGenerationService handles INSUFFICIENT_FUNDS gracefully (status='saved', needsCredits=true)", async () => {
-    const wallet = new InMemoryWalletService();
-    await wallet.setBalance("user-broke-h10", 0);
-
     const mediaRows = new Map();
     const mockDb = {
       media: {
@@ -2017,16 +1885,17 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
       workflows: { updatePrimaryMedia: async () => ({}) },
     };
 
-    const engine = new ExecutionEngine({
-      walletService: wallet,
-      identityTools: { assertOwns: async () => true, assertOwnsAny: async () => true },
-      mediaTools: { markMediaFailed: async () => {} },
-      jobQueueService: { addUseCaseJob: async () => ({ id: "should-not-enqueue" }) },
-    });
+    const mockEngine = {
+      launch: async () => {
+        const err = new Error("Insufficient credits for character sheet");
+        err.code = "INSUFFICIENT_FUNDS";
+        throw err;
+      },
+    };
 
     const charGenService = new CharacterGenerationService({
       db: mockDb,
-      executionEngine: engine,
+      executionEngine: mockEngine,
     });
 
     const result = await charGenService.enqueueSheetGeneration({

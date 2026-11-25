@@ -127,7 +127,7 @@ describe("Media Persistence Failure Boundary Tests (V3 Nodes & Executor)", () =>
     );
   });
 
-  it("TEST 4: WorkflowExecutor retries transient node failure when retryPolicy allows", async () => {
+  it("TEST 4: WorkflowExecutor fails fast on single attempt without automatic retries", async () => {
     const registry = new NodeRegistry();
     registry.registerAll(ALL_V3_NODES);
     registry.register({
@@ -140,12 +140,6 @@ describe("Media Persistence Failure Boundary Tests (V3 Nodes & Executor)", () =>
         },
       },
       RETURN_TYPES: { saved_media: "JSON" },
-      retryPolicy: {
-        maxAttempts: 2,
-        backoffMs: 1,
-        retryableCategories: ["UPSTREAM_FAULT"],
-      },
-      estimateCost: () => 0,
       async execute(inputs, ctx) {
         return SaveMediaNode.execute(inputs, ctx);
       },
@@ -154,10 +148,10 @@ describe("Media Persistence Failure Boundary Tests (V3 Nodes & Executor)", () =>
 
     const executor = new WorkflowExecutor(registry);
     const workflow = {
-      id: "wf-test-persist-retry",
+      id: "wf-test-persist-fail-fast",
       nodes: [
         {
-          id: "retry_node",
+          id: "fail_fast_node",
           type: "custom.transient_save_test",
           inputs: {
             media_id: { fromInput: "media_id" },
@@ -170,22 +164,22 @@ describe("Media Persistence Failure Boundary Tests (V3 Nodes & Executor)", () =>
     let attemptsCount = 0;
     db.media.updateMedia = async (id, patch) => {
       attemptsCount++;
-      if (attemptsCount === 1) {
-        const err = new Error("Transient connection timeout on attempt 1");
-        err.retryable = true;
-        throw err;
-      }
-      return { id, ...patch };
+      const err = new Error("Transient connection timeout on attempt 1");
+      err.retryable = true;
+      throw err;
     };
 
-    const result = await executor.execute({
-      workflow,
-      input: { media_id: "placeholder-retry" },
-      context: { db },
-    });
+    await assert.rejects(
+      () =>
+        executor.execute({
+          workflow,
+          input: { media_id: "placeholder-retry" },
+          context: { db },
+        }),
+      /Transient connection timeout on attempt 1/
+    );
 
-    assert.strictEqual(attemptsCount, 2, "Persistence should have been retried on attempt 2");
-    assert.strictEqual(result.status, "completed", "Workflow should succeed after retry");
+    assert.strictEqual(attemptsCount, 1, "Fail-fast executor must stop after attempt 1 without retrying");
   });
 });
 }
@@ -217,6 +211,21 @@ describe("Per-Run Media Cleanup & Cycle Boundary Tests (ExecutionEngine & GraphC
     }
   });
 
+  const attachMediaHook = (engine) => {
+    engine.onFailure(({ input, serverContext, errorMessage }) => {
+      const ids = [...new Set([
+        ...(Array.isArray(serverContext?.mediaIds) ? serverContext.mediaIds : []),
+        ...(Array.isArray(input?.serverMediaIds) ? input.serverMediaIds : []),
+        input?.media_id,
+      ].filter(Boolean))];
+      for (const mediaId of ids) {
+        const record = mediaRecords.find((m) => m.id === mediaId);
+        if (record) Object.assign(record, { status: "failed", error_message: errorMessage });
+        updatedCalls.push({ id: mediaId, status: "failed", error_message: errorMessage });
+      }
+    });
+  };
+
   it("TEST 1: ExecutionEngine failure fails ONLY this run's target mediaId and leaves sibling processing/pending & completed media untouched", async () => {
     const workflowId = "wf-sibling-test-1";
 
@@ -227,22 +236,8 @@ describe("Per-Run Media Cleanup & Cycle Boundary Tests (ExecutionEngine & GraphC
       { id: "media-4", workflow_id: workflowId, step_id: "step-4", status: "completed", url: "https://example.com/ok.png" },
     ];
 
-    const engine = new ExecutionEngine({
-      billingTools: {
-        rollbackCredits: async () => ({ rolledBack: true }),
-        settleCredits: async () => ({ settled: true }),
-      },
-      mediaTools: {
-        markMediaFailed: async ({ mediaId, errorMessage }) => {
-          const record = mediaRecords.find((m) => m.id === mediaId);
-          if (record) {
-            Object.assign(record, { status: "failed", error_message: errorMessage });
-          }
-          updatedCalls.push({ id: mediaId, status: "failed", error_message: errorMessage });
-          return { mediaId, status: "failed" };
-        },
-      },
-    });
+    const engine = new ExecutionEngine();
+    attachMediaHook(engine);
 
     const failingWorkflow = {
       id: "wf-sibling-v3",
@@ -268,7 +263,6 @@ describe("Per-Run Media Cleanup & Cycle Boundary Tests (ExecutionEngine & GraphC
             media_id: "media-1",
           },
           userId: "user-sibling-1",
-          billingHoldId: "hold-sibling-test-1",
         });
       }
     );
@@ -293,19 +287,8 @@ describe("Per-Run Media Cleanup & Cycle Boundary Tests (ExecutionEngine & GraphC
       { id: "m-succ-4", workflow_id: workflowId, status: "completed", url: "https://example.com/done.png" },
     ];
 
-    const engine = new ExecutionEngine({
-      billingTools: {
-        rollbackCredits: async () => ({ rolledBack: true }),
-        settleCredits: async () => ({ settled: true }),
-      },
-      mediaTools: {
-        markMediaFailed: async ({ mediaId, errorMessage }) => {
-          const item = mediaRecords.find((m) => m.id === mediaId);
-          if (item) Object.assign(item, { status: "failed", error_message: errorMessage });
-          return { mediaId, status: "failed" };
-        },
-      },
-    });
+    const engine = new ExecutionEngine();
+    attachMediaHook(engine);
 
     engine.executor = {
       execute: async () => {
@@ -323,12 +306,8 @@ describe("Per-Run Media Cleanup & Cycle Boundary Tests (ExecutionEngine & GraphC
             workflow_id: workflowId,
             media_id: "m-proc-1",
             serverMediaIds: ["m-proc-1"],
-            billing_hold_id: "hold-sibling-1",
-            billing_status: "reserved",
-            reserved_credits: 10,
           },
           userId: "user-victim-1",
-          billingHoldId: "hold-sibling-1",
         });
       },
       /Pipeline crashed unexpectedly/i
@@ -340,7 +319,7 @@ describe("Per-Run Media Cleanup & Cycle Boundary Tests (ExecutionEngine & GraphC
     assert.strictEqual(mediaRecords.find((m) => m.id === "m-succ-4").status, "completed", "Terminal completed status must not be modified");
   });
 
-  it("TEST 3: GraphCompiler cycle detection in ExecutionEngine fails this run's placeholder media and releases hold", async () => {
+  it("TEST 3: GraphCompiler cycle detection in ExecutionEngine fails this run's placeholder media via onFailure hook", async () => {
     const workflowId = "wf-deadlock-1";
 
     mediaRecords = [
@@ -349,22 +328,11 @@ describe("Per-Run Media Cleanup & Cycle Boundary Tests (ExecutionEngine & GraphC
       { id: "deadlock-m-3", workflow_id: workflowId, status: "completed", url: "https://example.com/ok.png" },
     ];
 
-    let holdReleased = false;
-    const engine = new ExecutionEngine({
-      billingTools: {
-        rollbackCredits: async () => {
-          holdReleased = true;
-          return { rolledBack: true };
-        },
-        settleCredits: async () => ({ settled: true }),
-      },
-      mediaTools: {
-        markMediaFailed: async ({ mediaId, errorMessage }) => {
-          const r = mediaRecords.find((m) => m.id === mediaId);
-          if (r) Object.assign(r, { status: "failed", error_message: errorMessage });
-          return { mediaId, status: "failed" };
-        },
-      },
+    let hookFired = false;
+    const engine = new ExecutionEngine();
+    attachMediaHook(engine);
+    engine.onFailure(() => {
+      hookFired = true;
     });
 
     const cyclicWorkflow = {
@@ -406,13 +374,12 @@ describe("Per-Run Media Cleanup & Cycle Boundary Tests (ExecutionEngine & GraphC
             media_id: "deadlock-m-1",
           },
           userId: "user-deadlock-1",
-          billingHoldId: "hold-deadlock-1",
         });
       },
       /Circular dependency/i
     );
 
-    assert.strictEqual(holdReleased, true, "Hold must be released on cyclic graph failure");
+    assert.strictEqual(hookFired, true, "onFailure hook must fire on cyclic graph failure");
 
     const m1 = mediaRecords.find((m) => m.id === "deadlock-m-1");
     const m2 = mediaRecords.find((m) => m.id === "deadlock-m-2");

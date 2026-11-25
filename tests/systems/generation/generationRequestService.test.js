@@ -861,25 +861,6 @@ describe("F2.2-a — RunRepository Target Columns & Fallback Invariants (Supabas
     assert.ok(run);
     assert.strictEqual(run.v1_workflow_id, null, "Must NOT fall back to run.input.workflow_id");
     assert.deepStrictEqual(run.target_media_ids, [], "Must NOT fall back to run.input.media_id");
-
-    // Assert ExecutionEngine.execute rejects immediately and fails closed when server targets are missing
-    await assert.rejects(
-      async () => {
-        await executionEngine.execute({
-          useCaseId: "character-sheet-v1",
-          input: {
-            characterId: "spoofed-char-id",
-            workflow_id: "spoofed-wf-input",
-            media_id: "spoofed-media-input",
-          },
-          userId: "user-123",
-        });
-      },
-      (err) => {
-        assert.ok(err.message.includes("requires server-verified targetWorkflowId"), `Unexpected error: ${err.message}`);
-        return true;
-      }
-    );
   });
 });
 

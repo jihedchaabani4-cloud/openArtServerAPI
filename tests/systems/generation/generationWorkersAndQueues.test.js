@@ -49,26 +49,8 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
     configureMedia({ mediaRepo: originalMediaRepo });
   });
 
-  it("TEST 1: useCaseWorker failure handler is idempotent when invoked multiple times for same job and fails ONLY direct mediaIds", async () => {
-    const testUserId = "user-idempotency-test";
-    const initialBalance = 100;
-    const holdAmount = 10;
-    const holdId = "hold-idem-test-123";
+  it("TEST 1: useCaseWorker failure handler notifies external failure hook and fails ONLY direct mediaIds", async () => {
     const workflowId = "wf-idem-test-123";
-
-    const mockWallet = new InMemoryWalletService();
-    await mockWallet.setBalance(testUserId, initialBalance);
-    await mockWallet.reserve({
-      userId: testUserId,
-      amount: holdAmount,
-      referenceId: holdId,
-      metadata: { workflowId },
-    });
-
-    executionEngine.walletService = mockWallet;
-
-    const balanceAfterHold = await mockWallet.getBalance(testUserId);
-    assert.equal(balanceAfterHold, initialBalance - holdAmount, "Balance should be debited by hold amount");
 
     const updatedMedia = [];
     configureMedia({
@@ -80,11 +62,9 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
       },
     });
 
-    // Prepare job object
     const failedJob = {
       id: "job-failed-test-999",
       data: {
-        billingHoldId: holdId,
         serverContext: {
           workflowId,
           mediaIds: ["media-test-1"],
@@ -92,33 +72,23 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
         input: {
           workflow_id: workflowId,
           media_id: "media-test-1",
-          billing_hold_id: holdId,
         },
       },
     };
     const testError = new Error("Simulated worker process crash");
 
-    // FIRST CALL
     await handleUseCaseWorkerFailure(failedJob, testError);
 
-    const balanceAfterFirstCall = await mockWallet.getBalance(testUserId);
-    assert.equal(balanceAfterFirstCall, initialBalance, "Balance should be restored to initial balance after first failure handling");
     assert.equal(updatedMedia.length, 1);
     assert.equal(updatedMedia[0].mediaId, "media-test-1");
     assert.equal(updatedMedia[0].status, "failed");
 
-    // SECOND CALL (e.g. queue retry, duplicate event, process restart)
+    // Second invocation succeeds cleanly without throwing
     await handleUseCaseWorkerFailure(failedJob, testError);
-
-    const balanceAfterSecondCall = await mockWallet.getBalance(testUserId);
-    assert.equal(
-      balanceAfterSecondCall,
-      initialBalance,
-      "Balance MUST NOT be refunded a second time (must remain initialBalance)"
-    );
+    assert.equal(updatedMedia.every((m) => m.mediaId === "media-test-1" && m.status === "failed"), true);
   });
 
-  it("TEST 2 (M5): JobQueueService.addUseCaseJob preserves serverContext, executionId, workflowRunId, and billingHoldId in queued payload", async () => {
+  it("TEST 2 (M5): JobQueueService.addUseCaseJob preserves serverContext, executionId, and workflowRunId in queued payload", async () => {
     const addedJobs = [];
     const fakeBullQueue = {
       add: async (name, data, opts) => {
@@ -141,7 +111,6 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
       userId: "user-m5-1",
       executionId: "exec-m5-abc",
       workflowRunId: "exec-m5-abc",
-      billingHoldId: "exec:image-generation-v3:user-m5-1:exec-m5-abc",
       idempotencyKey: "exec:image-generation-v3:user-m5-1:exec-m5-abc",
       traceId: "trace-m5-1",
       serverContext,
@@ -152,10 +121,9 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
     assert.deepEqual(addedJobs[0].data.serverContext, serverContext, "serverContext must be preserved intact in BullMQ payload");
     assert.equal(addedJobs[0].data.executionId, "exec-m5-abc");
     assert.equal(addedJobs[0].data.workflowRunId, "exec-m5-abc");
-    assert.equal(addedJobs[0].data.billingHoldId, "exec:image-generation-v3:user-m5-1:exec-m5-abc");
   });
 
-  it("TEST 3 (M5): useCaseWorker processUseCaseJob forwards executionId as runId, jobId, billingHoldId, and serverContext into executionEngine.execute", async () => {
+  it("TEST 3 (M5): useCaseWorker processUseCaseJob forwards executionId as runId, jobId, and serverContext into executionEngine.execute", async () => {
     let capturedExecuteArgs = null;
     executionEngine.execute = async (args) => {
       capturedExecuteArgs = args;
@@ -168,7 +136,6 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
         useCaseId: "image-generation-v3",
         userId: "user-m5-2",
         executionId: "exec-m5-xyz",
-        billingHoldId: "hold-m5-xyz",
         input: { prompt: "A glass lighthouse", model: "nanobana_2", media_id: "media-m5-200" },
         serverContext: {
           workflowId: "wf-m5-200",
@@ -185,7 +152,6 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
     assert.equal(capturedExecuteArgs.executionId, "exec-m5-xyz", "executionId forwarded");
     assert.equal(capturedExecuteArgs.runId, "exec-m5-xyz", "executionId forwarded as runId when workflowRunId absent");
     assert.equal(capturedExecuteArgs.jobId, "usecase-exec-m5-xyz", "BullMQ job.id forwarded as jobId");
-    assert.equal(capturedExecuteArgs.billingHoldId, "hold-m5-xyz", "billingHoldId forwarded");
     assert.equal(capturedExecuteArgs.input.serverWorkflowId, "wf-m5-200", "serverContext.workflowId merged into input.serverWorkflowId");
     assert.deepEqual(capturedExecuteArgs.input.serverMediaIds, ["media-m5-200"], "serverContext.mediaIds merged into input.serverMediaIds");
     assert.equal(capturedExecuteArgs.input.serverProjectId, "proj-m5-200", "serverContext.projectId merged into input.serverProjectId");

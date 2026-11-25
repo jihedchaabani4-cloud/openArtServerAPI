@@ -151,7 +151,7 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
   });
 
   describe("GraphCompiler", () => {
-    it("prunes dead/disconnected nodes backward from OUTPUT_NODE: true and estimates cost", () => {
+    it("prunes dead/disconnected nodes backward from OUTPUT_NODE: true and builds waves", () => {
       const reg = createTestRegistry();
       const compiler = new GraphCompiler(reg);
 
@@ -195,19 +195,11 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
         ],
       };
 
-      const plan = compiler.compile(workflow, {
-        prompt: "cyberpunk samurai",
-        model: "flux-schnell",
-        media_id: "media-1",
-      });
+      const plan = compiler.compile(workflow);
 
       assert.deepEqual(plan.activeNodeIds, ["prompt_node", "active_gen", "save_out"]);
       assert.equal(plan.activeNodeIds.includes("dead_expensive_gen"), false);
-      // Only active_gen (count: 2 -> 20 credits) should be billed, NOT dead_expensive_gen (50 credits)
-      assert.equal(plan.totalEstimatedCredits, 20);
-      assert.deepEqual(plan.costBreakdown, [
-        { nodeId: "active_gen", type: "base.image_generate", credits: 20 },
-      ]);
+      assert.deepEqual(plan.waves, [["prompt_node"], ["active_gen"], ["save_out"]]);
     });
 
     it("detects circular dependencies and throws GenerationCompilationError", () => {
@@ -288,57 +280,41 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
       );
     });
 
-    it("resolves nested dot-paths (e.g. parameters.count) via getValueByPath in estimateCost", () => {
+    it("resolves nested dot-paths (e.g. parameters.count) via getValueByPath in resolveStaticAndInitialInputs", () => {
       const reg = createTestRegistry();
       const compiler = new GraphCompiler(reg);
 
-      const workflow = {
-        id: "nested-path-v3",
-        nodes: [
-          {
-            id: "gen",
-            type: "base.image_generate",
-            inputs: {
-              model: { fromInput: "parameters.model" },
-              prompt: { fromInput: "prompt" },
-              count: { fromInput: "parameters.count", default: 1 },
-            },
-          },
-          {
-            id: "save",
-            type: "base.save_media",
-            inputs: {
-              media_id: { fromInput: "media_id" },
-              asset_url: { fromNode: "gen", output: "image_url" },
-            },
-          },
-        ],
-      };
-
-      const plan = compiler.compile(workflow, {
-        prompt: "nested test",
-        media_id: "m-nested",
-        parameters: {
-          model: "flux-pro",
-          count: 4,
+      const def = reg.get("base.image_generate");
+      const resolved = compiler.resolveStaticAndInitialInputs(
+        {
+          model: { fromInput: "parameters.model" },
+          prompt: { fromInput: "prompt" },
+          count: { fromInput: "parameters.count", default: 1 },
         },
-      });
+        {
+          prompt: "nested test",
+          media_id: "m-nested",
+          parameters: {
+            model: "flux-pro",
+            count: 4,
+          },
+        },
+        def
+      );
 
-      assert.equal(plan.totalEstimatedCredits, 40);
+      assert.equal(resolved.model, "flux-pro");
+      assert.equal(resolved.count, 4);
+      assert.equal(resolved.prompt, "nested test");
     });
   });
 
   describe("JobExecutionContext & NodeRegistry CACHEABLE contracts", () => {
-    it("creates isolated frozen identity/resources, tracks lifecycle state, and clears cache on dispose()", () => {
+    it("creates isolated frozen identity, tracks lifecycle state, and clears cache on dispose()", () => {
       const ctx = createJobExecutionContext({
         jobId: "job-100",
         userId: "user-100",
         blueprintId: "image-generation-v3",
         workflowId: "wf-100",
-        billingHoldId: "hold-100",
-        mediaId: "media-100",
-        mediaRole: "output",
-        saveType: "workflow_output",
       });
 
       assert.ok(ctx instanceof JobExecutionContext);
@@ -349,9 +325,6 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
       assert.equal(ctx.identity.blueprintId, "image-generation-v3");
       assert.equal(ctx.identity.workflowId, "wf-100");
       assert.equal(Object.isFrozen(ctx.identity), true);
-      assert.equal(Object.isFrozen(ctx.resources), true);
-      assert.equal(ctx.resources.billingHoldId, "hold-100");
-      assert.equal(ctx.resources.mediaId, "media-100");
 
       assert.equal(ctx.state.status, "created");
       ctx.markRunning();
@@ -520,75 +493,7 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
       assert.notEqual(sigUserA, sigRun2);
     });
 
-    it("retries transient upstream errors according to node retryPolicy and fails immediately on USER_FAULT", async () => {
-      const reg = new NodeRegistry();
-      let attempts = 0;
-
-      reg.register({
-        type: "base.video_generate",
-        OUTPUT_NODE: false,
-        INPUT_TYPES: {
-          required: { prompt: { type: "STRING" } },
-        },
-        RETURN_TYPES: { video_url: "VIDEO_URL" },
-        retryPolicy: {
-          maxAttempts: 3,
-          backoffMs: 1,
-          retryableCategories: ["UPSTREAM_FAULT", "RATE_LIMIT"],
-        },
-        async execute() {
-          attempts++;
-          if (attempts < 3) {
-            const err = new Error("Provider rate limit");
-            err.category = "RATE_LIMIT";
-            throw err;
-          }
-          return { video_url: "https://cdn.test/video.mp4" };
-        },
-      });
-
-      reg.register({
-        type: "base.save_media",
-        OUTPUT_NODE: true,
-        INPUT_TYPES: {
-          required: {
-            media_id: { type: "STRING" },
-            asset_url: { type: "STRING" },
-          },
-        },
-        RETURN_TYPES: { saved_media: "JSON" },
-        async execute(inputs) {
-          return { saved_media: inputs };
-        },
-      });
-
-      const executor = new WorkflowExecutor(reg, { sleepFn: async () => {} });
-      const res = await executor.execute({
-        workflow: {
-          id: "retry-v3",
-          nodes: [
-            { id: "vid", type: "base.video_generate", inputs: { prompt: "ocean waves" } },
-            {
-              id: "save",
-              type: "base.save_media",
-              inputs: {
-                media_id: "m-vid",
-                asset_url: { fromNode: "vid", output: "video_url" },
-              },
-            },
-          ],
-        },
-      });
-
-      assert.equal(attempts, 3);
-      assert.equal(res.terminalOutputs.save.saved_media.asset_url, "https://cdn.test/video.mp4");
-
-      const sig1 = computeNodeSignature("base.video_generate", { b: 2, a: 1 });
-      const sig2 = computeNodeSignature("base.video_generate", { a: 1, b: 2 });
-      assert.equal(sig1, sig2);
-    });
-
-    it("Layer 2 centralized holdExpired guard halts immediately before the next node runs", async () => {
+    it("executes nodes fail-fast (single attempt, tags error.nodeId, and stops downstream waves on error)", async () => {
       const reg = new NodeRegistry();
       let step1Calls = 0;
       let step2Calls = 0;
@@ -599,11 +504,12 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
         CACHEABLE: false,
         INPUT_TYPES: { required: { prompt: { type: "STRING" } } },
         RETURN_TYPES: { text: "STRING" },
-        async execute(inputs, ctx) {
+        async execute() {
           step1Calls++;
-          // Simulate heartbeat expiring hold during wave 1
-          ctx.jobContext?.markHoldExpired();
-          return { text: inputs.prompt };
+          const err = new Error("Upstream rate limit");
+          err.category = "RATE_LIMIT";
+          err.retryable = true;
+          throw err;
         },
       });
 
@@ -621,33 +527,27 @@ describe("V3 Core Engine — NodeRegistry, GraphCompiler & WorkflowExecutor", ()
 
       const executor = new WorkflowExecutor(reg);
       const wf = {
-        id: "hold-guard-v3",
+        id: "fail-fast-v3",
         nodes: [
           { id: "n1", type: "base.step_one", inputs: { prompt: "hello" } },
           { id: "n2", type: "base.step_two", inputs: { text: { fromNode: "n1", output: "text" } } },
         ],
       };
 
-      // Case A: Mid-run hold expiry stops before node 2 ever runs
       await assert.rejects(
         () => executor.execute({ workflow: wf, input: {} }),
         (err) => {
-          assert.equal(err.code, "HOLD_EXPIRED");
-          assert.equal(err.category, "HOLD_EXPIRED");
-          assert.equal(err.retryable, false);
+          assert.equal(err.message, "Upstream rate limit");
+          assert.equal(err.nodeId, "n1");
           return true;
         }
       );
-      assert.equal(step1Calls, 1);
-      assert.equal(step2Calls, 0, "Node 2 must never execute once holdExpired is set");
+      assert.equal(step1Calls, 1, "Failed node must execute exactly once without retries");
+      assert.equal(step2Calls, 0, "Downstream node must never execute once upstream fails");
 
-      // Case B: Already expired context stops before node 1 even runs
-      step1Calls = 0;
-      await assert.rejects(
-        () => executor.execute({ workflow: wf, input: {}, context: { holdExpired: true } }),
-        (err) => err.code === "HOLD_EXPIRED"
-      );
-      assert.equal(step1Calls, 0, "Node 1 must never execute when ctx.holdExpired === true");
+      const sig1 = computeNodeSignature("base.step_one", { b: 2, a: 1 });
+      const sig2 = computeNodeSignature("base.step_one", { a: 1, b: 2 });
+      assert.equal(sig1, sig2);
     });
   });
 });

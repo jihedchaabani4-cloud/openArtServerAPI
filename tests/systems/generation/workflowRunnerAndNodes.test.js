@@ -65,7 +65,7 @@ describe("F2 — Server-Side Workflow Context & Failure Handling Boundary Tests 
     }
   });
 
-  it("TEST 1: ExecutionEngine / WorkflowExecutor writes ONLY to server-assigned serverMediaIds, ignoring missing media_id", async () => {
+  it("TEST 1: WorkflowExecutor writes ONLY to supplied media_id", async () => {
     db.media.updateMedia = async (id, patch) => {
       updatedMediaCalls.push({ id, patch });
       return { id, ...patch };
@@ -88,12 +88,10 @@ describe("F2 — Server-Side Workflow Context & Failure Handling Boundary Tests 
       ],
     };
 
-    // Normalized input uses serverMediaIds[0] when media_id is absent
     await executor.execute({
       workflow,
       input: {
-        serverWorkflowId: "server-owned-wf-100",
-        serverMediaIds: ["media-server-1"],
+        media_id: "media-server-1",
       },
       context: { db },
     });
@@ -102,7 +100,7 @@ describe("F2 — Server-Side Workflow Context & Failure Handling Boundary Tests 
     assert.strictEqual(updatedMediaCalls[0].id, "media-server-1");
     assert.strictEqual(updatedMediaCalls[0].patch.status, "success");
 
-    // If neither media_id nor serverMediaIds is provided, SaveMediaNode refuses to write
+    // If media_id is missing, SaveMediaNode refuses to write
     await assert.rejects(
       async () => {
         await SaveMediaNode.execute({ asset_url: "https://storage.example.com/clean.png" }, { db });
@@ -169,22 +167,16 @@ describe("F2 — Server-Side Workflow Context & Failure Handling Boundary Tests 
     );
   });
 
-  it("TEST 4: ExecutionEngine failure handler marks character-sheet target mediaId as failed (never spoofed workflow)", async () => {
+  it("TEST 4: ExecutionEngine onFailure hook forwards server targets cleanly without touching spoofed inputs", async () => {
     const realCharWorkflowId = "char-wf-real-555";
     const spoofedInputWfId = "victim-wf-spoofed-888";
 
     const failedMediaIds = [];
 
     const engine = new ExecutionEngine({
-      billingTools: {
-        rollbackCredits: async () => ({ rolledBack: true }),
-        settleCredits: async () => ({ settled: true }),
-      },
-      mediaTools: {
-        markMediaFailed: async ({ mediaId }) => {
-          failedMediaIds.push(mediaId);
-          return { mediaId, status: "failed" };
-        },
+      onFailure: async ({ input }) => {
+        const ids = Array.isArray(input?.serverMediaIds) ? input.serverMediaIds : [];
+        failedMediaIds.push(...ids);
       },
     });
 
@@ -217,7 +209,7 @@ describe("F2 — Server-Side Workflow Context & Failure Handling Boundary Tests 
     assert.deepStrictEqual(
       failedMediaIds,
       [`media-${realCharWorkflowId}`],
-      "Failure handler must fail ONLY the real character workflow media, never the spoofed input workflow ID"
+      "Failure handler must notify ONLY the real character workflow media, never the spoofed input workflow ID"
     );
   });
 });
@@ -499,16 +491,12 @@ describe("Multi-Asset Outputs & Count Boundary (F2.4-b / V3)", () => {
     assert.strictEqual(cost4, 8, "Retail credits must not multiply by count");
   });
 
-  it("TEST 3: GraphCompiler calculates deterministic upfront cost for V3 image workflow", () => {
+  it("TEST 3: GraphCompiler compiles V3 image workflow into active nodes and parallel waves", () => {
     const compiler = new GraphCompiler(createDefaultV3NodeRegistry());
-    const plan = compiler.compile(imageGenerationV3, {
-      prompt: "hello",
-      model: "nanobana_2",
-      media_id: "m-1",
-    });
+    const plan = compiler.compile(imageGenerationV3);
 
-    assert.ok(plan.totalEstimatedCredits > 0);
-    assert.ok(Array.isArray(plan.costBreakdown));
+    assert.ok(Array.isArray(plan.activeNodeIds) && plan.activeNodeIds.length === 4);
+    assert.ok(Array.isArray(plan.waves) && plan.waves.length >= 4);
   });
 
   it("TEST 4: imageController clamps output count to 1 and pre-allocates exactly 1 placeholder even if count=4 is requested", async () => {

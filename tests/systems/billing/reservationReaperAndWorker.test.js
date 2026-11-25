@@ -114,42 +114,6 @@ describe("Reservation Reaper Race & Hold Heartbeat Boundary Tests (Task T10 / BU
     assert.strictEqual(completedUpdate, undefined, "Media status must NEVER be resurrected to success");
   });
 
-  it("TEST 3: ExecutionEngine maintains an active hold heartbeat during workflow execution", async () => {
-    const wallet = new InMemoryWalletService();
-    await wallet.setBalance("user-hb-3", 100);
-
-    const res = await wallet.reserve({
-      userId: "user-hb-3",
-      amount: 15,
-      metadata: { workflowId: "wf-hb-3" },
-    });
-
-    let heartbeatCount = 0;
-    const originalExtend = wallet.extendHold?.bind(wallet);
-    wallet.extendHold = async (holdId, seconds) => {
-      heartbeatCount++;
-      if (originalExtend) return originalExtend(holdId, seconds);
-      return res;
-    };
-
-    const engine = new ExecutionEngine({
-      walletService: wallet,
-      jobQueueService: { addUseCaseJob: async () => ({ id: "job-1" }) },
-    });
-
-    // Trigger heartbeat with short interval
-    const heartbeatHandle = engine.startHoldHeartbeat(res.reservationId, { intervalMs: 25, extensionSeconds: 300 });
-
-    // Wait deterministically for heartbeat to fire
-    const startWait = Date.now();
-    while (heartbeatCount < 2 && Date.now() - startWait < 400) {
-      await new Promise((r) => setTimeout(r, 20));
-    }
-    heartbeatHandle.stop();
-
-    assert.ok(heartbeatCount >= 1, `Expected heartbeat to trigger at least once, got ${heartbeatCount}`);
-  });
-
   it("TEST 4: Settling an expired/released hold throws cleanly without crashing process", async () => {
     const wallet = new InMemoryWalletService();
     await wallet.setBalance("user-hb-4", 100);
@@ -179,43 +143,6 @@ describe("Reservation Reaper Race & Hold Heartbeat Boundary Tests (Task T10 / BU
         return true;
       }
     );
-  });
-
-  it("TEST 5: ExecutionEngine.execute stops hold heartbeat cleanly in finally on both success and failure", async () => {
-    let extendCalls = 0;
-    const engine = new ExecutionEngine({
-      billingTools: {
-        settleCredits: async () => ({ settled: true }),
-        rollbackCredits: async () => ({ rolledBack: true }),
-        extendHold: async () => {
-          extendCalls++;
-        },
-      },
-      mediaTools: {
-        markMediaFailed: async () => {},
-      },
-    });
-
-    engine.executor = {
-      execute: async () => {
-        await new Promise((r) => setTimeout(r, 45));
-        return { status: "completed", costBreakdown: [], totalEstimatedCredits: 10 };
-      },
-    };
-
-    const result = await engine.execute({
-      useCaseId: "video-generation-v1",
-      input: { prompt: "ocean", media_id: "media-hb-5" },
-      userId: "user-hb-5",
-      billingHoldId: "hold-hb-5",
-      heartbeatIntervalMs: 15,
-    });
-
-    assert.equal(result.status, "completed");
-    assert.ok(extendCalls >= 1, `Heartbeat must have fired during execution, got ${extendCalls}`);
-    const callsAfterCompletion = extendCalls;
-    await new Promise((r) => setTimeout(r, 50));
-    assert.equal(extendCalls, callsAfterCompletion, "Heartbeat timer must be cleared in finally after execution finishes");
   });
 });
 }

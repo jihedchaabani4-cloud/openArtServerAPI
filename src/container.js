@@ -36,6 +36,7 @@ import {
     AssetUploadService,
     getStorageService,
     configureMedia,
+    markMediaFailed,
 } from "#media/tools";
 import { CharacterRepository, CharacterService, CharacterMediaService, configureCharacters } from "#characters/tools";
 import { ElementRepository, ElementService, ElementMediaService, ElementAnalysisService, configureElements } from "#elements/tools";
@@ -204,6 +205,32 @@ configureBilling({ lifecycleService: mediaWorkflowLifecycleService });
 export { jobQueueService };
 export const executionEngine = new ExecutionEngine({
     jobQueueService,
+});
+
+// External Media domain hook: marks pending media rows failed when a media-backed run
+// fails or crashes, keeping ExecutionEngine and useCaseWorker 100% decoupled from #media/tools.
+executionEngine.onFailure(async ({ input, serverContext, errorCode, errorMessage }) => {
+    const mediaIds = [...new Set([
+        ...(Array.isArray(serverContext?.mediaIds) ? serverContext.mediaIds : []),
+        ...(Array.isArray(input?.serverMediaIds) ? input.serverMediaIds : []),
+        input?.media_id,
+        input?.mediaId,
+        input?.pendingMediaId,
+        serverContext?.pendingMediaId,
+    ].filter((id) => typeof id === "string" && id.trim()))];
+
+    for (const mediaId of mediaIds) {
+        await markMediaFailed({
+            mediaId,
+            errorCode: errorCode || "V3_EXECUTION_FAILED",
+            errorMessage: errorMessage || "Generation failed. Please try again.",
+        }).catch((mediaErr) => {
+            systemLogger.warn(
+                { mediaId, errorCode, err: mediaErr?.message },
+                "[Container] External media failure hook encountered an error"
+            );
+        });
+    }
 });
 
 

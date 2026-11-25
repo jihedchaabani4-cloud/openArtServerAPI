@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createLogger, LogEvents, ErrorSystem, envConfig } from "#shared";
 import { assertOwns, assertOwnsAny } from "#identity/tools";
-import { reserveCredits, settleCredits, rollbackCredits, extendHold } from "#billing/tools";
-import { createPendingMedia, markMediaFailed } from "#media/tools";
 import { jobQueueService as defaultJobQueueService } from "../../services/jobQueueService.js";
 import { GraphCompiler } from "./GraphCompiler.js";
 import { WorkflowExecutor } from "./WorkflowExecutor.js";
@@ -19,21 +17,6 @@ import {
 const engineLogger = createLogger("execution-engine");
 const INLINE_TAG_REGEX = /<(character|element):([^>\s]+)>/gi;
 
-/**
- * Collects the placeholder media IDs strictly belonging to this single execution.
- */
-export function collectTargetMediaIds(input = {}) {
-  const ids = [
-    input?.media_id,
-    input?.mediaId,
-    ...(Array.isArray(input?.serverMediaIds) ? input.serverMediaIds : []),
-  ].filter((id) => typeof id === "string" && id.trim());
-  return [...new Set(ids)];
-}
-
-/**
- * Merges server-verified context targets cleanly into runtime input.
- */
 function mergeServerContext(input = {}, serverContext = null) {
   if (!serverContext || typeof serverContext !== "object") return { ...input };
   const workflowId = serverContext.workflowId || serverContext.v1_workflow_id || input.serverWorkflowId || null;
@@ -61,16 +44,13 @@ function mergeServerContext(input = {}, serverContext = null) {
 }
 
 /**
- * ExecutionEngine (V3 Execution Core)
+ * ExecutionEngine (Universal Black-Box V3 Core)
  *
- * Deep, independent per-job execution engine using strictly `#identity/tools`,
- * `#billing/tools`, and `#media/tools` (zero raw DB writes, zero workflow-wide media wipes):
- * - `launch(...)`: validate contract & ownership (including inline `<character:id>`/`<element:id>`),
- *   strictly compile & estimate cost (fail-closed), reserve credit hold, ensure 1 pending media,
- *   and enqueue 1 independent job with full compensating rollback on error.
- * - `execute(...)`: create isolated `JobExecutionContext`, run hold heartbeat, execute DAG waves,
- *   settle on success or rollback hold + fail ONLY this run's media on error, dispose cache in `finally`.
- * - `rollbackHold(referenceId, metadata)`: compensating rollback for worker crash recovery.
+ * Domain-agnostic execution & error coordinator (zero media coupling, zero billing coupling):
+ * - `launch(...)`: validate required inputs & ownership, compile DAG, enqueue job.
+ * - `execute(...)`: run compiled DAG inside an isolated `JobExecutionContext`, classify & sanitize
+ *   any error, and notify external lifecycle hooks (`onSuccess` / `onFailure`).
+ * - External domain concerns (such as marking pending media rows failed) attach via `onFailure(fn)`.
  */
 export class ExecutionEngine {
   constructor({
@@ -78,15 +58,13 @@ export class ExecutionEngine {
     compiler = null,
     executor = null,
     identityTools = null,
-    billingTools = null,
-    mediaTools = null,
     jobQueueService = undefined,
-    walletService = null,
+    onSuccess = null,
+    onFailure = null,
   } = {}) {
     this.registry = registry || createDefaultV3NodeRegistry();
     this.compiler = compiler || new GraphCompiler(this.registry);
     this.executor = executor || new WorkflowExecutor(this.registry);
-    this.walletService = walletService || null;
 
     this.identityTools = {
       assertOwns,
@@ -94,26 +72,61 @@ export class ExecutionEngine {
       ...(identityTools || {}),
     };
 
-    const customBilling = billingTools || {};
-    this.billingTools = {
-      reserveCredits: customBilling.reserveCredits || customBilling.reserveHold || reserveCredits,
-      settleCredits: customBilling.settleCredits || customBilling.settleHold || settleCredits,
-      rollbackCredits: customBilling.rollbackCredits || customBilling.releaseHold || rollbackCredits,
-      extendHold: customBilling.extendHold || extendHold,
-    };
-
-    this.mediaTools = {
-      createPendingMedia,
-      markMediaFailed,
-      ...(mediaTools || {}),
-    };
-
     this.jobQueueService = jobQueueService === undefined ? defaultJobQueueService : jobQueueService;
     this.workflowAliases = V3_WORKFLOW_ALIASES;
+
+    this._successHooks = [];
+    this._failureHooks = [];
+    if (typeof onSuccess === "function") this._successHooks.push(onSuccess);
+    if (typeof onFailure === "function") this._failureHooks.push(onFailure);
   }
 
-  _billingCtx() {
-    return this.walletService ? { walletService: this.walletService } : {};
+  /**
+   * Registers an external lifecycle hook invoked when a workflow run completes successfully.
+   * Returns an unsubscribe function.
+   */
+  onSuccess(handler) {
+    if (typeof handler !== "function") return () => {};
+    this._successHooks.push(handler);
+    return () => {
+      const idx = this._successHooks.indexOf(handler);
+      if (idx !== -1) this._successHooks.splice(idx, 1);
+    };
+  }
+
+  /**
+   * Registers an external lifecycle hook invoked when a workflow run fails (dispatch, execution, or crash).
+   * Returns an unsubscribe function.
+   */
+  onFailure(handler) {
+    if (typeof handler !== "function") return () => {};
+    this._failureHooks.push(handler);
+    return () => {
+      const idx = this._failureHooks.indexOf(handler);
+      if (idx !== -1) this._failureHooks.splice(idx, 1);
+    };
+  }
+
+  async notifySuccess(payload) {
+    for (const hook of this._successHooks) {
+      await Promise.resolve(hook(payload)).catch((hookErr) => {
+        engineLogger.warn(
+          { runId: payload?.runId, workflowId: payload?.workflowId, err: hookErr?.message },
+          "[ExecutionEngine] onSuccess hook encountered an error"
+        );
+      });
+    }
+  }
+
+  async notifyFailure(payload) {
+    for (const hook of this._failureHooks) {
+      await Promise.resolve(hook(payload)).catch((hookErr) => {
+        engineLogger.warn(
+          { runId: payload?.runId, workflowId: payload?.workflowId, err: hookErr?.message },
+          "[ExecutionEngine] onFailure hook encountered an error"
+        );
+      });
+    }
   }
 
   resolveWorkflow(workflowOrId) {
@@ -135,29 +148,33 @@ export class ExecutionEngine {
     return (
       getWorkflowContract(workflow) || {
         id: workflow.id,
-        aliases: workflow.aliases || [],
-        mediaType: workflow.mediaType || (workflow.category === "video" ? "video" : "image"),
-        mediaRole: workflow.mediaRole || (workflow.category === "character" ? "sheet" : "output"),
-        saveType:
-          workflow.saveType ||
-          (workflow.category === "character"
-            ? "character_sheet"
-            : workflow.category === "video"
-              ? "video_output"
-              : "workflow_output"),
+        aliases: Array.isArray(workflow.aliases) ? workflow.aliases : [],
         requiredInputs: Array.isArray(workflow.requiredInputs) ? workflow.requiredInputs : [],
       }
     );
   }
 
   /**
-   * Validates ownership of explicit references AND inline `<character:id>` / `<element:id>` prompt tags.
+   * Validates ownership of explicit references AND inline `<character:id>` / `<element:id>` prompt tags
+   * when present on the input.
    */
   async verifyInputOwnership(input = {}, userId) {
+    const hasScopedEntities = Boolean(
+      input.character_id ||
+        (Array.isArray(input.characters) && input.characters.length > 0) ||
+        (Array.isArray(input.elements) && input.elements.length > 0) ||
+        (Array.isArray(input.references) && input.references.length > 0) ||
+        input.input_media_id ||
+        (typeof input.prompt === "string" && input.prompt.includes("<"))
+    );
+
     if (!userId) {
-      throw new GenerationValidationError("userId is required to launch a workflow", {
-        field: "userId",
-      });
+      if (hasScopedEntities) {
+        throw new GenerationValidationError("userId is required to launch a workflow with scoped references", {
+          field: "userId",
+        });
+      }
+      return;
     }
 
     if (input.character_id && typeof input.character_id === "string") {
@@ -219,14 +236,14 @@ export class ExecutionEngine {
   }
 
   /**
-   * Phase 1: Synchronous Pre-Queue Launch (1 execution = 1 hold = 1 media = 1 independent job).
+   * Phase 1: Synchronous Pre-Queue Launch (validate contract & ownership -> compile DAG -> enqueue job).
    */
   async launch({
     workflow: workflowInput = null,
     useCaseId = null,
     workflowId = null,
     input = {},
-    userId,
+    userId = null,
     executionId = null,
     idempotencyKey = null,
     traceId = null,
@@ -256,114 +273,56 @@ export class ExecutionEngine {
       }
     }
 
-    // 2. Verify ownership across explicit references and inline prompt tags
+    // 2. Verify ownership across explicit entity references and inline prompt tags
     await this.verifyInputOwnership(mergedInput, userId);
 
-    // 3. Mint execution identity & deterministic billing referenceId
+    // 3. Mint execution identity
     const runId = executionId || randomUUID();
     const effectiveTraceId = traceId || runId;
-    const referenceId = idempotencyKey || `exec:${workflow.id}:${userId}:${runId}`;
+    const referenceId = idempotencyKey || `exec:${workflow.id}:${userId || "anon"}:${runId}`;
 
-    const existingMediaId =
-      mergedInput.media_id ||
-      mergedInput.mediaId ||
-      (Array.isArray(mergedInput.serverMediaIds) && mergedInput.serverMediaIds.length > 0
-        ? mergedInput.serverMediaIds[0]
-        : null);
+    // 4. Fail-closed DAG compilation before queueing
+    this.compiler.compile(workflow);
 
-    // 4. Strict fail-closed compilation & upfront credit estimation
-    const compiledPlan = this.compiler.compile(workflow, {
-      ...mergedInput,
-      media_id: existingMediaId || "pending-placeholder",
-    });
-    const totalCredits = compiledPlan.totalEstimatedCredits;
-    const costBreakdown = compiledPlan.costBreakdown || [];
-
-    // 5. Reserve credit hold via #billing/tools
-    const billingCtx = this._billingCtx();
-    let reservation = null;
-    if (totalCredits > 0) {
-      reservation = await this.billingTools.reserveCredits(
-        {
-          userId,
-          amount: totalCredits,
-          referenceId,
-          metadata: {
-            kind: "v3-upfront-reserve",
-            workflowId: parentDbWorkflowId || workflow.id,
-            blueprintId: workflow.id,
-            runId,
-            mediaId: existingMediaId || null,
-            totalCredits,
-            costBreakdown,
-          },
-        },
-        billingCtx
-      );
-    }
-    const billingHoldId =
-      totalCredits > 0
-        ? reservation?.billingHoldId || reservation?.referenceId || reservation?.reservationId || referenceId
+    const effectiveServerContext = serverContext
+      ? {
+          ...serverContext,
+          ...(parentDbWorkflowId && !serverContext.workflowId ? { workflowId: parentDbWorkflowId } : {}),
+          ...(resolvedProjectId && !serverContext.projectId ? { projectId: resolvedProjectId } : {}),
+        }
+      : parentDbWorkflowId || resolvedProjectId
+        ? { workflowId: parentDbWorkflowId, projectId: resolvedProjectId }
         : null;
 
-    // 6. Ensure strictly 1 pending media placeholder (reuse supplied or create via #media/tools)
-    let pendingMediaId = existingMediaId;
-    try {
-      if (!pendingMediaId) {
-        const placeholder = await this.mediaTools.createPendingMedia({
-          userId,
-          workflowId: parentDbWorkflowId,
-          projectId: resolvedProjectId,
-          stepId: workflow.id,
-          role: contract.mediaRole,
-          saveType: contract.saveType,
-          mediaType: contract.mediaType,
-          width: Number(mergedInput.width || (contract.mediaRole === "sheet" ? 1344 : 1024)),
-          height: Number(mergedInput.height || (contract.mediaRole === "sheet" ? 768 : 1024)),
-        });
-        pendingMediaId = placeholder?.mediaId || placeholder?.id || null;
-      }
-    } catch (mediaErr) {
-      await this._rollbackSafe(billingHoldId, {
-        failedMessage: mediaErr.message,
-        errorCategory: "PLACEHOLDER_CREATION_FAILED",
-      });
-      throw mediaErr;
-    }
-
-    const runtimeInput = {
-      ...mergedInput,
-      ...(pendingMediaId ? { media_id: pendingMediaId } : {}),
-    };
-    const targetMediaIds = collectTargetMediaIds(runtimeInput);
-
-    // 7. Enqueue 1 independent job with compensating rollback on failure
+    // 5. Enqueue 1 independent job
     if (!this.jobQueueService || typeof this.jobQueueService.addUseCaseJob !== "function") {
-      await this._rollbackSafe(billingHoldId, { errorCategory: "QUEUE_NOT_CONFIGURED" });
-      await this._markMediaIdsFailedSafe(
-        targetMediaIds,
-        "QUEUE_NOT_CONFIGURED",
-        "Job queue service is not configured"
-      );
-      throw new GenerationQueueDispatchError("Job queue service is not configured for ExecutionEngine");
+      const err = new GenerationQueueDispatchError("Job queue service is not configured for ExecutionEngine");
+      await this.notifyFailure({
+        stage: "launch",
+        runId,
+        workflowId: workflow.id,
+        userId,
+        input: mergedInput,
+        serverContext: effectiveServerContext,
+        errorCode: "QUEUE_NOT_CONFIGURED",
+        errorMessage: "Job queue service is not configured",
+        error: err,
+      });
+      throw err;
     }
 
     let job;
     try {
       job = await this.jobQueueService.addUseCaseJob({
         useCaseId: workflow.id,
-        input: runtimeInput,
+        ...(workflowInput && typeof workflowInput === "object" ? { workflow: workflowInput } : {}),
+        input: mergedInput,
         userId,
         executionId: runId,
         workflowRunId: runId,
-        billingHoldId,
         idempotencyKey: referenceId,
         traceId: effectiveTraceId,
-        serverContext: {
-          workflowId: parentDbWorkflowId,
-          mediaIds: targetMediaIds,
-          projectId: resolvedProjectId,
-        },
+        serverContext: effectiveServerContext,
       });
     } catch (dispatchErr) {
       const failMessage = `Queue dispatch failed: ${dispatchErr.message}`;
@@ -372,18 +331,22 @@ export class ExecutionEngine {
           event: "V3_QUEUE_DISPATCH_FAILED",
           workflowId: workflow.id,
           runId,
-          billingHoldId,
-          mediaIds: targetMediaIds,
           err: dispatchErr.message,
         },
-        `[ExecutionEngine] Queue dispatch failed for "${workflow.id}". Rolling back hold and failing placeholder.`
+        `[ExecutionEngine] Queue dispatch failed for "${workflow.id}".`
       );
 
-      await this._rollbackSafe(billingHoldId, {
-        failedMessage: dispatchErr.message,
-        errorCategory: "QUEUE_DISPATCH_FAILED",
+      await this.notifyFailure({
+        stage: "launch",
+        runId,
+        workflowId: workflow.id,
+        userId,
+        input: mergedInput,
+        serverContext: effectiveServerContext,
+        errorCode: "QUEUE_DISPATCH_FAILED",
+        errorMessage: failMessage,
+        error: dispatchErr,
       });
-      await this._markMediaIdsFailedSafe(targetMediaIds, "QUEUE_DISPATCH_FAILED", failMessage);
 
       throw new GenerationQueueDispatchError(
         `Failed to enqueue workflow "${workflow.id}": ${dispatchErr.message}`,
@@ -397,9 +360,6 @@ export class ExecutionEngine {
         workflowId: workflow.id,
         runId,
         jobId: job?.id || null,
-        billingHoldId,
-        mediaId: pendingMediaId,
-        totalCredits,
       },
       `[ExecutionEngine] Launched workflow "${workflow.id}"`
     );
@@ -411,104 +371,28 @@ export class ExecutionEngine {
       runId,
       workflowRunId: runId,
       jobId: job?.id || null,
-      mediaId: pendingMediaId,
-      billingHoldId,
-      totalEstimatedCredits: totalCredits,
-      costBreakdown,
-      cost: {
-        totalCredits,
-        currency: "credits",
-        components: costBreakdown,
-      },
-      activeNodeIds: compiledPlan.activeNodeIds || [],
     };
   }
 
   /**
-   * Starts a periodic hold heartbeat timer during worker execution.
-   */
-  startHoldHeartbeat(billingHoldId, { intervalMs = 120_000, extensionSeconds = 300, onHoldExpired = null } = {}) {
-    if (!billingHoldId || typeof this.billingTools.extendHold !== "function") {
-      return { stop: () => {} };
-    }
-    const billingCtx = this._billingCtx();
-    const timer = setInterval(async () => {
-      try {
-        await this.billingTools.extendHold(billingHoldId, extensionSeconds, billingCtx);
-      } catch (err) {
-        const errCode = String(err?.code || "").toUpperCase();
-        const status = Number(err?.statusCode || err?.status || 0);
-        const msg = String(err?.message || "");
-        const isTerminalHoldExpiry =
-          errCode === "HOLD_EXPIRED" ||
-          errCode === "HOLD_NOT_FOUND" ||
-          status === 404 ||
-          status === 409 ||
-          /expired|not found|already (committed|settled|rolled back|released)/i.test(msg);
-
-        engineLogger.warn(
-          { billingHoldId, isTerminalHoldExpiry, err: err.message },
-          `[ExecutionEngine] Hold heartbeat extension failed: ${err.message}`
-        );
-
-        if (isTerminalHoldExpiry) {
-          clearInterval(timer);
-          if (typeof onHoldExpired === "function") {
-            onHoldExpired(err);
-          }
-        }
-      }
-    }, intervalMs);
-    timer.unref?.();
-    return {
-      stop: () => clearInterval(timer),
-    };
-  }
-
-  /**
-   * Phase 2: Asynchronous Worker Execution & Settlement inside an isolated `JobExecutionContext`.
+   * Phase 2: Asynchronous Worker Execution inside an isolated `JobExecutionContext`.
+   * Executes DAG waves fail-fast, sanitizes errors, and invokes external lifecycle hooks.
    */
   async execute({
     workflow: workflowInput = null,
     useCaseId = null,
     workflowId = null,
     input = {},
-    userId,
-    billingHoldId = null,
+    userId = null,
     executionId = null,
     runId = null,
     jobId = null,
     jobContext = null,
     nodeContext = {},
-    heartbeatIntervalMs = 120_000,
   } = {}) {
     const workflow = this.resolveWorkflow(workflowInput || useCaseId || workflowId);
-    const contract = this.resolveContract(workflow);
-    const effectiveHoldId = billingHoldId || input?.billing_hold_id || input?.billingHoldId || null;
-    const serverWorkflowId = input?.serverWorkflowId || null;
-    const serverMediaIds = Array.isArray(input?.serverMediaIds) ? input.serverMediaIds : [];
-    const targetMediaIds = collectTargetMediaIds(input);
-
-    // Fail-closed server target verification
-    const hasUnverifiedTargets = Boolean(
-      input?.media_id && input?.characterId && !serverWorkflowId && serverMediaIds.length === 0
-    );
-    if (hasUnverifiedTargets) {
-      const failMsg = "Persistence requires server-verified targetWorkflowId and targetMediaIds";
-      await this._rollbackSafe(effectiveHoldId, {
-        errorCategory: "FAIL_CLOSED_SECURITY",
-        failedMessage: failMsg,
-      });
-      await this._markMediaIdsFailedSafe(targetMediaIds, "TARGET_VERIFICATION_FAILED", failMsg);
-      throw new GenerationError({
-        code: "TARGET_VERIFICATION_FAILED",
-        message: failMsg,
-        statusCode: 403,
-        isInternal: false,
-      });
-    }
-
     const effectiveRunId = runId || executionId || randomUUID();
+
     const jobCtx =
       jobContext && jobContext.cache instanceof Map
         ? jobContext
@@ -518,18 +402,8 @@ export class ExecutionEngine {
             jobId,
             userId,
             blueprintId: workflow.id,
-            workflowId: serverWorkflowId || input?.workflow_id || null,
-            billingHoldId: effectiveHoldId,
-            mediaId: targetMediaIds[0] || null,
-            mediaRole: contract.mediaRole || "output",
-            saveType: contract.saveType || "default",
+            workflowId: input?.serverWorkflowId || input?.workflow_id || null,
           });
-
-    const heartbeat = this.startHoldHeartbeat(effectiveHoldId, {
-      intervalMs: heartbeatIntervalMs,
-      extensionSeconds: 300,
-      onHoldExpired: () => jobCtx.markHoldExpired(),
-    });
 
     const useExternalPersistence =
       nodeContext?.useExternalPersistence !== undefined
@@ -551,49 +425,38 @@ export class ExecutionEngine {
           jobId: jobCtx.identity.jobId,
           userId,
           workflowId: jobCtx.identity.workflowId,
-          mediaRole: jobCtx.resources.mediaRole,
-          saveType: jobCtx.resources.saveType,
         },
       });
 
       if (!execResult || execResult.status !== "completed") {
-        const err = new GenerationError({
+        throw new GenerationError({
           code: "WORKFLOW_INCOMPLETE",
           message: `Workflow did not complete successfully (status: ${execResult?.status || "unknown"})`,
           statusCode: 500,
           isInternal: true,
         });
-        err.billingBreakdown = execResult?.billingBreakdown || [];
-        throw err;
-      }
-
-      if (effectiveHoldId) {
-        await this.billingTools.settleCredits(
-          {
-            referenceId: effectiveHoldId,
-            metadata: {
-              workflowId: workflow.id,
-              runId: jobCtx.identity.runId,
-              executionId: jobCtx.identity.executionId,
-              costBreakdown: execResult.costBreakdown,
-              totalEstimatedCredits: execResult.totalEstimatedCredits,
-            },
-          },
-          this._billingCtx()
-        );
       }
 
       jobCtx.markCompleted();
 
-      return {
+      const result = {
         ...execResult,
         runId: jobCtx.identity.runId,
         executionId: jobCtx.identity.executionId,
         jobId: jobCtx.identity.jobId,
-        billingHoldId: effectiveHoldId,
-        billingStatus: effectiveHoldId ? "settled" : "not_required",
         state: { ...jobCtx.state },
       };
+
+      await this.notifySuccess({
+        stage: "execute",
+        runId: jobCtx.identity.runId,
+        workflowId: workflow.id,
+        userId,
+        input,
+        result,
+      });
+
+      return result;
     } catch (err) {
       const report = ErrorSystem.process(err, {
         runId: jobCtx.identity.runId,
@@ -612,7 +475,7 @@ export class ExecutionEngine {
           event: LogEvents.USECASE_FAILED,
           workflowId: workflow?.id,
           runId: jobCtx.identity.runId,
-          billingHoldId: effectiveHoldId,
+          nodeId: err?.nodeId || null,
           errorCode: sanitized.code,
           errorCategory: sanitized.category,
           err: err.message,
@@ -620,73 +483,26 @@ export class ExecutionEngine {
         `[ExecutionEngine] Execution failed for "${workflow?.id}": ${err.message}`
       );
 
-      await this._rollbackSafe(effectiveHoldId, {
-        workflowId: workflow?.id,
-        runId: jobCtx.identity.runId,
-        executionId: jobCtx.identity.executionId,
-        failedMessage: report.system?.rawMessage || err.message,
-        errorCode: sanitized.code || report.user?.code || err.code || "V3_EXECUTION_FAILED",
-        errorCategory: sanitized.category || report.user?.category || "SERVER_FAULT",
-      });
-
       const failMsg = sanitized.userMessage || report.user?.message || "Workflow execution failed";
       const failCode = sanitized.code || err.code || report.user?.code || "V3_EXECUTION_FAILED";
-      await this._markMediaIdsFailedSafe(targetMediaIds, failCode, failMsg);
+
+      await this.notifyFailure({
+        stage: "execute",
+        runId: jobCtx.identity.runId,
+        workflowId: workflow?.id,
+        userId,
+        input,
+        nodeId: err?.nodeId || null,
+        errorCode: failCode,
+        errorMessage: failMsg,
+        error: err,
+        errorReport: err.errorReport,
+      });
 
       jobCtx.markFailed(err);
       throw err;
     } finally {
-      heartbeat.stop();
       jobCtx.dispose();
-    }
-  }
-
-  /**
-   * Compensating rollback for held credits (e.g. from worker crash recovery).
-   */
-  async rollbackHold(referenceId, metadata = {}) {
-    if (!referenceId) return null;
-    return this.billingTools.rollbackCredits(
-      {
-        referenceId,
-        metadata: metadata || {},
-      },
-      this._billingCtx()
-    );
-  }
-
-  async _rollbackSafe(billingHoldId, metadata = {}) {
-    if (!billingHoldId) return;
-    await this.billingTools
-      .rollbackCredits(
-        {
-          referenceId: billingHoldId,
-          metadata,
-        },
-        this._billingCtx()
-      )
-      .catch((rbErr) => {
-        engineLogger.warn(
-          { billingHoldId, err: rbErr?.message },
-          "[ExecutionEngine] Credit hold rollback encountered an error"
-        );
-      });
-  }
-
-  async _markMediaIdsFailedSafe(mediaIds, errorCode, errorMessage) {
-    for (const mediaId of mediaIds) {
-      await this.mediaTools
-        .markMediaFailed({
-          mediaId,
-          errorCode,
-          errorMessage,
-        })
-        .catch((mediaErr) => {
-          engineLogger.warn(
-            { mediaId, errorCode, err: mediaErr?.message },
-            "[ExecutionEngine] markMediaFailed encountered an error"
-          );
-        });
     }
   }
 }

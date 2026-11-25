@@ -235,34 +235,24 @@ describe("Generation API Boundary & Separation Tests", () => {
     );
   });
 
-  it("TEST 5: Image Generation V3 Workflow GraphCompiler calculates cost without LLM parameter error", async () => {
+  it("TEST 5: Image Generation V3 Workflow GraphCompiler compiles active nodes and waves", async () => {
     const compiler = new GraphCompiler(createDefaultV3NodeRegistry());
-    const plan = compiler.compile(getV3Workflow("image-generation-v1"), {
-      prompt: "A beautiful mountain sunset",
-      model: "nanobana_pro",
-      media_id: "media-test-123",
-      parameters: { resolution: "1k" },
-    });
+    const plan = compiler.compile(getV3Workflow("image-generation-v1"));
 
     assert.ok(plan, "Execution plan must compile successfully");
-    assert.ok(plan.totalEstimatedCredits > 0, "Total credits must be greater than 0");
-    assert.ok(Array.isArray(plan.costBreakdown), "Cost breakdown must be an array");
-    assert.ok(plan.costBreakdown.length >= 2, "Must include billable nodes");
+    assert.strictEqual(plan.workflowId, "image-generation-v3");
+    assert.ok(Array.isArray(plan.activeNodeIds) && plan.activeNodeIds.length === 4);
+    assert.ok(Array.isArray(plan.waves) && plan.waves.length >= 4);
   });
 
-  it("TEST 6: Video Generation V3 Workflow compiles and calculates billing plan for video models", async () => {
+  it("TEST 6: Video Generation V3 Workflow compiles cleanly into waves", async () => {
     const compiler = new GraphCompiler(createDefaultV3NodeRegistry());
-    const plan = compiler.compile(getV3Workflow("video-generation-v1"), {
-      prompt: "A drone shot over futuristic Tokyo at night",
-      model: "seedance_2_5",
-      media_id: "media-vid-test-456",
-      parameters: { duration: 5, aspect_ratio: "16:9" },
-    });
+    const plan = compiler.compile(getV3Workflow("video-generation-v1"));
 
     assert.ok(plan, "Video execution plan must compile successfully");
     assert.strictEqual(plan.workflowId, "video-generation-v3");
-    assert.ok(plan.totalEstimatedCredits > 0, "Total credits must be greater than 0");
-    assert.ok(plan.costBreakdown.length >= 2, "Must include billable nodes");
+    assert.ok(Array.isArray(plan.activeNodeIds) && plan.activeNodeIds.length === 4);
+    assert.ok(Array.isArray(plan.waves) && plan.waves.length >= 4);
   });
 
   it("TEST 7: LlmNode.estimateCost handles LLM node inputs with skills without capability error", async () => {

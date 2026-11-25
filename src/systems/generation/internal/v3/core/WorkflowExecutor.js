@@ -2,18 +2,9 @@ import { createHash } from "node:crypto";
 import { createLogger } from "#shared";
 import { GraphCompiler, getValueByPath } from "./GraphCompiler.js";
 import { createJobExecutionContext } from "./JobExecutionContext.js";
-import { GenerationValidationError, GenerationHoldExpiredError } from "../../errors.js";
+import { GenerationValidationError } from "../../errors.js";
 
 const v3ExecutorLogger = createLogger("v3-executor");
-
-function assertHoldNotExpired(context, jobCtx, nodeId) {
-  if (context?.holdExpired === true || jobCtx?.state?.holdExpired === true) {
-    throw new GenerationHoldExpiredError(
-      `Execution halted before node "${nodeId}" because the billing hold has expired`,
-      { nodeId, mediaId: jobCtx?.resources?.mediaId || null }
-    );
-  }
-}
 
 /**
  * Deterministically serializes a value for SHA-256 signature calculation.
@@ -34,7 +25,7 @@ function canonicalize(value) {
 
 /**
  * Computes a deterministic SHA-256 signature for a node type, resolved inputs, and optional scope.
- * Including `scope` (`{ runId, userId }`) makes cross-tenant or cross-run collisions structurally impossible.
+ * Including `scope` (`{ runId, userId }`) prevents cross-tenant or cross-run cache collisions.
  *
  * @param {string} nodeType
  * @param {Object} resolvedInputs
@@ -50,87 +41,22 @@ export function computeNodeSignature(nodeType, resolvedInputs, scope = null) {
   return createHash("sha256").update(payload).digest("hex");
 }
 
-const NON_RETRYABLE_CATEGORIES = new Set([
-  "USER_FAULT",
-  "CONTENT_SAFETY_VIOLATION",
-  "HOLD_EXPIRED",
-  "SERVER_FAULT",
-]);
-
-const NON_RETRYABLE_CODES = new Set([
-  "CONTENT_SAFETY_VIOLATION",
-  "PROMPT_VIOLATION",
-  "PROVIDER_CONTENT_POLICY_ERROR",
-  "SAFETY_CHECK_FAILED",
-  "CIRCUIT_BREAKER_OPEN",
-  "HOLD_EXPIRED",
-  "GENERATION_VALIDATION_ERROR",
-  "GENERATION_NOT_FOUND",
-  "OWNERSHIP_VERIFICATION_FAILED",
-  "TARGET_VERIFICATION_FAILED",
-]);
-
 /**
- * Determines whether an error is retryable according to the node's retryPolicy.
+ * WorkflowExecutor (Universal V3 Execution Core)
  *
- * @param {Error} err
- * @param {Object} retryPolicy
- * @returns {boolean}
- */
-export function isErrorRetryable(err, retryPolicy) {
-  if (!retryPolicy || (retryPolicy.maxAttempts ?? 1) <= 1) return false;
-  if (err?.retryable === false) return false;
-  if (err?.is_safe === false) return false;
-
-  const code = String(err?.code || err?.errorCode || "").toUpperCase();
-  if (NON_RETRYABLE_CODES.has(code)) return false;
-
-  const category = String(err?.category || "").toUpperCase();
-  const safetyCategory = String(err?.safetyCategory || "").toUpperCase();
-  if (NON_RETRYABLE_CATEGORIES.has(category) || NON_RETRYABLE_CATEGORIES.has(safetyCategory)) {
-    return false;
-  }
-
-  if (err?.retryable === true) return true;
-
-  const allowedCategories = Array.isArray(retryPolicy.retryableCategories)
-    ? retryPolicy.retryableCategories
-    : ["UPSTREAM_FAULT", "RATE_LIMIT"];
-
-  if (category && allowedCategories.includes(category)) {
-    return true;
-  }
-
-  if (
-    code.includes("RATE_LIMIT") ||
-    code.includes("TIMEOUT") ||
-    code.includes("TRANSIENT") ||
-    code.includes("UPSTREAM")
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-/**
- * WorkflowExecutor (V3 Execution Core)
- *
- * Stateless, database-agnostic parallel wave executor with:
- * - Zero process-global mutable cache state (per-job isolated cache cleared in `finally`)
- * - Scoped SHA-256 signature caching strictly for non-output cacheable nodes (`!OUTPUT_NODE && CACHEABLE !== false`)
- * - Parallel wave execution (`Promise.all`)
- * - Per-node retry with configurable backoff (`retryPolicy`)
+ * Stateless, domain-agnostic, fail-fast parallel wave executor:
+ * - Compiles DAG into parallel waves via `GraphCompiler`
+ * - Zero automatic retries (single-attempt fail-fast so side-effect nodes never duplicate)
+ * - Zero billing or media coupling
+ * - Scoped per-run SHA-256 cache for cacheable non-output nodes, cleared in `finally`
  */
 export class WorkflowExecutor {
-  constructor(registry, { sleepFn = null } = {}) {
+  constructor(registry) {
     if (!registry) {
       throw new GenerationValidationError("WorkflowExecutor requires a NodeRegistry instance");
     }
     this.registry = registry;
     this.compiler = new GraphCompiler(registry);
-    this.sleepFn =
-      sleepFn || ((ms) => (ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve()));
   }
 
   /**
@@ -145,13 +71,7 @@ export class WorkflowExecutor {
    * @returns {Promise<Object>}
    */
   async execute({ workflow, input = {}, jobContext = null, context = {}, signatureCache = null } = {}) {
-    const normalizedInput = {
-      ...input,
-      media_id: input.media_id || (Array.isArray(input.serverMediaIds) ? input.serverMediaIds[0] : input.media_id),
-      workflow_id: input.workflow_id || input.serverWorkflowId || input.workflow_id,
-    };
-
-    const plan = this.compiler.compile(workflow, normalizedInput);
+    const plan = this.compiler.compile(workflow);
     const nodesMap = new Map(workflow.nodes.map((n) => [n.id, n]));
 
     const jobCtx =
@@ -163,11 +83,7 @@ export class WorkflowExecutor {
             jobId: context?.jobId || null,
             userId: context?.userId || null,
             blueprintId: workflow?.id || null,
-            workflowId: normalizedInput.workflow_id || context?.workflowId || null,
-            billingHoldId: context?.billingHoldId || null,
-            mediaId: normalizedInput.media_id || null,
-            mediaRole: context?.mediaRole || "output",
-            saveType: context?.saveType || "default",
+            workflowId: input.workflow_id || input.serverWorkflowId || context?.workflowId || null,
           });
 
     const ownsCache = !(signatureCache instanceof Map);
@@ -180,8 +96,6 @@ export class WorkflowExecutor {
       jobId: jobCtx.identity.jobId,
       userId: context?.userId ?? jobCtx.identity.userId,
       workflowId: context?.workflowId ?? jobCtx.identity.workflowId,
-      mediaRole: context?.mediaRole ?? jobCtx.resources.mediaRole,
-      saveType: context?.saveType ?? jobCtx.resources.saveType,
       jobContext: jobCtx,
     };
 
@@ -203,11 +117,9 @@ export class WorkflowExecutor {
       for (const wave of plan.waves) {
         await Promise.all(
           wave.map(async (nodeId) => {
-            assertHoldNotExpired(executionContext, jobCtx, nodeId);
-
             const step = nodesMap.get(nodeId);
             const def = this.registry.get(step.type);
-            const resolvedInputs = this.resolveNodeInputs(step, def, normalizedInput, nodeOutputs);
+            const resolvedInputs = this.resolveNodeInputs(step, def, input, nodeOutputs);
 
             const isOutputNode = Boolean(def.OUTPUT_NODE);
             const isCacheable = !isOutputNode && def.CACHEABLE !== false;
@@ -226,7 +138,7 @@ export class WorkflowExecutor {
               return;
             }
 
-            const output = await this.executeNodeWithRetry(step, def, resolvedInputs, executionContext);
+            const output = await this.executeNode(step, def, resolvedInputs, executionContext);
             nodeOutputs[nodeId] = output;
 
             if (isCacheable && signature) {
@@ -249,8 +161,6 @@ export class WorkflowExecutor {
         terminalOutputs,
         cacheHits,
         wavesExecuted: plan.waves.length,
-        totalEstimatedCredits: plan.totalEstimatedCredits,
-        costBreakdown: plan.costBreakdown,
       };
     } finally {
       if (ownsCache) {
@@ -310,54 +220,35 @@ export class WorkflowExecutor {
   }
 
   /**
-   * Executes a single node with its declared `retryPolicy`.
+   * Executes a single node fail-fast (single attempt, zero automatic retries).
+   * Attaches `nodeId` to any thrown error before propagating to `ExecutionEngine`.
    */
-  async executeNodeWithRetry(step, def, resolvedInputs, context) {
-    const policy = def.retryPolicy || { maxAttempts: 1, backoffMs: 0 };
-    const maxAttempts = Math.max(1, Number(policy.maxAttempts || 1));
-    const backoffMs = Math.max(0, Number(policy.backoffMs || 0));
+  async executeNode(step, def, resolvedInputs, context) {
+    try {
+      const nodeCtx = {
+        ...context,
+        nodeId: step.id,
+        nodeType: step.type,
+        attempt: 1,
+      };
 
-    let lastErr = null;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      assertHoldNotExpired(context, context?.jobContext, step.id);
-      try {
-        const nodeCtx = {
-          ...context,
-          nodeId: step.id,
-          nodeType: step.type,
-          attempt,
-        };
+      const overrideFn =
+        context?.nodeExecutors?.[step.type] ||
+        context?.nodeExecutors?.[step.id];
 
-        const overrideFn =
-          context?.nodeExecutors?.[step.type] ||
-          context?.nodeExecutors?.[step.id];
-
-        if (typeof overrideFn === "function") {
-          const out = await overrideFn(resolvedInputs, nodeCtx);
-          return out || {};
-        }
-
-        const out = await def.execute(resolvedInputs, nodeCtx);
+      if (typeof overrideFn === "function") {
+        const out = await overrideFn(resolvedInputs, nodeCtx);
         return out || {};
-      } catch (err) {
-        lastErr = err;
-        if (attempt < maxAttempts && isErrorRetryable(err, policy)) {
-          const delay = backoffMs * attempt;
-          v3ExecutorLogger.warn(
-            { nodeId: step.id, type: step.type, attempt, maxAttempts, delay, err: err.message },
-            `[V3Executor] Node "${step.id}" (${step.type}) failed on attempt ${attempt}/${maxAttempts}. Retrying...`
-          );
-          await this.sleepFn(delay);
-          continue;
-        }
-        if (lastErr && typeof lastErr === "object" && !lastErr.nodeId) {
-          lastErr.nodeId = step.id;
-        }
-        throw lastErr;
       }
-    }
 
-    throw lastErr;
+      const out = await def.execute(resolvedInputs, nodeCtx);
+      return out || {};
+    } catch (err) {
+      if (err && typeof err === "object" && !err.nodeId) {
+        err.nodeId = step.id;
+      }
+      throw err;
+    }
   }
 }
 

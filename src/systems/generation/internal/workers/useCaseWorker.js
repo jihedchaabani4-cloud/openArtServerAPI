@@ -2,15 +2,13 @@ import "dotenv/config";
 import { EventEmitter } from "node:events";
 import { Worker } from "bullmq";
 import { workerRedisConnection, wrapWorkerJob, createLogger, LogEvents, envConfig } from "#shared";
-import { markMediaFailed } from "#media/tools";
 import { USECASE_QUEUE_NAME } from "../services/jobQueueService.js";
 import { getExecutionEngine } from "../services/serviceAccessor.js";
 
 const workerLogger = createLogger("worker");
 
 /**
- * Ensures the generation worker only boots after `src/container.js` has wired
- * `ExecutionEngine` (and all peer systems: billing, media, identity).
+ * Ensures the workflow worker only boots after `src/container.js` has wired `ExecutionEngine`.
  */
 export function assertWorkerConfigured() {
   const engine = getExecutionEngine();
@@ -29,24 +27,23 @@ if (!envConfig.isTest) {
       event: "worker.start",
       queue: USECASE_QUEUE_NAME,
     },
-    `Dedicated Generation & Workflow Worker listening on Redis queue: "${USECASE_QUEUE_NAME}"`
+    `Dedicated Workflow Execution Worker listening on Redis queue: "${USECASE_QUEUE_NAME}"`
   );
 }
 
 /**
- * Processes a single queued V3 execution job via `ExecutionEngine.execute(...)`.
- * Preserves per-job identity (`executionId`, `workflowRunId`, `jobId`), `billingHoldId`,
- * and `serverContext` targets.
+ * Processes a single queued V3 workflow job via `ExecutionEngine.execute(...)`.
+ * Domain-agnostic: forwards workflow blueprint/useCaseId, input, and execution identity only.
  */
 export async function processUseCaseJob(job) {
   const engine = assertWorkerConfigured();
 
   const {
+    workflow = null,
     useCaseId,
     workflowId,
     input = {},
-    userId,
-    billingHoldId = null,
+    userId = null,
     executionId = null,
     workflowRunId = null,
     serverContext = null,
@@ -73,15 +70,15 @@ export async function processUseCaseJob(job) {
 
   workerLogger.debug(
     { useCaseId, workflowId, userId, executionId, workflowRunId, jobId: job?.id },
-    `Processing V3 workflow "${useCaseId || workflowId}" for user ${userId}`
+    `Processing V3 workflow "${useCaseId || workflow?.id || workflowId}"`
   );
 
   return engine.execute({
+    ...(workflow ? { workflow } : {}),
     useCaseId,
     workflowId,
     input: mergedInput,
     userId,
-    billingHoldId,
     executionId: executionId || runId,
     runId,
     jobId: job?.id ?? null,
@@ -89,11 +86,9 @@ export async function processUseCaseJob(job) {
 }
 
 /**
- * BullMQ worker configuration for long-running generation jobs (WaveSpeed/LTX).
- * - `lockDuration: 300_000` (5 min) with `lockRenewTime: 60_000` (1 min) prevents false stalls
- *   during Redis blips or CPU-heavy image processing.
- * - `maxStalledCount: 0` fails closed so a stalled worker NEVER re-runs a paid generation twice;
- *   BullMQ emits `failed` and `handleUseCaseWorkerFailure` rolls back the credit hold cleanly.
+ * BullMQ worker configuration for long-running workflow jobs.
+ * - `lockDuration: 300_000` (5 min) with `lockRenewTime: 60_000` (1 min) prevents false stalls.
+ * - `maxStalledCount: 0` fails closed so a stalled worker NEVER re-runs a job twice.
  */
 export const USECASE_WORKER_OPTIONS = Object.freeze({
   concurrency: 10,
@@ -106,7 +101,7 @@ export const USECASE_WORKER_OPTIONS = Object.freeze({
 });
 
 /**
- * Dedicated Generation & Workflow Execution Worker
+ * Dedicated Universal Workflow Execution Worker
  */
 export const useCaseWorker = envConfig.isTest
   ? Object.assign(new EventEmitter(), { close: async () => {} })
@@ -144,8 +139,7 @@ if (!envConfig.isTest) {
 /**
  * Worker crash recovery handler.
  * If `ExecutionEngine.execute` already handled the error (`err.errorReport` present), skips duplicate cleanup.
- * Otherwise rolls back the credit hold via `engine.rollbackHold` and marks ONLY this job's `directMediaIds`
- * failed via `#media/tools` `markMediaFailed` (never wiping sibling runs on a shared workflow).
+ * Otherwise notifies registered external failure hooks on `ExecutionEngine`.
  */
 export async function handleUseCaseWorkerFailure(job, err) {
   if (err?.errorReport) {
@@ -160,49 +154,22 @@ export async function handleUseCaseWorkerFailure(job, err) {
 
   workerLogger.warn(
     { jobId: job?.id },
-    `[Worker] Job #${job?.id} failed without errorReport — Worker crash detected. Running crash cleanup.`
+    `[Worker] Job #${job?.id} failed without errorReport — Worker crash detected. Notifying failure hooks.`
   );
 
   const engine = getExecutionEngine();
-  const billingHoldId = job?.data?.billingHoldId || job?.data?.input?.billing_hold_id || null;
-
-  if (billingHoldId && engine) {
-    await engine
-      .rollbackHold(billingHoldId, {
-        failedMessage: err?.message || "Worker crash",
-        errorCategory: "WORKER_CRASH",
-      })
-      .catch((rollbackErr) => {
-        workerLogger.error(
-          { jobId: job?.id, billingHoldId, err: rollbackErr.message },
-          `[Worker] Billing rollback failed for hold ${billingHoldId} — manual review required.`
-        );
-      });
-  }
-
-  const failMessage = "Generation failed unexpectedly. Your credits have been refunded.";
-
-  const directMediaIds = [
-    ...(Array.isArray(job?.data?.serverContext?.mediaIds) ? job.data.serverContext.mediaIds : []),
-    ...(Array.isArray(job?.data?.input?.serverMediaIds) ? job.data.input.serverMediaIds : []),
-    ...(job?.data?.input?.media_id ? [job.data.input.media_id] : []),
-    ...(job?.data?.input?.mediaId ? [job.data.input.mediaId] : []),
-    ...(job?.data?.input?.pendingMediaId ? [job.data.input.pendingMediaId] : []),
-    ...(job?.data?.serverContext?.pendingMediaId ? [job.data.serverContext.pendingMediaId] : []),
-  ].filter((id) => typeof id === "string" && id.trim());
-
-  const uniqueDirectMediaIds = [...new Set(directMediaIds)];
-
-  for (const mediaId of uniqueDirectMediaIds) {
-    await markMediaFailed({
-      mediaId,
+  if (engine && typeof engine.notifyFailure === "function") {
+    await engine.notifyFailure({
+      stage: "worker_crash",
+      jobId: job?.id ?? null,
+      runId: job?.data?.workflowRunId || job?.data?.executionId || null,
+      workflowId: job?.data?.useCaseId || job?.data?.workflowId || null,
+      userId: job?.data?.userId || null,
+      input: job?.data?.input || {},
+      serverContext: job?.data?.serverContext || null,
       errorCode: "WORKER_CRASH",
-      errorMessage: failMessage,
-    }).catch((mediaErr) => {
-      workerLogger.error(
-        { jobId: job?.id, mediaId, err: mediaErr.message },
-        `[Worker] Direct media status update failed for media ${mediaId} — manual review required.`
-      );
+      errorMessage: "Generation failed unexpectedly. Please try again.",
+      error: err,
     });
   }
 }

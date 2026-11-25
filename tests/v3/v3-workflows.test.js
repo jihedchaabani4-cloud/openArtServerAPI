@@ -338,10 +338,7 @@ describe("V3 Declarative Workflows & Internal Engine", () => {
     assert.equal("style" in refsSpec.inputs, false);
     assert.equal("template_suffix" in refsSpec.inputs, false);
 
-    const plan = compiler.compile(characterSheetV3, {
-      prompt: "Cyberpunk samurai warrior",
-      media_id: "media-sheet-1",
-    });
+    const plan = compiler.compile(characterSheetV3);
     assert.equal(plan.waves.length, 4, "characterSheetV3 must execute in 4 waves");
     assert.deepEqual(plan.waves[0], ["resolve_refs"]);
     assert.deepEqual(plan.waves[1], ["llm_enrich"]);
@@ -351,11 +348,6 @@ describe("V3 Declarative Workflows & Internal Engine", () => {
       "Wave 3 must run extract_character_description and generate_sheet in parallel"
     );
     assert.deepEqual(plan.waves[3], ["save_media"]);
-    assert.equal(
-      plan.costBreakdown.some((c) => c.nodeId === "extract_character_description"),
-      false,
-      "base.extract must contribute 0 credits"
-    );
 
     const llmCalls = [];
     const providerCalls = [];
@@ -707,16 +699,9 @@ describe("V3 Declarative Workflows & Internal Engine", () => {
       ],
     };
 
-    const plan = compiler.compile(storyboardWorkflow, {
-      prompt: "Two-shot neo-noir chase",
-      media_id: "media-shot-0",
-    });
-    assert.equal(plan.totalEstimatedCredits, 9, "1 credit LLM + 0 credit extract + 8 credits nanobana_2");
-    assert.equal(
-      plan.costBreakdown.some((c) => c.nodeId === "extract_opening_shot"),
-      false,
-      "base.extract must have 0 estimated credits"
-    );
+    const plan = compiler.compile(storyboardWorkflow);
+    assert.equal(plan.activeNodeIds.length, 4);
+    assert.equal(plan.waves.length, 4);
 
     const providerCalls = [];
     const baseCtx = createMockNodeExecutionContext();
@@ -784,37 +769,9 @@ describe("V3 Declarative Workflows & Internal Engine", () => {
       assert.equal(tplNode.type, "base.text_template");
       assert.equal(wf.nodes.some((n) => n.type === "base.llm"), false, `${canonicalId} must not invoke base.llm`);
 
-      // Zero-LLM compile-time cost check across resolutions (0 template + 12/18/26 nanobana_2 edit)
-      // Also confirms client-supplied `model` in input is ignored in favor of locked `nanobana_2`
-      const pricingCases = [
-        { resolution: undefined, expectedTotal: 12, expectedImageCost: 12 },
-        { resolution: "1k", expectedTotal: 12, expectedImageCost: 12 },
-        { resolution: "2k", expectedTotal: 18, expectedImageCost: 18 },
-        { resolution: "4k", expectedTotal: 26, expectedImageCost: 26 },
-      ];
-
-      for (const { resolution, expectedTotal, expectedImageCost } of pricingCases) {
-        const plan = compiler.compile(wf, {
-          prompt: "Adjust scene lighting and perspective",
-          source_image_url: "https://cdn.example.com/source-primary.png",
-          model: "gpt-image-2", // must be ignored because workflow hardcodes nanobana_2
-          media_id: "media-edit-1",
-          parameters: resolution ? { resolution } : {},
-        });
-
-        assert.equal(
-          plan.totalEstimatedCredits,
-          expectedTotal,
-          `${canonicalId} at resolution=${resolution || "default"} must price at ${expectedTotal} credits (never 9-credit t2i)`
-        );
-        assert.notEqual(plan.totalEstimatedCredits, 9, `${canonicalId} must never fall back to 8-credit text_to_image pricing`);
-
-        const imageCostEntry = plan.costBreakdown.find((c) => c.nodeId === "generate_image");
-        const tplCostEntry = plan.costBreakdown.find((c) => c.nodeId === "build_prompt");
-        assert.ok(imageCostEntry, `${canonicalId} costBreakdown must include generate_image`);
-        assert.equal(tplCostEntry?.credits || 0, 0);
-        assert.equal(imageCostEntry.credits, expectedImageCost);
-      }
+      const plan = compiler.compile(wf);
+      assert.equal(plan.activeNodeIds.length, 4, `${canonicalId} must compile all 4 active nodes`);
+      assert.equal(plan.waves.length, 4, `${canonicalId} must schedule 4 waves`);
     }
   });
 
@@ -941,22 +898,9 @@ describe("V3 Declarative Workflows & Internal Engine", () => {
     assert.ok(!wf.nodes.some((n) => n.type === "base.llm"), "Must NOT invoke base.llm");
 
     const sourceImageUrl = "https://cdn.example.com/original-subject.png";
-    const planDirect = compiler.compile(wf, {
-      model: "bria_remove_background_3_0",
-      source_image_url: sourceImageUrl,
-      media_id: "media-rmbg-direct",
-      parameters: { preserve_alpha: true },
-    });
-    assert.equal(planDirect.totalEstimatedCredits, 3, "bria_remove_background_3_0 must cost 3 credits (zero LLM)");
-
-    const planGuided = compiler.compile(wf, {
-      model: "bria_remove_background_guided",
-      prompt: "keep only the red sneaker",
-      source_image_url: sourceImageUrl,
-      media_id: "media-rmbg-guided",
-      parameters: { preserve_alpha: true },
-    });
-    assert.equal(planGuided.totalEstimatedCredits, 4, "bria_remove_background_guided must cost 4 credits (zero LLM)");
+    const planDirect = compiler.compile(wf);
+    assert.equal(planDirect.activeNodeIds.length, 2, "image-remove-background-v3 must compile 2 active nodes");
+    assert.equal(planDirect.waves.length, 2);
 
     const providerCalls = [];
     const savedUpdates = [];
@@ -1043,32 +987,9 @@ describe("V3 Declarative Workflows & Internal Engine", () => {
     assert.equal(getV3Workflow("imageEdit"), wf);
 
     const sourceImageUrl = "https://cdn.example.com/primary-portrait.png";
-    const planNano2 = compiler.compile(wf, {
-      model: "nanobana_2",
-      prompt: "Change the jacket to red leather",
-      source_image_url: sourceImageUrl,
-      media_id: "media-edit-1",
-      parameters: { resolution: "1k" },
-    });
-    assert.equal(planNano2.totalEstimatedCredits, 13, "nanobana_2 1k edit must cost 12 + 1 = 13 credits");
-
-    const planNanoPro = compiler.compile(wf, {
-      model: "nanobana_pro",
-      prompt: "Change the jacket to red leather",
-      source_image_url: sourceImageUrl,
-      media_id: "media-edit-2",
-      parameters: { resolution: "1k" },
-    });
-    assert.equal(planNanoPro.totalEstimatedCredits, 19, "nanobana_pro 1k edit must cost 18 + 1 = 19 credits");
-
-    const planGpt2 = compiler.compile(wf, {
-      model: "gpt_image_2",
-      prompt: "Change the jacket to red leather",
-      source_image_url: sourceImageUrl,
-      media_id: "media-edit-3",
-      parameters: { resolution: "1k", quality: "medium" },
-    });
-    assert.equal(planGpt2.totalEstimatedCredits, 15, "gpt_image_2 1k:medium edit must cost 14 + 1 = 15 credits");
+    const planEdit = compiler.compile(wf);
+    assert.equal(planEdit.activeNodeIds.length, 4, "image-edit-v3 must compile 4 active nodes");
+    assert.equal(planEdit.waves.length, 4);
 
     const baseCtx = createMockNodeExecutionContext();
     const llmCalls = [];

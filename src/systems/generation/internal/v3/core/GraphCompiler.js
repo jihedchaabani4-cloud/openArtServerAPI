@@ -28,14 +28,13 @@ function arePortTypesCompatible(sourceType, targetType) {
 }
 
 /**
- * GraphCompiler (ComfyUI-Style Node Engine V3)
+ * GraphCompiler (Universal V3 Node Engine)
  *
  * Performs:
  * 1. Backward graph pruning starting exclusively from terminal nodes (`OUTPUT_NODE: true`)
  * 2. Cycle detection (DFS visiting set)
  * 3. Port & required input validation (`INPUT_TYPES` vs `RETURN_TYPES`)
  * 4. Topological wave scheduling for parallel execution
- * 5. Deterministic upfront credit cost estimation across active nodes
  */
 export class GraphCompiler {
   constructor(registry) {
@@ -46,13 +45,12 @@ export class GraphCompiler {
   }
 
   /**
-   * Compiles a workflow definition and computes its pruned execution plan and upfront credit cost.
+   * Compiles a workflow definition and computes its pruned execution plan and parallel waves.
    *
    * @param {Object} workflowDef
-   * @param {Object} [initialInput={}]
-   * @returns {Object} Compiled plan with activeNodeIds, waves, totalEstimatedCredits, and costBreakdown
+   * @returns {Object} Compiled plan with activeNodeIds, activeNodes, and waves
    */
-  compile(workflowDef, initialInput = {}) {
+  compile(workflowDef) {
     if (!workflowDef || typeof workflowDef !== "object" || !Array.isArray(workflowDef.nodes)) {
       throw new GenerationCompilationError("Invalid workflow definition: must include a nodes array");
     }
@@ -147,30 +145,6 @@ export class GraphCompiler {
 
     // 2. Build Parallel Execution Waves (Kahn's topological leveling on pruned subgraph)
     const waves = this.buildExecutionWaves(nodesMap, activeIds);
-
-    // 3. Compute Deterministic Upfront Cost across Active Nodes
-    let totalEstimatedCredits = 0;
-    const costBreakdown = [];
-
-    for (const nodeId of activeIds) {
-      const step = nodesMap.get(nodeId);
-      const def = this.registry.get(step.type);
-      if (typeof def.estimateCost === "function") {
-        const previewInputs = this.resolveStaticAndInitialInputs(step.inputs, initialInput, def);
-        const cost = Number(def.estimateCost(previewInputs) || 0);
-        if (Number.isNaN(cost) || !Number.isFinite(cost) || cost < 0) {
-          throw new GenerationCompilationError(
-            `Invalid cost calculation for node "${nodeId}" (${step.type})`
-          );
-        }
-        const roundedCost = Math.ceil(cost);
-        if (roundedCost > 0) {
-          totalEstimatedCredits += roundedCost;
-          costBreakdown.push({ nodeId, type: step.type, credits: roundedCost });
-        }
-      }
-    }
-
     const activeNodes = Array.from(activeIds).map((id) => nodesMap.get(id));
 
     return {
@@ -178,8 +152,6 @@ export class GraphCompiler {
       activeNodeIds: Array.from(activeIds),
       activeNodes,
       waves,
-      totalEstimatedCredits,
-      costBreakdown,
     };
   }
 

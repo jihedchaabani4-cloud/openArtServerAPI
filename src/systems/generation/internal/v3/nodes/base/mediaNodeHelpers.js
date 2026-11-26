@@ -187,6 +187,9 @@ export function normalizeModelInvocationError(
     const valErr = new GenerationValidationError(msg, { context: { model } });
     if (code) valErr.code = code;
     if (status === 403 || status === 404) valErr.statusCode = status;
+    if (typeof err?.safeMessage === "string" && err.safeMessage.trim()) {
+      valErr.safeMessage = err.safeMessage;
+    }
     return valErr;
   }
 

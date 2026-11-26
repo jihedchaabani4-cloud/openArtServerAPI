@@ -12,6 +12,7 @@ export function setMediaServices({ assetUploadService, workflowService, db, medi
     if (workflowService) _workflowService = workflowService;
     if (db) _db = db;
     if (mediaRepo) _mediaRepo = mediaRepo;
+    else if (db?.media) _mediaRepo = db.media;
     if (mediaService) _mediaService = mediaService;
 }
 

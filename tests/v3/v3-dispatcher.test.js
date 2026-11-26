@@ -356,6 +356,30 @@ describe("ExecutionEngine — Domain-Agnostic Black-Box Launch, Execution & Life
     assert.equal(sqlLeakSanitized.statusCode, 500);
     assert.ok(!/SELECT|supabase|postgres|relation/i.test(sqlLeakSanitized.userMessage));
 
+    // A2) Runway provider names and raw 400 JSON payloads must never leak into client/DB error_message
+    const { normalizeModelInvocationError } = await import(
+      "../../src/systems/generation/internal/v3/nodes/base/mediaNodeHelpers.js"
+    );
+    const runwayModerationSanitized = sanitizeClientError(
+      new GenerationSafetyError("[Runway] Task failed: RunwayML content moderation blocked prompt")
+    );
+    assert.equal(runwayModerationSanitized.category, "CONTENT_SAFETY_VIOLATION");
+    assert.ok(!/runway|runwayml/i.test(runwayModerationSanitized.userMessage));
+
+    const provider400 = Object.assign(
+      new Error('Provider rejected input payload: [Runway] 400 {"error":"invalid dimension"}'),
+      {
+        code: "INVALID_INPUT_REJECTED_BY_PROVIDER",
+        statusCode: 400,
+        safeMessage: "The model rejected one of the input parameters.",
+      }
+    );
+    const normalized400 = normalizeModelInvocationError(provider400, "gpt_image_2_5_flare");
+    const sanitized400 = sanitizeClientError(normalized400);
+    assert.equal(sanitized400.code, "INVALID_INPUT_REJECTED_BY_PROVIDER");
+    assert.equal(sanitized400.userMessage, "The model rejected one of the input parameters.");
+    assert.ok(!/runway|\{"error"/i.test(sanitized400.userMessage));
+
     // B) Verify WorkflowExecutor runs single-attempt fail-fast across all error types
     const retryRegistry = new NodeRegistry();
     let safetyAttempts = 0;

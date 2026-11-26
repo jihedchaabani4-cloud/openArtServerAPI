@@ -361,7 +361,7 @@ export class GenerationHoldExpiredError extends GenerationError {
 }
 
 const INTERNAL_LEAK_REGEX =
-    /\b(wavespeed|ltx|google|gemini|vertex|openai|anthropic|replicate|fal\.ai|supabase|postgrest|pg_|postgres|redis|bullmq|ioredis)\b/gi;
+    /\b(wavespeed|ltx|runwayml|runway|google|gemini|vertex|openai|anthropic|replicate|fal\.ai|supabase|postgrest|pg_|postgres|redis|bullmq|ioredis)\b/gi;
 const URL_LEAK_REGEX = /https?:\/\/[^\s"'<>]+/gi;
 const SQL_LEAK_REGEX = /\b(SELECT\s+.+\s+FROM|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|relation\s+"[^"]+"\s+does\s+not\s+exist|syntax\s+error\s+at\s+or\s+near)\b/gi;
 const STACK_TRACE_REGEX = /\n\s*at\s+[^\n]+/g;

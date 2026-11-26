@@ -1,0 +1,65 @@
+{
+  "modelId": "runway_act_two",
+  "operation": "character_performance",
+  "providerId": "runway",
+  "providerModelId": "act_two",
+  "sdkMethod": "characterPerformance",
+  "endpoint": "/v1/character_performance",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "input_image": {
+      "providerField": "characterImage"
+    },
+    "input_video": {
+      "providerField": "characterVideo"
+    },
+    "reference_video": {
+      "providerField": "referenceVideo"
+    },
+    "aspect_ratio": {
+      "providerField": "_aspect_ratio"
+    },
+    "body_control": {
+      "providerField": "bodyControl"
+    },
+    "expression_intensity": {
+      "providerField": "expressionIntensity"
+    },
+    "seed": {
+      "providerField": "seed"
+    }
+  },
+  "passthroughParameters": [
+    "duration",
+    "resolution"
+  ],
+  "pricing": {
+    "base_cost_usd": 0.25
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "5": 25,
+      "10": 50,
+      "default": 25
+    }
+  },
+  "outputMap": {
+    "videos.0.url": "output.0",
+    "url": "output.0",
+    "images": "output"
+  },
+  "pollingConfig": {
+    "pollInterval": 6,
+    "timeout": 600,
+    "completedStatuses": [
+      "SUCCEEDED"
+    ],
+    "failedStatuses": [
+      "FAILED",
+      "CANCELLED"
+    ]
+  },
+  "version": "1.0.0"
+}

@@ -1,0 +1,81 @@
+{
+  "id": "magnific_video_upscaler_creative",
+  "domain": "video",
+  "displayName": "Magnific Video Upscaler Creative",
+  "description": "Magnific creative AI video upscaling via Runway — enhance videos up to 4K with optional FPS boost and vivid/natural presets.",
+  "status": "active",
+  "aliases": [
+    "magnific-video-upscaler-creative",
+    "runway_video_upscale",
+    "runway-video-upscale"
+  ],
+  "capabilities": {
+    "input_video": true,
+    "resolution": true,
+    "flavor": true,
+    "creativity": true,
+    "fps_boost": true,
+    "sharpen": true,
+    "smart_grain": true
+  },
+  "canonicalInputs": {
+    "input_video": {
+      "type": "string",
+      "required": true,
+      "max": 1,
+      "description": "Source video URL to upscale"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "720p",
+        "1k",
+        "2k",
+        "4k"
+      ],
+      "default": "2k",
+      "description": "Target output resolution"
+    },
+    "flavor": {
+      "type": "string",
+      "values": [
+        "vivid",
+        "natural"
+      ],
+      "default": "natural",
+      "description": "Upscaling color and detail style"
+    },
+    "creativity": {
+      "type": "number",
+      "required": false,
+      "description": "AI-generated detail amount (0–100)"
+    },
+    "fps_boost": {
+      "type": "boolean",
+      "default": false,
+      "description": "Increase output frame rate during upscaling"
+    },
+    "sharpen": {
+      "type": "number",
+      "required": false,
+      "description": "Sharpness intensity (0–100)"
+    },
+    "smart_grain": {
+      "type": "number",
+      "required": false,
+      "description": "Grain and texture enhancement (0–100)"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "720p": 15,
+      "1k": 20,
+      "2k": 35,
+      "4k": 60,
+      "default": 35
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/runway.svg"
+}

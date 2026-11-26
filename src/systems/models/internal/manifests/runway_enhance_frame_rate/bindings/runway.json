@@ -1,0 +1,48 @@
+{
+  "modelId": "runway_enhance_frame_rate",
+  "operation": "video_upscale",
+  "providerId": "runway",
+  "providerModelId": "enhance_frame_rate",
+  "sdkMethod": "videoUpscale",
+  "endpoint": "/v1/video_upscale",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "input_video": {
+      "providerField": "videoUri"
+    },
+    "fps": {
+      "providerField": "targetFramerate"
+    }
+  },
+  "passthroughParameters": [
+    "duration",
+    "resolution"
+  ],
+  "pricing": {
+    "base_cost_usd": 0.15
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "default": 15
+    }
+  },
+  "outputMap": {
+    "videos.0.url": "output.0",
+    "url": "output.0",
+    "images": "output"
+  },
+  "pollingConfig": {
+    "pollInterval": 6,
+    "timeout": 600,
+    "completedStatuses": [
+      "SUCCEEDED"
+    ],
+    "failedStatuses": [
+      "FAILED",
+      "CANCELLED"
+    ]
+  },
+  "version": "1.0.0"
+}

@@ -1,0 +1,61 @@
+{
+  "modelId": "runway_gen4_image",
+  "operation": "text_to_image",
+  "providerId": "runway",
+  "providerModelId": "gen4_image",
+  "sdkMethod": "textToImage",
+  "endpoint": "/v1/text_to_image",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "prompt": {
+      "providerField": "promptText"
+    },
+    "input_image": {
+      "providerField": "_input_image"
+    },
+    "images": {
+      "providerField": "_images"
+    },
+    "reference_images": {
+      "providerField": "_reference_images"
+    },
+    "aspect_ratio": {
+      "providerField": "_aspect_ratio"
+    },
+    "resolution": {
+      "providerField": "_resolution"
+    },
+    "seed": {
+      "providerField": "seed"
+    }
+  },
+  "pricing": {
+    "base_cost_usd": 0.08
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "720p": 5,
+      "1k": 6,
+      "1080p": 8,
+      "default": 8
+    }
+  },
+  "outputMap": {
+    "images": "output",
+    "url": "output.0"
+  },
+  "pollingConfig": {
+    "pollInterval": 5,
+    "timeout": 300,
+    "completedStatuses": [
+      "SUCCEEDED"
+    ],
+    "failedStatuses": [
+      "FAILED",
+      "CANCELLED"
+    ]
+  },
+  "version": "1.0.0"
+}

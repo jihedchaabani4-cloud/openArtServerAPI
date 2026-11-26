@@ -1,0 +1,59 @@
+{
+  "modelId": "gemini_image_3_1_flash_lite",
+  "operation": "text_to_image",
+  "providerId": "runway",
+  "providerModelId": "gemini_image3.1_flash_lite",
+  "sdkMethod": "textToImage",
+  "endpoint": "/v1/text_to_image",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "prompt": {
+      "providerField": "promptText"
+    },
+    "input_image": {
+      "providerField": "_input_image"
+    },
+    "images": {
+      "providerField": "_images"
+    },
+    "reference_images": {
+      "providerField": "_reference_images"
+    },
+    "aspect_ratio": {
+      "providerField": "_aspect_ratio"
+    },
+    "resolution": {
+      "providerField": "_resolution"
+    },
+    "output_count": {
+      "providerField": "outputCount"
+    }
+  },
+  "pricing": {
+    "base_cost_usd": 0.03
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "1k": 4,
+      "default": 4
+    }
+  },
+  "outputMap": {
+    "images": "output",
+    "url": "output.0"
+  },
+  "pollingConfig": {
+    "pollInterval": 5,
+    "timeout": 300,
+    "completedStatuses": [
+      "SUCCEEDED"
+    ],
+    "failedStatuses": [
+      "FAILED",
+      "CANCELLED"
+    ]
+  },
+  "version": "1.0.0"
+}

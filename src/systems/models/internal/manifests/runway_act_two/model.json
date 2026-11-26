@@ -1,0 +1,86 @@
+{
+  "id": "runway_act_two",
+  "domain": "video",
+  "displayName": "Runway Act-Two",
+  "description": "Runway character performance capture — drive facial expressions and body gestures from a reference performance video.",
+  "status": "active",
+  "aliases": [
+    "act_two",
+    "act-two",
+    "runway-act-two"
+  ],
+  "capabilities": {
+    "input_image": true,
+    "input_video": true,
+    "reference_video": true,
+    "aspect_ratio": true,
+    "body_control": true,
+    "expression_intensity": true,
+    "seed": true
+  },
+  "canonicalInputs": {
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Character portrait image URL (provide input_image or input_video)"
+    },
+    "input_video": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Character video URL (provide input_image or input_video)"
+    },
+    "reference_video": {
+      "type": "string",
+      "required": true,
+      "max": 1,
+      "description": "Driving performance video URL (3–30s)"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "16:9",
+        "9:16",
+        "1:1",
+        "4:3",
+        "3:4",
+        "21:9"
+      ],
+      "default": "16:9",
+      "description": "Output video aspect ratio"
+    },
+    "body_control": {
+      "type": "boolean",
+      "default": true,
+      "description": "Apply full body movements and gestures in addition to facial expressions"
+    },
+    "expression_intensity": {
+      "type": "number",
+      "values": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "default": "3",
+      "description": "Facial expression intensity (1–5)"
+    },
+    "seed": {
+      "type": "number",
+      "required": false,
+      "description": "Random seed for reproducible generation"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "5": 25,
+      "10": 50,
+      "default": 25
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/runway.svg"
+}

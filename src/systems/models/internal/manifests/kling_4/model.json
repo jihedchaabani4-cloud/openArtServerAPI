@@ -1,0 +1,104 @@
+{
+  "id": "kling_4",
+  "domain": "video",
+  "displayName": "Kling 4",
+  "description": "Kling 4 flagship multimodal video model via Runway — T2V, I2V, and V2V up to 1080p with up to 10 image and 5 video references.",
+  "status": "active",
+  "aliases": [
+    "kling-4",
+    "kling4"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "last_frame": true,
+    "input_video": true,
+    "reference_images": true,
+    "reference_videos": true,
+    "duration": true,
+    "aspect_ratio": true,
+    "resolution": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Text prompt describing the video scene or motion"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "First frame image URL for image-to-video generation"
+    },
+    "last_frame": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Last frame image URL for keyframe interpolation (requires input_image)"
+    },
+    "input_video": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Source video URL for video-to-video editing or restyling"
+    },
+    "reference_images": {
+      "type": "array",
+      "required": false,
+      "max": 10,
+      "description": "Up to 10 reference image URLs for visual guidance"
+    },
+    "reference_videos": {
+      "type": "array",
+      "required": false,
+      "max": 5,
+      "description": "Up to 5 reference video URLs for motion or style guidance"
+    },
+    "duration": {
+      "type": "number",
+      "values": [
+        "3",
+        "5",
+        "8",
+        "10",
+        "15"
+      ],
+      "default": "5",
+      "description": "Output video duration in seconds"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "16:9",
+        "9:16",
+        "1:1",
+        "21:9"
+      ],
+      "default": "16:9",
+      "description": "Output video aspect ratio"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "720p",
+        "1080p"
+      ],
+      "default": "720p",
+      "description": "Output video resolution tier"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "3": 42,
+      "5": 70,
+      "8": 112,
+      "10": 140,
+      "15": 210,
+      "default": 70
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/kling.svg"
+}

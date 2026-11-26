@@ -11,6 +11,8 @@ import { RuntimeExecutor } from "../../../src/systems/models/internal/execution/
 import { circuitBreakerRegistry } from "../../../src/systems/models/internal/execution/circuitBreaker.js";
 import { run as runModel } from "../../../src/systems/models/internal/execution/modelRunner.js";
 import { run as runLtx } from "../../../src/systems/models/internal/runtime/ltx/runner.js";
+import { run as runRunway, resolveRunwayRatio } from "../../../src/systems/models/internal/runtime/runway/runner.js";
+import { TaskFailedError, TaskTimedOutError } from "@runwayml/sdk";
 import { runWithContext, baseLogger } from "#shared";
 import modelsRouter, { formatModelDto } from "#models/api";
 import { VideoGenerateNode } from "../../../src/systems/generation/internal/v3/index.js";
@@ -831,6 +833,296 @@ describe("Models Error Classification, Circuit Breaker, Retry-After Fast-Fail, a
       assert.throws(
         () => validateModelInputs("bria_remove_background_3_0", { input_image: imgUrl, prompt: "not supported" }),
         (err) => err.statusCode === 400
+      );
+    });
+  });
+
+  describe("6. RunwayML Provider (@runwayml/sdk) & Full Model Catalog", () => {
+    it("registers all 42 Runway catalog models across Runway, Gemini/Veo, Seedream/Seedance, GPT Image, Kling, and Upscale with non-null defaultCost", () => {
+      const expectedRunwayModels = [
+        // Runway native (6)
+        "runway_gen4_5", "runway_gen4_turbo", "runway_aleph_2", "runway_act_two", "runway_gen4_image", "runway_gen4_image_turbo",
+        // Google / Gemini / Veo (10)
+        "gemini_image_3_1_flash", "gemini_image_3_1_flash_lite", "gemini_image_3_pro", "gemini_2_5_flash_image", "nano_banana_2_1",
+        "veo_3_1", "veo_3_1_fast", "gemini_omni_flash", "gemini_omni_flash_1_1", "gemini_omni_flash_1_2",
+        // Seedream & Seedance (10)
+        "seedream_5_pro", "seedream_5_lite", "seedream_5_flash", "seedream_5_5", "seedream_5_pro_layers", "seedream_5_5_layers",
+        "seedance_2", "seedance_2_fast", "seedance_2_mini", "seedance_2_5_flash",
+        // OpenAI / GPT Image (4)
+        "gpt_image_2_5_flare", "gpt_image_2_5_sunburst", "gpt_image_2_6_flare", "gpt_image_2_6_sunburst",
+        // Kling (9)
+        "kling_4", "kling_4_flash", "kling_3_0_pro", "kling_3_0_standard", "kling_3_0_4k",
+        "kling_o3_pro", "kling_o3_standard", "kling_o3_4k", "kling_2_5_turbo_pro",
+        // Upscaling (3)
+        "magnific_precision_upscaler_v2", "magnific_video_upscaler_creative", "runway_enhance_frame_rate",
+      ];
+
+      const fullConfig = getModelConfig({ fresh: true });
+      for (const modelKey of expectedRunwayModels) {
+        const entry = fullConfig.models.find((m) => m.key === modelKey);
+        assert.ok(entry, `Expected Runway model "${modelKey}" in getModelConfig().models`);
+        assert.strictEqual(typeof entry.pricing?.defaultCost, "number", `Expected numeric defaultCost for "${modelKey}"`);
+        assert.ok(entry.pricing.defaultCost > 0, `Expected positive defaultCost for "${modelKey}"`);
+      }
+
+      // Aliases resolve cleanly
+      assert.strictEqual(getModelConfig("gen4.5").key, "runway_gen4_5");
+      assert.strictEqual(getModelConfig("aleph2").key, "runway_aleph_2");
+      assert.strictEqual(getModelConfig("veo3.1").key, "veo_3_1");
+      assert.strictEqual(getModelConfig("seedream5.5").key, "seedream_5_5");
+      assert.strictEqual(getModelConfig("kling3.0_4k").key, "kling_3_0_4k");
+      assert.strictEqual(getModelConfig("runway_image_upscale").key, "magnific_precision_upscaler_v2");
+    });
+
+    it("resolves multi-mode Runway routes (T2V / I2V / V2V) and exact pixel ratios accurately", () => {
+      const t2v = resolveExecutionPlan("runway_gen4_5", { prompt: "Sunset ocean", duration: 5 });
+      assert.strictEqual(t2v.route.providerId, "runway");
+      assert.strictEqual(t2v.route.sdkMethod, "textToVideo");
+
+      const i2v = resolveExecutionPlan("runway_gen4_5", {
+        prompt: "Camera pans right",
+        input_image: "https://cdn.example.com/start.png",
+        duration: 5,
+      });
+      assert.strictEqual(i2v.route.sdkMethod, "imageToVideo");
+
+      const v2vKling = resolveExecutionPlan("kling_4", {
+        prompt: "Turn into anime style",
+        input_video: "https://cdn.example.com/clip.mp4",
+      });
+      assert.strictEqual(v2vKling.route.sdkMethod, "videoToVideo");
+
+      // Ratio resolver exact literals
+      assert.strictEqual(resolveRunwayRatio("gen4.5", "textToVideo", "16:9", "720p"), "1280:720");
+      assert.strictEqual(resolveRunwayRatio("gen4.5", "imageToVideo", "21:9", "720p"), "1584:672");
+      assert.strictEqual(resolveRunwayRatio("gen4_image", "textToImage", "16:9", "1080p"), "1920:1080");
+      assert.strictEqual(resolveRunwayRatio("kling3.0_4k", "textToVideo", "16:9", "4k"), "3840:2160");
+      assert.strictEqual(resolveRunwayRatio("kling_4", "imageToVideo", "16:9", "1080p"), "auto_1080p");
+      assert.strictEqual(resolveRunwayRatio("kling2.5_turbo_pro", "imageToVideo", "16:9", "1080p"), undefined);
+      assert.strictEqual(resolveRunwayRatio("aleph2", "videoToVideo", "16:9", "720p"), undefined);
+    });
+
+    it("executes textToImage, imageToVideo (first+last frame), imageUpscale, and characterPerformance end-to-end through @runwayml/sdk runner", async () => {
+      const calls = [];
+      const makeWaitable = (outputUrls, credits = 10) => {
+        const p = Promise.resolve({ id: "rw-task-1", estimatedCost: { credits } });
+        p.waitForTaskOutput = async () => ({
+          id: "rw-task-1",
+          status: "SUCCEEDED",
+          output: outputUrls,
+          cost: { credits },
+          createdAt: "2026-11-26T00:00:00Z",
+        });
+        return p;
+      };
+
+      const fakeSdkClient = {
+        textToImage: {
+          create: (body) => {
+            calls.push({ method: "textToImage", body });
+            return makeWaitable(["https://cdn.runwayml.com/gen4-img.png"], 8);
+          },
+        },
+        imageToVideo: {
+          create: (body) => {
+            calls.push({ method: "imageToVideo", body });
+            return makeWaitable(["https://cdn.runwayml.com/veo31.mp4"], 120);
+          },
+        },
+        imageUpscale: {
+          create: (body) => {
+            calls.push({ method: "imageUpscale", body });
+            return makeWaitable(["https://cdn.runwayml.com/upscaled.png"], 6);
+          },
+        },
+        characterPerformance: {
+          create: (body) => {
+            calls.push({ method: "characterPerformance", body });
+            return makeWaitable(["https://cdn.runwayml.com/act-two.mp4"], 25);
+          },
+        },
+      };
+
+      // 1. Image generation with multi-reference
+      const imgRes = await runModel(
+        "runway_gen4_image",
+        {
+          prompt: "Editorial studio portrait",
+          aspect_ratio: "16:9",
+          resolution: "1080p",
+          input_image: "https://cdn.example.com/ref1.png",
+        },
+        { userId: "test-user-rw", sdkClient: fakeSdkClient }
+      );
+      assert.strictEqual(imgRes.images[0].url, "https://cdn.runwayml.com/gen4-img.png");
+      assert.deepStrictEqual(calls[0], {
+        method: "textToImage",
+        body: {
+          model: "gen4_image",
+          promptText: "Editorial studio portrait",
+          ratio: "1920:1080",
+          referenceImages: [{ uri: "https://cdn.example.com/ref1.png" }],
+        },
+      });
+
+      // 2. Veo 3.1 image-to-video with first + last frame
+      const vidRes = await runModel(
+        "veo_3_1",
+        {
+          prompt: "Smooth transition between keyframes",
+          input_image: "https://cdn.example.com/first.png",
+          last_frame: "https://cdn.example.com/last.png",
+          duration: 6,
+          resolution: "1080p",
+          aspect_ratio: "16:9",
+          generate_audio: true,
+        },
+        { userId: "test-user-rw", sdkClient: fakeSdkClient }
+      );
+      assert.strictEqual(vidRes.videos[0].url, "https://cdn.runwayml.com/veo31.mp4");
+      assert.deepStrictEqual(calls[1], {
+        method: "imageToVideo",
+        body: {
+          model: "veo3.1",
+          promptText: "Smooth transition between keyframes",
+          promptImage: [
+            { uri: "https://cdn.example.com/first.png", position: "first" },
+            { uri: "https://cdn.example.com/last.png", position: "last" },
+          ],
+          duration: 6,
+          audio: true,
+          ratio: "1920:1080",
+        },
+      });
+
+      // 3. Magnific Precision Upscaler v2
+      const upRes = await runModel(
+        "magnific_precision_upscaler_v2",
+        {
+          input_image: "https://cdn.example.com/lowres.png",
+          scale_factor: 4,
+          flavor: "photo",
+        },
+        { userId: "test-user-rw", sdkClient: fakeSdkClient }
+      );
+      assert.strictEqual(upRes.images[0].url, "https://cdn.runwayml.com/upscaled.png");
+      assert.deepStrictEqual(calls[2], {
+        method: "imageUpscale",
+        body: {
+          model: "magnific_precision_upscaler_v2",
+          imageUri: "https://cdn.example.com/lowres.png",
+          scaleFactor: 4,
+          flavor: "photo",
+        },
+      });
+
+      // 4. Act-Two Character Performance
+      const actRes = await runModel(
+        "runway_act_two",
+        {
+          input_image: "https://cdn.example.com/char.png",
+          reference_video: "https://cdn.example.com/perf.mp4",
+          aspect_ratio: "16:9",
+          body_control: true,
+          expression_intensity: 4,
+        },
+        { userId: "test-user-rw", sdkClient: fakeSdkClient }
+      );
+      assert.strictEqual(actRes.videos[0].url, "https://cdn.runwayml.com/act-two.mp4");
+      assert.deepStrictEqual(calls[3], {
+        method: "characterPerformance",
+        body: {
+          model: "act_two",
+          character: { type: "image", uri: "https://cdn.example.com/char.png" },
+          reference: { type: "video", uri: "https://cdn.example.com/perf.mp4" },
+          bodyControl: true,
+          expressionIntensity: 4,
+          ratio: "1280:720",
+        },
+      });
+    });
+
+    it("normalizes Runway TaskFailedError (terminal & quota) and TaskTimedOutError cleanly", async () => {
+      const failingClient = {
+        textToVideo: {
+          create: () => {
+            const p = Promise.resolve({ id: "rw-fail" });
+            p.waitForTaskOutput = async () => {
+              throw new TaskFailedError({
+                id: "rw-fail",
+                status: "FAILED",
+                failure: "Content moderation blocked output",
+                cost: { credits: 0 },
+                createdAt: "2026-11-26T00:00:00Z",
+              });
+            };
+            return p;
+          },
+        },
+      };
+
+      await assert.rejects(
+        () =>
+          runRunway({
+            provider: { id: "runway", baseUrl: "https://api.dev.runwayml.com" },
+            binding: { modelId: "runway_gen4_5", providerModelId: "gen4.5", sdkMethod: "textToVideo" },
+            payload: { promptText: "test", duration: 5 },
+            options: { sdkClient: failingClient },
+          }),
+        (err) => err.code === "PROVIDER_JOB_FAILED" && err.terminal === true && err.retryable === false
+      );
+
+      const timeoutClient = {
+        textToVideo: {
+          create: () => {
+            const p = Promise.resolve({ id: "rw-timeout" });
+            p.waitForTaskOutput = async () => {
+              throw new TaskTimedOutError({ id: "rw-timeout", status: "RUNNING", progress: 0.5, createdAt: "2026-11-26T00:00:00Z", estimatedCost: { credits: 60 } });
+            };
+            return p;
+          },
+        },
+      };
+
+      await assert.rejects(
+        () =>
+          runRunway({
+            provider: { id: "runway", baseUrl: "https://api.dev.runwayml.com" },
+            binding: { modelId: "runway_gen4_5", providerModelId: "gen4.5", sdkMethod: "textToVideo" },
+            payload: { promptText: "test", duration: 5 },
+            options: { sdkClient: timeoutClient },
+          }),
+        (err) => err.code === "PROVIDER_TIMEOUT" && err.statusCode === 504
+      );
+
+      // Immediate POST rejection (e.g. 400 "You do not have enough credits to run this task.")
+      // must be caught cleanly (no unhandled rejection crash) and mapped to PROVIDER_QUOTA_EXCEEDED
+      const noCreditsClient = {
+        textToImage: {
+          create: () => {
+            const p = Promise.reject(
+              Object.assign(new Error('400 {"error":"You do not have enough credits to run this task."}'), {
+                status: 400,
+              })
+            );
+            p.waitForTaskOutput = async () => {
+              await new Promise((r) => setTimeout(r, 50));
+              return await p;
+            };
+            return p;
+          },
+        },
+      };
+
+      await assert.rejects(
+        () =>
+          runRunway({
+            provider: { id: "runway", baseUrl: "https://api.dev.runwayml.com" },
+            binding: { modelId: "gpt_image_2_5_flare", providerModelId: "gpt_image_2_5_flare", sdkMethod: "textToImage" },
+            payload: { promptText: "test" },
+            options: { sdkClient: noCreditsClient },
+          }),
+        (err) => err.code === "PROVIDER_QUOTA_EXCEEDED" && err.statusCode === 402
       );
     });
   });

@@ -1,0 +1,101 @@
+{
+  "id": "kling_o3_pro",
+  "domain": "video",
+  "displayName": "Kling O3 Pro",
+  "description": "Kling O3 Pro 1080p omni-modal T2V/I2V/V2V via Runway with native audio and up to 7 reference images.",
+  "status": "active",
+  "aliases": [
+    "klingO3_pro",
+    "kling-o3-pro"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "last_frame": true,
+    "input_video": true,
+    "reference_images": true,
+    "duration": true,
+    "aspect_ratio": true,
+    "resolution": true,
+    "generate_audio": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Text prompt describing the video scene or motion"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "First frame image URL for image-to-video generation"
+    },
+    "last_frame": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Last frame image URL for keyframe interpolation (requires input_image)"
+    },
+    "input_video": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Source video URL for video-to-video editing or restyling"
+    },
+    "reference_images": {
+      "type": "array",
+      "required": false,
+      "max": 7,
+      "description": "Up to 7 reference image URLs for visual guidance"
+    },
+    "duration": {
+      "type": "number",
+      "values": [
+        "3",
+        "5",
+        "8",
+        "10",
+        "15"
+      ],
+      "default": "5",
+      "description": "Output video duration in seconds"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "16:9",
+        "9:16",
+        "1:1"
+      ],
+      "default": "16:9",
+      "description": "Output video aspect ratio"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "1080p"
+      ],
+      "default": "1080p",
+      "description": "Output video resolution tier"
+    },
+    "generate_audio": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether to generate native synchronized audio"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "3": 42,
+      "5": 70,
+      "8": 112,
+      "10": 140,
+      "15": 210,
+      "default": 70
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/kling.svg"
+}

@@ -1,0 +1,59 @@
+{
+  "modelId": "magnific_precision_upscaler_v2",
+  "operation": "upscale",
+  "providerId": "runway",
+  "providerModelId": "magnific_precision_upscaler_v2",
+  "sdkMethod": "imageUpscale",
+  "endpoint": "/v1/image_upscale",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "input_image": {
+      "providerField": "imageUri"
+    },
+    "scale_factor": {
+      "providerField": "scaleFactor"
+    },
+    "flavor": {
+      "providerField": "flavor"
+    },
+    "sharpen": {
+      "providerField": "sharpen"
+    },
+    "smart_grain": {
+      "providerField": "smartGrain"
+    },
+    "ultra_detail": {
+      "providerField": "ultraDetail"
+    }
+  },
+  "pricing": {
+    "base_cost_usd": 0.05
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "2": 6,
+      "4": 12,
+      "8": 24,
+      "16": 40,
+      "default": 6
+    }
+  },
+  "outputMap": {
+    "images": "output",
+    "url": "output.0"
+  },
+  "pollingConfig": {
+    "pollInterval": 5,
+    "timeout": 300,
+    "completedStatuses": [
+      "SUCCEEDED"
+    ],
+    "failedStatuses": [
+      "FAILED",
+      "CANCELLED"
+    ]
+  },
+  "version": "1.0.0"
+}

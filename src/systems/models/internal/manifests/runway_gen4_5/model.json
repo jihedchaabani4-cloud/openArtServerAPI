@@ -1,0 +1,93 @@
+{
+  "id": "runway_gen4_5",
+  "domain": "video",
+  "displayName": "Runway Gen-4.5",
+  "description": "Runway flagship state-of-the-art text-to-video and image-to-video model with cinematic motion quality.",
+  "status": "active",
+  "aliases": [
+    "gen4.5",
+    "gen4_5",
+    "gen-4.5",
+    "runway-gen4.5"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "duration": true,
+    "aspect_ratio": true,
+    "resolution": true,
+    "seed": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Text prompt describing the video scene or motion"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "First frame image URL for image-to-video generation"
+    },
+    "duration": {
+      "type": "number",
+      "values": [
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "10"
+      ],
+      "default": "5",
+      "description": "Output video duration in seconds"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "16:9",
+        "9:16",
+        "4:3",
+        "3:4",
+        "1:1",
+        "21:9"
+      ],
+      "default": "16:9",
+      "description": "Output video aspect ratio"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "720p"
+      ],
+      "default": "720p",
+      "description": "Output video resolution tier"
+    },
+    "seed": {
+      "type": "number",
+      "required": false,
+      "description": "Random seed for reproducible generation"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "2": 24,
+      "3": 36,
+      "4": 48,
+      "5": 60,
+      "6": 72,
+      "7": 84,
+      "8": 96,
+      "9": 108,
+      "10": 120,
+      "default": 60
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/runway.svg"
+}

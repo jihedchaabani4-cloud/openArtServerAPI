@@ -1,0 +1,130 @@
+{
+  "id": "gpt_image_2_5_sunburst",
+  "domain": "image",
+  "displayName": "GPT Image 2.5 Sunburst",
+  "description": "OpenAI GPT Image 2.5 Sunburst via Runway — 1K–4K generation with transparent background support and up to 16 references.",
+  "status": "active",
+  "aliases": [
+    "gpt-image-2.5-sunburst",
+    "gpt-image-2-5-sunburst"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "images": true,
+    "reference_images": true,
+    "aspect_ratio": true,
+    "resolution": true,
+    "quality": true,
+    "background": true,
+    "output_count": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Text prompt describing the desired image"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Primary source or reference image URL"
+    },
+    "images": {
+      "type": "array",
+      "required": false,
+      "max": 16,
+      "description": "Up to 16 reference image URLs for guided generation or editing"
+    },
+    "reference_images": {
+      "type": "array",
+      "required": false,
+      "max": 16,
+      "description": "Alias for images (up to 16 reference images)"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "1:1",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "4:3",
+        "3:4",
+        "5:4",
+        "4:5",
+        "21:9"
+      ],
+      "default": "1:1",
+      "description": "Target image aspect ratio"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "1k",
+        "2k",
+        "4k"
+      ],
+      "default": "1k",
+      "description": "Output image resolution tier"
+    },
+    "quality": {
+      "type": "string",
+      "values": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default": "high",
+      "description": "Rendering quality tier"
+    },
+    "background": {
+      "type": "string",
+      "values": [
+        "auto",
+        "opaque",
+        "transparent"
+      ],
+      "default": "auto",
+      "description": "Background treatment (transparent, opaque, or auto)"
+    },
+    "output_count": {
+      "type": "number",
+      "values": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "default": "1",
+      "description": "Number of images to generate"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "1k:low": 8,
+      "1k:medium": 12,
+      "1k:high": 20,
+      "1k:xhigh": 28,
+      "1k:max": 40,
+      "2k:low": 12,
+      "2k:medium": 18,
+      "2k:high": 32,
+      "2k:xhigh": 42,
+      "2k:max": 56,
+      "4k:low": 18,
+      "4k:medium": 28,
+      "4k:high": 46,
+      "4k:xhigh": 60,
+      "4k:max": 78,
+      "default": 20
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/openai.svg"
+}

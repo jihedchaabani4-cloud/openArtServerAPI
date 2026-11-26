@@ -1,0 +1,100 @@
+{
+  "id": "seedream_5_flash",
+  "domain": "image",
+  "displayName": "Seedream 5 Flash",
+  "description": "ByteDance Seedream 5 Flash via Runway — ultra-fast 1K/2K image generation and multi-image editing.",
+  "status": "active",
+  "aliases": [
+    "seedream5_flash",
+    "seedream-5-flash"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "images": true,
+    "reference_images": true,
+    "aspect_ratio": true,
+    "resolution": true,
+    "output_format": true,
+    "output_count": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Text prompt describing the desired image"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Primary source or reference image URL"
+    },
+    "images": {
+      "type": "array",
+      "required": false,
+      "max": 10,
+      "description": "Up to 10 reference image URLs for guided generation or editing"
+    },
+    "reference_images": {
+      "type": "array",
+      "required": false,
+      "max": 10,
+      "description": "Alias for images (up to 10 reference images)"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9"
+      ],
+      "default": "1:1",
+      "description": "Target image aspect ratio"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "1k",
+        "2k"
+      ],
+      "default": "1k",
+      "description": "Output image resolution tier"
+    },
+    "output_format": {
+      "type": "string",
+      "values": [
+        "png",
+        "jpeg"
+      ],
+      "default": "png",
+      "description": "Output image container format"
+    },
+    "output_count": {
+      "type": "number",
+      "values": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "default": "1",
+      "description": "Number of images to generate"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "1k": 4,
+      "2k": 8,
+      "default": 4
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/bytedance.svg"
+}

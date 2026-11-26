@@ -32,12 +32,14 @@ import { walletMaintenanceQueue } from "#billing/tools";
 describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Cleanup & M5 Context Forwarding", () => {
   let originalRollbackHold;
   let originalExecute;
+  let originalRunWorkflow;
   let originalWalletService;
   let originalMediaRepo;
 
   beforeEach(() => {
     originalRollbackHold = executionEngine.rollbackHold;
     originalExecute = executionEngine.execute;
+    originalRunWorkflow = executionEngine.runWorkflow;
     originalWalletService = executionEngine.walletService;
     originalMediaRepo = getMediaRepository();
   });
@@ -45,6 +47,7 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
   afterEach(() => {
     executionEngine.rollbackHold = originalRollbackHold;
     executionEngine.execute = originalExecute;
+    executionEngine.runWorkflow = originalRunWorkflow;
     executionEngine.walletService = originalWalletService;
     configureMedia({ mediaRepo: originalMediaRepo });
   });
@@ -123,11 +126,11 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
     assert.equal(addedJobs[0].data.workflowRunId, "exec-m5-abc");
   });
 
-  it("TEST 3 (M5): useCaseWorker processUseCaseJob forwards executionId as runId, jobId, and serverContext into executionEngine.execute", async () => {
-    let capturedExecuteArgs = null;
-    executionEngine.execute = async (args) => {
-      capturedExecuteArgs = args;
-      return { status: "completed", runId: args.runId, executionId: args.executionId };
+  it("TEST 3 (M5): useCaseWorker processUseCaseJob forwards executionId as runId, jobId, and serverContext into executionEngine.runWorkflow", async () => {
+    let capturedCall = null;
+    executionEngine.runWorkflow = async (workflowOrId, input, opts) => {
+      capturedCall = { workflowOrId, input, opts };
+      return { status: "completed", runId: opts.runId, executionId: opts.executionId };
     };
 
     const fakeJob = {
@@ -148,14 +151,17 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
     const res = await processUseCaseJob(fakeJob);
 
     assert.equal(res.status, "completed");
-    assert.ok(capturedExecuteArgs, "executionEngine.execute must be invoked");
-    assert.equal(capturedExecuteArgs.executionId, "exec-m5-xyz", "executionId forwarded");
-    assert.equal(capturedExecuteArgs.runId, "exec-m5-xyz", "executionId forwarded as runId when workflowRunId absent");
-    assert.equal(capturedExecuteArgs.jobId, "usecase-exec-m5-xyz", "BullMQ job.id forwarded as jobId");
+    assert.ok(capturedCall, "executionEngine.runWorkflow must be invoked");
+    assert.equal(capturedCall.workflowOrId, "image-generation-v3");
+    assert.deepEqual(capturedCall.input, fakeJob.data.input);
+    assert.equal(capturedCall.opts.async, false, "worker must run workflow with async: false");
+    assert.equal(capturedCall.opts.executionId, "exec-m5-xyz", "executionId forwarded");
+    assert.equal(capturedCall.opts.runId, "exec-m5-xyz", "executionId forwarded as runId when workflowRunId absent");
+    assert.equal(capturedCall.opts.jobId, "usecase-exec-m5-xyz", "BullMQ job.id forwarded as jobId");
     assert.deepEqual(
-      capturedExecuteArgs.serverContext,
+      capturedCall.opts.serverContext,
       fakeJob.data.serverContext,
-      "serverContext must be forwarded opaquely to executionEngine.execute"
+      "serverContext must be forwarded opaquely to executionEngine.runWorkflow"
     );
   });
 

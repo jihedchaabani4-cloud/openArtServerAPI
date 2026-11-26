@@ -1,0 +1,96 @@
+{
+  "id": "veo_3_1",
+  "domain": "video",
+  "displayName": "Google Veo 3.1",
+  "description": "Google Veo 3.1 cinema-grade video generation via Runway with native synchronized audio and first/last keyframe support.",
+  "status": "active",
+  "aliases": [
+    "veo3.1",
+    "veo-3.1",
+    "google_veo_3_1"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "last_frame": true,
+    "duration": true,
+    "aspect_ratio": true,
+    "resolution": true,
+    "generate_audio": true,
+    "negative_prompt": true,
+    "seed": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Text prompt describing the video scene or motion"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "First frame image URL for image-to-video generation"
+    },
+    "last_frame": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Last frame image URL for keyframe interpolation (requires input_image)"
+    },
+    "duration": {
+      "type": "number",
+      "values": [
+        "4",
+        "6",
+        "8"
+      ],
+      "default": "6",
+      "description": "Output video duration in seconds"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "16:9",
+        "9:16"
+      ],
+      "default": "16:9",
+      "description": "Output video aspect ratio"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "720p",
+        "1080p"
+      ],
+      "default": "720p",
+      "description": "Output video resolution tier"
+    },
+    "generate_audio": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether to generate native synchronized audio"
+    },
+    "negative_prompt": {
+      "type": "string",
+      "required": false,
+      "description": "Elements to avoid in the generated video"
+    },
+    "seed": {
+      "type": "number",
+      "required": false,
+      "description": "Random seed for reproducible generation"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "4": 120,
+      "6": 180,
+      "8": 240,
+      "default": 180
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/google.svg"
+}

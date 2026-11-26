@@ -1,0 +1,60 @@
+{
+  "id": "runway_aleph_2",
+  "domain": "video",
+  "displayName": "Runway Aleph 2.0",
+  "description": "Runway flagship in-context video-to-video editing, relighting, restyling, and outpainting model.",
+  "status": "active",
+  "aliases": [
+    "aleph2",
+    "aleph_2",
+    "aleph-2",
+    "runway-aleph-2"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_video": true,
+    "aspect_ratio": true,
+    "seed": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": false,
+      "description": "Text prompt describing the video scene or motion"
+    },
+    "input_video": {
+      "type": "string",
+      "required": true,
+      "max": 1,
+      "description": "Source video URL for video-to-video editing or restyling"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "16:9",
+        "4:3",
+        "3:2",
+        "1:1",
+        "2:3",
+        "3:4",
+        "9:16",
+        "21:9"
+      ],
+      "default": "16:9",
+      "description": "Output video aspect ratio"
+    },
+    "seed": {
+      "type": "number",
+      "required": false,
+      "description": "Random seed for reproducible generation"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "default": 140
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/runway.svg"
+}

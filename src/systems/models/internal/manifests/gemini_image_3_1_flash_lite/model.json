@@ -1,0 +1,88 @@
+{
+  "id": "gemini_image_3_1_flash_lite",
+  "domain": "image",
+  "displayName": "Gemini 3.1 Flash Lite Image",
+  "description": "Google Gemini 3.1 Flash Lite ultra-fast image generation via Runway with up to 14 references.",
+  "status": "active",
+  "aliases": [
+    "gemini_image3.1_flash_lite",
+    "gemini-image-3.1-flash-lite"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "images": true,
+    "reference_images": true,
+    "aspect_ratio": true,
+    "resolution": true,
+    "output_count": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Text prompt describing the desired image"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Primary source or reference image URL"
+    },
+    "images": {
+      "type": "array",
+      "required": false,
+      "max": 14,
+      "description": "Up to 14 reference image URLs for guided generation or editing"
+    },
+    "reference_images": {
+      "type": "array",
+      "required": false,
+      "max": 14,
+      "description": "Alias for images (up to 14 reference images)"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "1:1",
+        "2:3",
+        "3:2",
+        "3:4",
+        "4:3",
+        "4:5",
+        "5:4",
+        "9:16",
+        "16:9",
+        "21:9"
+      ],
+      "default": "1:1",
+      "description": "Target image aspect ratio"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "1k"
+      ],
+      "default": "1k",
+      "description": "Output image resolution tier"
+    },
+    "output_count": {
+      "type": "number",
+      "values": [
+        "1",
+        "4"
+      ],
+      "default": "1",
+      "description": "Number of images to generate"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "1k": 4,
+      "default": 4
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/google.svg"
+}

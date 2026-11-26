@@ -1,0 +1,53 @@
+{
+  "modelId": "seedream_5_pro_layers",
+  "operation": "text_to_image",
+  "providerId": "runway",
+  "providerModelId": "seedream5_pro_layers",
+  "sdkMethod": "textToImage",
+  "endpoint": "/v1/text_to_image",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "prompt": {
+      "providerField": "promptText"
+    },
+    "input_image": {
+      "providerField": "_input_image"
+    },
+    "resolution": {
+      "providerField": "resolution"
+    },
+    "output_format": {
+      "providerField": "outputFormat"
+    }
+  },
+  "pricing": {
+    "base_cost_usd": 0.1
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "auto": 12,
+      "1k": 10,
+      "1.5k": 14,
+      "2k": 18,
+      "default": 12
+    }
+  },
+  "outputMap": {
+    "images": "output",
+    "url": "output.0"
+  },
+  "pollingConfig": {
+    "pollInterval": 5,
+    "timeout": 300,
+    "completedStatuses": [
+      "SUCCEEDED"
+    ],
+    "failedStatuses": [
+      "FAILED",
+      "CANCELLED"
+    ]
+  },
+  "version": "1.0.0"
+}

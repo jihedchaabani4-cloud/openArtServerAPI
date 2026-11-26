@@ -1,0 +1,78 @@
+{
+  "id": "runway_gen4_turbo",
+  "domain": "video",
+  "displayName": "Runway Gen-4 Turbo",
+  "description": "Runway high-speed, cost-efficient image-to-video model for rapid iteration.",
+  "status": "active",
+  "aliases": [
+    "gen4_turbo",
+    "gen4-turbo",
+    "runway-gen4-turbo"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "duration": true,
+    "aspect_ratio": true,
+    "resolution": true,
+    "seed": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": false,
+      "description": "Text prompt describing the video scene or motion"
+    },
+    "input_image": {
+      "type": "string",
+      "required": true,
+      "max": 1,
+      "description": "First frame image URL for image-to-video generation"
+    },
+    "duration": {
+      "type": "number",
+      "values": [
+        "5",
+        "10"
+      ],
+      "default": "5",
+      "description": "Output video duration in seconds"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "16:9",
+        "9:16",
+        "4:3",
+        "3:4",
+        "1:1",
+        "21:9"
+      ],
+      "default": "16:9",
+      "description": "Output video aspect ratio"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "720p"
+      ],
+      "default": "720p",
+      "description": "Output video resolution tier"
+    },
+    "seed": {
+      "type": "number",
+      "required": false,
+      "description": "Random seed for reproducible generation"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "5": 25,
+      "10": 50,
+      "default": 25
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/runway.svg"
+}

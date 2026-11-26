@@ -1,0 +1,63 @@
+{
+  "modelId": "runway_aleph_2",
+  "operation": "video_to_video",
+  "providerId": "runway",
+  "providerModelId": "aleph2",
+  "sdkMethod": "videoToVideo",
+  "endpoint": "/v1/video_to_video",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "prompt": {
+      "providerField": "promptText"
+    },
+    "input_video": {
+      "providerField": "videoUri"
+    },
+    "aspect_ratio": {
+      "providerField": "_aspect_ratio"
+    },
+    "seed": {
+      "providerField": "seed"
+    }
+  },
+  "passthroughParameters": [
+    "duration",
+    "resolution"
+  ],
+  "operations": [
+    {
+      "id": "video_to_video",
+      "operation": "video_to_video",
+      "sdkMethod": "videoToVideo",
+      "endpoint": "/v1/video_to_video",
+      "priority": 1
+    }
+  ],
+  "pricing": {
+    "base_cost_usd": 1.4
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "default": 140
+    }
+  },
+  "outputMap": {
+    "videos.0.url": "output.0",
+    "url": "output.0",
+    "images": "output"
+  },
+  "pollingConfig": {
+    "pollInterval": 6,
+    "timeout": 600,
+    "completedStatuses": [
+      "SUCCEEDED"
+    ],
+    "failedStatuses": [
+      "FAILED",
+      "CANCELLED"
+    ]
+  },
+  "version": "1.0.0"
+}

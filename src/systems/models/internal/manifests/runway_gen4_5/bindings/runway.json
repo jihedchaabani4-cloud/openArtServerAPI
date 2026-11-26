@@ -1,0 +1,87 @@
+{
+  "modelId": "runway_gen4_5",
+  "operation": "text_to_video",
+  "providerId": "runway",
+  "providerModelId": "gen4.5",
+  "sdkMethod": "textToVideo",
+  "endpoint": "/v1/text_to_video",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "prompt": {
+      "providerField": "promptText"
+    },
+    "input_image": {
+      "providerField": "_input_image"
+    },
+    "duration": {
+      "providerField": "duration"
+    },
+    "aspect_ratio": {
+      "providerField": "_aspect_ratio"
+    },
+    "resolution": {
+      "providerField": "_resolution"
+    },
+    "seed": {
+      "providerField": "seed"
+    }
+  },
+  "operations": [
+    {
+      "id": "image_to_video",
+      "operation": "image_to_video",
+      "sdkMethod": "imageToVideo",
+      "endpoint": "/v1/image_to_video",
+      "priority": 2,
+      "when": {
+        "input_image": "present"
+      }
+    },
+    {
+      "id": "text_to_video",
+      "operation": "text_to_video",
+      "sdkMethod": "textToVideo",
+      "endpoint": "/v1/text_to_video",
+      "priority": 3,
+      "when": {
+        "input_image": "absent"
+      }
+    }
+  ],
+  "pricing": {
+    "base_cost_usd": 0.6
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "2": 24,
+      "3": 36,
+      "4": 48,
+      "5": 60,
+      "6": 72,
+      "7": 84,
+      "8": 96,
+      "9": 108,
+      "10": 120,
+      "default": 60
+    }
+  },
+  "outputMap": {
+    "videos.0.url": "output.0",
+    "url": "output.0",
+    "images": "output"
+  },
+  "pollingConfig": {
+    "pollInterval": 6,
+    "timeout": 600,
+    "completedStatuses": [
+      "SUCCEEDED"
+    ],
+    "failedStatuses": [
+      "FAILED",
+      "CANCELLED"
+    ]
+  },
+  "version": "1.0.0"
+}

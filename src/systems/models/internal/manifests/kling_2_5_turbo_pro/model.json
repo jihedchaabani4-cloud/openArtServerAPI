@@ -1,0 +1,83 @@
+{
+  "id": "kling_2_5_turbo_pro",
+  "domain": "video",
+  "displayName": "Kling 2.5 Turbo Pro",
+  "description": "Kling 2.5 Turbo Pro fast 720p/1080p T2V and I2V via Runway with first/last frame support.",
+  "status": "active",
+  "aliases": [
+    "kling2.5_turbo_pro",
+    "kling-2.5-turbo-pro"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "last_frame": true,
+    "duration": true,
+    "aspect_ratio": true,
+    "resolution": true,
+    "cfg_scale": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Text prompt describing the video scene or motion"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "First frame image URL for image-to-video generation"
+    },
+    "last_frame": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Last frame image URL for keyframe interpolation (requires input_image)"
+    },
+    "duration": {
+      "type": "number",
+      "values": [
+        "5",
+        "10"
+      ],
+      "default": "5",
+      "description": "Output video duration in seconds"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "16:9",
+        "9:16",
+        "1:1"
+      ],
+      "default": "16:9",
+      "description": "Output video aspect ratio"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "720p",
+        "1080p"
+      ],
+      "default": "1080p",
+      "description": "Output video resolution tier"
+    },
+    "cfg_scale": {
+      "type": "number",
+      "required": false,
+      "default": 0.5,
+      "description": "Prompt adherence scale (0 = creative freedom, 1 = strict prompt adherence)"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "5": 35,
+      "10": 70,
+      "default": 35
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/kling.svg"
+}

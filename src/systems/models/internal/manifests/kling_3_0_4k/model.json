@@ -1,0 +1,94 @@
+{
+  "id": "kling_3_0_4k",
+  "domain": "video",
+  "displayName": "Kling 3.0 4K",
+  "description": "Kling 3.0 Ultra-HD 4K video generation via Runway with native audio, first/last keyframes, and CFG control.",
+  "status": "active",
+  "aliases": [
+    "kling3.0_4k",
+    "kling-3.0-4k"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "last_frame": true,
+    "duration": true,
+    "aspect_ratio": true,
+    "resolution": true,
+    "generate_audio": true,
+    "cfg_scale": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Text prompt describing the video scene or motion"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "First frame image URL for image-to-video generation"
+    },
+    "last_frame": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Last frame image URL for keyframe interpolation (requires input_image)"
+    },
+    "duration": {
+      "type": "number",
+      "values": [
+        "3",
+        "5",
+        "8",
+        "10",
+        "15"
+      ],
+      "default": "5",
+      "description": "Output video duration in seconds"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "16:9",
+        "9:16",
+        "1:1"
+      ],
+      "default": "16:9",
+      "description": "Output video aspect ratio"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "4k"
+      ],
+      "default": "4k",
+      "description": "Output video resolution tier"
+    },
+    "generate_audio": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether to generate native synchronized audio"
+    },
+    "cfg_scale": {
+      "type": "number",
+      "required": false,
+      "default": 0.5,
+      "description": "Prompt adherence scale (0 = creative freedom, 1 = strict prompt adherence)"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "3": 72,
+      "5": 120,
+      "8": 192,
+      "10": 240,
+      "15": 360,
+      "default": 120
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/kling.svg"
+}

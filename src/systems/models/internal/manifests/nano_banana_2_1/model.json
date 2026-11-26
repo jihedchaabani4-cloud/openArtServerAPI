@@ -1,0 +1,110 @@
+{
+  "id": "nano_banana_2_1",
+  "domain": "image",
+  "displayName": "Nano Banana 2.1",
+  "description": "Google Nano Banana 2.1 reasoning image model via Runway — 1K to 4K with up to 14 references and configurable thinking depth.",
+  "status": "active",
+  "aliases": [
+    "nano_banana_2.1",
+    "nano-banana-2.1",
+    "nanobana_2_1"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "images": true,
+    "reference_images": true,
+    "aspect_ratio": true,
+    "resolution": true,
+    "output_count": true,
+    "thinking_level": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Text prompt describing the desired image"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Primary source or reference image URL"
+    },
+    "images": {
+      "type": "array",
+      "required": false,
+      "max": 14,
+      "description": "Up to 14 reference image URLs for guided generation or editing"
+    },
+    "reference_images": {
+      "type": "array",
+      "required": false,
+      "max": 14,
+      "description": "Alias for images (up to 14 reference images)"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "1:1",
+        "2:3",
+        "3:2",
+        "3:4",
+        "4:3",
+        "4:5",
+        "5:4",
+        "9:16",
+        "16:9",
+        "21:9",
+        "1:4",
+        "4:1",
+        "1:8",
+        "8:1"
+      ],
+      "default": "1:1",
+      "description": "Target image aspect ratio"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "1k",
+        "2k",
+        "4k"
+      ],
+      "default": "1k",
+      "description": "Output image resolution tier"
+    },
+    "output_count": {
+      "type": "number",
+      "values": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "default": "1",
+      "description": "Number of images to generate"
+    },
+    "thinking_level": {
+      "type": "string",
+      "values": [
+        "minimal",
+        "medium",
+        "high"
+      ],
+      "default": "medium",
+      "description": "Reasoning depth before image rendering"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "1k": 10,
+      "2k": 18,
+      "4k": 28,
+      "default": 10
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/google.svg"
+}

@@ -1,0 +1,67 @@
+{
+  "modelId": "seedream_5_5",
+  "operation": "text_to_image",
+  "providerId": "runway",
+  "providerModelId": "seedream5.5",
+  "sdkMethod": "textToImage",
+  "endpoint": "/v1/text_to_image",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "prompt": {
+      "providerField": "promptText"
+    },
+    "input_image": {
+      "providerField": "_input_image"
+    },
+    "images": {
+      "providerField": "_images"
+    },
+    "reference_images": {
+      "providerField": "_reference_images"
+    },
+    "aspect_ratio": {
+      "providerField": "_aspect_ratio"
+    },
+    "resolution": {
+      "providerField": "_resolution"
+    },
+    "background": {
+      "providerField": "background"
+    },
+    "output_format": {
+      "providerField": "outputFormat"
+    },
+    "output_count": {
+      "providerField": "outputCount"
+    }
+  },
+  "pricing": {
+    "base_cost_usd": 0.08
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "1k": 10,
+      "1.5k": 14,
+      "2k": 18,
+      "default": 10
+    }
+  },
+  "outputMap": {
+    "images": "output",
+    "url": "output.0"
+  },
+  "pollingConfig": {
+    "pollInterval": 5,
+    "timeout": 300,
+    "completedStatuses": [
+      "SUCCEEDED"
+    ],
+    "failedStatuses": [
+      "FAILED",
+      "CANCELLED"
+    ]
+  },
+  "version": "1.0.0"
+}

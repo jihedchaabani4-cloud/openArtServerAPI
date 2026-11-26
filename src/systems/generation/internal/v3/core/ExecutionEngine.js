@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createLogger, LogEvents, ErrorSystem } from "#shared";
 import { jobQueueService as defaultJobQueueService } from "../../services/jobQueueService.js";
-import { GraphCompiler } from "./GraphCompiler.js";
+import { GraphCompiler, getValueByPath } from "./GraphCompiler.js";
 import { WorkflowExecutor } from "./WorkflowExecutor.js";
 import { createJobExecutionContext } from "./JobExecutionContext.js";
 import { createDefaultV3NodeRegistry } from "../nodes/index.js";
@@ -9,6 +9,7 @@ import { getV3Workflow } from "../workflows/index.js";
 import {
   GenerationError,
   GenerationValidationError,
+  GenerationCompilationError,
   GenerationQueueDispatchError,
   sanitizeClientError,
 } from "../../errors.js";
@@ -26,11 +27,12 @@ function mergeServerContext(input = {}, serverContext = null) {
 /**
  * ExecutionEngine (Universal Black-Box V3 Core)
  *
- * Domain-agnostic execution & error coordinator (zero media coupling, zero billing coupling, zero entity coupling):
- * - `launch(...)`: validate required inputs, compile DAG, enqueue job with opaque `serverContext`.
- * - `execute(...)`: run compiled DAG inside an isolated `JobExecutionContext`, classify & sanitize
- *   any error, and notify external lifecycle hooks (`onSuccess` / `onFailure`).
- * - External domain concerns (such as marking pending media rows failed) attach via `onFailure(fn)`.
+ * Minimal 3-tool domain-agnostic DAG engine (zero domain, storage, or wallet coupling):
+ * - `verifyInput(workflowOrId, input)`: pure read-only dry-run contract & DAG validator (never throws).
+ * - `calculateCost(workflowOrId, input)`: pure read-only dry-run cost estimator (fail-closed).
+ * - `runWorkflow(workflowOrId, input, opts)`: single unified execution entrypoint supporting both
+ *   asynchronous queue dispatch (`async: true`) and in-process DAG execution (`async: false`).
+ * - External domain concerns attach via lifecycle hooks (`onSuccess` / `onFailure`).
  */
 export class ExecutionEngine {
   constructor({
@@ -117,142 +119,277 @@ export class ExecutionEngine {
   }
 
   /**
-   * Phase 1: Synchronous Pre-Queue Launch (validate required inputs -> compile DAG -> enqueue job).
+   * Tool 1: Pure read-only dry-run validator (zero DB/Redis side effects, never throws).
+   * Resolves workflow, checks `requiredInputs`, and validates DAG compilation.
+   *
+   * @param {string|Object} workflowOrId
+   * @param {Object} [input={}]
+   * @returns {{ valid: boolean, workflowId: string|null, missing: string[], errors: Array<{ code: string, field?: string, message: string }> }}
    */
-  async launch({
-    workflow: workflowInput = null,
-    useCaseId = null,
-    workflowId = null,
-    input = {},
-    userId = null,
-    executionId = null,
-    idempotencyKey = null,
-    traceId = null,
-    serverContext = null,
-  } = {}) {
-    const workflow = this.resolveWorkflow(workflowInput || useCaseId || workflowId);
-    const mergedInput = mergeServerContext(input, serverContext);
+  verifyInput(workflowOrId, input = {}) {
+    let workflow;
+    try {
+      workflow = this.resolveWorkflow(workflowOrId);
+    } catch (err) {
+      return {
+        valid: false,
+        workflowId: typeof workflowOrId === "string" ? workflowOrId : null,
+        missing: [],
+        errors: [
+          {
+            code: "USE_CASE_NOT_FOUND",
+            message: err?.message || `Workflow "${String(workflowOrId)}" not found`,
+          },
+        ],
+      };
+    }
 
-    // 1. Validate required inputs from workflow definition
+    const safeInput = input && typeof input === "object" ? input : {};
+    const missing = [];
+    const errors = [];
+
     const requiredInputs = Array.isArray(workflow.requiredInputs) ? workflow.requiredInputs : [];
     for (const reqField of requiredInputs) {
-      const val = mergedInput[reqField];
+      const val = safeInput[reqField];
       if (val === undefined || val === null || (typeof val === "string" && !val.trim())) {
-        throw new GenerationValidationError(
-          `Workflow "${workflow.id}" requires input "${reqField}" before launch`,
-          { field: reqField }
-        );
+        missing.push(reqField);
+        errors.push({
+          code: "MISSING_REQUIRED_INPUT",
+          field: reqField,
+          message: `Workflow "${workflow.id}" requires input "${reqField}"`,
+        });
       }
     }
 
-    // 2. Mint execution identity
-    const runId = executionId || randomUUID();
-    const effectiveTraceId = traceId || runId;
-    const referenceId = idempotencyKey || `exec:${workflow.id}:${userId || "anon"}:${runId}`;
-
-    // 3. Fail-closed DAG compilation before queueing (cached in O(1) for static workflows)
-    this.compiler.compile(workflow);
-
-    const opaqueServerContext = serverContext ?? null;
-
-    // 4. Enqueue 1 independent job
-    if (!this.jobQueueService || typeof this.jobQueueService.addUseCaseJob !== "function") {
-      const err = new GenerationQueueDispatchError("Job queue service is not configured for ExecutionEngine");
-      await this.notifyFailure({
-        stage: "launch",
-        runId,
-        workflowId: workflow.id,
-        userId,
-        input: mergedInput,
-        serverContext: opaqueServerContext,
-        errorCode: "QUEUE_NOT_CONFIGURED",
-        errorMessage: "Job queue service is not configured",
-        error: err,
-      });
-      throw err;
-    }
-
-    let job;
     try {
-      job = await this.jobQueueService.addUseCaseJob({
-        useCaseId: workflow.id,
-        ...(workflowInput && typeof workflowInput === "object" ? { workflow: workflowInput } : {}),
-        input: mergedInput,
-        userId,
-        executionId: runId,
-        workflowRunId: runId,
-        idempotencyKey: referenceId,
-        traceId: effectiveTraceId,
-        serverContext: opaqueServerContext,
+      this.compiler.compile(workflow);
+    } catch (compileErr) {
+      errors.push({
+        code: "COMPILATION_ERROR",
+        message: compileErr?.message || String(compileErr),
       });
-    } catch (dispatchErr) {
-      const failMessage = `Queue dispatch failed: ${dispatchErr.message}`;
-      engineLogger.error(
-        {
-          event: "V3_QUEUE_DISPATCH_FAILED",
-          workflowId: workflow.id,
-          runId,
-          err: dispatchErr.message,
-        },
-        `[ExecutionEngine] Queue dispatch failed for "${workflow.id}".`
-      );
-
-      await this.notifyFailure({
-        stage: "launch",
-        runId,
-        workflowId: workflow.id,
-        userId,
-        input: mergedInput,
-        serverContext: opaqueServerContext,
-        errorCode: "QUEUE_DISPATCH_FAILED",
-        errorMessage: failMessage,
-        error: dispatchErr,
-      });
-
-      throw new GenerationQueueDispatchError(
-        `Failed to enqueue workflow "${workflow.id}": ${dispatchErr.message}`,
-        { cause: dispatchErr }
-      );
     }
-
-    engineLogger.info(
-      {
-        event: LogEvents.USECASE_STARTED,
-        workflowId: workflow.id,
-        runId,
-        jobId: job?.id || null,
-      },
-      `[ExecutionEngine] Launched workflow "${workflow.id}"`
-    );
 
     return {
-      status: "queued",
+      valid: errors.length === 0,
       workflowId: workflow.id,
-      executionId: runId,
-      runId,
-      workflowRunId: runId,
-      jobId: job?.id || null,
+      missing,
+      errors,
     };
   }
 
   /**
-   * Phase 2: Asynchronous Worker Execution inside an isolated `JobExecutionContext`.
-   * Executes DAG waves fail-fast, sanitizes errors, and invokes external lifecycle hooks.
+   * Tool 2: Pure read-only dry-run cost estimator (zero DB/Redis/wallet side effects).
+   * Compiles the DAG (O(1) cached for frozen workflows), resolves static/input planned values,
+   * and sums per-node `estimateCost(plannedInputs)` fail-closed.
+   *
+   * @param {string|Object} workflowOrId
+   * @param {Object} [input={}]
+   * @returns {{ totalCredits: number, breakdown: Array<{ nodeId: string, nodeType: string, credits: number }> }}
    */
-  async execute({
-    workflow: workflowInput = null,
-    useCaseId = null,
-    workflowId = null,
+  calculateCost(workflowOrId, input = {}) {
+    const workflow = this.resolveWorkflow(workflowOrId);
+    const plan = this.compiler.compile(workflow);
+    const safeInput = input && typeof input === "object" ? input : {};
+
+    let totalCredits = 0;
+    const breakdown = [];
+
+    for (const step of plan.activeNodes) {
+      const def = this.registry.get(step.type);
+      const plannedInputs = {};
+
+      for (const [k, spec] of Object.entries(def.INPUT_TYPES?.required || {})) {
+        if (spec.default !== undefined) {
+          plannedInputs[k] = spec.default;
+        }
+      }
+      for (const [k, spec] of Object.entries(def.INPUT_TYPES?.optional || {})) {
+        if (spec.default !== undefined) {
+          plannedInputs[k] = spec.default;
+        }
+      }
+
+      for (const [inputName, binding] of Object.entries(step.inputs || {})) {
+        if (binding && typeof binding === "object" && binding.fromNode) {
+          continue;
+        }
+        if (binding && typeof binding === "object" && binding.fromInput) {
+          const val = getValueByPath(safeInput, binding.fromInput);
+          if (val !== undefined) {
+            plannedInputs[inputName] = val;
+          } else if (binding.default !== undefined) {
+            plannedInputs[inputName] = binding.default;
+          }
+        } else {
+          plannedInputs[inputName] = binding;
+        }
+      }
+
+      let credits = 0;
+      if (typeof def.estimateCost === "function") {
+        const rawCredits = def.estimateCost(plannedInputs);
+        if (typeof rawCredits !== "number" || !Number.isFinite(rawCredits) || rawCredits < 0) {
+          const err = new GenerationCompilationError(
+            `Invalid cost estimate (${String(rawCredits)}) returned by node "${step.id}" (${step.type})`
+          );
+          err.code = "PRICING_CONFIG_ERROR";
+          err.category = "SERVER_FAULT";
+          err.statusCode = 500;
+          err.retryable = false;
+          throw err;
+        }
+        credits = rawCredits;
+      }
+
+      totalCredits += credits;
+      breakdown.push({
+        nodeId: step.id,
+        nodeType: step.type,
+        credits,
+      });
+    }
+
+    return {
+      totalCredits,
+      breakdown,
+    };
+  }
+
+  /**
+   * Tool 3: Unified workflow execution entrypoint.
+   * - `async !== false` (default): validates via `verifyInput`, enqueues job, returns queued handle.
+   * - `async === false`: executes compiled DAG in-process inside an isolated `JobExecutionContext`,
+   *   sanitizes errors, fires `onSuccess` / `onFailure` hooks, and disposes context in `finally`.
+   *
+   * @param {string|Object} workflowOrId
+   * @param {Object} [input={}]
+   * @param {Object} [opts={}]
+   * @returns {Promise<Object>}
+   */
+  async runWorkflow(
+    workflowOrId,
     input = {},
-    userId = null,
-    executionId = null,
-    runId = null,
-    jobId = null,
-    serverContext = null,
-    jobContext = null,
-    nodeContext = {},
-  } = {}) {
-    const workflow = this.resolveWorkflow(workflowInput || useCaseId || workflowId);
+    {
+      async: isAsync = true,
+      userId = null,
+      executionId = null,
+      runId = null,
+      jobId = null,
+      idempotencyKey = null,
+      traceId = null,
+      serverContext = null,
+      jobContext = null,
+      nodeContext = {},
+    } = {}
+  ) {
+    if (isAsync !== false) {
+      const mergedInput = mergeServerContext(input, serverContext);
+      const validation = this.verifyInput(workflowOrId, mergedInput);
+
+      if (!validation.valid) {
+        const firstErr = validation.errors[0];
+        if (firstErr?.code === "USE_CASE_NOT_FOUND") {
+          const err = new GenerationValidationError(firstErr.message);
+          err.code = "USE_CASE_NOT_FOUND";
+          err.statusCode = 404;
+          throw err;
+        }
+        if (firstErr?.code === "MISSING_REQUIRED_INPUT") {
+          throw new GenerationValidationError(
+            `Workflow "${validation.workflowId}" requires input "${firstErr.field}" before launch`,
+            { field: firstErr.field }
+          );
+        }
+        throw new GenerationCompilationError(firstErr?.message || "Workflow compilation failed");
+      }
+
+      const workflow = this.resolveWorkflow(workflowOrId);
+      const resolvedRunId = runId || executionId || randomUUID();
+      const effectiveTraceId = traceId || resolvedRunId;
+      const referenceId = idempotencyKey || `exec:${workflow.id}:${userId || "anon"}:${resolvedRunId}`;
+      const opaqueServerContext = serverContext ?? null;
+
+      if (!this.jobQueueService || typeof this.jobQueueService.addUseCaseJob !== "function") {
+        const err = new GenerationQueueDispatchError("Job queue service is not configured for ExecutionEngine");
+        await this.notifyFailure({
+          stage: "launch",
+          runId: resolvedRunId,
+          workflowId: workflow.id,
+          userId,
+          input: mergedInput,
+          serverContext: opaqueServerContext,
+          errorCode: "QUEUE_NOT_CONFIGURED",
+          errorMessage: "Job queue service is not configured",
+          error: err,
+        });
+        throw err;
+      }
+
+      let job;
+      try {
+        job = await this.jobQueueService.addUseCaseJob({
+          useCaseId: workflow.id,
+          ...(workflowOrId && typeof workflowOrId === "object" ? { workflow: workflowOrId } : {}),
+          input: mergedInput,
+          userId,
+          executionId: resolvedRunId,
+          workflowRunId: resolvedRunId,
+          idempotencyKey: referenceId,
+          traceId: effectiveTraceId,
+          serverContext: opaqueServerContext,
+        });
+      } catch (dispatchErr) {
+        const failMessage = `Queue dispatch failed: ${dispatchErr.message}`;
+        engineLogger.error(
+          {
+            event: "V3_QUEUE_DISPATCH_FAILED",
+            workflowId: workflow.id,
+            runId: resolvedRunId,
+            err: dispatchErr.message,
+          },
+          `[ExecutionEngine] Queue dispatch failed for "${workflow.id}".`
+        );
+
+        await this.notifyFailure({
+          stage: "launch",
+          runId: resolvedRunId,
+          workflowId: workflow.id,
+          userId,
+          input: mergedInput,
+          serverContext: opaqueServerContext,
+          errorCode: "QUEUE_DISPATCH_FAILED",
+          errorMessage: failMessage,
+          error: dispatchErr,
+        });
+
+        throw new GenerationQueueDispatchError(
+          `Failed to enqueue workflow "${workflow.id}": ${dispatchErr.message}`,
+          { cause: dispatchErr }
+        );
+      }
+
+      engineLogger.info(
+        {
+          event: LogEvents.USECASE_STARTED,
+          workflowId: workflow.id,
+          runId: resolvedRunId,
+          jobId: job?.id || null,
+        },
+        `[ExecutionEngine] Launched workflow "${workflow.id}"`
+      );
+
+      return {
+        status: "queued",
+        workflowId: workflow.id,
+        executionId: resolvedRunId,
+        runId: resolvedRunId,
+        workflowRunId: resolvedRunId,
+        jobId: job?.id || null,
+      };
+    }
+
+    const workflow = this.resolveWorkflow(workflowOrId);
     const effectiveRunId = runId || executionId || randomUUID();
 
     const jobCtx =
@@ -297,9 +434,15 @@ export class ExecutionEngine {
 
       const result = {
         ...execResult,
+        status: "completed",
+        workflowId: workflow.id,
         runId: jobCtx.identity.runId,
         executionId: jobCtx.identity.executionId,
         jobId: jobCtx.identity.jobId,
+        terminalOutputs: execResult.terminalOutputs,
+        nodeOutputs: execResult.nodeOutputs,
+        cacheHits: execResult.cacheHits,
+        wavesExecuted: execResult.wavesExecuted,
         state: { ...jobCtx.state },
       };
 
@@ -362,6 +505,58 @@ export class ExecutionEngine {
     } finally {
       jobCtx.dispose();
     }
+  }
+
+  /**
+   * Backward-compatible alias delegating to `runWorkflow(..., { async: true })`.
+   */
+  async launch({
+    workflow: workflowInput = null,
+    useCaseId = null,
+    workflowId = null,
+    input = {},
+    userId = null,
+    executionId = null,
+    idempotencyKey = null,
+    traceId = null,
+    serverContext = null,
+  } = {}) {
+    return this.runWorkflow(workflowInput || useCaseId || workflowId, input, {
+      async: true,
+      userId,
+      executionId,
+      idempotencyKey,
+      traceId,
+      serverContext,
+    });
+  }
+
+  /**
+   * Backward-compatible alias delegating to `runWorkflow(..., { async: false })`.
+   */
+  async execute({
+    workflow: workflowInput = null,
+    useCaseId = null,
+    workflowId = null,
+    input = {},
+    userId = null,
+    executionId = null,
+    runId = null,
+    jobId = null,
+    serverContext = null,
+    jobContext = null,
+    nodeContext = {},
+  } = {}) {
+    return this.runWorkflow(workflowInput || useCaseId || workflowId, input, {
+      async: false,
+      userId,
+      executionId,
+      runId,
+      jobId,
+      serverContext,
+      jobContext,
+      nodeContext,
+    });
   }
 }
 

@@ -1,0 +1,62 @@
+{
+  "id": "seedream_5_pro_layers",
+  "domain": "image",
+  "displayName": "Seedream 5 Pro Layers",
+  "description": "ByteDance Seedream 5 Pro Layers via Runway — decomposes any image into separate transparent editable PNG layers.",
+  "status": "active",
+  "aliases": [
+    "seedream5_pro_layers",
+    "seedream-5-pro-layers"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "resolution": true,
+    "output_format": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": false,
+      "description": "Text prompt describing the desired image"
+    },
+    "input_image": {
+      "type": "string",
+      "required": true,
+      "max": 1,
+      "description": "Primary source or reference image URL"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "auto",
+        "1k",
+        "1.5k",
+        "2k"
+      ],
+      "default": "auto",
+      "description": "Output image resolution tier"
+    },
+    "output_format": {
+      "type": "string",
+      "values": [
+        "png",
+        "jpeg"
+      ],
+      "default": "png",
+      "description": "Output image container format"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "auto": 12,
+      "1k": 10,
+      "1.5k": 14,
+      "2k": 18,
+      "default": 12
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/bytedance.svg"
+}

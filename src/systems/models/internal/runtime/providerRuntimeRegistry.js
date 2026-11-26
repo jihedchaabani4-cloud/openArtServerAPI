@@ -5,6 +5,7 @@ import { ConfigIntegrityError } from "../errors.js";
 import { createLogger, envConfig } from "#shared";
 
 import { resolveWaveSpeedRoute } from "./wavespeed/resolver.js";
+import { resolveRunwayRoute } from "./runway/resolver.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +18,7 @@ const logger = createLogger("models");
  */
 const providerResolvers = new Map([
   ["wavespeed", resolveWaveSpeedRoute],
+  ["runway", resolveRunwayRoute],
 ]);
 
 /**

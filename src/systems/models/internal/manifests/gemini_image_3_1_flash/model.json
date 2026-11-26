@@ -1,0 +1,98 @@
+{
+  "id": "gemini_image_3_1_flash",
+  "domain": "image",
+  "displayName": "Gemini 3.1 Flash Image",
+  "description": "Google Gemini 3.1 Flash image generation via Runway — 0.5K to 4K with up to 14 character/object references.",
+  "status": "active",
+  "aliases": [
+    "gemini_image3.1_flash",
+    "gemini-image-3.1-flash"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "images": true,
+    "reference_images": true,
+    "aspect_ratio": true,
+    "resolution": true,
+    "output_count": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Text prompt describing the desired image"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Primary source or reference image URL"
+    },
+    "images": {
+      "type": "array",
+      "required": false,
+      "max": 14,
+      "description": "Up to 14 reference image URLs for guided generation or editing"
+    },
+    "reference_images": {
+      "type": "array",
+      "required": false,
+      "max": 14,
+      "description": "Alias for images (up to 14 reference images)"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "1:1",
+        "2:3",
+        "3:2",
+        "3:4",
+        "4:3",
+        "4:5",
+        "5:4",
+        "9:16",
+        "16:9",
+        "21:9",
+        "1:4",
+        "4:1",
+        "1:8",
+        "8:1"
+      ],
+      "default": "1:1",
+      "description": "Target image aspect ratio"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "0.5k",
+        "1k",
+        "2k",
+        "4k"
+      ],
+      "default": "1k",
+      "description": "Output image resolution tier"
+    },
+    "output_count": {
+      "type": "number",
+      "values": [
+        "1",
+        "4"
+      ],
+      "default": "1",
+      "description": "Number of images to generate"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "0.5k": 5,
+      "1k": 8,
+      "2k": 14,
+      "4k": 20,
+      "default": 8
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/google.svg"
+}

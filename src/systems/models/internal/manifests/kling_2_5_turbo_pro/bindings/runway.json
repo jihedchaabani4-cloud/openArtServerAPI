@@ -1,0 +1,83 @@
+{
+  "modelId": "kling_2_5_turbo_pro",
+  "operation": "text_to_video",
+  "providerId": "runway",
+  "providerModelId": "kling2.5_turbo_pro",
+  "sdkMethod": "textToVideo",
+  "endpoint": "/v1/text_to_video",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "prompt": {
+      "providerField": "promptText"
+    },
+    "input_image": {
+      "providerField": "_input_image"
+    },
+    "last_frame": {
+      "providerField": "_last_frame"
+    },
+    "duration": {
+      "providerField": "duration"
+    },
+    "aspect_ratio": {
+      "providerField": "_aspect_ratio"
+    },
+    "resolution": {
+      "providerField": "_resolution"
+    },
+    "cfg_scale": {
+      "providerField": "cfgScale"
+    }
+  },
+  "operations": [
+    {
+      "id": "image_to_video",
+      "operation": "image_to_video",
+      "sdkMethod": "imageToVideo",
+      "endpoint": "/v1/image_to_video",
+      "priority": 2,
+      "when": {
+        "input_image": "present"
+      }
+    },
+    {
+      "id": "text_to_video",
+      "operation": "text_to_video",
+      "sdkMethod": "textToVideo",
+      "endpoint": "/v1/text_to_video",
+      "priority": 3,
+      "when": {
+        "input_image": "absent"
+      }
+    }
+  ],
+  "pricing": {
+    "base_cost_usd": 0.35
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "5": 35,
+      "10": 70,
+      "default": 35
+    }
+  },
+  "outputMap": {
+    "videos.0.url": "output.0",
+    "url": "output.0",
+    "images": "output"
+  },
+  "pollingConfig": {
+    "pollInterval": 6,
+    "timeout": 600,
+    "completedStatuses": [
+      "SUCCEEDED"
+    ],
+    "failedStatuses": [
+      "FAILED",
+      "CANCELLED"
+    ]
+  },
+  "version": "1.0.0"
+}

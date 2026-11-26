@@ -1,0 +1,78 @@
+{
+  "id": "gemini_2_5_flash_image",
+  "domain": "image",
+  "displayName": "Gemini 2.5 Flash Image",
+  "description": "Google Gemini 2.5 Flash image generation via Runway with up to 3 reference images.",
+  "status": "active",
+  "aliases": [
+    "gemini_2.5_flash_image",
+    "gemini-2.5-flash-image"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "images": true,
+    "reference_images": true,
+    "aspect_ratio": true,
+    "resolution": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Text prompt describing the desired image"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Primary source or reference image URL"
+    },
+    "images": {
+      "type": "array",
+      "required": false,
+      "max": 3,
+      "description": "Up to 3 reference image URLs for guided generation or editing"
+    },
+    "reference_images": {
+      "type": "array",
+      "required": false,
+      "max": 3,
+      "description": "Alias for images (up to 3 reference images)"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "1:1",
+        "2:3",
+        "3:2",
+        "3:4",
+        "4:3",
+        "4:5",
+        "5:4",
+        "9:16",
+        "16:9",
+        "21:9"
+      ],
+      "default": "1:1",
+      "description": "Target image aspect ratio"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "1k"
+      ],
+      "default": "1k",
+      "description": "Output image resolution tier"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "1k": 5,
+      "default": 5
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/google.svg"
+}

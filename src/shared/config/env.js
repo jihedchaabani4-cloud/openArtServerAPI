@@ -79,6 +79,9 @@ export const envConfig = {
   get wavespeedApiKey() {
     return process.env.WAVESPEED_API_KEY || null;
   },
+  get runwayApiKey() {
+    return process.env.RUNWAYML_API_SECRET || process.env.RUNWAY_API_KEY || null;
+  },
   get assetListMaxLimit() {
     return Number(process.env.ASSET_LIST_MAX_LIMIT || 200);
   },

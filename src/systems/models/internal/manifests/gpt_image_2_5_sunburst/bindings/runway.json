@@ -1,0 +1,79 @@
+{
+  "modelId": "gpt_image_2_5_sunburst",
+  "operation": "text_to_image",
+  "providerId": "runway",
+  "providerModelId": "gpt_image_2_5_sunburst",
+  "sdkMethod": "textToImage",
+  "endpoint": "/v1/text_to_image",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "prompt": {
+      "providerField": "promptText"
+    },
+    "input_image": {
+      "providerField": "_input_image"
+    },
+    "images": {
+      "providerField": "_images"
+    },
+    "reference_images": {
+      "providerField": "_reference_images"
+    },
+    "aspect_ratio": {
+      "providerField": "_aspect_ratio"
+    },
+    "resolution": {
+      "providerField": "_resolution"
+    },
+    "quality": {
+      "providerField": "quality"
+    },
+    "background": {
+      "providerField": "background"
+    },
+    "output_count": {
+      "providerField": "outputCount"
+    }
+  },
+  "pricing": {
+    "base_cost_usd": 0.12
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "1k:low": 8,
+      "1k:medium": 12,
+      "1k:high": 20,
+      "1k:xhigh": 28,
+      "1k:max": 40,
+      "2k:low": 12,
+      "2k:medium": 18,
+      "2k:high": 32,
+      "2k:xhigh": 42,
+      "2k:max": 56,
+      "4k:low": 18,
+      "4k:medium": 28,
+      "4k:high": 46,
+      "4k:xhigh": 60,
+      "4k:max": 78,
+      "default": 20
+    }
+  },
+  "outputMap": {
+    "images": "output",
+    "url": "output.0"
+  },
+  "pollingConfig": {
+    "pollInterval": 5,
+    "timeout": 300,
+    "completedStatuses": [
+      "SUCCEEDED"
+    ],
+    "failedStatuses": [
+      "FAILED",
+      "CANCELLED"
+    ]
+  },
+  "version": "1.0.0"
+}

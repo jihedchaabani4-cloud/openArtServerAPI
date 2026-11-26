@@ -1,0 +1,118 @@
+{
+  "id": "gemini_omni_flash_1_2",
+  "domain": "video",
+  "displayName": "Gemini Omni Flash 1.2",
+  "description": "Google Gemini Omni Flash 1.2 latest multimodal video generation & editing up to 15s and 4K via Runway.",
+  "status": "active",
+  "aliases": [
+    "gemini_omni_flash_1.2",
+    "gemini-omni-flash-1.2"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "last_frame": true,
+    "input_video": true,
+    "reference_images": true,
+    "reference_videos": true,
+    "duration": true,
+    "aspect_ratio": true,
+    "resolution": true,
+    "mode": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Text prompt describing the video scene or motion"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "First frame image URL for image-to-video generation"
+    },
+    "last_frame": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Last frame image URL for keyframe interpolation (requires input_image)"
+    },
+    "input_video": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Source video URL for video-to-video editing or restyling"
+    },
+    "reference_images": {
+      "type": "array",
+      "required": false,
+      "max": 6,
+      "description": "Up to 6 reference image URLs for visual guidance"
+    },
+    "reference_videos": {
+      "type": "array",
+      "required": false,
+      "max": 3,
+      "description": "Up to 3 reference video URLs for motion or style guidance"
+    },
+    "duration": {
+      "type": "number",
+      "values": [
+        "3",
+        "4",
+        "5",
+        "6",
+        "8",
+        "10",
+        "12",
+        "15"
+      ],
+      "default": "5",
+      "description": "Output video duration in seconds"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "16:9",
+        "9:16"
+      ],
+      "default": "16:9",
+      "description": "Output video aspect ratio"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "360p",
+        "720p",
+        "1080p",
+        "4k"
+      ],
+      "default": "720p",
+      "description": "Output video resolution tier"
+    },
+    "mode": {
+      "type": "string",
+      "values": [
+        "reference",
+        "extend",
+        "edit"
+      ],
+      "default": "reference",
+      "description": "How input_video is used in video-to-video mode"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "3": 36,
+      "5": 60,
+      "8": 96,
+      "10": 120,
+      "15": 180,
+      "default": 60
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/google.svg"
+}

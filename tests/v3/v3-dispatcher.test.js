@@ -865,4 +865,284 @@ describe("ExecutionEngine — Domain-Agnostic Black-Box Launch, Execution & Life
     );
     assert.equal(resolveExecutions, 2, "resolve_references ran fresh for User B (zero cross-tenant cache hit)");
   });
+
+  // =========================================================================
+  // MINIMAL 3-TOOL ENGINE TESTS (verifyInput, calculateCost, runWorkflow)
+  // =========================================================================
+
+  it("verifyInput() performs pure read-only dry-run validation (never throws, zero Redis/DB side effects)", () => {
+    let queueCalls = 0;
+    const engine = new ExecutionEngine({
+      jobQueueService: {
+        addUseCaseJob: async () => {
+          queueCalls++;
+          return { id: "should-not-be-called" };
+        },
+      },
+    });
+
+    // 1. Valid workflow with required inputs
+    const validRes = engine.verifyInput("image-generation-v3", { prompt: "A crystal observatory" });
+    assert.equal(validRes.valid, true);
+    assert.equal(validRes.workflowId, "image-generation-v3");
+    assert.deepEqual(validRes.missing, []);
+    assert.deepEqual(validRes.errors, []);
+
+    // 2. Missing required input
+    const missingRes = engine.verifyInput("image-generation-v3", { model: "nanobana_2" });
+    assert.equal(missingRes.valid, false);
+    assert.equal(missingRes.workflowId, "image-generation-v3");
+    assert.deepEqual(missingRes.missing, ["prompt"]);
+    assert.equal(missingRes.errors.length, 1);
+    assert.equal(missingRes.errors[0].code, "MISSING_REQUIRED_INPUT");
+    assert.equal(missingRes.errors[0].field, "prompt");
+
+    // 3. Unknown workflow ID (never throws)
+    const unknownRes = engine.verifyInput("non-existent-workflow-xyz", { prompt: "hello" });
+    assert.equal(unknownRes.valid, false);
+    assert.equal(unknownRes.workflowId, "non-existent-workflow-xyz");
+    assert.deepEqual(unknownRes.missing, []);
+    assert.equal(unknownRes.errors.length, 1);
+    assert.equal(unknownRes.errors[0].code, "USE_CASE_NOT_FOUND");
+
+    // 4. Invalid DAG (no OUTPUT_NODE / cycle)
+    const invalidDagRes = engine.verifyInput(
+      {
+        id: "broken-dag-wf",
+        requiredInputs: ["topic"],
+        nodes: [
+          {
+            id: "step_a",
+            type: "base.text_template",
+            inputs: { template: "Hello {{topic}}" },
+          },
+        ],
+      },
+      { topic: "world" }
+    );
+    assert.equal(invalidDagRes.valid, false);
+    assert.equal(invalidDagRes.workflowId, "broken-dag-wf");
+    assert.deepEqual(invalidDagRes.missing, []);
+    assert.equal(invalidDagRes.errors.length, 1);
+    assert.equal(invalidDagRes.errors[0].code, "COMPILATION_ERROR");
+    assert.match(invalidDagRes.errors[0].message, /no OUTPUT_NODE/i);
+
+    assert.equal(queueCalls, 0, "verifyInput must never touch jobQueueService");
+  });
+
+  it("calculateCost() estimates credits purely without side effects and fails closed on invalid pricing", () => {
+    let queueCalls = 0;
+    const defaultEngine = new ExecutionEngine({
+      jobQueueService: {
+        addUseCaseJob: async () => {
+          queueCalls++;
+          return { id: "should-not-be-called" };
+        },
+      },
+    });
+
+    // 1. Billable built-in workflow (`image-generation-v3`)
+    const imgCost = defaultEngine.calculateCost("image-generation-v3", {
+      prompt: "Neon skyline",
+      model: "nanobana_2",
+    });
+    assert.equal(typeof imgCost.totalCredits, "number");
+    assert.ok(imgCost.totalCredits > 0, "billable image-generation-v3 must report positive totalCredits");
+    assert.equal(imgCost.breakdown.length, 4);
+    assert.equal(
+      imgCost.breakdown.reduce((sum, item) => sum + item.credits, 0),
+      imgCost.totalCredits
+    );
+    const genEntry = imgCost.breakdown.find((b) => b.nodeId === "generate_image");
+    assert.ok(genEntry && genEntry.nodeType === "base.image_generate" && genEntry.credits > 0);
+
+    // 2. Fail-closed on unknown model / bad pricing (never swallows to 0)
+    assert.throws(
+      () =>
+        defaultEngine.calculateCost("image-generation-v3", {
+          prompt: "Neon skyline",
+          model: "nonexistent_unknown_model_xyz",
+        }),
+      (err) => Boolean(err)
+    );
+
+    // 3. Generic 0-cost non-billable workflow + mock billable node
+    const registry = new NodeRegistry();
+    registry.register({
+      type: "custom.echo_out",
+      OUTPUT_NODE: true,
+      INPUT_TYPES: { required: { text: { type: "STRING" } } },
+      RETURN_TYPES: { result: "STRING" },
+      async execute(inputs) {
+        return { result: inputs.text };
+      },
+    });
+    registry.register({
+      type: "custom.metered_step",
+      OUTPUT_NODE: false,
+      INPUT_TYPES: {
+        required: { units: { type: "INT", default: 1 } },
+      },
+      RETURN_TYPES: { text: "STRING" },
+      estimateCost(planned) {
+        if (planned.units < 0) throw new Error("Negative units invalid");
+        return planned.units * 5;
+      },
+      async execute(inputs) {
+        return { text: `units:${inputs.units}` };
+      },
+    });
+
+    const customEngine = new ExecutionEngine({ registry });
+    const freeWorkflow = {
+      id: "free-generic-wf",
+      nodes: [
+        { id: "out", type: "custom.echo_out", inputs: { text: { fromInput: "msg", default: "hi" } } },
+      ],
+    };
+    const freeCost = customEngine.calculateCost(freeWorkflow, { msg: "hello" });
+    assert.equal(freeCost.totalCredits, 0);
+    assert.deepEqual(freeCost.breakdown, [{ nodeId: "out", nodeType: "custom.echo_out", credits: 0 }]);
+
+    const meteredWorkflow = {
+      id: "metered-generic-wf",
+      nodes: [
+        { id: "meter", type: "custom.metered_step", inputs: { units: { fromInput: "units", default: 2 } } },
+        { id: "out", type: "custom.echo_out", inputs: { text: { fromNode: "meter", output: "text" } } },
+      ],
+    };
+    const meteredCost = customEngine.calculateCost(meteredWorkflow, { units: 3 });
+    assert.equal(meteredCost.totalCredits, 15);
+    assert.deepEqual(meteredCost.breakdown, [
+      { nodeId: "meter", nodeType: "custom.metered_step", credits: 15 },
+      { nodeId: "out", nodeType: "custom.echo_out", credits: 0 },
+    ]);
+
+    assert.throws(
+      () => customEngine.calculateCost(meteredWorkflow, { units: -1 }),
+      /Negative units invalid/
+    );
+    assert.equal(queueCalls, 0, "calculateCost must never touch jobQueueService");
+  });
+
+  it("runWorkflow() supports async queue dispatch and sync in-process execution on generic non-media workflows with lifecycle hooks", async () => {
+    const { TextTemplateNode } = await import(
+      "../../src/systems/generation/internal/v3/nodes/base/textTemplateNode.js"
+    );
+    const { ExtractNode } = await import(
+      "../../src/systems/generation/internal/v3/nodes/base/extractNode.js"
+    );
+
+    const registry = new NodeRegistry();
+    registry.register(TextTemplateNode);
+    registry.register({
+      ...ExtractNode,
+      type: "custom.terminal_extract",
+      OUTPUT_NODE: true,
+    });
+    registry.register({
+      type: "custom.failing_terminal",
+      OUTPUT_NODE: true,
+      INPUT_TYPES: { required: { text: { type: "STRING" } } },
+      RETURN_TYPES: { ok: "BOOLEAN" },
+      async execute() {
+        const err = new Error("Generic terminal failure");
+        err.code = "GENERIC_NODE_FAILURE";
+        throw err;
+      },
+    });
+
+    const genericWorkflow = {
+      id: "generic-template-extract-wf",
+      requiredInputs: ["greeting", "payload"],
+      nodes: [
+        {
+          id: "render",
+          type: "base.text_template",
+          inputs: {
+            template: "{{greeting}}, {{name}}!",
+            variables: { fromInput: "vars", default: {} },
+            defaults: { greeting: { fromInput: "greeting" } },
+          },
+        },
+        {
+          id: "extract",
+          type: "custom.terminal_extract",
+          inputs: {
+            data: { fromInput: "payload" },
+            path: "summary.headline",
+            default_value: { fromNode: "render", output: "text" },
+          },
+        },
+      ],
+    };
+
+    const hookEvents = [];
+    const queuedPayloads = [];
+    const engine = new ExecutionEngine({
+      registry,
+      onSuccess: (evt) => hookEvents.push(`success:${evt.workflowId}:${evt.runId}`),
+      onFailure: (evt) => hookEvents.push(`failure:${evt.stage}:${evt.workflowId}:${evt.errorCode}`),
+      jobQueueService: {
+        addUseCaseJob: async (payload) => {
+          queuedPayloads.push(payload);
+          return { id: `job-${payload.executionId}`, data: payload };
+        },
+      },
+    });
+
+    // 1. async: true (default) enqueues and returns queued handle
+    const queuedRes = await engine.runWorkflow(
+      genericWorkflow,
+      {
+        greeting: "Hello",
+        vars: { greeting: "Hello", name: "Ada" },
+        payload: { summary: { headline: "Black-box engine ready" } },
+      },
+      { async: true, executionId: "run-generic-async-1", userId: "user-generic-1" }
+    );
+    assert.equal(queuedRes.status, "queued");
+    assert.equal(queuedRes.workflowId, "generic-template-extract-wf");
+    assert.equal(queuedRes.runId, "run-generic-async-1");
+    assert.equal(queuedRes.jobId, "job-run-generic-async-1");
+    assert.equal(queuedPayloads.length, 1);
+
+    // 2. async: false runs DAG in-process, returns terminalOutputs & nodeOutputs, fires onSuccess
+    const syncRes = await engine.runWorkflow(
+      genericWorkflow,
+      {
+        greeting: "Hello",
+        vars: { greeting: "Hello", name: "Ada" },
+        payload: { summary: { headline: "" } },
+      },
+      { async: false, runId: "run-generic-sync-1" }
+    );
+    assert.equal(syncRes.status, "completed");
+    assert.equal(syncRes.workflowId, "generic-template-extract-wf");
+    assert.equal(syncRes.runId, "run-generic-sync-1");
+    assert.equal(syncRes.nodeOutputs.render.text, "Hello, Ada!");
+    assert.deepEqual(syncRes.terminalOutputs.extract, {
+      value: "Hello, Ada!",
+      text: "Hello, Ada!",
+    });
+    assert.equal(syncRes.state.status, "completed");
+    assert.deepEqual(hookEvents, ["success:generic-template-extract-wf:run-generic-sync-1"]);
+
+    // 3. async: false fires onFailure when a node throws
+    const failingWorkflow = {
+      id: "generic-fail-wf",
+      nodes: [
+        {
+          id: "boom",
+          type: "custom.failing_terminal",
+          inputs: { text: "trigger" },
+        },
+      ],
+    };
+    await assert.rejects(
+      () => engine.runWorkflow(failingWorkflow, {}, { async: false, runId: "run-generic-fail-1" }),
+      /Generic terminal failure/
+    );
+    assert.ok(hookEvents.includes("failure:execute:generic-fail-wf:GENERIC_NODE_FAILURE"));
+  });
 });

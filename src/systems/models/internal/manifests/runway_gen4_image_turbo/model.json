@@ -1,0 +1,85 @@
+{
+  "id": "runway_gen4_image_turbo",
+  "domain": "image",
+  "displayName": "Runway Gen-4 Image Turbo",
+  "description": "Runway fast, cost-efficient reference-guided image generation model (requires 1–3 reference images).",
+  "status": "active",
+  "aliases": [
+    "gen4_image_turbo",
+    "gen4-image-turbo",
+    "runway-gen4-image-turbo"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "images": true,
+    "reference_images": true,
+    "aspect_ratio": true,
+    "resolution": true,
+    "seed": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Text prompt describing the desired image"
+    },
+    "input_image": {
+      "type": "string",
+      "required": true,
+      "max": 1,
+      "description": "Primary source or reference image URL"
+    },
+    "images": {
+      "type": "array",
+      "required": false,
+      "max": 3,
+      "description": "Up to 3 reference image URLs for guided generation or editing"
+    },
+    "reference_images": {
+      "type": "array",
+      "required": false,
+      "max": 3,
+      "description": "Alias for images (up to 3 reference images)"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "1:1",
+        "16:9",
+        "9:16",
+        "4:3",
+        "3:4",
+        "21:9"
+      ],
+      "default": "16:9",
+      "description": "Target image aspect ratio"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "720p",
+        "1k",
+        "1080p"
+      ],
+      "default": "1080p",
+      "description": "Output image resolution tier"
+    },
+    "seed": {
+      "type": "number",
+      "required": false,
+      "description": "Random seed for reproducible generation"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "720p": 2,
+      "1k": 2,
+      "1080p": 3,
+      "default": 2
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/runway.svg"
+}

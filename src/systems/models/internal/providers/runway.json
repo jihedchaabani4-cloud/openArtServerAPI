@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "2.0",
+  "id": "runway",
+  "displayName": "RunwayML",
+  "baseUrl": "https://api.dev.runwayml.com",
+  "authType": "bearer",
+  "authHeader": "Authorization",
+  "runtime": "sdk",
+  "clientType": "sdk",
+  "defaultTimeoutMs": 600000,
+  "envKeys": ["RUNWAYML_API_SECRET", "RUNWAY_API_KEY"]
+}

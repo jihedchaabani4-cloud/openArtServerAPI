@@ -2,9 +2,8 @@ import { GenerationCompilationError } from "../../errors.js";
 
 /**
  * Port type compatibility matrix.
- * Wildcard "ANY" matches anything; STRING is compatible with URL subtypes (IMAGE_URL, VIDEO_URL)
- * so generic nodes like `base.save_media` (expecting `asset_url: STRING`) can accept `IMAGE_URL` or `VIDEO_URL`.
- * Single `IMAGE_URL` outputs are compatible with `ARRAY` inputs (e.g. `base.image_generate.images`).
+ * Wildcard "ANY" matches anything; STRING is compatible with URL subtypes (IMAGE_URL, VIDEO_URL).
+ * Single `IMAGE_URL` outputs are compatible with `ARRAY` inputs.
  */
 function arePortTypesCompatible(sourceType, targetType) {
   if (!sourceType || !targetType) return false;
@@ -230,7 +229,7 @@ const FORBIDDEN_PATH_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 
 /**
  * Safely resolves a value from an object or array by key or dot-separated path
- * (e.g. "parameters.duration", "shots.0.prompt", "character_description").
+ * (e.g. "parameters.duration", "items.0.title", "user_profile").
  *
  * @param {Object|Array} obj
  * @param {string} path

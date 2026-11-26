@@ -1,0 +1,48 @@
+{
+  "id": "runway_enhance_frame_rate",
+  "domain": "video",
+  "displayName": "Runway Enhance Frame Rate",
+  "description": "Runway AI video frame-rate interpolation up to 120 FPS (including broadcast 23.98/29.97/59.94).",
+  "status": "active",
+  "aliases": [
+    "enhance_frame_rate",
+    "runway-enhance-frame-rate"
+  ],
+  "capabilities": {
+    "input_video": true,
+    "fps": true
+  },
+  "canonicalInputs": {
+    "input_video": {
+      "type": "string",
+      "required": true,
+      "max": 1,
+      "description": "Source video URL for frame-rate interpolation"
+    },
+    "fps": {
+      "type": "string",
+      "values": [
+        "24",
+        "25",
+        "30",
+        "48",
+        "50",
+        "60",
+        "120",
+        "23_98",
+        "29_97",
+        "59_94"
+      ],
+      "default": "60",
+      "description": "Target output frame rate"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "default": 15
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/runway.svg"
+}

@@ -1,0 +1,129 @@
+{
+  "id": "seedance_2_5_flash",
+  "domain": "video",
+  "displayName": "Seedance 2.5 Flash",
+  "description": "ByteDance Seedance 2.5 Flash via Runway — rapid 480p/720p T2V/I2V/V2V with native audio and reference/extend/edit modes.",
+  "status": "active",
+  "aliases": [
+    "seedance2_5_flash",
+    "seedance-2.5-flash"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "last_frame": true,
+    "input_video": true,
+    "reference_images": true,
+    "reference_videos": true,
+    "duration": true,
+    "aspect_ratio": true,
+    "resolution": true,
+    "generate_audio": true,
+    "mode": true,
+    "seed": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Text prompt describing the video scene or motion"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "First frame image URL for image-to-video generation"
+    },
+    "last_frame": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Last frame image URL for keyframe interpolation (requires input_image)"
+    },
+    "input_video": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Source video URL for video-to-video editing or restyling"
+    },
+    "reference_images": {
+      "type": "array",
+      "required": false,
+      "max": 10,
+      "description": "Up to 10 reference image URLs for visual guidance"
+    },
+    "reference_videos": {
+      "type": "array",
+      "required": false,
+      "max": 4,
+      "description": "Up to 4 reference video URLs for motion or style guidance"
+    },
+    "duration": {
+      "type": "number",
+      "values": [
+        "4",
+        "5",
+        "6",
+        "8",
+        "10",
+        "12"
+      ],
+      "default": "5",
+      "description": "Output video duration in seconds"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "16:9",
+        "9:16",
+        "4:3",
+        "3:4",
+        "1:1",
+        "21:9"
+      ],
+      "default": "16:9",
+      "description": "Output video aspect ratio"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "480p",
+        "720p"
+      ],
+      "default": "720p",
+      "description": "Output video resolution tier"
+    },
+    "generate_audio": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether to generate native synchronized audio"
+    },
+    "mode": {
+      "type": "string",
+      "values": [
+        "reference",
+        "extend",
+        "edit"
+      ],
+      "default": "reference",
+      "description": "How input_video is used in video-to-video mode"
+    },
+    "seed": {
+      "type": "number",
+      "required": false,
+      "description": "Random seed for reproducible generation"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "4": 70,
+      "5": 85,
+      "8": 135,
+      "10": 170,
+      "default": 85
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/bytedance.svg"
+}

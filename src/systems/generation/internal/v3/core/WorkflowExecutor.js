@@ -47,7 +47,7 @@ export function computeNodeSignature(nodeType, resolvedInputs, scope = null) {
  * Stateless, domain-agnostic, fail-fast parallel wave executor:
  * - Compiles DAG into parallel waves via `GraphCompiler`
  * - Zero automatic retries (single-attempt fail-fast so side-effect nodes never duplicate)
- * - Zero billing or media coupling
+ * - Zero domain or persistence coupling
  * - Scoped per-run SHA-256 cache for cacheable non-output nodes, cleared in `finally`
  */
 export class WorkflowExecutor {

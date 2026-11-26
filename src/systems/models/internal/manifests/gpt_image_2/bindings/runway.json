@@ -1,0 +1,52 @@
+{
+  "modelId": "gpt_image_2",
+  "operation": "text_to_image",
+  "providerId": "runway",
+  "providerModelId": "gpt_image_2",
+  "sdkMethod": "textToImage",
+  "endpoint": "/v1/text_to_image",
+  "priority": 2,
+  "status": "standby",
+  "parameterMap": {
+    "prompt": {
+      "providerField": "promptText"
+    },
+    "input_image": {
+      "providerField": "_input_image"
+    },
+    "images": {
+      "providerField": "_images"
+    },
+    "aspect_ratio": {
+      "providerField": "_aspect_ratio"
+    },
+    "resolution": {
+      "providerField": "_resolution"
+    },
+    "quality": {
+      "providerField": "quality"
+    }
+  },
+  "passthroughParameters": [
+    "output_format"
+  ],
+  "pricing": {
+    "base_cost_usd": 0.08
+  },
+  "outputMap": {
+    "images": "output",
+    "url": "output.0"
+  },
+  "pollingConfig": {
+    "pollInterval": 5,
+    "timeout": 300,
+    "completedStatuses": [
+      "SUCCEEDED"
+    ],
+    "failedStatuses": [
+      "FAILED",
+      "CANCELLED"
+    ]
+  },
+  "version": "1.0.0"
+}

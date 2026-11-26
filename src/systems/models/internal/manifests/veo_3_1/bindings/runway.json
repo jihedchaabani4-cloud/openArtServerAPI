@@ -1,0 +1,90 @@
+{
+  "modelId": "veo_3_1",
+  "operation": "text_to_video",
+  "providerId": "runway",
+  "providerModelId": "veo3.1",
+  "sdkMethod": "textToVideo",
+  "endpoint": "/v1/text_to_video",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "prompt": {
+      "providerField": "promptText"
+    },
+    "input_image": {
+      "providerField": "_input_image"
+    },
+    "last_frame": {
+      "providerField": "_last_frame"
+    },
+    "duration": {
+      "providerField": "duration"
+    },
+    "aspect_ratio": {
+      "providerField": "_aspect_ratio"
+    },
+    "resolution": {
+      "providerField": "_resolution"
+    },
+    "generate_audio": {
+      "providerField": "audio"
+    },
+    "negative_prompt": {
+      "providerField": "negativePrompt"
+    },
+    "seed": {
+      "providerField": "seed"
+    }
+  },
+  "operations": [
+    {
+      "id": "image_to_video",
+      "operation": "image_to_video",
+      "sdkMethod": "imageToVideo",
+      "endpoint": "/v1/image_to_video",
+      "priority": 2,
+      "when": {
+        "input_image": "present"
+      }
+    },
+    {
+      "id": "text_to_video",
+      "operation": "text_to_video",
+      "sdkMethod": "textToVideo",
+      "endpoint": "/v1/text_to_video",
+      "priority": 3,
+      "when": {
+        "input_image": "absent"
+      }
+    }
+  ],
+  "pricing": {
+    "base_cost_usd": 1.6
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "4": 120,
+      "6": 180,
+      "8": 240,
+      "default": 180
+    }
+  },
+  "outputMap": {
+    "videos.0.url": "output.0",
+    "url": "output.0",
+    "images": "output"
+  },
+  "pollingConfig": {
+    "pollInterval": 6,
+    "timeout": 600,
+    "completedStatuses": [
+      "SUCCEEDED"
+    ],
+    "failedStatuses": [
+      "FAILED",
+      "CANCELLED"
+    ]
+  },
+  "version": "1.0.0"
+}

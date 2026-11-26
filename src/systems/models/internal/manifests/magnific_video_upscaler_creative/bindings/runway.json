@@ -1,0 +1,66 @@
+{
+  "modelId": "magnific_video_upscaler_creative",
+  "operation": "video_upscale",
+  "providerId": "runway",
+  "providerModelId": "magnific_video_upscaler_creative",
+  "sdkMethod": "videoUpscale",
+  "endpoint": "/v1/video_upscale",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "input_video": {
+      "providerField": "videoUri"
+    },
+    "resolution": {
+      "providerField": "resolution"
+    },
+    "flavor": {
+      "providerField": "flavor"
+    },
+    "creativity": {
+      "providerField": "creativity"
+    },
+    "fps_boost": {
+      "providerField": "fpsBoost"
+    },
+    "sharpen": {
+      "providerField": "sharpen"
+    },
+    "smart_grain": {
+      "providerField": "smartGrain"
+    }
+  },
+  "passthroughParameters": [
+    "duration"
+  ],
+  "pricing": {
+    "base_cost_usd": 0.3
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "720p": 15,
+      "1k": 20,
+      "2k": 35,
+      "4k": 60,
+      "default": 35
+    }
+  },
+  "outputMap": {
+    "videos.0.url": "output.0",
+    "url": "output.0",
+    "images": "output"
+  },
+  "pollingConfig": {
+    "pollInterval": 6,
+    "timeout": 600,
+    "completedStatuses": [
+      "SUCCEEDED"
+    ],
+    "failedStatuses": [
+      "FAILED",
+      "CANCELLED"
+    ]
+  },
+  "version": "1.0.0"
+}

@@ -1,0 +1,104 @@
+{
+  "modelId": "kling_o3_standard",
+  "operation": "text_to_video",
+  "providerId": "runway",
+  "providerModelId": "klingO3_standard",
+  "sdkMethod": "textToVideo",
+  "endpoint": "/v1/text_to_video",
+  "priority": 1,
+  "status": "active",
+  "parameterMap": {
+    "prompt": {
+      "providerField": "promptText"
+    },
+    "input_image": {
+      "providerField": "_input_image"
+    },
+    "last_frame": {
+      "providerField": "_last_frame"
+    },
+    "input_video": {
+      "providerField": "promptVideo"
+    },
+    "reference_images": {
+      "providerField": "_reference_images"
+    },
+    "duration": {
+      "providerField": "duration"
+    },
+    "aspect_ratio": {
+      "providerField": "_aspect_ratio"
+    },
+    "resolution": {
+      "providerField": "_resolution"
+    },
+    "generate_audio": {
+      "providerField": "audio"
+    }
+  },
+  "operations": [
+    {
+      "id": "video_to_video",
+      "operation": "video_to_video",
+      "sdkMethod": "videoToVideo",
+      "endpoint": "/v1/video_to_video",
+      "priority": 1,
+      "when": {
+        "input_video": "present"
+      }
+    },
+    {
+      "id": "image_to_video",
+      "operation": "image_to_video",
+      "sdkMethod": "imageToVideo",
+      "endpoint": "/v1/image_to_video",
+      "priority": 2,
+      "when": {
+        "input_image": "present",
+        "input_video": "absent"
+      }
+    },
+    {
+      "id": "text_to_video",
+      "operation": "text_to_video",
+      "sdkMethod": "textToVideo",
+      "endpoint": "/v1/text_to_video",
+      "priority": 3,
+      "when": {
+        "input_image": "absent",
+        "input_video": "absent"
+      }
+    }
+  ],
+  "pricing": {
+    "base_cost_usd": 0.45
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "3": 27,
+      "5": 45,
+      "8": 72,
+      "10": 90,
+      "15": 135,
+      "default": 45
+    }
+  },
+  "outputMap": {
+    "videos.0.url": "output.0",
+    "url": "output.0",
+    "images": "output"
+  },
+  "pollingConfig": {
+    "pollInterval": 6,
+    "timeout": 600,
+    "completedStatuses": [
+      "SUCCEEDED"
+    ],
+    "failedStatuses": [
+      "FAILED",
+      "CANCELLED"
+    ]
+  },
+  "version": "1.0.0"
+}

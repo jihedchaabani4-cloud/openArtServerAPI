@@ -1,0 +1,76 @@
+{
+  "id": "magnific_precision_upscaler_v2",
+  "domain": "upscale",
+  "displayName": "Magnific Precision Upscaler v2",
+  "description": "Magnific precision AI image upscaling via Runway — 2x to 16x up to 25.3MP with photo, denoiser, and sublime presets.",
+  "status": "active",
+  "aliases": [
+    "magnific-precision-upscaler-v2",
+    "runway_image_upscale",
+    "runway-image-upscale"
+  ],
+  "capabilities": {
+    "input_image": true,
+    "scale_factor": true,
+    "flavor": true,
+    "sharpen": true,
+    "smart_grain": true,
+    "ultra_detail": true
+  },
+  "canonicalInputs": {
+    "input_image": {
+      "type": "string",
+      "required": true,
+      "max": 1,
+      "description": "Source image URL to upscale (300–8000px per side)"
+    },
+    "scale_factor": {
+      "type": "number",
+      "values": [
+        "2",
+        "4",
+        "8",
+        "16"
+      ],
+      "default": 2,
+      "description": "Upscaling multiplier (2x, 4x, 8x, or 16x)"
+    },
+    "flavor": {
+      "type": "string",
+      "values": [
+        "sublime",
+        "photo",
+        "photo_denoiser"
+      ],
+      "default": "photo",
+      "description": "Optimization preset"
+    },
+    "sharpen": {
+      "type": "number",
+      "required": false,
+      "description": "Sharpness intensity (0–100)"
+    },
+    "smart_grain": {
+      "type": "number",
+      "required": false,
+      "description": "Grain and texture enhancement (0–100)"
+    },
+    "ultra_detail": {
+      "type": "number",
+      "required": false,
+      "description": "Fine detail enhancement (0–100)"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "2": 6,
+      "4": 12,
+      "8": 24,
+      "16": 40,
+      "default": 6
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/runway.svg"
+}

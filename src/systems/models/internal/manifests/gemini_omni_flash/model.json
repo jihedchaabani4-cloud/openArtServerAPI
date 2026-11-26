@@ -1,0 +1,88 @@
+{
+  "id": "gemini_omni_flash",
+  "domain": "video",
+  "displayName": "Gemini Omni Flash",
+  "description": "Google Gemini Omni Flash multimodal text-to-video, image-to-video, and video-to-video model via Runway.",
+  "status": "active",
+  "aliases": [
+    "gemini-omni-flash"
+  ],
+  "capabilities": {
+    "prompt": true,
+    "input_image": true,
+    "input_video": true,
+    "reference_images": true,
+    "duration": true,
+    "aspect_ratio": true,
+    "resolution": true
+  },
+  "canonicalInputs": {
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Text prompt describing the video scene or motion"
+    },
+    "input_image": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "First frame image URL for image-to-video generation"
+    },
+    "input_video": {
+      "type": "string",
+      "required": false,
+      "max": 1,
+      "description": "Source video URL for video-to-video editing or restyling"
+    },
+    "reference_images": {
+      "type": "array",
+      "required": false,
+      "max": 4,
+      "description": "Up to 4 reference image URLs for visual guidance"
+    },
+    "duration": {
+      "type": "number",
+      "values": [
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "10"
+      ],
+      "default": "5",
+      "description": "Output video duration in seconds"
+    },
+    "aspect_ratio": {
+      "type": "string",
+      "values": [
+        "16:9",
+        "9:16"
+      ],
+      "default": "16:9",
+      "description": "Output video aspect ratio"
+    },
+    "resolution": {
+      "type": "string",
+      "values": [
+        "720p"
+      ],
+      "default": "720p",
+      "description": "Output video resolution tier"
+    }
+  },
+  "retailPricing": {
+    "currency": "credits",
+    "table": {
+      "3": 30,
+      "5": 50,
+      "8": 80,
+      "10": 100,
+      "default": 50
+    }
+  },
+  "version": "1.0.0",
+  "iconUrl": "/icons/models/google.svg"
+}

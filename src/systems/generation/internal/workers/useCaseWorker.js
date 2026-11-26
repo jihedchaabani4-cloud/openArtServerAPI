@@ -32,7 +32,7 @@ if (!envConfig.isTest) {
 }
 
 /**
- * Processes a single queued V3 workflow job via `ExecutionEngine.execute(...)`.
+ * Processes a single queued V3 workflow job via `ExecutionEngine.runWorkflow(..., { async: false })`.
  * Domain-agnostic: forwards workflow blueprint/useCaseId, input, and execution identity only.
  */
 export async function processUseCaseJob(job) {
@@ -56,11 +56,8 @@ export async function processUseCaseJob(job) {
     `Processing V3 workflow "${useCaseId || workflow?.id || workflowId}"`
   );
 
-  return engine.execute({
-    ...(workflow ? { workflow } : {}),
-    useCaseId,
-    workflowId,
-    input,
+  return engine.runWorkflow(workflow || useCaseId || workflowId, input, {
+    async: false,
     userId,
     executionId: executionId || runId,
     runId,
@@ -122,14 +119,14 @@ if (!envConfig.isTest) {
 
 /**
  * Worker crash recovery handler.
- * If `ExecutionEngine.execute` already handled the error (`err.errorReport` present), skips duplicate cleanup.
+ * If `ExecutionEngine.runWorkflow` already handled the error (`err.errorReport` present), skips duplicate cleanup.
  * Otherwise notifies registered external failure hooks on `ExecutionEngine`.
  */
 export async function handleUseCaseWorkerFailure(job, err) {
   if (err?.errorReport) {
     workerLogger.debug(
       { event: LogEvents.JOB_FAILED, jobId: job?.id, err },
-      `[Worker] Job #${job?.id} failed with errorReport — cleanup already done by ExecutionEngine.execute.`
+      `[Worker] Job #${job?.id} failed with errorReport — cleanup already done by ExecutionEngine.runWorkflow.`
     );
     return;
   }

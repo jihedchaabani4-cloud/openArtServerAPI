@@ -30,24 +30,27 @@ The single HTTP entry point mounting all 8 `#<system>/api` routers plus health/r
 ## 2. Domain & Operational Concepts
 
 ### Two-Phase Credit Hold
-The mandatory financial safety protocol for billable AI operations managed between `src/systems/generation/internal/v3/core/ExecutionEngine.js` and `#billing/tools`:
-1. **Reserve**: Upfront credit hold (`reserveCredits`) before queueing the BullMQ job.
-2. **Protected Dispatch**: Enqueue the job via `jobQueueService.js`; if enqueueing throws, immediately release the hold (`rollbackCredits`) and mark the placeholder media as `failed` (`markMediaFailed`).
-3. **Settle / Rollback**: Worker (`useCaseWorker.js`) executes the job inside an isolated `JobExecutionContext.js` and finalizes the hold on completion (`settleCredits`) or refunds on failure (`rollbackCredits`), backed by `ReservationReaperService.js` for stale holds.
+The mandatory financial safety protocol for billable AI operations enforced at the domain/billing boundary via `#billing/tools` — never coupled inside `ExecutionEngine.js` core:
+1. **Reserve**: Upfront credit hold (`reserveCredits`) placed before dispatching the BullMQ job.
+2. **Protected Dispatch**: Enqueue the job via `jobQueueService.js`; if enqueueing throws, immediately release the hold (`rollbackCredits`) and mark placeholder media as `failed` (`markMediaFailed`).
+3. **Settle / Rollback**: Settle the hold (`settleCredits`) on completion or refund (`rollbackCredits`) on failure/crash, backed by `ReservationReaperService.js` for stale holds.
 
 ### Workflow & Workflow Run
 - **Workflow (`workflows` table)**: A persistent creative unit in a project owning generated or uploaded media via `workflow_media`.
-- **Workflow Run (`workflow_runs` & `node_runs` tables)**: An execution instance of a compiled V3 workflow orchestrated by `WorkflowExecutor.js`.
+- **Workflow Run**: An ephemeral in-memory/queued execution instance of a compiled V3 workflow identified by `runId` / `executionId` inside an isolated `JobExecutionContext` (`JobExecutionContext.js`) and orchestrated by `WorkflowExecutor.js`.
+
+### Black-Box Workflow Engine
+The 100% domain-agnostic internal DAG execution engine inside System 1 (`src/systems/generation/internal/v3/core/`), composed of 5 core modules (`ExecutionEngine.js`, `GraphCompiler.js`, `WorkflowExecutor.js`, `NodeRegistry.js`, `JobExecutionContext.js`). Exposes 3 strictly internal tools on `ExecutionEngine` (`verifyInput`, `calculateCost`, `runWorkflow`) with external lifecycle hooks (`onSuccess` / `onFailure`) and zero billing, media, or entity coupling.
 
 ### 4-Layer Composable V3 Architecture
 The locked separation of responsibilities across the V3 Generation & Edit Engine so Base Nodes remain composable into future Composite Nodes and User Workflows:
-- **Layer 1 — API & Intake Guards**: HTTP intake, auth, ownership, rate limits, domain validation, and concurrency guards (`GenerationRequestService`).
-- **Layer 2 — Execution Engine (`ExecutionEngine` & `WorkflowExecutor`)**: Sole owner of execution lifecycle, credit holds, heartbeats, centralized pre-node `holdExpired` enforcement, settlement, and rollback.
+- **Layer 1 — API & Intake Guards**: Thin HTTP adapters delegating to `GenerationRequestService` for auth, ownership (1x fail-fast gate), rate limits, domain validation, and concurrency guards.
+- **Layer 2 — Black-Box Workflow Engine (`ExecutionEngine`, `GraphCompiler`, `WorkflowExecutor`, `NodeRegistry`, `JobExecutionContext`)**: 100% domain-agnostic internal DAG compiler and parallel wave executor exposing `verifyInput`, `calculateCost`, and `runWorkflow` with external `onSuccess` / `onFailure` hooks and zero billing, media, or entity coupling.
 - **Layer 3 — Pure Base Nodes**: Stateless, single-responsibility DAG units with a strict `inputs -> execute() -> outputs` contract, zero billing or credit-hold awareness, and report-don't-decide typed error handling.
 - **Layer 4 — Storage & DB Tools**: Idempotent permanent object-storage persistence, real media dimension extraction, atomic DB completion guards, and compensating storage discard on commit failure.
 
 ### Fail-Fast Generation Policy & Worker Lock Safety
-AI generation executions run single-attempt fail-fast (`maxAttempts: 1` on `ImageGenerateNode`, `VideoGenerateNode`, and `LlmNode`; `maxRetries: 0` default in `RuntimeExecutor`) while keeping status polling alive for already-submitted async provider jobs (capped at `180s` for WaveSpeed image/edit/upscale/remove-background and `600s` for video). On any failure or stall, `useCaseWorker.js` (`lockDuration: 300_000`, `lockRenewTime: 60_000`, `stalledInterval: 60_000`, `maxStalledCount: 0`) fails closed without re-executing the provider call, rolls back the credit hold, and marks only that job's pending media as `failed`.
+AI generation executions run single-attempt fail-fast (`maxAttempts: 1` on `ImageGenerateNode`, `VideoGenerateNode`, and `LlmNode`; `maxRetries: 0` default in `RuntimeExecutor`) while keeping status polling alive for already-submitted async provider jobs (capped at `180s` for WaveSpeed image/edit/upscale/remove-background and `600s` for video). On any failure or stall, `useCaseWorker.js` (`lockDuration: 300_000`, `lockRenewTime: 60_000`, `stalledInterval: 60_000`, `maxStalledCount: 0`) fails closed without re-executing the provider call and notifies registered failure hooks (such as marking pending media as `failed`) while billing holds are rolled back at the billing boundary.
 
 ### Service-Role Repository Access
 All server-side database repositories across the 8 Business Systems default to `supabaseAdmin || supabase` so background workers (`useCaseWorker`, `walletWorker`, reapers) and HTTP services never fail under RLS in production while ownership checks are enforced explicitly at the service/controller boundary.

@@ -1,29 +1,18 @@
 /**
  * System 8: Workspace — Public Tools Gateway (#workspace/tools)
  *
- * Exposes inter-system programmatic tools with pure DTO contracts (Rule 8).
+ * Sealed surface exposing inter-system programmatic tools with pure DTO contracts (Rule 8),
+ * composition-root wiring classes, and canonical Workspace typed errors.
  * Enforces the Two-Gateway Rule (Rule 2) and isolates internal/ (Rule 1, R10).
  */
 
 import { ProjectRepository, projectRepository } from "../internal/db/ProjectRepository.js";
-import { FolderRepository, folderRepository } from "../internal/db/FolderRepository.js";
+import { FolderRepository } from "../internal/db/FolderRepository.js";
 import { TrashRepository, trashRepository } from "../internal/db/TrashRepository.js";
 import { ProjectService } from "../internal/services/ProjectService.js";
 import { ProjectReadService } from "../internal/services/ProjectReadService.js";
 import { FolderService } from "../internal/services/FolderService.js";
 import { TrashService } from "../internal/services/TrashService.js";
-import * as folderTree from "../internal/services/folderTree.js";
-import {
-    indexById,
-    indexChildren,
-    getAncestorIds,
-    getDepth,
-    getSubtreeHeight,
-    collectDescendantIds,
-    wouldCreateCycle,
-    wouldExceedDepth,
-    depthForNewChild,
-} from "../internal/services/folderTree.js";
 
 import {
     WorkspaceError,
@@ -38,11 +27,9 @@ import { setWorkspaceServices } from "../internal/services/serviceAccessor.js";
 
 // System-managed singletons (configured by container at bootstrap)
 let _defaultTrashService = null;
-let _defaultProjectService = null;
 
 export function configureWorkspace(services = {}) {
     if (services.trashService) _defaultTrashService = services.trashService;
-    if (services.projectService) _defaultProjectService = services.projectService;
     setWorkspaceServices(services);
 }
 
@@ -124,48 +111,14 @@ export async function moveItemToTrash({ userId, itemType = "workflow", itemId, t
     };
 }
 
-// ── Facade Re-exports for 100% Backward Compatibility ──────────────
+// ── Sealed Public Surface Exports ──────────────────────────────────
 export {
     ProjectService,
     ProjectReadService,
     FolderService,
     TrashService,
-    folderTree,
-    indexById,
-    indexChildren,
-    getAncestorIds,
-    getDepth,
-    getSubtreeHeight,
-    collectDescendantIds,
-    wouldCreateCycle,
-    wouldExceedDepth,
-    depthForNewChild,
     ProjectRepository,
-    projectRepository,
     FolderRepository,
-    folderRepository,
-    TrashRepository,
-    trashRepository,
-    WorkspaceError,
-    WorkspaceValidationError,
-    WorkspaceNotFoundError,
-    WorkspaceConflictError,
-    WorkspaceUnauthorizedError,
-    FolderError,
-};
-
-export default {
-    assertProjectAccess,
-    moveItemToTrash,
-    ProjectService,
-    ProjectReadService,
-    FolderService,
-    TrashService,
-    folderTree,
-    ProjectRepository,
-    projectRepository,
-    FolderRepository,
-    folderRepository,
     TrashRepository,
     trashRepository,
     WorkspaceError,

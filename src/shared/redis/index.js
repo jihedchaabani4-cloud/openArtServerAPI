@@ -1,6 +1,6 @@
 import Redis from "ioredis";
 import { createLogger } from "../logger/index.js";
-import { redisConfig, envConfig } from "../config/index.js";
+import { redisConfig } from "../config/index.js";
 
 const redisLogger = createLogger("redis");
 
@@ -14,12 +14,10 @@ const isTLS = redisUrl?.startsWith("rediss://") || redisUrl?.includes("upstash.i
 // ── Base options for Upstash Serverless Redis & BullMQ ───────────────────────
 const MAX_RECONNECT_ATTEMPTS = 20; // Stop retrying after 20 attempts (~60s total)
 
-const isTestEnv = redisConfig.isTestEnv;
-
 const BASE_OPTIONS = {
   maxRetriesPerRequest: null, // Required by BullMQ
   enableReadyCheck: false,
-  lazyConnect: isTestEnv,
+  lazyConnect: true,
   enableOfflineQueue: true, // Allows ioredis to buffer commands during Upstash TCP reconnect
   keepAlive: 10_000, // Send TCP keep-alive packets to prevent Upstash idle disconnect
   pingInterval: 15_000, // Heartbeat PING every 15s to keep socket warm
@@ -45,28 +43,18 @@ export const workerRedisConnection = redisUrl
   : new Redis({ host: redisHost, port: Number(redisPort), password: redisPassword || undefined, ...BASE_OPTIONS });
 
 // ── Rate limiter connection (fail fast: no offline queue, strict command timeout) ─
-const isRedisRateLimitStore =
-  (envConfig.rateLimitStore || "").trim().toLowerCase() === "redis";
-
 const RATE_LIMIT_BASE_OPTIONS = {
   ...BASE_OPTIONS,
   enableOfflineQueue: false,
   commandTimeout: redisConfig.rateLimitCommandTimeoutMs,
   connectTimeout: 2000,
   maxRetriesPerRequest: 1,
-  lazyConnect: isTestEnv || !isRedisRateLimitStore,
+  lazyConnect: true,
 };
 
 export const rateLimitRedisConnection = redisUrl
   ? new Redis(redisUrl, RATE_LIMIT_BASE_OPTIONS)
   : new Redis({ host: redisHost, port: Number(redisPort), password: redisPassword || undefined, ...RATE_LIMIT_BASE_OPTIONS });
-
-// Eagerly connect outside test environment only when Redis rate limiting is enabled
-if (!isTestEnv && isRedisRateLimitStore && rateLimitRedisConnection.status === "wait") {
-  rateLimitRedisConnection.connect().catch((err) => {
-    redisLogger.warn({ event: "redis.eager_connect_warning", err: err.message }, "[RateLimit Redis] Eager connection warning");
-  });
-}
 
 // Error handlers to prevent unhandled log floods
 redisConnection.on("error", (err) => {

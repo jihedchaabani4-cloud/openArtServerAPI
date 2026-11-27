@@ -6,6 +6,8 @@
  * Feature: 018-element-reference-system
  */
 
+import { ElementsValidationError } from "../errors.js";
+
 // ─── @ElementName Token Resolver ─────────────────────────────────────────────
 
 /**
@@ -49,7 +51,9 @@ export class PromptBuilderProService {
      */
     async buildMultiElementPayload({ userPrompt, elements = [] }) {
         if (!userPrompt || typeof userPrompt !== "string") {
-            throw new Error("ERR_INVALID_PARAMS: userPrompt is required");
+            throw new ElementsValidationError("ERR_INVALID_PARAMS: userPrompt is required", {
+                field: "userPrompt",
+            });
         }
 
         const promptParts     = [];

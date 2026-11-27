@@ -10,6 +10,7 @@ import elementRepository from "../db/ElementRepository.js";
 import { executeLLM } from "#models/tools";
 import { getWorkflowVisualMedia } from "#media/tools";
 import { createLogger } from "#shared";
+import { ElementsValidationError } from "../errors.js";
 
 const logger = createLogger("elements:analysis");
 
@@ -75,7 +76,10 @@ export class ElementAnalysisService {
     }
 
     if (resolvedUrls.length === 0) {
-      throw new Error("ElementAnalysisService: No reference images found for this element.");
+      throw new ElementsValidationError(
+        "ElementAnalysisService: No reference images found for this element.",
+        { field: "imageUrls", context: { projectId, workflowId } }
+      );
     }
 
     // 2. Perform Multimodal AI Vision LLM Analysis via LLMService

@@ -17,6 +17,7 @@ import {
     CHARACTER_SHEET_UPLOAD_POLICY,
     CHARACTER_DETAIL_UPLOAD_POLICY,
 } from "#media/tools";
+import { CharactersError } from "../errors.js";
 
 export const CHARACTER_MAX_DETAIL_MEDIA = envConfig.characterMaxDetailMedia;
 
@@ -31,19 +32,51 @@ export class CharacterMediaService {
      */
     constructor({ db, storageService, mediaUploadService, workflowMediaService, authService }) {
         if (!db) {
-            throw new Error("CharacterMediaService requires db");
+            throw new CharactersError("CHARACTERS_CONFIGURATION_ERROR", "CharacterMediaService requires db", {
+                type: "PROGRAMMER",
+                category: "SERVER_FAULT",
+                statusCode: 500,
+            });
         }
         if (!storageService) {
-            throw new Error("CharacterMediaService requires storageService");
+            throw new CharactersError("CHARACTERS_CONFIGURATION_ERROR", "CharacterMediaService requires storageService", {
+                type: "PROGRAMMER",
+                category: "SERVER_FAULT",
+                statusCode: 500,
+            });
         }
         if (!mediaUploadService || typeof mediaUploadService.upload !== "function") {
-            throw new Error("CharacterMediaService requires mediaUploadService with upload method");
+            throw new CharactersError(
+                "CHARACTERS_CONFIGURATION_ERROR",
+                "CharacterMediaService requires mediaUploadService with upload method",
+                {
+                    type: "PROGRAMMER",
+                    category: "SERVER_FAULT",
+                    statusCode: 500,
+                }
+            );
         }
         if (!workflowMediaService || typeof workflowMediaService.attachMediaItems !== "function") {
-            throw new Error("CharacterMediaService requires workflowMediaService with attachMediaItems method");
+            throw new CharactersError(
+                "CHARACTERS_CONFIGURATION_ERROR",
+                "CharacterMediaService requires workflowMediaService with attachMediaItems method",
+                {
+                    type: "PROGRAMMER",
+                    category: "SERVER_FAULT",
+                    statusCode: 500,
+                }
+            );
         }
         if (!authService || typeof authService.verifyWorkflowOwnership !== "function") {
-            throw new Error("CharacterMediaService requires authService with verifyWorkflowOwnership method");
+            throw new CharactersError(
+                "CHARACTERS_CONFIGURATION_ERROR",
+                "CharacterMediaService requires authService with verifyWorkflowOwnership method",
+                {
+                    type: "PROGRAMMER",
+                    category: "SERVER_FAULT",
+                    statusCode: 500,
+                }
+            );
         }
 
         this.db = db;

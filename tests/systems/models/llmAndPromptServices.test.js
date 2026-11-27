@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { executeLLM } from "#models/tools";
 import { LLMService, llmService, ALLOWED_INTERNAL_REASONS } from "../../../src/systems/models/internal/services/LLMService.js";
 import { run as runGoogle } from "../../../src/systems/models/internal/runtime/google/runner.js";
-import { LlmNode } from "../../../src/systems/generation/internal/v3/index.js";
+import { LlmNode } from "../../../src/systems/workflow-engine/internal/nodes/index.js";
 import { ElementAnalysisService } from "#elements/tools";
 
 // ─── Source: llmServiceNoChargeBoundary.test.js ───

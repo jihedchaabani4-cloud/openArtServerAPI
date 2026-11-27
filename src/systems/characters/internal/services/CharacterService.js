@@ -5,15 +5,15 @@
  *
  * Clean Architecture Boundary:
  *   - CharacterMediaService handles storage uploads, Supabase buckets, and media rows.
- *   - CharacterGenerationService handles AI ExecutionEngine job dispatching and LLM descriptions.
+ *   - CharacterGenerationService handles AI WorkflowDispatchService job dispatching and LLM descriptions.
  *   - WorkflowService handles workflow lifecycle and low-level workflow deletion.
  *   - CharacterRepository (db.characters) & WorkflowRepository (db.workflows) handle data persistence.
  */
 
 import { randomUUID } from "node:crypto";
 import { crudOperationLog, CrudServiceError, createLogger } from "#shared";
-import { CharacterMediaService } from "./CharacterMediaService.js";
 import { CharacterGenerationService } from "./CharacterGenerationService.js";
+import { CharactersError } from "../errors.js";
 import { assertOwns, assertOwnsAny, toMediaIdList } from "#identity/tools";
 
 const logger = createLogger("character-service");
@@ -23,29 +23,30 @@ export class CharacterService {
      * @param {Object} deps
      * @param {Object} deps.db                   - Repository map (db.characters, db.workflows, db.media, db.projects)
      * @param {Object} deps.workflowService      - WorkflowLifecycleService instance
-     * @param {Object} [deps.executionEngine]    - ExecutionEngine instance
+     * @param {Object} [deps.workflowDispatcher] - WorkflowDispatchService instance
      * @param {Object} [deps.mediaService]       - Optional pre-configured CharacterMediaService
      * @param {Object} [deps.generationService]  - Optional pre-configured CharacterGenerationService
      */
-    constructor({ db, workflowService, executionEngine, useCaseService, mediaService, generationService } = {}) {
+    constructor({ db, workflowService, workflowDispatcher, mediaService, generationService } = {}) {
         this.db = db;
         this.workflowService = workflowService;
 
         if (!mediaService) {
-            throw new Error("CharacterService requires mediaService (CharacterMediaService)");
+            throw new CharactersError(
+                "CHARACTERS_CONFIGURATION_ERROR",
+                "CharacterService requires mediaService (CharacterMediaService)",
+                {
+                    type: "PROGRAMMER",
+                    category: "SERVER_FAULT",
+                    statusCode: 500,
+                }
+            );
         }
         this.mediaService = mediaService;
         this.generationService = generationService || new CharacterGenerationService({
             db,
-            executionEngine: executionEngine || useCaseService || null,
+            workflowDispatcher: workflowDispatcher || null,
         });
-    }
-
-    /**
-     * Allows setting/updating executionEngine after container initialization
-     */
-    setExecutionEngine(executionEngine) {
-        this.generationService.executionEngine = executionEngine;
     }
 
     // ── createCharacter ──────────────────────────────────────────────────────
@@ -360,7 +361,15 @@ export class CharacterService {
             let result = null;
             if (targetWorkflowId) {
                 if (!this.workflowService) {
-                    throw new Error("CharacterService.deleteCharacter requires workflowService");
+                    throw new CharactersError(
+                        "CHARACTERS_CONFIGURATION_ERROR",
+                        "CharacterService.deleteCharacter requires workflowService",
+                        {
+                            type: "PROGRAMMER",
+                            category: "SERVER_FAULT",
+                            statusCode: 500,
+                        }
+                    );
                 }
                 result = await this.workflowService.deleteWorkflow({ workflowId: targetWorkflowId, userId, req });
             }

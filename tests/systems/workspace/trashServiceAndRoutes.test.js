@@ -14,10 +14,10 @@ import http from "node:http";
 import apiRouter from "../../../src/api/routes.js";
 import { db, createOwnershipResolvers, workflowService, trashService as containerTrashService } from "../../../src/container.js";
 const setDb = (targetDb) => configureOwnershipResolvers(createOwnershipResolvers(targetDb));
-import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared";
+import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared/redis";
 import { workflowsRouter } from "#generation/api";
-import elementRoutes from "#elements/api";
-import charactersRouter from "#characters/api";
+import { elementRoutes } from "#elements/api";
+import { charactersRouter } from "#characters/api";
 
 // ─── Source: trashMigrationAndService.test.js ───
 {

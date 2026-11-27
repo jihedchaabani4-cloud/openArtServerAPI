@@ -1,6 +1,6 @@
 import { supabase, supabaseAdmin } from "./mediaClient.js";
 import { inferWorkflowMediaRole } from "./workflowMediaRole.js";
-import { formatWorkflowReferenceQuotaMessage } from "../errors.js";
+import { formatWorkflowReferenceQuotaMessage, MediaError } from "../errors.js";
 import { envConfig } from "#shared";
 
 const memoryWorkflowMedia = [];
@@ -10,7 +10,11 @@ export class WorkflowMediaRepository {
 
     static enableTestMemoryFallback() {
         if (!envConfig.isTest) {
-            throw new Error("WorkflowMediaRepository in-memory fallback is prohibited outside NODE_ENV=test");
+            throw new MediaError(
+                "MEDIA_FORBIDDEN",
+                "WorkflowMediaRepository in-memory fallback is prohibited outside NODE_ENV=test",
+                { statusCode: 403 }
+            );
         }
         WorkflowMediaRepository._testMemoryEnabled = true;
     }
@@ -82,7 +86,11 @@ export class WorkflowMediaRepository {
     _getClientOrThrow() {
         const client = this.client();
         if (!client || typeof client.from !== "function") {
-            throw new Error("WorkflowMediaRepository: Database client is not wired (production requires a valid database client)");
+            throw new MediaError(
+                "MEDIA_CONFIG_ERROR",
+                "WorkflowMediaRepository: Database client is not wired (production requires a valid database client)",
+                { statusCode: 500 }
+            );
         }
         return client;
     }

@@ -4,21 +4,21 @@
  *   1. Folder validation
  *   2. Workflow & single Media placeholder row persistence
  *   3. Relation linking via WorkflowMedia
- *   4. ExecutionEngine launch (ownership, cost, credit hold, Redis queue dispatch)
+ *   4. WorkflowDispatchService dispatch (fail-fast input validation + Redis queue dispatch)
  *   5. Failure compensation (marking placeholder status on billing error or dispatch failure)
  */
 
 import { randomUUID } from "node:crypto";
-import { AppError, createLogger, envConfig, redisConnection } from "#shared";
+import { AppError, createLogger, envConfig, calculateAspectRatio } from "#shared";
+import { redisConnection } from "#shared/redis";
 import {
     createGenerationPlaceholderAtomic,
     appendMediaToWorkflow,
-    calculateAspectRatio,
     resolveMediaMetadata,
 } from "#media/tools";
 import { assertOwns, assertOwnsAny, toMediaIdList } from "#identity/tools";
 import { validateModelInputs, getModelSchema } from "#models/tools";
-import { assertAllowedMediaType } from "../v3/nodes/base/resolveRefsNode.js";
+import { assertAllowedMediaType } from "./mediaGuards.js";
 import {
     IMAGE_EDIT_MODELS,
     extractInlineEntityIds,
@@ -141,8 +141,7 @@ export class GenerationRequestService {
     /**
      * @param {Object} deps
      * @param {Object} deps.db
-     * @param {Object} [deps.executionEngine]
-     * @param {Object} [deps.useCaseService]
+     * @param {Object} deps.workflowDispatcher
      * @param {Object} deps.folderService
      * @param {Function} [deps.modelValidator]
      * @param {Object|null} [deps.redis]
@@ -151,8 +150,7 @@ export class GenerationRequestService {
      */
     constructor({
         db,
-        executionEngine,
-        useCaseService,
+        workflowDispatcher,
         folderService,
         modelValidator = validateModelInputs,
         redis = undefined,
@@ -160,7 +158,7 @@ export class GenerationRequestService {
         assertOwnsAny: assertOwnsAnyFn = assertOwnsAny,
     }) {
         this.db = db;
-        this.executionEngine = executionEngine || useCaseService;
+        this.workflowDispatcher = workflowDispatcher;
         this.folderService = folderService;
         this.modelValidator = modelValidator;
         this.redis = redis !== undefined ? redis : (envConfig.isTest ? null : redisConnection);
@@ -347,7 +345,7 @@ export class GenerationRequestService {
     }
 
     /**
-     * Launches a V3 workflow via ExecutionEngine and applies consistent billing ("saved")
+     * Dispatches a workflow via WorkflowDispatchService and applies single-owner billing ("saved")
      * and queue dispatch failure (503 + "failed" placeholder) compensation.
      */
     async _launchWithBillingCompensation({
@@ -367,14 +365,13 @@ export class GenerationRequestService {
         let calculatedCost = null;
 
         try {
-            logger.debug({ workflowId, mediaId, useCase: useCaseId }, `Launching ${label} via ExecutionEngine`);
-            const prepared = await this.executionEngine.launch({
+            logger.debug({ workflowId, mediaId, useCase: useCaseId }, `Dispatching ${label} via WorkflowDispatchService`);
+            const prepared = await this.workflowDispatcher.dispatch({
                 useCaseId,
                 input: runtimeInput,
                 userId,
                 executionId: randomUUID(),
                 traceId: workflowId,
-                projectId,
                 serverContext: {
                     workflowId,
                     mediaIds: serverMediaIds,
@@ -592,7 +589,7 @@ export class GenerationRequestService {
             serverMediaIds = [mediaId];
             logger.info({ workflowId, mediaId, projectId: resolvedProjectId, mediaType, atomic: placeholder.atomic }, `Workflow and media placeholder created`);
 
-            // 7. Prepare ExecutionEngine runtime input (ownership already verified fail-fast above)
+            // 7. Prepare workflow-engine runtime input (ownership already verified fail-fast above)
             const runtimeInput = {
                 prompt: cleanInput.prompt || trimmedPrompt,
                 model: chosenModel,
@@ -612,7 +609,7 @@ export class GenerationRequestService {
                 serverProjectId: resolvedProjectId,
             };
 
-            // 8. Credit reservation & Redis job dispatch via ExecutionEngine
+            // 8. Dispatch workflow via WorkflowDispatchService & apply billing/dispatch compensation
             const { taskId, hasSufficientCredits, creditErrorMsg, calculatedCost } =
                 await this._launchWithBillingCompensation({
                     useCaseId: resolvedUseCaseId,
@@ -842,7 +839,6 @@ export class GenerationRequestService {
         characters = [],
         elements = [],
         editSettings = {},
-        templateVars = null,
         parameters = {},
         defaultMessages = null,
     }) {
@@ -860,7 +856,6 @@ export class GenerationRequestService {
         let resolvedCharacters = characters;
         let resolvedElements = elements;
         let resolvedEditSettings = editSettings;
-        let resolvedTemplateVars = templateVars;
         let resolvedParameters = parameters;
 
         if (body !== null && body !== undefined) {
@@ -879,7 +874,6 @@ export class GenerationRequestService {
             resolvedCharacters = parsed.characters ?? [];
             resolvedElements = parsed.elements ?? [];
             resolvedEditSettings = parsed.editSettings ?? {};
-            resolvedTemplateVars = parsed.templateVars ?? null;
             resolvedParameters = parsed.parameters ?? {};
         }
 
@@ -1033,7 +1027,7 @@ export class GenerationRequestService {
                 "In-place image edit placeholder appended and promoted to primary"
             );
 
-            // 6. Launch V3 Workflow via ExecutionEngine & Apply Billing/Dispatch Compensation
+            // 6. Dispatch Workflow via WorkflowDispatchService & Apply Billing/Dispatch Compensation
             const runtimeInput = {
                 prompt: finalPrompt,
                 model: resolvedModel,
@@ -1050,9 +1044,6 @@ export class GenerationRequestService {
                     : {}),
                 parameters: sanitizedParams,
                 edit_settings: resolvedEditSettings,
-                ...(resolvedTemplateVars && typeof resolvedTemplateVars === "object"
-                    ? { template_vars: resolvedTemplateVars }
-                    : {}),
                 verify_ownership: false,
                 project_id: workflow.project_id,
                 workflow_id: resolvedWorkflowId,

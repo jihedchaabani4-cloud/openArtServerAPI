@@ -1,10 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: docs/adr/0006-standalone-queue-free-workflow-engine.md
 ---
 
 # Pure Black-Box 3-Tool Workflow Engine
 
-- **Status:** Accepted *(supersedes Layer 2's billing ownership in `docs/adr/0004-four-layer-composable-v3-architecture.md`)*
+- **Status:** Superseded by `docs/adr/0006-standalone-queue-free-workflow-engine.md` *(previously superseded Layer 2's billing ownership in `docs/adr/0004-four-layer-composable-v3-architecture.md`)*
 
 ## Context
 
@@ -21,7 +22,7 @@ We lock `src/systems/generation/internal/v3/core/` as a **100% domain-agnostic, 
    - `verifyInput(workflowOrId, input)` — 100% pure read-only dry-run (zero DB/Redis side effects) that **never throws**; resolves the workflow, validates `requiredInputs`, compiles the DAG, and returns `{ valid, workflowId, missing, errors }`.
    - `calculateCost(workflowOrId, input)` — 100% pure read-only dry-run that resolves and compiles the workflow, resolves planned inputs (`INPUT_TYPES` defaults + static literals + `{ fromInput }` bindings), and sums each active node's `estimateCost(plannedInputs)` fail-closed into `{ totalCredits, breakdown }`.
    - `runWorkflow(workflowOrId, input, opts)` — unified execution entrypoint supporting both modes:
-     - `async: true` (default): merges `serverContext`, validates via `verifyInput`, enqueues 1 job to BullMQ (`workflow-jobs`) via `jobQueueService.js`, and returns `{ status: "queued", workflowId, executionId, runId, workflowRunId, jobId }`.
+     - `async: true` (default): merges `serverContext`, validates via `verifyInput`, enqueues 1 job to BullMQ (`workflow-jobs`) via `jobQueueService.js`, and returns `{ status: "queued", workflowId, executionId, runId, workflowRunId, jobId }`. <!-- no-check -->
      - `async: false`: executes the compiled DAG synchronously via `WorkflowExecutor` inside an isolated `JobExecutionContext`, classifies and sanitizes errors (`ErrorSystem` + `sanitizeClientError`), invokes external lifecycle hooks (`onSuccess` / `onFailure`), disposes the context in `finally`, and returns execution outputs. `useCaseWorker.js` delegates directly to `engine.runWorkflow(..., { async: false, ... })`.
    - `launch(params)` and `execute(params)` remain on `ExecutionEngine` strictly as thin backward-compatible aliases delegating to `runWorkflow(..., { async: true / false, ... })`.
 3. **Zero domain coupling in `v3/core/`:** None of the 5 core files import or reference `#billing/tools`, `#identity/tools`, `#media/tools`, characters, elements, or projects. This supersedes Layer 2's billing ownership from `docs/adr/0004-four-layer-composable-v3-architecture.md`; Two-Phase Credit Holds live at the domain/billing boundary via `#billing/tools`.

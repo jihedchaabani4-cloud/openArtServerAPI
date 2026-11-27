@@ -8,18 +8,24 @@ import { errSerializer, reqSerializer, resSerializer } from "../../src/shared/lo
 import {
   envConfig,
   loggingConfig,
-  redisConnection,
-  workerRedisConnection,
-  rateLimitRedisConnection,
-  waitForRedis,
-  waitForRateLimitRedis,
   RATE_LIMIT_POLICIES,
   clampBulkDeleteConcurrency,
   BULK_DELETE_CONCURRENCY_DEFAULT,
   BULK_DELETE_CONCURRENCY_MIN,
   BULK_DELETE_CONCURRENCY_MAX,
+  clampUseCaseWorkerConcurrency,
+  USECASE_WORKER_CONCURRENCY_DEFAULT,
+  USECASE_WORKER_CONCURRENCY_MIN,
+  USECASE_WORKER_CONCURRENCY_MAX,
   runWithConcurrency,
+  getValueByPath,
+  renderTextTemplate,
+  inferMediaType,
+  normalizeAllowedMediaTypes,
+  scrubSensitiveText,
+  sanitizePublicError,
 } from "#shared";
+import { redisConnection, workerRedisConnection, rateLimitRedisConnection, waitForRedis, waitForRateLimitRedis } from "#shared/redis";
 import { isProductionEnvironment, assertSecurityConfiguredForEnvironment, assertWalletConfiguredForEnvironment, assertRateLimitConfiguredForEnvironment, workflowService } from "../../src/container.js";
 import http from "node:http";
 import app from "../../index.js";
@@ -235,13 +241,77 @@ describe("Shared Redis & Config Kernel", () => {
     assert.equal(typeof envConfig.level, "string");
   });
 
-  it("exports Redis connection singletons without domain-specific keys", async () => {
+  it("exports Redis connection singletons with lazyConnect: true and without domain-specific keys", async () => {
     assert.ok(redisConnection);
     assert.ok(workerRedisConnection);
     assert.ok(rateLimitRedisConnection);
+    assert.equal(redisConnection.options?.lazyConnect, true, "redisConnection must use lazyConnect: true");
+    assert.equal(workerRedisConnection.options?.lazyConnect, true, "workerRedisConnection must use lazyConnect: true");
+    assert.equal(rateLimitRedisConnection.options?.lazyConnect, true, "rateLimitRedisConnection must use lazyConnect: true");
 
     const ready = await waitForRateLimitRedis(100);
     assert.equal(ready, true); // in test environment, resolves immediately to true
+  });
+
+  it("parses and clamps USECASE_WORKER_CONCURRENCY into [1, 20] with default 6", () => {
+    const orig = process.env.USECASE_WORKER_CONCURRENCY;
+    try {
+      assert.equal(USECASE_WORKER_CONCURRENCY_DEFAULT, 6);
+      assert.equal(USECASE_WORKER_CONCURRENCY_MIN, 1);
+      assert.equal(USECASE_WORKER_CONCURRENCY_MAX, 20);
+
+      assert.equal(clampUseCaseWorkerConcurrency(undefined), 6);
+      assert.equal(clampUseCaseWorkerConcurrency(""), 6);
+      assert.equal(clampUseCaseWorkerConcurrency("abc"), 6);
+      assert.equal(clampUseCaseWorkerConcurrency(0), 1);
+      assert.equal(clampUseCaseWorkerConcurrency(-3), 1);
+      assert.equal(clampUseCaseWorkerConcurrency(7), 7);
+      assert.equal(clampUseCaseWorkerConcurrency(99), 20);
+
+      delete process.env.USECASE_WORKER_CONCURRENCY;
+      assert.equal(envConfig.useCaseWorkerConcurrency, 6);
+
+      process.env.USECASE_WORKER_CONCURRENCY = "12";
+      assert.equal(envConfig.useCaseWorkerConcurrency, 12);
+
+      process.env.USECASE_WORKER_CONCURRENCY = "50";
+      assert.equal(envConfig.useCaseWorkerConcurrency, 20);
+    } finally {
+      if (orig === undefined) {
+        delete process.env.USECASE_WORKER_CONCURRENCY;
+      } else {
+        process.env.USECASE_WORKER_CONCURRENCY = orig;
+      }
+    }
+  });
+
+  it("exposes pure shared utilities (getValueByPath, renderTextTemplate, inferMediaType, sanitizePublicError)", () => {
+    const obj = { items: [{ user_name: "Ada", displayName: "Lovelace" }] };
+    assert.equal(getValueByPath(obj, "items[0].userName"), "Ada");
+    assert.equal(getValueByPath(obj, "items[0].display_name"), "Lovelace");
+    assert.equal(getValueByPath(obj, "__proto__.polluted"), undefined);
+    assert.equal(getValueByPath(obj, "constructor.prototype"), undefined);
+
+    const rendered = renderTextTemplate(
+      "Hello {{name}}{{#tag}} [{{tag}}]{{/tag}}{{^tag}} [none]{{/tag}}",
+      { name: "Ada" },
+      { defaults: { tag: "" } }
+    );
+    assert.equal(rendered.text, "Hello Ada [none]");
+    assert.throws(
+      () => renderTextTemplate(123),
+      (err) => err instanceof ValidationError && err.code === "TEMPLATE_VALIDATION_ERROR"
+    );
+
+    assert.equal(inferMediaType({ url: "https://cdn.example.com/clip.mp4" }), "video");
+    assert.equal(inferMediaType({ url: "https://cdn.example.com/photo.png" }), "image");
+    assert.deepEqual(normalizeAllowedMediaTypes(["IMAGE", " Video ", "image"]), new Set(["image", "video"]));
+
+    assert.ok(!/wavespeed|https|SELECT/i.test(scrubSensitiveText("wavespeed error at https://api.wavespeed.ai/v1 SELECT * FROM media")));
+    const sanitized = sanitizePublicError(new ProviderError("UPSTREAM_FAIL", "wavespeed 502 from https://internal.host/v1"));
+    assert.equal(sanitized.category, "UPSTREAM_FAULT");
+    assert.equal(sanitized.statusCode, 502);
+    assert.ok(!/wavespeed|https|credit|refund/i.test(sanitized.userMessage));
   });
 
   it("parses and clamps BULK_DELETE_CONCURRENCY into [1, 15] with default 10", () => {

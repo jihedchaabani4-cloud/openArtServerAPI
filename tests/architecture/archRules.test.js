@@ -281,6 +281,7 @@ const {
   checkRuleR13,
   checkRuleR15,
   checkRuleR16,
+  checkRuleR18,
   findImportCycles,
   collect,
 } = require("../../scripts/arch-check.cjs");
@@ -311,6 +312,20 @@ describe("Ticket 0.4 Architecture Rules R10-R16 and Cycle Detector", () => {
       );
       const hits = checkRuleR10(file);
       assert.equal(hits.length, 1);
+    });
+
+    it("allows #shared/redis outside workflow-engine and blocks it inside workflow-engine", () => {
+      const workerFile = makeFile(
+        "src/systems/generation/internal/workers/useCaseWorker.js",
+        `import { workerRedisConnection } from "#shared/redis";\n`
+      );
+      assert.equal(checkRuleR10(workerFile).length, 0);
+
+      const engineFile = makeFile(
+        "src/systems/workflow-engine/internal/core/ExecutionEngine.js",
+        `import { redisConnection } from "#shared/redis";\n`
+      );
+      assert.equal(checkRuleR10(engineFile).length, 1);
     });
   });
 
@@ -437,7 +452,7 @@ describe("Ticket 0.4 Architecture Rules R10-R16 and Cycle Detector", () => {
       const { files } = collect();
 
       // Pair 1: WorkflowExecutor -> circular dependency check (must not import runners)
-      const workflowExec = files.find((f) => f.rel === "src/systems/generation/internal/v3/core/WorkflowExecutor.js");
+      const workflowExec = files.find((f) => f.rel === "src/systems/workflow-engine/internal/core/WorkflowExecutor.js");
       assert.ok(workflowExec);
       assert.ok(!workflowExec.text.includes("workflowRunner.js"));
 
@@ -451,6 +466,62 @@ describe("Ticket 0.4 Architecture Rules R10-R16 and Cycle Detector", () => {
       const catalogPres = files.find((f) => f.rel === "src/systems/models/internal/services/catalogPresentation.js");
       assert.ok(catalogPres);
       assert.ok(!catalogPres.text.includes("./index.js"));
+    });
+  });
+
+  describe("Rule R18: Standalone workflow-engine closed allowlist", () => {
+    it("allows #shared, node:*, and intra-system relative imports in internal/core/**", () => {
+      const file = makeFile(
+        "src/systems/workflow-engine/internal/core/ExecutionEngine.js",
+        `import { randomUUID } from "node:crypto";\nimport { createLogger } from "#shared";\nimport { GraphCompiler } from "./GraphCompiler.js";\n`
+      );
+      assert.equal(checkRuleR18(file).length, 0);
+    });
+
+    it("forbids #models/tools, #shared/redis, bullmq, ioredis, and peer systems in internal/core/**", () => {
+      const file = makeFile(
+        "src/systems/workflow-engine/internal/core/ExecutionEngine.js",
+        [
+          `import { executeLLM } from "#models/tools";`,
+          `import { redisConnection } from "#shared/redis";`,
+          `import { Queue } from "bullmq";`,
+          `import Redis from "ioredis";`,
+          `import { markMediaFailed } from "#media/tools";`,
+        ].join("\n")
+      );
+      assert.equal(checkRuleR18(file).length, 5);
+    });
+
+    it("allows #shared and #models/tools in Base Nodes, but forbids peer systems and third-party SDKs", () => {
+      const okNode = makeFile(
+        "src/systems/workflow-engine/internal/nodes/base/llmNode.js",
+        `import { executeLLM } from "#models/tools";\nimport { createLogger } from "#shared";\nimport { WorkflowSafetyError } from "../../errors.js";\n`
+      );
+      assert.equal(checkRuleR18(okNode).length, 0);
+
+      const badNode = makeFile(
+        "src/systems/workflow-engine/internal/nodes/base/resolveRefsNode.js",
+        [
+          `import { getCharacterPromptContext } from "#characters/tools";`,
+          `import { Redis } from "@upstash/redis";`,
+          `import OpenAI from "openai";`,
+        ].join("\n")
+      );
+      assert.equal(checkRuleR18(badNode).length, 3);
+    });
+
+    it('allows "yaml" only inside internal/skills/** and blocks it elsewhere', () => {
+      const okSkill = makeFile(
+        "src/systems/workflow-engine/internal/skills/index.js",
+        `import { readFileSync } from "node:fs";\nimport { parse } from "yaml";\nimport { WorkflowValidationError } from "../errors.js";\n`
+      );
+      assert.equal(checkRuleR18(okSkill).length, 0);
+
+      const badYamlInCore = makeFile(
+        "src/systems/workflow-engine/internal/core/GraphCompiler.js",
+        `import { parse } from "yaml";\n`
+      );
+      assert.equal(checkRuleR18(badYamlInCore).length, 1);
     });
   });
 });

@@ -26,8 +26,10 @@ import { paymentsRouter, walletRouter } from "#billing/api";
 import { WalletService } from "../../../src/systems/billing/internal/services/WalletService.js";
 import { reconcileExpiredHolds } from "../../../src/systems/billing/internal/services/ReservationReaperService.js";
 import { getCreditPackage, resolvePackageCredits } from "../../../src/systems/billing/internal/services/serviceAccessor.js";
-import { ExecutionEngine } from "#generation/tools";
-import { GraphCompiler, createDefaultV3NodeRegistry, getV3Workflow } from "../../../src/systems/generation/internal/v3/index.js";
+import { WorkflowDispatchService } from "#generation/tools";
+import { GraphCompiler } from "../../../src/systems/workflow-engine/internal/core/GraphCompiler.js";
+import { createDefaultV3NodeRegistry } from "../../../src/systems/workflow-engine/internal/nodes/index.js";
+import { getV3Workflow } from "../../../src/systems/workflow-engine/internal/workflows/index.js";
 
 // ─── Source: billingSystem.test.js ───
 {
@@ -797,26 +799,22 @@ describe("D2.3 — GraphCompiler & ExecutionEngine Black-Box Launch Contract Tes
     assert.ok(json.length < 400, `Compiled wave plan must stay compact (< 400 bytes), got ${json.length}`);
   });
 
-  it("TEST 2: ExecutionEngine.launch forwards inputs cleanly and runs zero billing logic during dev mode", async () => {
+  it("TEST 2: WorkflowDispatchService.dispatch forwards inputs cleanly and runs zero billing logic during dev mode", async () => {
     let queuedPayload = null;
-    const engine = new ExecutionEngine({
-      identityTools: {
-        assertOwns: async () => true,
-        assertOwnsAny: async () => true,
-      },
-      jobQueueService: {
-        addUseCaseJob: async (payload) => {
+    const dispatcher = new WorkflowDispatchService({
+      queue: {
+        add: async (_name, payload) => {
           queuedPayload = payload;
           return { id: "job-d23" };
         },
       },
     });
 
-    const result = await engine.launch({
+    const result = await dispatcher.dispatch({
       useCaseId: "video-generation-v3",
       userId: "user-test-d23",
       executionId: "run-d23-test",
-      workflowId: "wf-d23-test",
+      serverContext: { workflowId: "wf-d23-test" },
       input: {
         prompt: "Massive prompt ".repeat(300),
         model: "seedance_2_5",

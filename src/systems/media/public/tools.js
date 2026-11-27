@@ -5,82 +5,38 @@
  * linking, URL resolution, asset upload, and storage management.
  */
 
-import { createLogger, envConfig } from "#shared";
-import { saveTypeRegistry, SAVE_TYPES, RETENTION_POLICIES } from "../internal/services/saveTypes.js";
+import { createLogger, envConfig, calculateAspectRatio } from "#shared";
+import { saveTypeRegistry } from "../internal/services/saveTypes.js";
 import { MediaRepository } from "../internal/db/MediaRepository.js";
 import { WorkflowMediaRepository } from "../internal/db/WorkflowMediaRepository.js";
+import { createMediaInWorkflow } from "../internal/db/workflowMediaLinker.js";
 import {
-    createMediaInWorkflow,
-    linkWorkflowMediaForCreatedRow,
-} from "../internal/db/workflowMediaLinker.js";
-import {
-    markMediaStatus,
     markMediaFailed as internalMarkMediaFailed,
     createGenerationPlaceholderAtomic,
     appendMediaToWorkflow,
 } from "../internal/db/workflowMediaOps.js";
-import {
-    WORKFLOW_MEDIA_ROLES,
-    normalizeWorkflowMediaRole,
-    inferWorkflowMediaRole,
-} from "../internal/db/workflowMediaRole.js";
-import { StorageService } from "../internal/storage/StorageService.js";
-import { StoragePathResolver, storagePathResolver } from "../internal/storage/StoragePathResolver.js";
-import {
-    createStorageService,
-    createDefaultStorageService,
-    IStorageProvider,
-    InMemoryStorageProvider,
-    SupabaseStorageProvider,
-} from "../internal/storage/storageFactory.js";
-import { isStream } from "../internal/storage/streamUtils.js";
+import { createDefaultStorageService } from "../internal/storage/storageFactory.js";
 import { MediaUploadService } from "../internal/services/MediaUploadService.js";
 import { AssetUploadService } from "../internal/services/AssetUploadService.js";
-import { MediaInspector } from "../internal/ingestion/MediaInspector.js";
 import {
-    extractImageMetadata,
-    extractVideoMetadata,
-    extractMediaMetadata,
-} from "../internal/ingestion/MediaMetadataExtractor.js";
-import { SourceResolver } from "../internal/ingestion/SourceResolver.js";
-import { SourceReader } from "../internal/ingestion/SourceReader.js";
-import { SourcePolicy } from "../internal/ingestion/SourcePolicy.js";
-import {
-    createSizeLimitedMemoryStorage,
-    resetActiveUploadsForTest,
-    resetInFlightBytesForTest,
-    getActiveUploadsCountForTest,
-    getInFlightBytesForTest,
-} from "../internal/ingestion/sizeLimitedStorage.js";
-import {
-    DEFAULT_UPLOAD_POLICY,
     GENERATED_OUTPUT_UPLOAD_POLICY,
     ELEMENT_REFERENCE_UPLOAD_POLICY,
     ELEMENT_SHEET_UPLOAD_POLICY,
-    ELEMENT_SOURCES_UPLOAD_POLICY,
     CHARACTER_SHEET_UPLOAD_POLICY,
     CHARACTER_DETAIL_UPLOAD_POLICY,
-    UPLOAD_POLICIES,
 } from "../internal/ingestion/UploadPolicy.js";
 import { MediaService } from "../internal/services/MediaService.js";
 import {
     MediaWorkflowLifecycleService,
     MEDIA_WORKFLOW_STATUS,
-    MEDIA_IN_FLIGHT_STATUSES,
     isMediaInFlight,
-    isMediaFailed,
     hasInFlightMedia,
     areAllWorkflowMediaFailed,
-    failWorkflowPendingMedia,
 } from "../internal/services/MediaLifecycleService.js";
-import {
-    resolveMediaMetadata,
-    calculateAspectRatio,
-} from "../internal/services/mediaMetadataResolver.js";
+import { resolveMediaMetadata } from "../internal/services/mediaMetadataResolver.js";
 import {
     setMediaServices,
     getMediaRepository as getAccessorMediaRepository,
-    getMediaService as getAccessorMediaService,
 } from "../internal/services/serviceAccessor.js";
 import {
     MediaError,
@@ -90,16 +46,10 @@ import {
     MediaStorageError,
     MediaUploadError,
     MediaQuotaError,
-    StorageError,
-    StorageValidationError,
     ValidationError,
     UploadError,
     QuotaError,
-    WORKFLOW_REFERENCE_QUOTA_PREFIX,
-    WORKFLOW_REFERENCE_QUOTA_PATTERN,
-    formatWorkflowReferenceQuotaMessage,
     isWorkflowReferenceQuotaError,
-    createPayloadTooLargeError,
 } from "../internal/errors.js";
 
 const mediaToolsLogger = createLogger("media-tools");
@@ -137,26 +87,11 @@ export function getStorageService() {
     return _storageService;
 }
 
-export function setStorageService(customStorageService) {
-    if (!envConfig.isTest) {
-        throw new MediaValidationError("setStorageService is only allowed in test environments.");
-    }
-    _storageService = customStorageService;
-}
-
-export function getMediaUploadService() {
+function getInternalMediaUploadService() {
     if (!_mediaUploadService) {
         _mediaUploadService = new MediaUploadService({ storageService: getStorageService() });
     }
     return _mediaUploadService;
-}
-
-export function getMediaService() {
-    return getAccessorMediaService();
-}
-
-export function getSaveTypeRegistry() {
-    return saveTypeRegistry;
 }
 
 // ── Pure DTO Tool Functions (Rule 8) ──────────────────────────────────────────
@@ -305,7 +240,7 @@ export async function persistExternalMedia({
     let realWidth = baseMeta.width || null;
     let realHeight = baseMeta.height || null;
     let realRatio = baseMeta.ratio || null;
-    const uploader = uploadService || getMediaUploadService();
+    const uploader = uploadService || getInternalMediaUploadService();
 
     if (!isAlreadyInOwnStorage(source)) {
         const stConfig = saveTypeRegistry.get(saveType);
@@ -894,84 +829,35 @@ export async function deleteMedia({ mediaId, workflowId = null } = {}) {
     return { deleted: true, mediaId };
 }
 
-// ── Re-exports for Systems & Architecture Compatibility ───────────────────────
+// ── Sealed Public Surface Exports ─────────────────────────────────────────────
 
 export {
-    // Save-type registry
-    saveTypeRegistry,
-    SAVE_TYPES,
-    RETENTION_POLICIES,
-
-    // Storage abstractions
-    StorageService,
-    StoragePathResolver,
-    createStorageService,
-    IStorageProvider,
-    InMemoryStorageProvider,
-    SupabaseStorageProvider,
-    storagePathResolver,
-    StorageError,
-    StorageValidationError,
-    isStream,
-
-    // Repositories
+    // Composition & Domain Service Exports
     MediaRepository,
     WorkflowMediaRepository,
-    createMediaInWorkflow,
-    linkWorkflowMediaForCreatedRow,
-    markMediaStatus,
-    createGenerationPlaceholderAtomic,
-    appendMediaToWorkflow,
-    WORKFLOW_MEDIA_ROLES,
-    normalizeWorkflowMediaRole,
-    inferWorkflowMediaRole,
-
-    // Ingestion & Policies
-    MediaUploadService,
-    AssetUploadService,
-    MediaInspector,
-    SourceResolver,
-    SourceReader,
-    SourcePolicy,
-    extractImageMetadata,
-    extractVideoMetadata,
-    extractMediaMetadata,
-    createSizeLimitedMemoryStorage,
-    resetActiveUploadsForTest,
-    resetInFlightBytesForTest,
-    getActiveUploadsCountForTest,
-    getInFlightBytesForTest,
-    DEFAULT_UPLOAD_POLICY,
-    GENERATED_OUTPUT_UPLOAD_POLICY,
-    ELEMENT_REFERENCE_UPLOAD_POLICY,
-    ELEMENT_SHEET_UPLOAD_POLICY,
-    ELEMENT_SOURCES_UPLOAD_POLICY,
-    CHARACTER_SHEET_UPLOAD_POLICY,
-    CHARACTER_DETAIL_UPLOAD_POLICY,
-    UPLOAD_POLICIES,
-    createPayloadTooLargeError,
-    ValidationError,
-    UploadError,
-    QuotaError,
-    WORKFLOW_REFERENCE_QUOTA_PREFIX,
-    WORKFLOW_REFERENCE_QUOTA_PATTERN,
-    formatWorkflowReferenceQuotaMessage,
-    isWorkflowReferenceQuotaError,
-
-    // Services
     MediaService,
     MediaWorkflowLifecycleService,
+    MediaUploadService,
+    AssetUploadService,
+
+    // Workflow-Media Lifecycle & Status Helpers
+    createMediaInWorkflow,
+    createGenerationPlaceholderAtomic,
+    appendMediaToWorkflow,
     MEDIA_WORKFLOW_STATUS,
-    MEDIA_IN_FLIGHT_STATUSES,
     isMediaInFlight,
-    isMediaFailed,
     hasInFlightMedia,
     areAllWorkflowMediaFailed,
     resolveMediaMetadata,
-    calculateAspectRatio,
-    failWorkflowPendingMedia,
+    isWorkflowReferenceQuotaError,
 
-    // Typed Errors
+    // Domain Upload Policies
+    ELEMENT_REFERENCE_UPLOAD_POLICY,
+    ELEMENT_SHEET_UPLOAD_POLICY,
+    CHARACTER_SHEET_UPLOAD_POLICY,
+    CHARACTER_DETAIL_UPLOAD_POLICY,
+
+    // Typed Error Hierarchy
     MediaError,
     MediaValidationError,
     MediaNotFoundError,
@@ -979,23 +865,7 @@ export {
     MediaStorageError,
     MediaUploadError,
     MediaQuotaError,
-};
-
-export default {
-    createPendingMedia,
-    persistExternalMedia,
-    completeMedia,
-    markMediaFailed,
-    linkMediaToEntity,
-    getMediaUrls,
-    getMediaById,
-    getWorkflowVisualMedia,
-    getWorkflowPrimaryMedia,
-    deleteMedia,
-    getMediaRepository,
-    getWorkflowMediaRepository,
-    getStorageService,
-    getMediaUploadService,
-    getMediaService,
-    getSaveTypeRegistry,
+    ValidationError,
+    UploadError,
+    QuotaError,
 };

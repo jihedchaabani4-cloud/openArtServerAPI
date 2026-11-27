@@ -4,7 +4,7 @@ status: accepted
 
 # In-place parent-workflow image edits with immediate primary swap and server-locked edit model
 
-Adding specialized in-place image editing flows (`image-relight-v3` in `src/systems/generation/internal/v3/workflows/imageRelightV3.js` and `image-angles-v3` in `src/systems/generation/internal/v3/workflows/imageAnglesV3.js`) required clear ownership, version-history, and model-selection invariants across the HTTP boundary (`src/systems/generation/public/api.js`, `imageController.js`), request orchestration (`GenerationRequestService.js`), and V3 execution nodes (`resolveRefsNode.js`, `imageGenerateNode.js`).
+Adding specialized in-place image editing flows (`image-relight-v3` in `src/systems/workflow-engine/internal/workflows/imageRelightV3.js` and `image-angles-v3` in `src/systems/workflow-engine/internal/workflows/imageAnglesV3.js`) required clear ownership, version-history, and model-selection invariants across the HTTP boundary (`src/systems/generation/public/api.js`, `imageController.js`), request orchestration (`GenerationRequestService.js`), and V3 execution nodes (`resolveRefsNode.js`, `imageGenerateNode.js`).
 
 We made three architectural decisions:
 

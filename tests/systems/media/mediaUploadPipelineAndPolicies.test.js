@@ -2,17 +2,23 @@ import { describe, it, beforeEach, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { PassThrough, Readable } from "node:stream";
 import sharp from "sharp";
-import { DEFAULT_UPLOAD_POLICY, ELEMENT_REFERENCE_UPLOAD_POLICY, ELEMENT_SHEET_UPLOAD_POLICY, ELEMENT_SOURCES_UPLOAD_POLICY, CHARACTER_SHEET_UPLOAD_POLICY, CHARACTER_DETAIL_UPLOAD_POLICY, ValidationError, UploadError, QuotaError, MediaUploadService, SourceReader, SourcePolicy, resetActiveUploadsForTest, resetInFlightBytesForTest, StorageService, InMemoryStorageProvider, AssetUploadService, MediaService, WorkflowMediaRepository } from "#media/tools";
-import { createUploadMiddleware, resolveMiddlewarePolicy, assetsRouter, mediaIngestRouter } from "#media/api";
+import { ELEMENT_REFERENCE_UPLOAD_POLICY, ELEMENT_SHEET_UPLOAD_POLICY, CHARACTER_SHEET_UPLOAD_POLICY, CHARACTER_DETAIL_UPLOAD_POLICY, ValidationError, UploadError, QuotaError, MediaUploadService, AssetUploadService, MediaService, WorkflowMediaRepository } from "#media/tools";
+import { DEFAULT_UPLOAD_POLICY, ELEMENT_SOURCES_UPLOAD_POLICY, resolveMiddlewarePolicy } from "../../../src/systems/media/internal/ingestion/UploadPolicy.js";
+import { SourceReader } from "../../../src/systems/media/internal/ingestion/SourceReader.js";
+import { SourcePolicy } from "../../../src/systems/media/internal/ingestion/SourcePolicy.js";
+import { resetActiveUploadsForTest, resetInFlightBytesForTest } from "../../../src/systems/media/internal/ingestion/sizeLimitedStorage.js";
+import { StorageService } from "../../../src/systems/media/internal/storage/StorageService.js";
+import { InMemoryStorageProvider } from "../../../src/systems/media/internal/storage/providers/InMemoryStorageProvider.js";
+import { createUploadMiddleware, assetsRouter, mediaIngestRouter } from "#media/api";
 import { WorkflowMediaService } from "../../../src/systems/generation/internal/services/WorkflowMediaService.js";
 import dns from "node:dns/promises";
 import http from "node:http";
 import express from "express";
-import elementRoutes from "#elements/api";
-import charactersRouter from "#characters/api";
+import { elementRoutes } from "#elements/api";
+import { charactersRouter } from "#characters/api";
 import { supabase } from "#shared/db/supabase.js";
 import { assetUploadService, elementMediaService, characterService, db } from "../../../src/container.js";
-import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared";
+import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared/redis";
 
 // ─── Source: mediaUploadServiceAndPolicy.test.js ───
 {
@@ -614,7 +620,7 @@ describe("MediaUploadService Seam 1 Contract", () => {
     });
 
     it("discard() logs and throws UploadError when Supabase remove() returns { error } through StorageService.deleteFiles", async () => {
-        const { StorageService } = await import("#media/tools");
+        const { StorageService } = await import("../../../src/systems/media/internal/storage/StorageService.js");
         const mockProvider = {
             async deleteFiles(paths) {
                 // Simulate SupabaseStorageProvider receiving an error from supabase.storage.from().remove()

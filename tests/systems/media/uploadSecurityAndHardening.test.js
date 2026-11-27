@@ -4,11 +4,15 @@ import http from "node:http";
 import crypto from "node:crypto";
 import app, { isScopedLargeBodyRoute, normalizeRoutePath } from "../../../index.js";
 import { supabase } from "#shared/db/supabase.js";
-import { redisConnection, workerRedisConnection, rateLimitRedisConnection, waitForRateLimitRedis, baseLogger } from "#shared";
+import { baseLogger } from "#shared";
+import { redisConnection, workerRedisConnection, rateLimitRedisConnection, waitForRateLimitRedis } from "#shared/redis";
 import { requireAuth } from "#identity/tools";
 import { setLimiterForTest, resetLimitersForTest } from "../../../src/systems/identity/internal/middleware/rateLimit.js";
 import { isInternalSecretAllowedRoute } from "../../../src/systems/identity/internal/middleware/auth.js";
-import { MediaInspector, StorageService, createSizeLimitedMemoryStorage, resetActiveUploadsForTest, getActiveUploadsCountForTest, MediaUploadService, resetInFlightBytesForTest, getInFlightBytesForTest } from "#media/tools";
+import { MediaUploadService } from "#media/tools";
+import { MediaInspector } from "../../../src/systems/media/internal/ingestion/MediaInspector.js";
+import { StorageService } from "../../../src/systems/media/internal/storage/StorageService.js";
+import { createSizeLimitedMemoryStorage, resetActiveUploadsForTest, getActiveUploadsCountForTest, resetInFlightBytesForTest, getInFlightBytesForTest } from "../../../src/systems/media/internal/ingestion/sizeLimitedStorage.js";
 import { Readable } from "node:stream";
 import { registerProviderRunner, unregisterProviderRunner } from "../../../src/systems/models/internal/runtime/providerRuntimeRegistry.js";
 import { resolveBindingForTest } from "../../../src/systems/models/internal/registry/bindingResolver.js";
@@ -277,7 +281,7 @@ describe("RC1.4-D2.2 — Parse-Before-Auth and Upload Hardening Boundary Tests",
       supabase.auth.getUser = origGetUser;
     }
     try {
-      const { rateLimitRedisConnection } = await import("#shared");
+      const { rateLimitRedisConnection } = await import("#shared/redis");
       await rateLimitRedisConnection?.quit().catch(() => rateLimitRedisConnection?.disconnect());
     } catch {}
     try {
@@ -447,7 +451,7 @@ describe("RC1.4-D2.2 — Parse-Before-Auth and Upload Hardening Boundary Tests",
 
   // ── (f) Fail-fast rate limiter Redis connection ───────────────────────────
   it("TEST D2.2-f: Dedicated rate-limiter Redis client has enableOfflineQueue: false", async () => {
-    const { rateLimitRedisConnection } = await import("#shared");
+    const { rateLimitRedisConnection } = await import("#shared/redis");
     assert.ok(rateLimitRedisConnection, "rateLimitRedisConnection must be exported");
     assert.equal(
       rateLimitRedisConnection.options.enableOfflineQueue,
@@ -2073,7 +2077,7 @@ describe("STEP 3: Multipart 2 files route-level error safety boundary test", () 
       supabase.auth.getUser = origGetUser;
     }
     try {
-      const { rateLimitRedisConnection } = await import("#shared");
+      const { rateLimitRedisConnection } = await import("#shared/redis");
       await rateLimitRedisConnection?.quit().catch(() => rateLimitRedisConnection?.disconnect());
     } catch {}
     try {

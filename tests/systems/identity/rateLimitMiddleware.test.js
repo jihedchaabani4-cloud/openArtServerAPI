@@ -7,12 +7,12 @@ import cookieParser from "cookie-parser";
 import { authRouter } from "#identity/api";
 import { supabase, supabaseAdmin } from "#shared/db/supabase.js";
 import { walletService, characterService, elementService } from "../../../src/container.js";
-import { redisConnection, workerRedisConnection } from "#shared";
+import { redisConnection, workerRedisConnection } from "#shared/redis";
 import { rateLimit, walletRateLimit } from "#identity/tools";
 import { resetLimitersForTest, setLimiterForTest } from "../../../src/systems/identity/internal/middleware/rateLimit.js";
 import { paymentsRouter } from "#billing/api";
-import characterRouter from "#characters/api";
-import elementRouter from "#elements/api";
+import { charactersRouter as characterRouter } from "#characters/api";
+import { elementRoutes as elementRouter } from "#elements/api";
 
 // ─── Source: rateLimitBoundary.test.js ───
 {
@@ -682,7 +682,7 @@ describe("RC1.4-D1.2 — Rate Limiter Outage Policy Boundary Tests", () => {
   after(async () => {
     resetLimitersForTest();
     try {
-      const { redisConnection, workerRedisConnection } = await import("#shared");
+      const { redisConnection, workerRedisConnection } = await import("#shared/redis");
       await redisConnection?.quit().catch(() => redisConnection?.disconnect());
       await workerRedisConnection?.quit().catch(() => workerRedisConnection?.disconnect());
     } catch {}

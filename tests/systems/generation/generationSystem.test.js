@@ -1,27 +1,21 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import * as generationToolsNamespace from "#generation/tools";
 import {
-    ExecutionEngine,
-    JobExecutionContext,
-    createJobExecutionContext,
-    jobQueueService,
+    WorkflowDispatchService,
     GenerationService,
     GenerationRequestService,
     WorkflowService,
     WorkflowRepository,
     configureGeneration,
+    startGenerationWorker,
 } from "#generation/tools";
-import {
-    GraphCompiler,
-    WorkflowExecutor,
-    NodeRegistry,
-    createDefaultV3NodeRegistry,
-    V3_WORKFLOWS,
-    getV3Workflow,
-    imageGenerationV3,
-    videoGenerationV3,
-    characterSheetV3,
-} from "../../../src/systems/generation/internal/v3/index.js";
+import { JobExecutionContext, createJobExecutionContext } from "../../../src/systems/workflow-engine/internal/core/JobExecutionContext.js";
+import { GraphCompiler } from "../../../src/systems/workflow-engine/internal/core/GraphCompiler.js";
+import { WorkflowExecutor } from "../../../src/systems/workflow-engine/internal/core/WorkflowExecutor.js";
+import { NodeRegistry } from "../../../src/systems/workflow-engine/internal/core/NodeRegistry.js";
+import { createDefaultV3NodeRegistry } from "../../../src/systems/workflow-engine/internal/nodes/index.js";
+import { V3_WORKFLOWS, getV3Workflow, imageGenerationV3, videoGenerationV3, characterSheetV3 } from "../../../src/systems/workflow-engine/internal/workflows/index.js";
 import {
     GenerationError,
     GenerationValidationError,
@@ -29,7 +23,9 @@ import {
     GenerationCompilationError,
     GenerationQueueDispatchError,
 } from "../../../src/systems/generation/internal/errors.js";
-import { imagesRouter, videoRouter, v2WorkflowsRouter, workflowsRouter, generationRouter } from "#generation/api";
+import { sendGenerationControllerError } from "../../../src/systems/generation/internal/controllers/generationControllerHelpers.js";
+import * as generationApiNamespace from "#generation/api";
+import { imagesRouter, videoRouter, v2WorkflowsRouter, workflowsRouter } from "#generation/api";
 import apiRouter from "../../../src/api/routes.js";
 import express from "express";
 import http from "node:http";
@@ -46,16 +42,79 @@ import { execSync } from "node:child_process";
  */
 
 describe("System 1: Generation & Workflows — Gateways & Public Tools Contract", () => {
+    it("seals #generation/api and #generation/tools to exact production surface (zero handler leaks or internal V3 exports)", () => {
+        const expectedApiExports = [
+            "imagesRouter",
+            "v2WorkflowsRouter",
+            "videoRouter",
+            "workflowsRouter",
+        ].sort();
+        const expectedToolsExports = [
+            "GenerationRequestService",
+            "GenerationService",
+            "WorkflowDispatchService",
+            "WorkflowRepository",
+            "WorkflowService",
+            "configureGeneration",
+            "startGenerationWorker",
+        ].sort();
+
+        assert.deepEqual(Object.keys(generationApiNamespace).sort(), expectedApiExports);
+        assert.deepEqual(Object.keys(generationToolsNamespace).sort(), expectedToolsExports);
+
+        for (const forbiddenApi of [
+            "generationRouter",
+            "generateImage",
+            "relightImage",
+            "changeImageAngle",
+            "removeImageBackground",
+            "editImage",
+            "generateVideo",
+            "getProjectData",
+            "deleteItem",
+            "toggleItemLike",
+            "deleteWorkflow",
+            "bulkDeleteWorkflows",
+            "setPrimaryMedia",
+            "deleteMedia",
+            "default",
+        ]) {
+            assert.equal(
+                generationApiNamespace[forbiddenApi],
+                undefined,
+                `#generation/api must not export ${forbiddenApi}`
+            );
+        }
+
+        for (const forbiddenTool of [
+            "ExecutionEngine",
+            "jobQueueService",
+            "JobExecutionContext",
+            "createJobExecutionContext",
+            "GraphCompiler",
+            "WorkflowExecutor",
+            "NodeRegistry",
+            "workflowRepository",
+            "default",
+        ]) {
+            assert.equal(
+                generationToolsNamespace[forbiddenTool],
+                undefined,
+                `#generation/tools must not export ${forbiddenTool}`
+            );
+        }
+    });
+
     it("should export all expected V3 public tools and domain services", () => {
-        assert.equal(typeof ExecutionEngine, "function");
+        assert.equal(typeof WorkflowDispatchService, "function");
         assert.equal(typeof JobExecutionContext, "function");
         assert.equal(typeof createJobExecutionContext, "function");
         assert.equal(typeof WorkflowService, "function");
-        assert.equal(typeof jobQueueService, "object");
         assert.equal(typeof GenerationService, "function");
         assert.equal(typeof GenerationRequestService, "function");
         assert.equal(typeof WorkflowRepository, "function");
         assert.equal(typeof configureGeneration, "function");
+        assert.equal(typeof startGenerationWorker, "function");
     });
 
     it("should export valid Express routers from #generation/api", () => {
@@ -63,13 +122,82 @@ describe("System 1: Generation & Workflows — Gateways & Public Tools Contract"
         assert.equal(typeof videoRouter, "function");
         assert.equal(typeof v2WorkflowsRouter, "function");
         assert.equal(typeof workflowsRouter, "function");
-        assert.equal(typeof generationRouter, "function");
 
         assert.ok(Array.isArray(imagesRouter.stack));
         assert.ok(Array.isArray(videoRouter.stack));
         assert.ok(Array.isArray(v2WorkflowsRouter.stack));
         assert.ok(Array.isArray(workflowsRouter.stack));
-        assert.ok(Array.isArray(generationRouter.stack));
+    });
+
+    it("rejects malformed or PostgREST-injection cursor values in WorkflowRepository.listProjectAssets", async () => {
+        const orCalls = [];
+        const mockBuilder = {
+            select() { return this; },
+            eq() { return this; },
+            in() { return this; },
+            not() { return this; },
+            is() { return this; },
+            or(expr) { orCalls.push(expr); return this; },
+            order() { return this; },
+            limit() { return this; },
+            then(resolve) { return resolve({ data: [], error: null }); },
+        };
+        const mockClient = { from: () => mockBuilder };
+        const repo = new WorkflowRepository(mockClient);
+
+        // Injection attempt in createTime
+        await assert.rejects(
+            () => repo.listProjectAssets("proj-1", {
+                cursor: { createTime: "2026-01-01T00:00:00Z,id.gt.0", id: "wf-1" },
+            }),
+            (err) => err instanceof GenerationValidationError && err.statusCode === 400
+        );
+
+        // Injection attempt in id
+        await assert.rejects(
+            () => repo.listProjectAssets("proj-1", {
+                cursor: { createTime: "2026-01-01T00:00:00.000Z", id: "wf-1),project_id.neq.0" },
+            }),
+            (err) => err instanceof GenerationValidationError && err.statusCode === 400
+        );
+
+        // Valid ISO-8601 timestamp + safe id succeeds and passes sanitized .or() filter
+        await repo.listProjectAssets("proj-1", {
+            cursor: { createTime: "2026-01-01T12:30:00.123Z", id: "wf_123-abc" },
+        });
+        assert.equal(orCalls.length, 1);
+        assert.equal(
+            orCalls[0],
+            "create_time.lt.2026-01-01T12:30:00.123Z,and(create_time.eq.2026-01-01T12:30:00.123Z,id.lt.wf_123-abc)"
+        );
+    });
+
+    it("masks raw Redis/internal error messages on HTTP 503 QUEUE_DISPATCH_FAILED responses", () => {
+        let statusCode = 200;
+        let payload = null;
+        const res = {
+            status(code) { statusCode = code; return res; },
+            json(body) { payload = body; return res; },
+        };
+        const err = new GenerationQueueDispatchError(
+            "Failed to enqueue workflow: ECONNREFUSED 10.0.0.5:6379 ioredis cluster down"
+        );
+        err.workflowId = "wf-503";
+        err.mediaId = "m-503";
+        err.mediaIds = ["m-503"];
+
+        sendGenerationControllerError(res, err, {
+            logger: { error() {} },
+            actionName: "generateImage",
+            fallbackMessage: "Failed to generate image",
+        });
+
+        assert.equal(statusCode, 503);
+        assert.equal(payload.ok, false);
+        assert.equal(payload.code, "QUEUE_DISPATCH_FAILED");
+        assert.equal(payload.workflowId, "wf-503");
+        assert.equal(payload.mediaId, "m-503");
+        assert.doesNotMatch(payload.message, /ECONNREFUSED|10\.0\.0\.5|ioredis|redis/i);
     });
 
     it("should enforce Generation typed error hierarchy", () => {
@@ -226,7 +354,7 @@ describe("Generation API Boundary & Separation Tests", () => {
   });
 
   it("TEST 7: LlmNode.estimateCost handles LLM node inputs with skills without capability error", async () => {
-    const { LlmNode } = await import("../../../src/systems/generation/internal/v3/index.js");
+    const { LlmNode } = await import("../../../src/systems/workflow-engine/internal/nodes/index.js");
 
     const cost = LlmNode.estimateCost({
       model: "gemini-3-flash",

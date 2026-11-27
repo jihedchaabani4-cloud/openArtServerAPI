@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { Queue } from "bullmq";
-import { redisConnection, createLogger, envConfig } from "#shared";
+import { createLogger, envConfig } from "#shared";
+import { redisConnection } from "#shared/redis";
 
 const queueLogger = createLogger("wallet-queue");
 

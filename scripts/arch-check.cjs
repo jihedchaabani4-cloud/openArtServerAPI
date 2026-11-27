@@ -50,7 +50,7 @@ function loadFiles() {
 
 function specifiers(file) {
   const out = [];
-  const re = /(?:require\(\s*|from\s+|import\(\s*|import\s+)['"]([^'"]+)['"]/g;
+  const re = /(?:require\(\s*|import\(\s*|^\s*import\s+|(?:^\s*(?:import|export)\b[^\n'"]*|\})\s*from\s+)['"]([^'"]+)['"]/g;
   file.lines.forEach((line, i) => {
     if (isComment(line)) return;
     let m;
@@ -133,7 +133,8 @@ function checkRuleR10(f, exceptions = loadExceptions()) {
         if (aliasSys === 'shared') {
           const isInternalDb = (f.rel.startsWith('src/systems/') && f.rel.includes('/internal/db/')) || f.rel === 'lib/supabase.js';
           const isAllowedShared = subpath === '' || subpath === 'index' || subpath === 'index.js' ||
-                                  (isInternalDb && subpath === 'db/supabase.js');
+                                  (isInternalDb && subpath === 'db/supabase.js') ||
+                                  (subpath === 'redis' && fromSys !== 'workflow-engine');
           if (!isAllowedShared && fromSys !== targetSys) {
             isDeep = true;
           }
@@ -337,6 +338,45 @@ function checkRuleR17(rootDir = ROOT) {
   }
 
   return violations;
+}
+
+function checkRuleR18(f) {
+  // R18: Standalone workflow-engine isolation — closed per-folder positive allowlist.
+  // - internal/core/**: ONLY #shared, node:*, and intra-system relative paths.
+  // - internal/skills/**: ONLY #shared, node:*, "yaml", and intra-system relative paths.
+  // - All other workflow-engine files: ONLY #shared, #models/tools, node:*, and intra-system relative paths.
+  // Forbids #shared/redis, all other #<system>/*, bullmq, ioredis, redis, @upstash/redis, and provider SDKs.
+  if (!f.rel.startsWith('src/systems/workflow-engine/')) return [];
+
+  const isCore = f.rel.startsWith('src/systems/workflow-engine/internal/core/');
+  const isSkills = f.rel.startsWith('src/systems/workflow-engine/internal/skills/');
+
+  const hits = [];
+  for (const s of specifiers(f)) {
+    const spec = s.spec;
+
+    if (spec.startsWith('node:')) continue;
+
+    if (spec.startsWith('.')) {
+      const abs = path.resolve(ROOT, path.dirname(f.rel), spec);
+      const resolved = path.relative(ROOT, abs).split(path.sep).join('/');
+      if (resolved.startsWith('src/systems/workflow-engine/')) continue;
+      hits.push({ line: s.line, text: s.text });
+      continue;
+    }
+
+    if (spec.startsWith('#')) {
+      if (spec === '#shared') continue;
+      if (!isCore && !isSkills && spec === '#models/tools') continue;
+      hits.push({ line: s.line, text: s.text });
+      continue;
+    }
+
+    if (isSkills && spec === 'yaml') continue;
+
+    hits.push({ line: s.line, text: s.text });
+  }
+  return hits;
 }
 
 /**
@@ -620,6 +660,11 @@ const RULES = [
     desc: 'zero outbound legacy imports from src/systems/** or src/shared/**',
     run: (f) => checkRuleR16(f),
   },
+  {
+    id: 'R18',
+    desc: 'workflow-engine closed allowlist: zero Redis/BullMQ/DB/peer systems (core: #shared only; skills: +yaml; nodes: +#models/tools)',
+    run: (f) => checkRuleR18(f),
+  },
 ];
 
 function migrationViolations() {
@@ -713,7 +758,7 @@ function layerReport(files) {
 }
 
 function summary(violations, baseline, fresh) {
-  const allRuleIds = ['R1', 'R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11', 'R12', 'R13', 'R14', 'R15', 'R16', 'R17'];
+  const allRuleIds = ['R1', 'R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11', 'R12', 'R13', 'R14', 'R15', 'R16', 'R17', 'R18'];
   const ids = allRuleIds.sort((a, b) => {
     const numA = parseInt(a.replace(/\D/g, ''), 10);
     const numB = parseInt(b.replace(/\D/g, ''), 10);
@@ -814,6 +859,7 @@ if (require.main === module) {
     checkRuleR15,
     checkRuleR16,
     checkRuleR17,
+    checkRuleR18,
     findImportCycles,
     collect,
   };

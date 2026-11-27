@@ -1,18 +1,21 @@
-import { AppError, createLogger } from "#shared";
+import { createLogger, safePublicRouteError } from "#shared";
 import { getProjectService, getGenerationService } from "../services/serviceAccessor.js";
 
 const logger = createLogger("workspace:projects_controller");
 
 function handleError(res, error, operation) {
-    if (error instanceof AppError && error.statusCode < 500) {
-        return res.status(error.statusCode).json({
-            ok: false,
-            errorCode: error.errorCode || "APP_ERROR",
-            message: error.message,
-        });
+    const { statusCode, errorCode, publicMessage } = safePublicRouteError(error);
+    if (statusCode >= 500) {
+        logger.error(
+            { event: `projects_controller.${operation}_error`, err: error?.message || String(error), statusCode },
+            `${operation} error`
+        );
     }
-    logger.error({ event: `projects_controller.${operation}_error`, err: error?.message || String(error) }, `${operation} error`);
-    return res.status(500).json({ ok: false, message: "Internal server error" });
+    return res.status(statusCode).json({
+        ok: false,
+        errorCode,
+        message: publicMessage,
+    });
 }
 
 /** GET all projects for the authenticated user */
@@ -72,7 +75,7 @@ export const remove = async (req, res) => {
  * Lists assets for a project with optional folder filtering and cursor-based pagination.
  * Task F-T7 (Scenario 9).
  */
-export const listAssets = async (req, res, next) => {
+export const listAssets = async (req, res) => {
     try {
         const { projectId } = req.params;
         const userId = req.user?.id;
@@ -81,7 +84,7 @@ export const listAssets = async (req, res, next) => {
         const generationService = getGenerationService();
         if (!generationService) {
             logger.error({ event: "projects_controller.listAssets_uninitialized" }, "GenerationService not initialized");
-            return res.status(500).json({ ok: false, message: "Internal server error" });
+            return res.status(500).json({ ok: false, errorCode: "INTERNAL_ERROR", message: "Internal server error" });
         }
 
         const result = await generationService.listProjectAssets({
@@ -95,13 +98,6 @@ export const listAssets = async (req, res, next) => {
 
         return res.status(200).json(result);
     } catch (err) {
-        if (err instanceof AppError) {
-            return res.status(err.statusCode).json({
-                ok: false,
-                errorCode: err.errorCode || "APP_ERROR",
-                message: err.message,
-            });
-        }
-        return next(err);
+        return handleError(res, err, "listAssets");
     }
 };

@@ -1,9 +1,13 @@
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { CharacterMediaService, CHARACTER_MAX_DETAIL_MEDIA, CharacterGenerationService } from "#characters/tools";
+import { CharacterMediaService } from "#characters/tools";
+import { CHARACTER_MAX_DETAIL_MEDIA } from "../../../src/systems/characters/internal/services/CharacterMediaService.js";
+import { CharacterGenerationService } from "../../../src/systems/characters/internal/services/CharacterGenerationService.js";
 import { CrudServiceError } from "#shared";
-import { CHARACTER_SHEET_UPLOAD_POLICY, CHARACTER_DETAIL_UPLOAD_POLICY, failWorkflowPendingMedia, WorkflowMediaRepository, configureMedia, getMediaRepository } from "#media/tools";
-import { ExecutionEngine } from "#generation/tools";
+import { CHARACTER_SHEET_UPLOAD_POLICY, CHARACTER_DETAIL_UPLOAD_POLICY, WorkflowMediaRepository, configureMedia, getMediaRepository } from "#media/tools";
+import { failWorkflowPendingMedia } from "../../../src/systems/media/internal/services/MediaLifecycleService.js";
+import { WorkflowDispatchService } from "#generation/tools";
+import { createWorkflowEngine } from "#workflow-engine/tools";
 import { InMemoryWalletService } from "../../helpers/inMemoryWalletService.js";
 import { WorkflowMediaService } from "../../../src/systems/generation/internal/services/WorkflowMediaService.js";
 import { ElementMediaService, ElementService } from "#elements/tools";
@@ -1341,14 +1345,14 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
       },
     };
 
-    const mockExecutionEngine = {
-      launch: async ({ executionId }) => ({ executionId, workflowRunId: executionId }),
+    const mockDispatcher = {
+      dispatch: async ({ executionId }) => ({ executionId, workflowRunId: executionId }),
     };
 
     // A. Success path: verify placeholder media and workflow_media link are created
     const charGenService = new CharacterGenerationService({
       db: realDb,
-      executionEngine: mockExecutionEngine,
+      workflowDispatcher: mockDispatcher,
     });
 
     const res = await charGenService.enqueueSheetGeneration({
@@ -1383,7 +1387,7 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
 
     const failingCharGenService = new CharacterGenerationService({
       db: failingDb,
-      executionEngine: mockExecutionEngine,
+      workflowDispatcher: mockDispatcher,
     });
 
     await assert.rejects(
@@ -1403,8 +1407,8 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
     // C. Fail-closed on linkMedia returning null:
     // createMediaInWorkflow must NOT mask null with a synthetic object.
     let enqueueCallCount = 0;
-    const trackedExecutionEngine = {
-      launch: async ({ executionId }) => {
+    const trackedDispatcher = {
+      dispatch: async ({ executionId }) => {
         enqueueCallCount++;
         return { executionId, workflowRunId: executionId };
       },
@@ -1419,7 +1423,7 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
 
     const nullLinkCharGenService = new CharacterGenerationService({
       db: nullLinkDb,
-      executionEngine: trackedExecutionEngine,
+      workflowDispatcher: trackedDispatcher,
     });
 
     await assert.rejects(
@@ -1607,11 +1611,11 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
     }
   });
 
-  it("5. Worker crash handler: notifies external failure hooks and marks ALL direct media failed", async () => {
+  it("5. Worker crash handler: marks ALL direct media in serverContext.mediaIds failed", async () => {
     process.env.NODE_ENV = "test";
     const { handleUseCaseWorkerFailure, useCaseWorker } = await import("../../../src/systems/generation/internal/workers/useCaseWorker.js");
-    const { executionEngine } = await import("../../../src/container.js");
-    const { redisConnection, workerRedisConnection, rateLimitRedisConnection } = await import("#shared");
+    await import("../../../src/container.js");
+    const { redisConnection, workerRedisConnection, rateLimitRedisConnection } = await import("#shared/redis");
 
     const mediaTable = new Map();
     const targetMediaId = "media-crash-idem-1";
@@ -1630,11 +1634,6 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
     };
     configureMedia({ mediaRepo: mockMediaRepo });
 
-    const notifiedPayloads = [];
-    const unsubscribe = executionEngine.onFailure((payload) => {
-      notifiedPayloads.push(payload);
-    });
-
     const mockMultiMediaJob = {
       id: "job-crash-multi-1",
       data: {
@@ -1647,12 +1646,9 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
 
     try {
       await handleUseCaseWorkerFailure(mockMultiMediaJob, new Error("Crash"));
-      assert.equal(notifiedPayloads.length, 1, "External onFailure hook must be notified once");
-      assert.equal(notifiedPayloads[0].stage, "worker_crash");
       assert.equal(mediaTable.get(targetMediaId).status, "failed", "First media must be marked failed");
       assert.equal(mediaTable.get(targetMediaId2).status, "failed", "ALL direct media in mediaIds must be marked failed");
     } finally {
-      unsubscribe();
       configureMedia({ mediaRepo: origMediaRepo });
       await useCaseWorker?.close?.().catch(() => {});
       await redisConnection?.quit().catch(() => redisConnection?.disconnect());
@@ -1697,11 +1693,10 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
       },
     };
 
-    const engine = new ExecutionEngine({
-      identityTools: { assertOwns: async () => true, assertOwnsAny: async () => true },
-      jobQueueService: {
-        addUseCaseJob: async (payload) => {
-          const job = { id: `usecase-${payload.executionId}`, data: payload };
+    const dispatcher = new WorkflowDispatchService({
+      queue: {
+        add: async (_name, payload, opts) => {
+          const job = { id: opts.jobId, data: payload };
           queuedJobs.push(job);
           return job;
         },
@@ -1710,7 +1705,7 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
 
     const charGenService = new CharacterGenerationService({
       db: mockDb,
-      executionEngine: engine,
+      workflowDispatcher: dispatcher,
     });
 
     // Submit 2 character-sheet generations on the EXACT same characterId
@@ -1742,16 +1737,16 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
     assert.notEqual(queuedJobs[0].id, queuedJobs[1].id, "2 distinct BullMQ jobIds");
     assert.notEqual(sheet1.placeholderMedia.id, sheet2.placeholderMedia.id, "2 distinct placeholder mediaIds");
 
-    // Execute both jobs concurrently and verify independent outputs
+    const { completeMedia } = await import("#media/tools");
+    // Execute both jobs concurrently using fresh isolated engines and verify independent outputs
     const execResults = await Promise.all(
       queuedJobs.map((job) =>
-        engine.execute({
-          useCaseId: job.data.useCaseId,
-          input: job.data.input,
+        createWorkflowEngine().runWorkflow(job.data.useCaseId, job.data.input, {
           userId: job.data.userId,
           executionId: job.data.executionId,
           runId: job.data.workflowRunId,
           jobId: job.id,
+          adapters: { completeMedia },
           nodeContext: {
             db: mockDb,
             mediaRepository: mockDb.media,
@@ -1803,8 +1798,8 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
       workflows: { updatePrimaryMedia: async () => ({}) },
     };
 
-    const mockEngine = {
-      launch: async () => {
+    const mockDispatcher = {
+      dispatch: async () => {
         const err = new Error("Insufficient credits for character sheet");
         err.code = "INSUFFICIENT_FUNDS";
         throw err;
@@ -1813,7 +1808,7 @@ describe("Sheet Generation real service layer tests — workflow_media integrity
 
     const charGenService = new CharacterGenerationService({
       db: mockDb,
-      executionEngine: mockEngine,
+      workflowDispatcher: mockDispatcher,
     });
 
     const result = await charGenService.enqueueSheetGeneration({

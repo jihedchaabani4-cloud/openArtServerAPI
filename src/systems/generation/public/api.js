@@ -7,7 +7,6 @@
  */
 
 import express from "express";
-import { Router } from "express";
 
 import * as imageController from "../internal/controllers/imageController.js";
 import * as videoController from "../internal/controllers/videoController.js";
@@ -59,21 +58,3 @@ workflowsRouter.delete("/workflows/:id", workflowsController.deleteWorkflow);
 workflowsRouter.delete("/:id", workflowsController.deleteWorkflow);
 workflowsRouter.delete("/items/:id", generationsMutation.deleteItem);
 workflowsRouter.delete("/media/:media_id", workflowsController.deleteMedia);
-
-// ── Combined Generation Router ─────────────────────────────────────
-export const generationRouter = express.Router();
-generationRouter.use("/images", imagesRouter);
-generationRouter.use("/video", videoRouter);
-generationRouter.use("/v2/workflows", v2WorkflowsRouter);
-generationRouter.use("/workflows", workflowsRouter);
-
-export const { generateImage, relightImage, changeImageAngle, removeImageBackground, editImage } = imageController;
-export const { generateVideo } = videoController;
-export const { getProjectData } = projectController;
-export const { deleteItem, toggleLike: toggleItemLike } = generationsMutation;
-export const {
-    deleteWorkflow,
-    bulkDeleteWorkflows,
-    setPrimaryMedia,
-    deleteMedia,
-} = workflowsController;

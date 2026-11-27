@@ -5,54 +5,39 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assertWorkerConfigured,
+  createGenerationFailureHandler,
   handleUseCaseWorkerFailure,
   processUseCaseJob,
   useCaseWorker,
   USECASE_WORKER_OPTIONS,
 } from "../../../src/systems/generation/internal/workers/useCaseWorker.js";
+import { WorkflowExecutor } from "../../../src/systems/workflow-engine/internal/core/WorkflowExecutor.js";
+import { NodeRegistry } from "../../../src/systems/workflow-engine/internal/core/NodeRegistry.js";
+import { ImageGenerateNode, VideoGenerateNode, LlmNode } from "../../../src/systems/workflow-engine/internal/nodes/index.js";
 import {
-  WorkflowExecutor,
-  NodeRegistry,
-  ImageGenerateNode,
-  VideoGenerateNode,
-  LlmNode,
-} from "../../../src/systems/generation/internal/v3/index.js";
-import {
-  JobQueueService,
+  WorkflowDispatchService,
   getUseCaseQueue,
-} from "../../../src/systems/generation/internal/services/jobQueueService.js";
-import { executionEngine } from "../../../src/container.js";
+} from "../../../src/systems/generation/internal/services/WorkflowDispatchService.js";
+import "../../../src/container.js";
 import { configureMedia, getMediaRepository } from "#media/tools";
-import { InMemoryWalletService } from "../../helpers/inMemoryWalletService.js";
-import { redisConnection, baseLogger, LogEvents } from "#shared";
+import { baseLogger, LogEvents } from "#shared";
+import { redisConnection } from "#shared/redis";
 import { walletMaintenanceQueue } from "../../../src/systems/billing/internal/workers/walletQueue.js";
 
 // ─── Source: useCaseWorkerFailureIdempotencyBoundary.test.js ───
 {
 describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Cleanup & M5 Context Forwarding", () => {
-  let originalRollbackHold;
-  let originalExecute;
-  let originalRunWorkflow;
-  let originalWalletService;
   let originalMediaRepo;
 
   beforeEach(() => {
-    originalRollbackHold = executionEngine.rollbackHold;
-    originalExecute = executionEngine.execute;
-    originalRunWorkflow = executionEngine.runWorkflow;
-    originalWalletService = executionEngine.walletService;
     originalMediaRepo = getMediaRepository();
   });
 
   afterEach(() => {
-    executionEngine.rollbackHold = originalRollbackHold;
-    executionEngine.execute = originalExecute;
-    executionEngine.runWorkflow = originalRunWorkflow;
-    executionEngine.walletService = originalWalletService;
     configureMedia({ mediaRepo: originalMediaRepo });
   });
 
-  it("TEST 1: useCaseWorker failure handler notifies external failure hook and fails ONLY direct mediaIds", async () => {
+  it("TEST 1: useCaseWorker failure handler marks ONLY explicit serverContext.mediaIds (never generic input.media_id)", async () => {
     const workflowId = "wf-idem-test-123";
 
     const updatedMedia = [];
@@ -74,7 +59,7 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
         },
         input: {
           workflow_id: workflowId,
-          media_id: "media-test-1",
+          media_id: "media-unrelated-input-only",
         },
       },
     };
@@ -86,12 +71,22 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
     assert.equal(updatedMedia[0].mediaId, "media-test-1");
     assert.equal(updatedMedia[0].status, "failed");
 
-    // Second invocation succeeds cleanly without throwing
-    await handleUseCaseWorkerFailure(failedJob, testError);
-    assert.equal(updatedMedia.every((m) => m.mediaId === "media-test-1" && m.status === "failed"), true);
+    // Read-only workflow with only input.media_id and NO serverContext.mediaIds must NEVER mutate DB
+    updatedMedia.length = 0;
+    const handler = createGenerationFailureHandler({
+      markMediaFailed: async ({ mediaId }) => {
+        updatedMedia.push({ mediaId });
+      },
+    });
+    await handler({
+      input: { media_id: "completed-media-do-not-touch" },
+      serverContext: null,
+      error: new Error("Read-only analysis failed"),
+    });
+    assert.equal(updatedMedia.length, 0, "Failure handler must never mutate generic input.media_id");
   });
 
-  it("TEST 2 (M5): JobQueueService.addUseCaseJob preserves serverContext, executionId, and workflowRunId in queued payload", async () => {
+  it("TEST 2 (M5): WorkflowDispatchService.dispatch preserves serverContext, executionId, and workflowRunId in queued payload", async () => {
     const addedJobs = [];
     const fakeBullQueue = {
       add: async (name, data, opts) => {
@@ -101,14 +96,14 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
       },
     };
 
-    const queueService = new JobQueueService(fakeBullQueue);
+    const dispatcher = new WorkflowDispatchService({ queue: fakeBullQueue });
     const serverContext = {
       workflowId: "wf-m5-100",
       mediaIds: ["media-m5-100"],
       projectId: "proj-m5-100",
     };
 
-    const job = await queueService.addUseCaseJob({
+    const res = await dispatcher.dispatch({
       useCaseId: "image-generation-v3",
       input: { prompt: "A serene fjord", model: "nanobana_2", media_id: "media-m5-100" },
       userId: "user-m5-1",
@@ -120,20 +115,29 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
     });
 
     assert.equal(addedJobs.length, 1);
-    assert.equal(job.id, "usecase-exec-m5-abc");
+    assert.equal(res.status, "queued");
+    assert.equal(res.jobId, "usecase-exec-m5-abc");
     assert.deepEqual(addedJobs[0].data.serverContext, serverContext, "serverContext must be preserved intact in BullMQ payload");
     assert.equal(addedJobs[0].data.executionId, "exec-m5-abc");
     assert.equal(addedJobs[0].data.workflowRunId, "exec-m5-abc");
   });
 
-  it("TEST 3 (M5): useCaseWorker processUseCaseJob forwards executionId as runId, jobId, and serverContext into executionEngine.runWorkflow", async () => {
-    let capturedCall = null;
-    executionEngine.runWorkflow = async (workflowOrId, input, opts) => {
-      capturedCall = { workflowOrId, input, opts };
-      return { status: "completed", runId: opts.runId, executionId: opts.executionId };
+  it("TEST 3 (M5): useCaseWorker processUseCaseJob spawns a fresh engine per job and forwards runId, jobId, adapters, and serverContext", async () => {
+    const capturedCalls = [];
+    const createdEngines = [];
+    const fakeFactory = (factoryOpts) => {
+      const fakeEngine = {
+        factoryOpts,
+        runWorkflow: async (workflowOrId, input, opts) => {
+          capturedCalls.push({ workflowOrId, input, opts, factoryOpts });
+          return { status: "completed", runId: opts.runId, executionId: opts.executionId };
+        },
+      };
+      createdEngines.push(fakeEngine);
+      return fakeEngine;
     };
 
-    const fakeJob = {
+    const fakeJob1 = {
       id: "usecase-exec-m5-xyz",
       data: {
         useCaseId: "image-generation-v3",
@@ -147,37 +151,51 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
         },
       },
     };
+    const fakeJob2 = {
+      id: "usecase-exec-m5-2",
+      data: {
+        useCaseId: "image-generation-v3",
+        userId: "user-m5-3",
+        executionId: "exec-m5-2",
+        input: { prompt: "A crystal desert", model: "nanobana_2", media_id: "media-m5-201" },
+        serverContext: { workflowId: "wf-m5-201", mediaIds: ["media-m5-201"] },
+      },
+    };
 
-    const res = await processUseCaseJob(fakeJob);
+    const [res1, res2] = await Promise.all([
+      processUseCaseJob(fakeJob1, { engineFactory: fakeFactory }),
+      processUseCaseJob(fakeJob2, { engineFactory: fakeFactory }),
+    ]);
 
-    assert.equal(res.status, "completed");
-    assert.ok(capturedCall, "executionEngine.runWorkflow must be invoked");
+    assert.equal(res1.status, "completed");
+    assert.equal(res2.status, "completed");
+    assert.equal(createdEngines.length, 2, "Must instantiate a fresh isolated engine per job");
+    assert.notStrictEqual(createdEngines[0], createdEngines[1]);
+
+    const capturedCall = capturedCalls[0];
     assert.equal(capturedCall.workflowOrId, "image-generation-v3");
-    assert.deepEqual(capturedCall.input, fakeJob.data.input);
-    assert.equal(capturedCall.opts.async, false, "worker must run workflow with async: false");
-    assert.equal(capturedCall.opts.executionId, "exec-m5-xyz", "executionId forwarded");
-    assert.equal(capturedCall.opts.runId, "exec-m5-xyz", "executionId forwarded as runId when workflowRunId absent");
-    assert.equal(capturedCall.opts.jobId, "usecase-exec-m5-xyz", "BullMQ job.id forwarded as jobId");
-    assert.deepEqual(
-      capturedCall.opts.serverContext,
-      fakeJob.data.serverContext,
-      "serverContext must be forwarded opaquely to executionEngine.runWorkflow"
-    );
+    assert.deepEqual(capturedCall.input, fakeJob1.data.input);
+    assert.equal(typeof capturedCall.factoryOpts.onFailure, "function");
+    assert.equal(typeof capturedCall.factoryOpts.adapters?.completeMedia, "function");
+    assert.equal(capturedCall.opts.executionId, "exec-m5-xyz");
+    assert.equal(capturedCall.opts.runId, "exec-m5-xyz");
+    assert.equal(capturedCall.opts.jobId, "usecase-exec-m5-xyz");
+    assert.deepEqual(capturedCall.opts.serverContext, fakeJob1.data.serverContext);
   });
 
-  it("TEST 4 (Bootstrap): standalone root worker.js wires ExecutionEngine, Billing, Media, and Identity without index.js", () => {
+  it("TEST 4 (Bootstrap): standalone root worker.js wires WorkflowAdapters, markMediaFailed, Billing, Media, and Identity without index.js", () => {
     const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
     const script = `
       const { worker } = await import("./worker.js");
-      const { getExecutionEngine } = await import("./src/systems/generation/internal/services/serviceAccessor.js");
+      const { getMarkMediaFailed, getWorkflowAdapters } = await import("./src/systems/generation/internal/services/serviceAccessor.js");
       const { assertWorkerConfigured } = await import("./src/systems/generation/internal/workers/useCaseWorker.js");
-      const { ExecutionEngine } = await import("#generation/tools");
       const { getDefaultWalletService } = await import("./src/systems/billing/internal/services/serviceAccessor.js");
       const { getMediaRepository } = await import("#media/tools");
-      const engine = assertWorkerConfigured();
+      const cfg = assertWorkerConfigured();
       if (!worker) throw new Error("root worker.js did not export worker");
-      if (!(engine instanceof ExecutionEngine)) throw new Error("ExecutionEngine not wired");
-      if (getExecutionEngine() !== engine) throw new Error("serviceAccessor mismatch");
+      if (typeof cfg.markMediaFailed !== "function") throw new Error("markMediaFailed not wired");
+      if (getMarkMediaFailed() !== cfg.markMediaFailed) throw new Error("serviceAccessor markMediaFailed mismatch");
+      if (getWorkflowAdapters() !== cfg.workflowAdapters) throw new Error("serviceAccessor workflowAdapters mismatch");
       if (!getDefaultWalletService()) throw new Error("WalletService not wired in billing serviceAccessor");
       if (!getMediaRepository()) throw new Error("MediaRepository not wired");
       console.log("STANDALONE_WORKER_OK");
@@ -210,11 +228,11 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
       ["--import", "./tests/setup-env.js", "--input-type=module", "-e", script],
       { cwd: repoRoot, encoding: "utf8", timeout: 15000 }
     );
-    assert.match(out, /ExecutionEngine is not configured/);
+    assert.match(out, /markMediaFailed is not configured/);
     assert.match(out, /worker\.js/);
   });
 
-  it("TEST 6 (P2-3): JobQueueService.addUseCaseJob logs job.queued AFTER queue.add resolves with enqueueDurationMs and never logs on failure", async () => {
+  it("TEST 6 (P2-3): WorkflowDispatchService.dispatch logs job.queued AFTER queue.add resolves with enqueueDurationMs and never logs on failure", async () => {
     const timeline = [];
     const origInfo = baseLogger.info;
     baseLogger.info = (payload, msg) => {
@@ -225,7 +243,6 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
     };
 
     try {
-      // A) Success path: queue.add must complete BEFORE job.queued is logged
       const fakeSuccessQueue = {
         add: async (name, data, opts) => {
           timeline.push({ step: "queue.add.start" });
@@ -235,8 +252,8 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
         },
       };
 
-      const queueService = new JobQueueService(fakeSuccessQueue);
-      await queueService.addUseCaseJob({
+      const dispatcher = new WorkflowDispatchService({ queue: fakeSuccessQueue });
+      await dispatcher.dispatch({
         useCaseId: "video-generation-v3",
         input: { prompt: "Sunrise over dunes" },
         userId: "user-p23-queue",
@@ -252,25 +269,24 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
       assert.equal(loggedPayload.event, LogEvents.JOB_QUEUED);
       assert.equal(loggedPayload.jobId, "usecase-exec-p23-ok");
       assert.equal(typeof loggedPayload.enqueueDurationMs, "number");
-      assert.ok(loggedPayload.enqueueDurationMs >= 0, "enqueueDurationMs must be a non-negative number");
+      assert.ok(loggedPayload.enqueueDurationMs >= 0);
 
-      // B) Failure path: when queue.add throws on all attempts, job.queued must NOT be logged
       timeline.length = 0;
       const fakeFailingQueue = {
         add: async () => {
           throw new Error("Redis ECONNREFUSED");
         },
       };
-      const failingQueueService = new JobQueueService(fakeFailingQueue);
+      const failingDispatcher = new WorkflowDispatchService({ queue: fakeFailingQueue });
       await assert.rejects(
         () =>
-          failingQueueService.addUseCaseJob({
+          failingDispatcher.dispatch({
             useCaseId: "video-generation-v3",
             input: { prompt: "Will fail to enqueue" },
             userId: "user-p23-queue",
             executionId: "exec-p23-fail",
           }),
-        /Queue dispatch failed/
+        /Failed to enqueue workflow/
       );
 
       assert.equal(
@@ -299,7 +315,6 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
     };
 
     try {
-      // A) Handled error (err.errorReport present) -> DEBUG only, 0 ERROR logs
       const handledErr = new Error("Safety check unavailable");
       handledErr.errorReport = { code: "SAFETY_CHECK_UNAVAILABLE", category: "UPSTREAM_FAULT" };
 
@@ -307,24 +322,20 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
 
       assert.equal(
         errorLogs.filter((l) => l.payload?.event === LogEvents.JOB_FAILED).length,
-        0,
-        "Handled failure with err.errorReport must NOT emit duplicate ERROR job.failed log"
+        0
       );
       assert.equal(
         debugLogs.filter((l) => l.payload?.event === LogEvents.JOB_FAILED && l.payload?.jobId === "job-handled-1").length,
-        1,
-        "Handled failure with err.errorReport must log job.failed at DEBUG"
+        1
       );
 
-      // B) Uncaught crash (no err.errorReport) -> ERROR log emitted
       errorLogs.length = 0;
       const crashErr = new Error("Uncaught worker OOM crash");
       await handleUseCaseWorkerFailure({ id: "job-crash-2", data: {} }, crashErr);
 
       assert.equal(
         errorLogs.filter((l) => l.payload?.event === LogEvents.JOB_FAILED && l.payload?.jobId === "job-crash-2").length,
-        1,
-        "Uncaught crash without err.errorReport must emit ERROR job.failed log"
+        1
       );
     } finally {
       baseLogger.error = origError;
@@ -336,14 +347,12 @@ describe("RC1.4-D3(3) — UseCaseWorker Failure Handler Idempotency, Crash Clean
 
 // ─── Source: queueErrorHandlers.test.js ───
 {
-// Prevent ioredis reconnect backoff loop in unit test environment
 if (redisConnection?.options) {
     redisConnection.options.retryStrategy = () => null;
 }
 
 describe("Queue and Worker Error Event Handlers", () => {
     after(() => {
-        // Disconnect immediately without waiting for graceful quit or ping timers
         if (typeof redisConnection?.disconnect === "function") {
             redisConnection.disconnect(false);
         }
@@ -362,7 +371,8 @@ describe("Queue and Worker Error Event Handlers", () => {
         });
     });
 
-    it("useCaseWorker enforces long lock duration and fail-closed maxStalledCount=0", () => {
+    it("useCaseWorker enforces default concurrency 6, long lock duration, and fail-closed maxStalledCount=0", () => {
+        assert.equal(USECASE_WORKER_OPTIONS.concurrency, 6);
         assert.equal(USECASE_WORKER_OPTIONS.lockDuration, 300_000);
         assert.equal(USECASE_WORKER_OPTIONS.lockRenewTime, 60_000);
         assert.equal(USECASE_WORKER_OPTIONS.stalledInterval, 60_000);
@@ -387,7 +397,7 @@ describe("Queue and Worker Error Event Handlers", () => {
             estimateCost: () => 0,
             execute: async () => ({ status: "saved" }),
         });
-        const executor = new WorkflowExecutor(registry, { sleepFn: async () => {} });
+        const executor = new WorkflowExecutor(registry);
 
         let imageAttempts = 0;
         await assert.rejects(
@@ -396,16 +406,8 @@ describe("Queue and Worker Error Event Handlers", () => {
                     workflow: {
                         id: "fail-fast-image",
                         nodes: [
-                            {
-                                id: "gen",
-                                type: "base.image_generate",
-                                inputs: { model: "nanobana-2", prompt: "test" },
-                            },
-                            {
-                                id: "sink",
-                                type: "custom.sink",
-                                inputs: { value: { fromNode: "gen", output: "image_url" } },
-                            },
+                            { id: "gen", type: "base.image_generate", inputs: { model: "nanobana-2", prompt: "test" } },
+                            { id: "sink", type: "custom.sink", inputs: { value: { fromNode: "gen", output: "image_url" } } },
                         ],
                     },
                     context: {
@@ -420,7 +422,7 @@ describe("Queue and Worker Error Event Handlers", () => {
                 }),
             /WaveSpeed 503/
         );
-        assert.equal(imageAttempts, 1, "ImageGenerateNode must not retry failed upstream calls");
+        assert.equal(imageAttempts, 1);
 
         let videoAttempts = 0;
         await assert.rejects(
@@ -429,16 +431,8 @@ describe("Queue and Worker Error Event Handlers", () => {
                     workflow: {
                         id: "fail-fast-video",
                         nodes: [
-                            {
-                                id: "vid",
-                                type: "base.video_generate",
-                                inputs: { model: "wan_3_0", prompt: "test video" },
-                            },
-                            {
-                                id: "sink",
-                                type: "custom.sink",
-                                inputs: { value: { fromNode: "vid", output: "video_url" } },
-                            },
+                            { id: "vid", type: "base.video_generate", inputs: { model: "wan_3_0", prompt: "test video" } },
+                            { id: "sink", type: "custom.sink", inputs: { value: { fromNode: "vid", output: "video_url" } } },
                         ],
                     },
                     context: {
@@ -453,7 +447,7 @@ describe("Queue and Worker Error Event Handlers", () => {
                 }),
             /WaveSpeed 504 timeout/
         );
-        assert.equal(videoAttempts, 1, "VideoGenerateNode must not retry failed upstream calls");
+        assert.equal(videoAttempts, 1);
 
         let llmAttempts = 0;
         await assert.rejects(
@@ -462,16 +456,8 @@ describe("Queue and Worker Error Event Handlers", () => {
                     workflow: {
                         id: "fail-fast-llm",
                         nodes: [
-                            {
-                                id: "llm",
-                                type: "base.llm",
-                                inputs: { prompt: "check safety" },
-                            },
-                            {
-                                id: "sink",
-                                type: "custom.sink",
-                                inputs: { value: { fromNode: "llm", output: "text" } },
-                            },
+                            { id: "llm", type: "base.llm", inputs: { prompt: "check safety" } },
+                            { id: "sink", type: "custom.sink", inputs: { value: { fromNode: "llm", output: "text" } } },
                         ],
                     },
                     context: {
@@ -486,7 +472,7 @@ describe("Queue and Worker Error Event Handlers", () => {
                 }),
             /Gemini 429/
         );
-        assert.equal(llmAttempts, 1, "LlmNode must not retry failed upstream calls");
+        assert.equal(llmAttempts, 1);
     });
 
     it("walletMaintenanceQueue handles error events without throwing or crashing", () => {

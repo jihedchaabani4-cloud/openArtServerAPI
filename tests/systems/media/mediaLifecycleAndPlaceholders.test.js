@@ -1,14 +1,10 @@
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import {
-  NodeRegistry,
-  ALL_V3_NODES,
-  ExecutionEngine,
-  WorkflowExecutor,
-  GraphCompiler,
-  SaveMediaNode,
-  createDefaultV3NodeRegistry,
-} from "../../../src/systems/generation/internal/v3/index.js";
+import { NodeRegistry } from "../../../src/systems/workflow-engine/internal/core/NodeRegistry.js";
+import { ALL_V3_NODES, SaveMediaNode, createDefaultV3NodeRegistry } from "../../../src/systems/workflow-engine/internal/nodes/index.js";
+import { ExecutionEngine } from "../../../src/systems/workflow-engine/internal/core/ExecutionEngine.js";
+import { WorkflowExecutor } from "../../../src/systems/workflow-engine/internal/core/WorkflowExecutor.js";
+import { GraphCompiler } from "../../../src/systems/workflow-engine/internal/core/GraphCompiler.js";
 import { db } from "../../../src/container.js";
 import { MediaRepository, MediaWorkflowLifecycleService } from "#media/tools";
 import { runReservationReaper } from "#billing/tools";
@@ -255,15 +251,15 @@ describe("Per-Run Media Cleanup & Cycle Boundary Tests (ExecutionEngine & GraphC
 
     await assert.rejects(
       async () => {
-        await engine.execute({
-          workflow: failingWorkflow,
-          input: {
+        await engine.runWorkflow(
+          failingWorkflow,
+          {
             workflow_id: workflowId,
             serverWorkflowId: workflowId,
             media_id: "media-1",
           },
-          userId: "user-sibling-1",
-        });
+          { userId: "user-sibling-1" }
+        );
       }
     );
 
@@ -300,15 +296,15 @@ describe("Per-Run Media Cleanup & Cycle Boundary Tests (ExecutionEngine & GraphC
 
     await assert.rejects(
       async () => {
-        await engine.execute({
-          useCaseId: "image-generation-v3",
-          input: {
+        await engine.runWorkflow(
+          "image-generation-v3",
+          {
             workflow_id: workflowId,
             media_id: "m-proc-1",
             serverMediaIds: ["m-proc-1"],
           },
-          userId: "user-victim-1",
-        });
+          { userId: "user-victim-1" }
+        );
       },
       /Pipeline crashed unexpectedly/i
     );
@@ -366,15 +362,15 @@ describe("Per-Run Media Cleanup & Cycle Boundary Tests (ExecutionEngine & GraphC
 
     await assert.rejects(
       async () => {
-        await engine.execute({
-          workflow: cyclicWorkflow,
-          input: {
+        await engine.runWorkflow(
+          cyclicWorkflow,
+          {
             workflow_id: workflowId,
             serverWorkflowId: workflowId,
             media_id: "deadlock-m-1",
           },
-          userId: "user-deadlock-1",
-        });
+          { userId: "user-deadlock-1" }
+        );
       },
       /Circular dependency/i
     );

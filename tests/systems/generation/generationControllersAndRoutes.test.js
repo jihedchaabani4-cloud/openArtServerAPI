@@ -1,13 +1,18 @@
 import { describe, it, beforeEach, afterEach, after, before } from "node:test";
 import assert from "node:assert/strict";
-import * as imageController from "#generation/api";
-import * as videoController from "#generation/api";
-import { generateImage, generateVideo, deleteItem, toggleItemLike as toggleLike, imagesRouter, workflowsRouter, deleteWorkflow, bulkDeleteWorkflows, deleteMedia } from "#generation/api";
-import { generationRequestService, db, workflowService, executionEngine, characterService, folderService, trashService } from "../../../src/container.js";
+import * as imageController from "../../../src/systems/generation/internal/controllers/imageController.js";
+import * as videoController from "../../../src/systems/generation/internal/controllers/videoController.js";
+import { generateImage } from "../../../src/systems/generation/internal/controllers/imageController.js";
+import { generateVideo } from "../../../src/systems/generation/internal/controllers/videoController.js";
+import { deleteItem, toggleLike } from "../../../src/systems/generation/internal/controllers/generationsMutationController.js";
+import { deleteWorkflow, bulkDeleteWorkflows, deleteMedia } from "../../../src/systems/generation/internal/controllers/workflowsController.js";
+import { imagesRouter, workflowsRouter } from "#generation/api";
+import { generationRequestService, db, workflowService, workflowDispatcher, characterService, folderService, trashService } from "../../../src/container.js";
 import { MediaConflictError } from "#media/tools";
-import { AppError, redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared";
+import { AppError } from "#shared";
+import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared/redis";
 import { randomUUID } from "node:crypto";
-import * as characterController from "#characters/api";
+import * as characterController from "../../../src/systems/characters/internal/controllers/characterController.js";
 import { InMemoryWalletService } from "../../helpers/inMemoryWalletService.js";
 import express from "express";
 import http from "node:http";
@@ -596,8 +601,7 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
     origDbWorkflows = db.workflows;
     origDbProjects = db.projects;
     origDbCharacters = db.characters;
-    origWalletService = executionEngine.walletService;
-    origJobQueueService = executionEngine.jobQueueService;
+        origJobQueueService = workflowDispatcher.queue;
 
     db.media = {
       createMedia: async (data) => {
@@ -655,8 +659,7 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
     db.workflows = origDbWorkflows;
     db.projects = origDbProjects;
     db.characters = origDbCharacters;
-    executionEngine.walletService = origWalletService;
-    executionEngine.jobQueueService = origJobQueueService;
+        workflowDispatcher.queue = origJobQueueService;
   });
 
   function makeMockRes() {
@@ -683,8 +686,8 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
 
   describe("imageController", () => {
     it("TEST 1 (Image path a): error before enqueue (launch fails with 500) -> all placeholders failed, clean 500, no stuck processing rows", async () => {
-      const origLaunch = executionEngine.launch;
-      executionEngine.launch = async () => {
+      const origLaunch = workflowDispatcher.dispatch;
+      workflowDispatcher.dispatch = async () => {
         const err = new Error("Upstream launch validation failure");
         err.statusCode = 500;
         throw err;
@@ -713,13 +716,13 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
         const stuckRows = Array.from(mediaRows.values()).filter((m) => m.status === "processing");
         assert.strictEqual(stuckRows.length, 0, "Zero stuck processing rows");
       } finally {
-        executionEngine.launch = origLaunch;
+        workflowDispatcher.dispatch = origLaunch;
       }
     });
 
     it("TEST 2 (Image path b): enqueue dispatch fails (QUEUE_DISPATCH_FAILED) -> all placeholders failed, clean 503, no stuck processing rows", async () => {
-      executionEngine.jobQueueService = {
-        addUseCaseJob: async () => {
+      workflowDispatcher.queue = {
+        add: async () => {
           throw new Error("Redis cluster failover in progress");
         },
       };
@@ -753,8 +756,8 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
 
   describe("videoController", () => {
     it("TEST 3 (Video path a): error before enqueue (launch fails with 500) -> all placeholders failed, clean 500, no stuck processing rows", async () => {
-      const origLaunch = executionEngine.launch;
-      executionEngine.launch = async () => {
+      const origLaunch = workflowDispatcher.dispatch;
+      workflowDispatcher.dispatch = async () => {
         const err = new Error("Video launch pipeline failure");
         err.statusCode = 500;
         throw err;
@@ -783,13 +786,13 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
         const stuckRows = Array.from(mediaRows.values()).filter((m) => m.status === "processing");
         assert.strictEqual(stuckRows.length, 0);
       } finally {
-        executionEngine.launch = origLaunch;
+        workflowDispatcher.dispatch = origLaunch;
       }
     });
 
     it("TEST 4 (Video path b): enqueue dispatch fails (QUEUE_DISPATCH_FAILED) -> all placeholders failed, clean 503, no stuck processing rows", async () => {
-      executionEngine.jobQueueService = {
-        addUseCaseJob: async () => {
+      workflowDispatcher.queue = {
+        add: async () => {
           throw new Error("Redis OOM or unreachable for video job");
         },
       };
@@ -823,8 +826,8 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
 
   describe("characterController — generateCharacterSheet", () => {
     it("TEST 5 (generate-sheet path a): error before enqueue -> placeholder failed, clean 500, no stuck processing rows", async () => {
-      const origLaunch = executionEngine.launch;
-      executionEngine.launch = async () => {
+      const origLaunch = workflowDispatcher.dispatch;
+      workflowDispatcher.dispatch = async () => {
         const err = new Error("Character sheet launch failure");
         err.statusCode = 500;
         throw err;
@@ -852,13 +855,13 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
         const stuckRows = Array.from(mediaRows.values()).filter((m) => m.status === "processing");
         assert.strictEqual(stuckRows.length, 0);
       } finally {
-        executionEngine.launch = origLaunch;
+        workflowDispatcher.dispatch = origLaunch;
       }
     });
 
     it("TEST 6 (generate-sheet path b): enqueue dispatch fails (QUEUE_DISPATCH_FAILED) -> placeholder failed, clean 503, no stuck processing rows", async () => {
-      executionEngine.jobQueueService = {
-        addUseCaseJob: async () => {
+      workflowDispatcher.queue = {
+        add: async () => {
           throw new Error("Redis down during character sheet enqueue");
         },
       };
@@ -892,8 +895,8 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
 
   describe("characterController — createCharacter (AI sheet path)", () => {
     it("TEST 7 (createCharacter path a): error before enqueue -> placeholder failed, clean 500, no stuck processing rows", async () => {
-      const origLaunch = executionEngine.launch;
-      executionEngine.launch = async () => {
+      const origLaunch = workflowDispatcher.dispatch;
+      workflowDispatcher.dispatch = async () => {
         const err = new Error("Character creation launch failure");
         err.statusCode = 500;
         throw err;
@@ -920,13 +923,13 @@ describe("F2.5-c — Controller Error-Path Boundary Tests (Image, Video, Charact
         const stuckRows = Array.from(mediaRows.values()).filter((m) => m.status === "processing");
         assert.strictEqual(stuckRows.length, 0);
       } finally {
-        executionEngine.launch = origLaunch;
+        workflowDispatcher.dispatch = origLaunch;
       }
     });
 
     it("TEST 8 (createCharacter path b): enqueue dispatch fails (QUEUE_DISPATCH_FAILED) -> placeholder failed, clean 503, no stuck processing rows", async () => {
-      executionEngine.jobQueueService = {
-        addUseCaseJob: async () => {
+      workflowDispatcher.queue = {
+        add: async () => {
           throw new Error("Redis queue down during character create");
         },
       };
@@ -1020,7 +1023,7 @@ describe("RC1.1-R3 — Count Parameter Current Server Behavior Test", () => {
 
     origCreateWorkflow = db.workflows.createWorkflow;
     origCreateMedia = db.media.createMedia;
-    origLaunch = executionEngine.launch;
+    origLaunch = workflowDispatcher.dispatch;
     origProjectsFindByUser = db.projects?.findByUser;
 
     db.projects = {
@@ -1038,7 +1041,7 @@ describe("RC1.1-R3 — Count Parameter Current Server Behavior Test", () => {
       return data;
     };
 
-    executionEngine.launch = async (params) => {
+    workflowDispatcher.dispatch = async (params) => {
       enqueueCalls.push(params);
       return {
         jobId: "mock-job-count-test",
@@ -1052,7 +1055,7 @@ describe("RC1.1-R3 — Count Parameter Current Server Behavior Test", () => {
   afterEach(() => {
     db.workflows.createWorkflow = origCreateWorkflow;
     db.media.createMedia = origCreateMedia;
-    executionEngine.launch = origLaunch;
+    workflowDispatcher.dispatch = origLaunch;
     if (db.projects) db.projects.findByUser = origProjectsFindByUser;
   });
 
@@ -1221,7 +1224,7 @@ describe("Generation & Gen-Edit APIs — All Models & Parameters Boundary Suite"
     originalLinkMedia = db.workflowMedia?.linkMedia;
     originalFindByCharacterId = db.characters?.findByCharacterId;
     originalResolveElementRecord = db.elements?.resolveRecord;
-    originalLaunch = executionEngine?.launch;
+    originalLaunch = workflowDispatcher?.dispatch;
 
     createdWorkflows = [];
     createdMedia = [];
@@ -1307,7 +1310,7 @@ describe("Generation & Gen-Edit APIs — All Models & Parameters Boundary Suite"
       };
     }
 
-    executionEngine.launch = async (args) => {
+    workflowDispatcher.dispatch = async (args) => {
       enqueueCalls.push(args);
       return {
         jobId: `job-${enqueueCalls.length}`,
@@ -1338,7 +1341,7 @@ describe("Generation & Gen-Edit APIs — All Models & Parameters Boundary Suite"
     if (db.workflowMedia) db.workflowMedia.linkMedia = originalLinkMedia;
     if (db.characters) db.characters.findByCharacterId = originalFindByCharacterId;
     if (db.elements) db.elements.resolveRecord = originalResolveElementRecord;
-    if (executionEngine) executionEngine.launch = originalLaunch;
+    if (workflowDispatcher) workflowDispatcher.dispatch = originalLaunch;
   });
 
   async function postJson(path, body, token = "token-user-A") { // gate:allow-secret

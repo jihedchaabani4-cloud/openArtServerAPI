@@ -2,12 +2,12 @@ import { describe, it, beforeEach, afterEach, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { WorkflowRepository } from "#generation/tools";
 import { WorkflowAuthorizationService } from "../../../src/systems/generation/internal/services/WorkflowAuthorizationService.js";
-import { ResolveRefsNode } from "../../../src/systems/generation/internal/v3/index.js";
+import { ResolveRefsNode } from "../../../src/systems/workflow-engine/internal/nodes/index.js";
 import express from "express";
 import http from "node:http";
 import { workflowsRouter, imagesRouter, videoRouter } from "#generation/api";
-import { db, executionEngine, elementService, workflowMediaService } from "../../../src/container.js";
-import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared";
+import { db, workflowDispatcher, elementService, workflowMediaService } from "../../../src/container.js";
+import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared/redis";
 import { supabase } from "#shared/db/supabase.js";
 import { toMediaIdList } from "#identity/tools";
 import { resetLimitersForTest } from "../../../src/systems/identity/internal/middleware/rateLimit.js";
@@ -371,7 +371,7 @@ describe("Reference and Media Ownership Security & Boundary Tests (Task T2c)", (
     originalFindByWorkflow = db.media?.findByWorkflow;
     originalFindByCharacterId = db.characters?.findByCharacterId;
     originalResolveRecord = db.elements?.resolveRecord;
-    originalLaunch = executionEngine?.launch;
+    originalLaunch = workflowDispatcher?.dispatch;
 
     workflowCreationCalls = [];
     mediaCreationCalls = [];
@@ -482,8 +482,8 @@ describe("Reference and Media Ownership Security & Boundary Tests (Task T2c)", (
       };
     }
 
-    if (executionEngine) {
-      executionEngine.launch = async (params) => {
+    if (workflowDispatcher) {
+      workflowDispatcher.dispatch = async (params) => {
         enqueueCalls.push(params);
         return {
           jobId: "mock-job-t2c",
@@ -511,7 +511,7 @@ describe("Reference and Media Ownership Security & Boundary Tests (Task T2c)", (
     }
     if (db.characters) db.characters.findByCharacterId = originalFindByCharacterId;
     if (db.elements) db.elements.resolveRecord = originalResolveRecord;
-    if (executionEngine) executionEngine.launch = originalLaunch;
+    if (workflowDispatcher) workflowDispatcher.dispatch = originalLaunch;
   });
 
   // ── TEST 1: Image Generation Controller - Cross-Tenant Reference in references[] ──

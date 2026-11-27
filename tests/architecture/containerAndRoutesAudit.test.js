@@ -2,7 +2,7 @@ import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import * as container from "../../src/container.js";
 import { db, workflowService, projectReadService } from "../../src/container.js";
-import { WorkflowService, ExecutionEngine } from "#generation/tools";
+import { WorkflowService, WorkflowDispatchService } from "#generation/tools";
 import { WorkflowMediaService } from "../../src/systems/generation/internal/services/WorkflowMediaService.js";
 import { MediaUploadService, MediaService, MediaWorkflowLifecycleService } from "#media/tools";
 import { ElementService, ElementMediaService } from "#elements/tools";
@@ -16,7 +16,7 @@ import http from "node:http";
 import apiRouter from "../../src/api/routes.js";
 import { extractRoutes } from "../../scripts/dump-routes.js";
 import { supabase, supabaseAdmin } from "#shared/db/supabase.js";
-import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared";
+import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared/redis";
 
 // ─── Source: containerWiringBoundary.test.js ───
 {
@@ -331,19 +331,22 @@ describe("Container Service Graph & Dependency Wiring Boundary", () => {
         );
     });
 
-    it("V3 ExecutionEngine wiring: container exposes executionEngine cleanly and removes legacy V3Dispatcher/useCaseService aliases", () => {
-        assert.ok(container.executionEngine instanceof ExecutionEngine, "container.executionEngine must be instance of ExecutionEngine");
+    it("WorkflowDispatchService & workflowAdapters wiring: container exposes workflowDispatcher cleanly and removes legacy executionEngine/jobQueueService aliases", () => {
+        assert.ok(container.workflowDispatcher instanceof WorkflowDispatchService, "container.workflowDispatcher must be instance of WorkflowDispatchService");
+        assert.ok(container.workflowAdapters && typeof container.workflowAdapters.completeMedia === "function", "container.workflowAdapters must expose domain adapters");
+        assert.equal("executionEngine" in container, false, "container.executionEngine must be removed");
+        assert.equal("jobQueueService" in container, false, "container.jobQueueService must be removed");
         assert.equal("v3Dispatcher" in container, false, "container.v3Dispatcher must be removed");
         assert.equal("useCaseService" in container, false, "container.useCaseService must be removed");
         assert.equal(
-            container.generationRequestService.executionEngine,
-            container.executionEngine,
-            "generationRequestService must hold container.executionEngine"
+            container.generationRequestService.workflowDispatcher,
+            container.workflowDispatcher,
+            "generationRequestService must hold container.workflowDispatcher"
         );
         assert.equal(
-            container.characterService.generationService.executionEngine,
-            container.executionEngine,
-            "characterService.generationService must hold container.executionEngine"
+            container.characterService.generationService.workflowDispatcher,
+            container.workflowDispatcher,
+            "characterService.generationService must hold container.workflowDispatcher"
         );
     });
 });

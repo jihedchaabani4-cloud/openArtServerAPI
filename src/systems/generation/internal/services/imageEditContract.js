@@ -5,11 +5,14 @@
  * server-locked in-place image edits (`relight` and `angles`).
  */
 
-import { AppError } from "#shared";
+import { AppError, renderTextTemplate } from "#shared";
 import { getCatalog, getModelSchema } from "#models/tools";
-import { renderTextTemplate } from "../v3/nodes/base/textTemplateNode.js";
-import { IMAGE_RELIGHT_PROMPT_TEMPLATE } from "../v3/workflows/imageRelightV3.js";
-import { IMAGE_ANGLES_PROMPT_TEMPLATE } from "../v3/workflows/imageAnglesV3.js";
+
+export const IMAGE_RELIGHT_PROMPT_TEMPLATE =
+    "{{#has_settings}}Relight this image with a {{light_type}} light (brightness {{brightness}}%, color {{color}}, size {{size}}/100, rotation {{rotation}} degrees, tilt {{tilt}} degrees{{#distance}}, distance {{distance}}/100{{/distance}}), positioned relative to the current camera view{{#rotation_dir}}, shifted {{rotation_abs}} degrees {{rotation_dir}}{{/rotation_dir}}{{#tilt_dir}}, {{tilt_abs}} degrees {{tilt_dir}}{{/tilt_dir}}.{{#distance}} Place the light at distance {{distance}}/100 from the subject.{{/distance}}{{#user_prompt}} Additional direction: {{user_prompt}}.{{/user_prompt}} Preserve the exact subject identity, pose, camera angle, framing, and scene; change only the lighting, shadows, and highlights.{{/has_settings}}{{^has_settings}}{{fallback_text}}{{/has_settings}}";
+
+export const IMAGE_ANGLES_PROMPT_TEMPLATE =
+    "{{#has_settings}}Move the camera relative to the current viewpoint (rotation {{rotation}} degrees, tilt {{tilt}} degrees{{#zoom}}, zoom {{zoom}}/10{{/zoom}}).{{#rotation_dir}} Orbit the camera {{rotation_abs}} degrees {{rotation_dir}} around the subject.{{/rotation_dir}}{{#tilt_dir}} Move the camera {{tilt_abs}} degrees {{tilt_dir}}.{{/tilt_dir}}{{#zoom}} Zoom in {{zoom}}/10 closer toward the subject.{{/zoom}}{{#user_prompt}} Additional direction: {{user_prompt}}.{{/user_prompt}} Preserve the exact subject identity, pose, wardrobe, lighting, and scene continuity; only move the camera viewpoint and naturally reveal newly visible areas.{{/has_settings}}{{^has_settings}}{{fallback_text}}{{/has_settings}}";
 
 export const IMAGE_EDIT_MODELS = Object.freeze({
     relight: "nanobana_2",

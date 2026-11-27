@@ -2,12 +2,11 @@ import "dotenv/config";
 import { EventEmitter } from "node:events";
 import { Worker } from "bullmq";
 import {
-  workerRedisConnection,
-  redisConnection,
   createLogger,
   LogEvents,
   envConfig,
 } from "#shared";
+import { workerRedisConnection, redisConnection } from "#shared/redis";
 import { WALLET_QUEUE_NAME, scheduleWalletJobs } from "./walletQueue.js";
 import {
   getWalletService,

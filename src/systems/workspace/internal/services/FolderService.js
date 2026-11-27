@@ -2,12 +2,13 @@
  * System 8: Workspace — FolderService (Internal)
  * @owns System 8: Workspace — folder tree hierarchy, lifecycle, and validations
  */
-import { AppError, envConfig } from "#shared";
+import { envConfig } from "#shared";
 import {
   hasInFlightMedia,
   areAllWorkflowMediaFailed,
   MediaConflictError,
 } from "#media/tools";
+import { FolderError } from "../errors.js";
 import { getMediaStatusesByWorkflowIds } from "./workflowMediaStatus.js";
 import {
   indexById,
@@ -19,16 +20,7 @@ import {
   getDepth,
 } from "./folderTree.js";
 
-/**
- * Domain error class with structured status code and domain error code.
- */
-export class FolderError extends AppError {
-  constructor(message, statusCode = 400, errorCode = "FOLDER_ERROR") {
-    super(message, statusCode);
-    this.name = "FolderError";
-    this.errorCode = errorCode;
-  }
-}
+export { FolderError };
 
 /**
  * FolderService

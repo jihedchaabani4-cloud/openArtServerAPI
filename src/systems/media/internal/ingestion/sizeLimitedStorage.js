@@ -11,6 +11,7 @@
 
 import { envConfig } from "#shared";
 import { MediaInspector } from "./MediaInspector.js";
+import { MediaValidationError } from "../errors.js";
 
 const DEFAULT_MAX_CONCURRENT_UPLOADS = 3;
 const activeUploadsByUser = new Map();
@@ -63,28 +64,28 @@ function validateHeaderMagicAndMime(headerBuffer, declaredMime, allowedMimeTypes
 
 export function resetActiveUploadsForTest() {
     if (!envConfig.isTest) {
-        throw new Error("[sizeLimitedStorage] resetActiveUploadsForTest is only permitted when NODE_ENV === 'test'");
+        throw new MediaValidationError("[sizeLimitedStorage] resetActiveUploadsForTest is only permitted when NODE_ENV === 'test'");
     }
     activeUploadsByUser.clear();
 }
 
 export function resetInFlightBytesForTest() {
     if (!envConfig.isTest) {
-        throw new Error("[sizeLimitedStorage] resetInFlightBytesForTest is only permitted when NODE_ENV === 'test'");
+        throw new MediaValidationError("[sizeLimitedStorage] resetInFlightBytesForTest is only permitted when NODE_ENV === 'test'");
     }
     currentInFlightBytes = 0;
 }
 
 export function getActiveUploadsCountForTest(userId) {
     if (!envConfig.isTest) {
-        throw new Error("[sizeLimitedStorage] getActiveUploadsCountForTest is only permitted when NODE_ENV === 'test'");
+        throw new MediaValidationError("[sizeLimitedStorage] getActiveUploadsCountForTest is only permitted when NODE_ENV === 'test'");
     }
     return activeUploadsByUser.get(userId) || 0;
 }
 
 export function getInFlightBytesForTest() {
     if (!envConfig.isTest) {
-        throw new Error("[sizeLimitedStorage] getInFlightBytesForTest is only permitted when NODE_ENV === 'test'");
+        throw new MediaValidationError("[sizeLimitedStorage] getInFlightBytesForTest is only permitted when NODE_ENV === 'test'");
     }
     return currentInFlightBytes;
 }

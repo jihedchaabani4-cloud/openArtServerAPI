@@ -2,8 +2,13 @@
  * System 8: Workspace — ProjectService (Internal)
  * @owns System 8: Workspace — project lifecycle, naming, user scoping, and project DTO mapping.
  */
-import { AppError, createLogger } from "#shared";
+import { createLogger } from "#shared";
 import { hasInFlightMedia, MediaConflictError } from "#media/tools";
+import {
+    WorkspaceError,
+    WorkspaceValidationError,
+    WorkspaceNotFoundError,
+} from "../errors.js";
 
 const logger = createLogger("workspace:project");
 
@@ -23,7 +28,7 @@ export class ProjectService {
      */
     async listUserProjects(userId) {
         if (!userId) {
-            throw new AppError("Authentication required", 401);
+            throw new WorkspaceError("UNAUTHORIZED", "Authentication required", { statusCode: 401, category: "USER_FAULT" });
         }
 
         const rawProjects = await this.projectRepo.findProjectsWithThumbnails(userId);
@@ -40,7 +45,7 @@ export class ProjectService {
      */
     async createProject({ userId, name }) {
         if (!userId) {
-            throw new AppError("Authentication required", 401);
+            throw new WorkspaceError("UNAUTHORIZED", "Authentication required", { statusCode: 401, category: "USER_FAULT" });
         }
 
         let resolvedName = name ? String(name).trim() : "";
@@ -72,16 +77,16 @@ export class ProjectService {
      */
     async updateProject({ id, userId, name }) {
         if (!userId) {
-            throw new AppError("Authentication required", 401);
+            throw new WorkspaceError("UNAUTHORIZED", "Authentication required", { statusCode: 401, category: "USER_FAULT" });
         }
         if (!id) {
-            throw new AppError("Project ID is required", 400);
+            throw new WorkspaceValidationError("Project ID is required", { field: "id" });
         }
 
         const existing = await this.projectRepo.findOwnedProject(id, userId);
         if (!existing) {
             logger.warn({ userId, projectId: id }, "Foreign or non-existent project update denied");
-            throw new AppError("Project not found", 404);
+            throw new WorkspaceNotFoundError("Project not found", { resourceId: id });
         }
 
         const updated = await this.projectRepo.updateProjectName(id, userId, String(name || "").trim());
@@ -97,16 +102,16 @@ export class ProjectService {
      */
     async deleteProject({ id, userId }) {
         if (!userId) {
-            throw new AppError("Authentication required", 401);
+            throw new WorkspaceError("UNAUTHORIZED", "Authentication required", { statusCode: 401, category: "USER_FAULT" });
         }
         if (!id) {
-            throw new AppError("Project ID is required", 400);
+            throw new WorkspaceValidationError("Project ID is required", { field: "id" });
         }
 
         const existing = await this.projectRepo.findOwnedProject(id, userId);
         if (!existing) {
             logger.warn({ userId, projectId: id }, "Foreign or non-existent project delete denied");
-            throw new AppError("Project not found", 404);
+            throw new WorkspaceNotFoundError("Project not found", { resourceId: id });
         }
 
         if (this.mediaRepo) {

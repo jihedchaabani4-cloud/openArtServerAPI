@@ -6,7 +6,7 @@ import {
     FAILED_OPS_BACKOFF_MULTIPLIER,
     FAILED_OPS_DEFAULT_MAX_RETRIES,
 } from "../../../src/systems/billing/internal/services/FailedOpsService.js";
-import { redisConnection, workerRedisConnection } from "#shared";
+import { redisConnection, workerRedisConnection } from "#shared/redis";
 import {
     RECONCILIATION_CACHE_KEY,
     handleRetryFailedOps,

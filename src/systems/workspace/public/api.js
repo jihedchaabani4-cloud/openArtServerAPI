@@ -1,7 +1,8 @@
 /**
  * System 8: Workspace — Public API Gateway (#workspace/api)
  *
- * Exposes HTTP routers for Projects, Folders, and Trash endpoints.
+ * Sealed HTTP gateway exposing ONLY the 4 Express routers mounted by src/api/routes.js:
+ * projectsRouter, foldersRouter, trashRouter, workspaceBulkRouter.
  * Isolates express web framework strictly to public/api.js per Rule 13.
  */
 
@@ -42,11 +43,3 @@ export const workspaceBulkRouter = express.Router();
 workspaceBulkRouter.use(requireAuth);
 
 workspaceBulkRouter.post("/bulk-delete", rateLimit("bulkDelete"), trashController.bulkDeleteWorkspace);
-
-// ── Unified Workspace Router ─────────────────────────────────────────
-export const workspaceRouter = express.Router();
-workspaceRouter.use("/projects", projectsRouter);
-workspaceRouter.use("/folders", foldersRouter);
-workspaceRouter.use("/trash", trashRouter);
-
-export const { getAll, create, update, remove } = projectsController;

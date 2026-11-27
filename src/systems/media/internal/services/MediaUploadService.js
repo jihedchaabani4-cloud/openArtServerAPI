@@ -25,7 +25,7 @@ import { SourceReader } from "../ingestion/SourceReader.js";
 import { SourcePolicy } from "../ingestion/SourcePolicy.js";
 import { MediaInspector } from "../ingestion/MediaInspector.js";
 import { DEFAULT_UPLOAD_POLICY } from "../ingestion/UploadPolicy.js";
-import { ValidationError, UploadError } from "../errors.js";
+import { ValidationError, UploadError, MediaValidationError } from "../errors.js";
 import { crudOperationLog, CrudServiceError, calculateAspectRatio } from "#shared";
 
 const MIME_TO_EXT = Object.freeze({
@@ -57,7 +57,7 @@ export class MediaUploadService {
             typeof storageService.buildKey !== "function" ||
             typeof storageService.validateFolder !== "function"
         ) {
-            throw new Error(
+            throw new MediaValidationError(
                 "MediaUploadService requires storageService implementing upload, deleteFiles, buildKey, and validateFolder."
             );
         }

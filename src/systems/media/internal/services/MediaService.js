@@ -12,7 +12,7 @@
 
 import { randomUUID } from "node:crypto";
 import { AppError, createLogger } from "#shared";
-import { MediaNotFoundError } from "../errors.js";
+import { MediaNotFoundError, MediaValidationError } from "../errors.js";
 
 const mediaLogger = createLogger("media_service");
 
@@ -26,7 +26,7 @@ export class MediaService {
     constructor({ mediaRepo = null, db = null, assertOwnsFn = null } = {}) {
         const resolvedRepo = mediaRepo || db?.media;
         if (!resolvedRepo || typeof resolvedRepo.createMedia !== "function") {
-            throw new Error("MediaService requires mediaRepo (or db.media) implementing createMedia.");
+            throw new MediaValidationError("MediaService requires mediaRepo (or db.media) implementing createMedia.");
         }
         this.mediaRepo = resolvedRepo;
         this.db = db || null;

@@ -1,6 +1,7 @@
 /**
- * Pure hierarchical tree logic for folder operations with zero external dependencies.
+ * Pure hierarchical tree logic for folder operations.
  */
+import { FolderError } from "../errors.js";
 
 // Indexes an array of folder objects by their unique ID into a Map.
 export function indexById(folders = []) {
@@ -42,7 +43,7 @@ export function getAncestorIds(byId, folderId) {
       break;
     }
     if (visited.has(parentId) || parentId === currentId) {
-      throw new Error("Cycle detected in stored data");
+      throw new FolderError("Cycle detected in stored data", 500, "FOLDER_CYCLE");
     }
     visited.add(parentId);
     ancestors.push(parentId);

@@ -6,10 +6,9 @@ import {
     requestLogger,
     createLogger,
     LogErrorCodes,
-    waitForRedis,
-    waitForRateLimitRedis,
     envConfig,
 } from "#shared";
+import { waitForRedis, waitForRateLimitRedis } from "#shared/redis";
 import { requireAuth, rateLimit } from "#identity/tools";
 import apiRouter from "./src/api/routes.js";
 import healthRouter from "./src/api/probes/health.js";

@@ -1,12 +1,10 @@
 /**
  * System 7: Elements — Public HTTP API Gateway (#elements/api)
  *
- * Exposes Element entity CRUD, AI vision taste analysis, prompt building,
- * and reference image management.
+ * Sealed Express gateway mounting ONLY elementRoutes for Element entity CRUD,
+ * AI vision taste analysis, prompt building, and reference image management.
  *
- * Governed by:
- * - docs/architecture/constitution/01_business_systems_architecture.md (System 7)
- * - Rule 13: Express isolated strictly to public/api.js
+ * Governed by Rule 13: Express isolated strictly to public/api.js.
  */
 
 import { Router } from "express";
@@ -23,7 +21,7 @@ import {
 } from "../internal/controllers/elementController.js";
 import { requireAuth, rateLimit } from "#identity/tools";
 import { createUploadMiddleware } from "#media/api";
-import { preUploadElementCapacityGuard, createPreUploadElementCapacityGuard } from "../internal/middleware/elementUploadGuard.js";
+import { preUploadElementCapacityGuard } from "../internal/middleware/elementUploadGuard.js";
 import { ELEMENT_REFERENCE_UPLOAD_POLICY } from "#media/tools";
 
 const upload = createUploadMiddleware(ELEMENT_REFERENCE_UPLOAD_POLICY);
@@ -57,15 +55,4 @@ router.patch("/:id", updateElement);
 // ─── DELETE /api/v2/elements/:id ─────────────────────────────────────────────
 router.delete("/:id", deleteElement);
 
-export {
-    createElement,
-    listProjectElements,
-    addImageToElement,
-    removeImageFromElement,
-    updateElement,
-    analyzeElement,
-    createPreUploadElementCapacityGuard,
-};
-
 export const elementRoutes = router;
-export default router;

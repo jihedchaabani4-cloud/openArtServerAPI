@@ -1,6 +1,7 @@
 import { IStorageProvider } from "../IStorageProvider.js";
 import { isStream } from "../streamUtils.js";
 import { createLogger } from "#shared";
+import { StorageValidationError } from "../../errors.js";
 
 const storageLogger = createLogger("storage");
 
@@ -13,7 +14,7 @@ export class SupabaseStorageProvider extends IStorageProvider {
     constructor({ bucketName = "generated_images", client = null } = {}) {
         super();
         if (!client || !client.storage) {
-            throw new Error("SupabaseStorageProvider requires a storage-capable client.");
+            throw new StorageValidationError("SupabaseStorageProvider requires a storage-capable client.");
         }
         this.bucketName = bucketName;
         this.client = client;

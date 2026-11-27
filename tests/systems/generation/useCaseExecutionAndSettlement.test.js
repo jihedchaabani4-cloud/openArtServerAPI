@@ -1,24 +1,20 @@
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import {
-  ExecutionEngine,
-  WorkflowExecutor,
-  GraphCompiler,
-  SaveMediaNode,
-  ImageGenerateNode,
-  createDefaultV3NodeRegistry,
-  imageGenerationV3,
-  videoGenerationV3,
-  characterSheetV3,
-} from "../../../src/systems/generation/internal/v3/index.js";
+import { ExecutionEngine } from "../../../src/systems/workflow-engine/internal/core/ExecutionEngine.js";
+import { WorkflowExecutor } from "../../../src/systems/workflow-engine/internal/core/WorkflowExecutor.js";
+import { GraphCompiler } from "../../../src/systems/workflow-engine/internal/core/GraphCompiler.js";
+import { SaveMediaNode, ImageGenerateNode, createDefaultV3NodeRegistry } from "../../../src/systems/workflow-engine/internal/nodes/index.js";
+import { imageGenerationV3, videoGenerationV3, characterSheetV3 } from "../../../src/systems/workflow-engine/internal/workflows/index.js";
 import { ERROR_CODES } from "../../../src/systems/generation/internal/errors.js";
-import { executionEngine, db, assertWalletConfiguredForEnvironment } from "../../../src/container.js";
+import { workflowDispatcher, db, assertWalletConfiguredForEnvironment } from "../../../src/container.js";
+import { WorkflowDispatchService } from "#generation/tools";
 import { reserveCredits, BillingValidationError } from "#billing/tools";
-import { redisConnection, workerRedisConnection } from "#shared";
+import { redisConnection, workerRedisConnection } from "#shared/redis";
 import { randomUUID } from "node:crypto";
 import { InMemoryWalletService } from "../../helpers/inMemoryWalletService.js";
-import { generateImage, generateVideo } from "#generation/api";
-import { generateCharacterSheet, createCharacter } from "#characters/api";
+import { generateImage } from "../../../src/systems/generation/internal/controllers/imageController.js";
+import { generateVideo } from "../../../src/systems/generation/internal/controllers/videoController.js";
+import { generateCharacterSheet, createCharacter } from "../../../src/systems/characters/internal/controllers/characterController.js";
 
 after(async () => {
   try {
@@ -209,9 +205,7 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
       }),
     };
 
-    await engine.execute({
-      useCaseId: "image-generation-v3",
-      input: { workflow_id: "wf-1", media_id: "m-1" },
+    await engine.runWorkflow("image-generation-v3", { workflow_id: "wf-1", media_id: "m-1" }, {
       userId: "00000000-0000-0000-0000-000000000001",
     });
 
@@ -229,9 +223,7 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
 
     await assert.rejects(
       async () => {
-        await engine.execute({
-          useCaseId: "image-generation-v3",
-          input: { workflow_id: "wf-2", media_id: "m-2" },
+        await engine.runWorkflow("image-generation-v3", { workflow_id: "wf-2", media_id: "m-2" }, {
           userId: "00000000-0000-0000-0000-000000000001",
         });
       },
@@ -249,9 +241,9 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
       onSuccess: async (payload) => { successPayload = payload; },
     });
 
-    const result = await engine.execute({
-      useCaseId: "image-generation-v3",
-      input: {
+    const result = await engine.runWorkflow(
+      "image-generation-v3",
+      {
         prompt: "A beautiful mountain landscape at sunset",
         model: "gpt-image-2",
         parameters: { aspect_ratio: "16:9" },
@@ -260,9 +252,11 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
         serverWorkflowId: "wf-img-e2e",
         serverMediaIds: ["media-img-e2e"],
       },
-      userId: "00000000-0000-0000-0000-000000000001",
-      nodeContext: { ...createDefaultMockNodeContext({ db }), useExternalPersistence: false },
-    });
+      {
+        userId: "00000000-0000-0000-0000-000000000001",
+        nodeContext: { ...createDefaultMockNodeContext({ db }), useExternalPersistence: false },
+      }
+    );
 
     assert.equal(result.status, "completed");
     assert.ok(successPayload, "onSuccess hook must fire on completed run");
@@ -278,9 +272,9 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
       onSuccess: async (payload) => { successPayload = payload; },
     });
 
-    const result = await engine.execute({
-      useCaseId: "video-generation-v3",
-      input: {
+    const result = await engine.runWorkflow(
+      "video-generation-v3",
+      {
         prompt: "A drone shot flying over waves crashing on rocks",
         model: "wan_3_0",
         parameters: { duration: 5 },
@@ -289,9 +283,11 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
         serverWorkflowId: "wf-vid-e2e",
         serverMediaIds: ["media-vid-e2e"],
       },
-      userId: "00000000-0000-0000-0000-000000000001",
-      nodeContext: { ...createDefaultMockNodeContext({ db }), useExternalPersistence: false },
-    });
+      {
+        userId: "00000000-0000-0000-0000-000000000001",
+        nodeContext: { ...createDefaultMockNodeContext({ db }), useExternalPersistence: false },
+      }
+    );
 
     assert.equal(result.status, "completed");
     assert.ok(successPayload, "onSuccess hook must fire on completed run");
@@ -307,9 +303,7 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
       onSuccess: async (payload) => { successPayload = payload; },
     });
 
-    const result = await engine.execute({
-      useCaseId: "character-sheet-v3",
-      input: {
+    const result = await engine.runWorkflow("character-sheet-v3", {
         prompt: "Futuristic cyberpunk warrior with cybernetic arm",
         name: "CyberHero",
         character_id: "char-e2e-123",
@@ -318,7 +312,7 @@ describe("F2.1 — Fail-Closed Targets, Exploit Regression & Settlement Invarian
         media_id: "media-char-e2e",
         serverWorkflowId: "wf-char-e2e",
         serverMediaIds: ["media-char-e2e"],
-      },
+      }, {
       userId: "00000000-0000-0000-0000-000000000001",
       nodeContext: { ...createDefaultMockNodeContext({ db }), useExternalPersistence: false },
     });
@@ -393,7 +387,9 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
 
     let caughtError = null;
     try {
-      await engine.execute(legacyPayload);
+      await engine.runWorkflow(legacyPayload.useCaseId, legacyPayload.input, {
+        userId: legacyPayload.userId,
+      });
     } catch (err) {
       caughtError = err;
     }
@@ -433,9 +429,9 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
 
     const engine = new ExecutionEngine();
 
-    const result = await engine.execute({
-      useCaseId: "image-generation-v3",
-      input: {
+    const result = await engine.runWorkflow(
+      "image-generation-v3",
+      {
         prompt: "four variations of cat",
         model: "nanobana_2",
         parameters: {},
@@ -443,17 +439,19 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         serverWorkflowId: "wf-multi",
         serverMediaIds: ["media-placeholder-1"],
       },
-      userId: "user-multi",
-      nodeContext: {
-        ...createDefaultMockNodeContext({
-          db,
-          executeProvider: async () => ({
-            assets: multiAssets,
+      {
+        userId: "user-multi",
+        nodeContext: {
+          ...createDefaultMockNodeContext({
+            db,
+            executeProvider: async () => ({
+              assets: multiAssets,
+            }),
           }),
-        }),
-        useExternalPersistence: false,
-      },
-    });
+          useExternalPersistence: false,
+        },
+      }
+    );
 
     assert.equal(result.status, "completed");
 
@@ -506,7 +504,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
 
         let threw = false;
         try {
-          await engine.execute(payload);
+          await engine.runWorkflow(payload.useCaseId, payload.input, payload);
         } catch {
           threw = true;
         }
@@ -526,20 +524,17 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
     it("ENTRY POINT 1: imageController.generateImage produces server targets and completes media", async () => {
       let capturedJobPayload = null;
       const mockQueue = {
-        addUseCaseJob: async (jobData) => {
+        add: async (_name, jobData, opts) => {
           capturedJobPayload = jobData;
-          return { id: "job-img-ep-1", ...jobData };
+          return { id: opts?.jobId || "job-img-ep-1", ...jobData };
         },
       };
 
-      const testEngine = new ExecutionEngine({
-        jobQueueService: mockQueue,
-      });
+      const testDispatcher = new WorkflowDispatchService({ queue: mockQueue });
+      const testEngine = new ExecutionEngine();
 
-      const origLaunch = executionEngine.launch;
-      const origExecute = executionEngine.execute;
-      executionEngine.launch = testEngine.launch.bind(testEngine);
-      executionEngine.execute = testEngine.execute.bind(testEngine);
+      const origLaunch = workflowDispatcher.dispatch;
+      workflowDispatcher.dispatch = testDispatcher.dispatch.bind(testDispatcher);
 
       try {
         const dbWorkflowsStore = new Map();
@@ -614,9 +609,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         assert.strictEqual(capturedJobPayload.input.serverWorkflowId, workflowId);
         assert.deepStrictEqual(capturedJobPayload.input.serverMediaIds, [mediaId]);
 
-        const runResult = await testEngine.execute({
-          useCaseId: capturedJobPayload.useCaseId,
-          input: capturedJobPayload.input,
+        const runResult = await testEngine.runWorkflow(capturedJobPayload.useCaseId, capturedJobPayload.input, {
           userId: capturedJobPayload.userId,
           executionId: capturedJobPayload.executionId,
           runId: capturedJobPayload.workflowRunId,
@@ -629,28 +622,24 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         assert.strictEqual(completedMedia.status, "success", "Placeholder media must be completed by node");
         assert.ok(completedMedia.url.startsWith("https://"), "Media URL must be populated");
       } finally {
-        executionEngine.launch = origLaunch;
-        executionEngine.execute = origExecute;
+        workflowDispatcher.dispatch = origLaunch;
       }
     });
 
     it("ENTRY POINT 2: videoController.generateVideo produces server targets and completes media", async () => {
       let capturedJobPayload = null;
       const mockQueue = {
-        addUseCaseJob: async (jobData) => {
+        add: async (_name, jobData, opts) => {
           capturedJobPayload = jobData;
-          return { id: "job-vid-ep-1", ...jobData };
+          return { id: opts?.jobId || "job-vid-ep-1", ...jobData };
         },
       };
 
-      const testEngine = new ExecutionEngine({
-        jobQueueService: mockQueue,
-      });
+      const testDispatcher = new WorkflowDispatchService({ queue: mockQueue });
+      const testEngine = new ExecutionEngine();
 
-      const origLaunch = executionEngine.launch;
-      const origExecute = executionEngine.execute;
-      executionEngine.launch = testEngine.launch.bind(testEngine);
-      executionEngine.execute = testEngine.execute.bind(testEngine);
+      const origLaunch = workflowDispatcher.dispatch;
+      workflowDispatcher.dispatch = testDispatcher.dispatch.bind(testDispatcher);
 
       try {
         const dbMediaStore = new Map();
@@ -718,9 +707,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         assert.strictEqual(capturedJobPayload.serverContext.workflowId, workflowId);
         assert.deepStrictEqual(capturedJobPayload.serverContext.mediaIds, [mediaId]);
 
-        const runResult = await testEngine.execute({
-          useCaseId: capturedJobPayload.useCaseId,
-          input: capturedJobPayload.input,
+        const runResult = await testEngine.runWorkflow(capturedJobPayload.useCaseId, capturedJobPayload.input, {
           userId: capturedJobPayload.userId,
           executionId: capturedJobPayload.executionId,
           runId: capturedJobPayload.workflowRunId,
@@ -733,28 +720,24 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         assert.strictEqual(completedMedia.status, "success");
         assert.ok(completedMedia.url);
       } finally {
-        executionEngine.launch = origLaunch;
-        executionEngine.execute = origExecute;
+        workflowDispatcher.dispatch = origLaunch;
       }
     });
 
     it("ENTRY POINT 3: characterController.generateCharacterSheet produces server targets and completes media", async () => {
       let capturedJobPayload = null;
       const mockQueue = {
-        addUseCaseJob: async (jobData) => {
+        add: async (_name, jobData, opts) => {
           capturedJobPayload = jobData;
-          return { id: "job-sheet-ep-1", ...jobData };
+          return { id: opts?.jobId || "job-sheet-ep-1", ...jobData };
         },
       };
 
-      const testEngine = new ExecutionEngine({
-        jobQueueService: mockQueue,
-      });
+      const testDispatcher = new WorkflowDispatchService({ queue: mockQueue });
+      const testEngine = new ExecutionEngine();
 
-      const origLaunch = executionEngine.launch;
-      const origExecute = executionEngine.execute;
-      executionEngine.launch = testEngine.launch.bind(testEngine);
-      executionEngine.execute = testEngine.execute.bind(testEngine);
+      const origLaunch = workflowDispatcher.dispatch;
+      workflowDispatcher.dispatch = testDispatcher.dispatch.bind(testDispatcher);
 
       try {
         const dbMediaStore = new Map();
@@ -833,9 +816,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         assert.ok(capturedJobPayload.serverContext.mediaIds.length > 0);
         const placeholderMediaId = capturedJobPayload.serverContext.mediaIds[0];
 
-        const runResult = await testEngine.execute({
-          useCaseId: capturedJobPayload.useCaseId,
-          input: capturedJobPayload.input,
+        const runResult = await testEngine.runWorkflow(capturedJobPayload.useCaseId, capturedJobPayload.input, {
           userId: capturedJobPayload.userId,
           executionId: capturedJobPayload.executionId,
           runId: capturedJobPayload.workflowRunId,
@@ -847,28 +828,24 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         const completedMedia = dbMediaStore.get(placeholderMediaId);
         assert.strictEqual(completedMedia.status, "success");
       } finally {
-        executionEngine.launch = origLaunch;
-        executionEngine.execute = origExecute;
+        workflowDispatcher.dispatch = origLaunch;
       }
     });
 
     it("ENTRY POINT 4: characterController.createCharacter (AI visual sheet path) produces server targets and completes media", async () => {
       let capturedJobPayload = null;
       const mockQueue = {
-        addUseCaseJob: async (jobData) => {
+        add: async (_name, jobData, opts) => {
           capturedJobPayload = jobData;
-          return { id: "job-createchar-ep-1", ...jobData };
+          return { id: opts?.jobId || "job-createchar-ep-1", ...jobData };
         },
       };
 
-      const testEngine = new ExecutionEngine({
-        jobQueueService: mockQueue,
-      });
+      const testDispatcher = new WorkflowDispatchService({ queue: mockQueue });
+      const testEngine = new ExecutionEngine();
 
-      const origLaunch = executionEngine.launch;
-      const origExecute = executionEngine.execute;
-      executionEngine.launch = testEngine.launch.bind(testEngine);
-      executionEngine.execute = testEngine.execute.bind(testEngine);
+      const origLaunch = workflowDispatcher.dispatch;
+      workflowDispatcher.dispatch = testDispatcher.dispatch.bind(testDispatcher);
 
       try {
         const dbMediaStore = new Map();
@@ -953,9 +930,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         assert.ok(capturedJobPayload.serverContext.mediaIds.length > 0);
         const placeholderMediaId = capturedJobPayload.serverContext.mediaIds[0];
 
-        const runResult = await testEngine.execute({
-          useCaseId: capturedJobPayload.useCaseId,
-          input: capturedJobPayload.input,
+        const runResult = await testEngine.runWorkflow(capturedJobPayload.useCaseId, capturedJobPayload.input, {
           userId: capturedJobPayload.userId,
           executionId: capturedJobPayload.executionId,
           runId: capturedJobPayload.workflowRunId,
@@ -967,8 +942,7 @@ describe("F2.3 — ServerContext Fail-Closed, Hold Release, and Multi-Asset Outp
         const completedMedia = dbMediaStore.get(placeholderMediaId);
         assert.strictEqual(completedMedia.status, "success");
       } finally {
-        executionEngine.launch = origLaunch;
-        executionEngine.execute = origExecute;
+        workflowDispatcher.dispatch = origLaunch;
       }
     });
   });
@@ -1013,12 +987,10 @@ describe("Execution Error & Hook Propagation Boundary Tests (BUG-01 / V3)", () =
 
     await assert.rejects(
       async () => {
-        await engine.execute({
-          useCaseId: "image-generation-v3",
-          input: {
+        await engine.runWorkflow("image-generation-v3", {
             workflow_id: "wf-bug01-media",
             media_id: "media-placeholder-1",
-          },
+          }, {
           userId: "user-victim-123",
         });
       },
@@ -1041,12 +1013,10 @@ describe("Execution Error & Hook Propagation Boundary Tests (BUG-01 / V3)", () =
 
     await assert.rejects(
       async () => {
-        await engine.execute({
-          useCaseId: "image-generation-v3",
-          input: {
+        await engine.runWorkflow("image-generation-v3", {
             workflow_id: "wf-bug01-e2e",
             media_id: "media-placeholder-e2e",
-          },
+          }, {
           userId: "user-audit-123",
         });
       },
@@ -1148,7 +1118,7 @@ describe("F2.4-a — Wallet Misconfiguration & Zero Price Invariants (V3)", () =
     const origDbMedia = db.media;
     const origDbProjects = db.projects;
     const origDbWorkflows = db.workflows;
-    const origLaunch = executionEngine.launch;
+    const origLaunch = workflowDispatcher.dispatch;
 
     db.media = {
       createMedia: async (data) => {
@@ -1173,7 +1143,7 @@ describe("F2.4-a — Wallet Misconfiguration & Zero Price Invariants (V3)", () =
       createWorkflow: async (data) => data,
     };
 
-    executionEngine.launch = async () => {
+    workflowDispatcher.dispatch = async () => {
       const pricingErr = new Error("Pricing engine failed to resolve valid cost: NaN");
       pricingErr.code = "PRICING_CONFIG_ERROR";
       pricingErr.category = "SERVER_FAULT";
@@ -1216,7 +1186,7 @@ describe("F2.4-a — Wallet Misconfiguration & Zero Price Invariants (V3)", () =
       db.media = origDbMedia;
       db.projects = origDbProjects;
       db.workflows = origDbWorkflows;
-      executionEngine.launch = origLaunch;
+      workflowDispatcher.dispatch = origLaunch;
     }
   });
 });
@@ -1225,27 +1195,19 @@ describe("F2.4-a — Wallet Misconfiguration & Zero Price Invariants (V3)", () =
 // ─── Source: useCasePendingMediaZombieCleanup.test.js ───
 {
 describe("Sprint R2: ExecutionEngine Failure Hook Propagation", () => {
-  it("when queue.addUseCaseJob throws, external onFailure hook is invoked with serverContext", async () => {
-    const failures = [];
-
+  it("when Redis queue.add throws, WorkflowDispatchService throws 503 QUEUE_DISPATCH_FAILED for single-owner intake compensation", async () => {
     const mockQueue = {
-      addUseCaseJob: async () => {
+      add: async () => {
         throw new Error("Redis cluster connection lost during dispatch");
       },
     };
 
-    const service = new ExecutionEngine({
-      jobQueueService: mockQueue,
-      onFailure: async (payload) => {
-        failures.push(payload);
-      },
-    });
-
+    const dispatcher = new WorkflowDispatchService({ queue: mockQueue });
     const serverMediaIds = ["media-pending-1", "media-pending-2"];
     let caughtError = null;
 
     try {
-      await service.launch({
+      await dispatcher.dispatch({
         useCaseId: "image-generation-v3",
         input: {
           prompt: "A neon cyborg cat",
@@ -1263,14 +1225,9 @@ describe("Sprint R2: ExecutionEngine Failure Hook Propagation", () => {
       caughtError = err;
     }
 
-    assert.ok(caughtError, "launch should throw when queue dispatch fails");
+    assert.ok(caughtError, "dispatch should throw when queue dispatch fails");
     assert.equal(caughtError.code, "QUEUE_DISPATCH_FAILED");
     assert.equal(caughtError.statusCode, 503);
-
-    assert.equal(failures.length, 1, "onFailure must fire once on dispatch failure");
-    assert.equal(failures[0].stage, "launch");
-    assert.equal(failures[0].errorCode, "QUEUE_DISPATCH_FAILED");
-    assert.deepEqual(failures[0].serverContext.mediaIds, serverMediaIds);
   });
 
   it("when standalone execution fails with workflowId = null, onFailure hook receives input targets", async () => {
@@ -1290,11 +1247,9 @@ describe("Sprint R2: ExecutionEngine Failure Hook Propagation", () => {
 
     let caughtError = null;
     try {
-      await service.execute({
-        useCaseId: "image-generation-v3",
-        input: {
+      await service.runWorkflow("image-generation-v3", {
           serverMediaIds: ["media-standalone-1", "media-standalone-2"],
-        },
+        }, {
         userId: "user-2",
       });
     } catch (err) {

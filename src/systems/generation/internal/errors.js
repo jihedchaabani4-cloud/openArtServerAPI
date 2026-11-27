@@ -4,7 +4,7 @@
  * Base error extends AppError from #shared following platform conventions.
  * Standard code, statusCode, category, and safe public messages.
  */
-import { AppError } from "#shared";
+import { AppError, scrubSensitiveText, sanitizePublicError } from "#shared";
 
 // ─── Error codes ─────────────────────────────────────────────────────────────
 export const ERROR_CODES = {
@@ -360,95 +360,17 @@ export class GenerationHoldExpiredError extends GenerationError {
     }
 }
 
-const INTERNAL_LEAK_REGEX =
-    /\b(wavespeed|ltx|runwayml|runway|google|gemini|vertex|openai|anthropic|replicate|fal\.ai|supabase|postgrest|pg_|postgres|redis|bullmq|ioredis)\b/gi;
-const URL_LEAK_REGEX = /https?:\/\/[^\s"'<>]+/gi;
-const SQL_LEAK_REGEX = /\b(SELECT\s+.+\s+FROM|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|relation\s+"[^"]+"\s+does\s+not\s+exist|syntax\s+error\s+at\s+or\s+near)\b/gi;
-const STACK_TRACE_REGEX = /\n\s*at\s+[^\n]+/g;
-
-function scrubSensitiveText(text, fallback = "Generation failed. Please try again.") {
-    if (!text || typeof text !== "string") return fallback;
-    let cleaned = text.replace(STACK_TRACE_REGEX, "").trim();
-    if (SQL_LEAK_REGEX.test(cleaned)) {
-        SQL_LEAK_REGEX.lastIndex = 0;
-        return fallback;
-    }
-    cleaned = cleaned.replace(URL_LEAK_REGEX, "[redacted-url]");
-    cleaned = cleaned.replace(INTERNAL_LEAK_REGEX, "provider");
-    cleaned = cleaned.replace(/\s{2,}/g, " ").trim();
-    return cleaned || fallback;
-}
-
 /**
- * Classifies and sanitizes any error into one of the 4 canonical V3 error categories:
- *   1. USER_FAULT (400/403/404 — input or ownership errors; never retried)
- *   2. CONTENT_SAFETY_VIOLATION (422 — LLM or provider safety rejection; never retried)
- *   3. UPSTREAM_FAULT / RATE_LIMIT (502/503/429 — transient provider failures; retryable)
- *   4. HOLD_EXPIRED / SERVER_FAULT (409/500 — expired hold or internal fault; never retried)
- *
- * Ensures no stack trace, SQL detail, internal URL, or internal provider name leaks to client/DB.
+ * Classifies and sanitizes any error for billable Generation jobs.
+ * Reuses `#shared` neutral scrubbing/classification and formats Generation-specific
+ * `HOLD_EXPIRED` (409) and credit-refund copy strictly at the Generation seam.
  */
 export function sanitizeClientError(err) {
     const rawCode = String(err?.code || err?.errorCode || "").trim();
-    const rawMsg = typeof err?.message === "string" ? err.message : String(err || "");
     const rawCategory = String(err?.category || "").toUpperCase();
     const rawStatus = Number(err?.statusCode || err?.status || 0);
 
-    // 0. SAFETY_CHECK_UNAVAILABLE (429 / 502 / 503 — transient safety provider fault; fail-closed, NOT user policy violation)
-    if (rawCode === "SAFETY_CHECK_UNAVAILABLE") {
-        const isRateLimit = rawCategory === "RATE_LIMIT" || rawStatus === 429;
-        const category = isRateLimit ? "RATE_LIMIT" : "UPSTREAM_FAULT";
-        const statusCode = isRateLimit ? 429 : rawStatus === 503 ? 503 : 502;
-        const userMessage = isRateLimit
-            ? "Safety check service is temporarily busy. Please try again in a moment."
-            : "Safety check service is temporarily unavailable. Your credits have been refunded. Please try again shortly.";
-        return {
-            code: "SAFETY_CHECK_UNAVAILABLE",
-            category,
-            statusCode,
-            retryable: err?.retryable !== undefined ? Boolean(err.retryable) : true,
-            message: userMessage,
-            userMessage,
-        };
-    }
-
-    // 0b. SAFETY_CHECK_FAILED (422 — static user-safe message; never leak internal route/model keys)
-    if (rawCode === "SAFETY_CHECK_FAILED") {
-        const staticMsg = "Unable to verify prompt safety. Please revise your prompt and try again.";
-        return {
-            code: "SAFETY_CHECK_FAILED",
-            category: "CONTENT_SAFETY_VIOLATION",
-            statusCode: 422,
-            retryable: false,
-            message: staticMsg,
-            userMessage: staticMsg,
-        };
-    }
-
-    // 1. CONTENT_SAFETY_VIOLATION (422)
-    if (
-        rawCode === "CONTENT_SAFETY_VIOLATION" ||
-        rawCode === "PROMPT_VIOLATION" ||
-        rawCode === "PROVIDER_CONTENT_POLICY_ERROR" ||
-        rawCategory === "CONTENT_SAFETY_VIOLATION" ||
-        err?.is_safe === false ||
-        /content safety|content policy|safety violation|nsfw/i.test(rawMsg)
-    ) {
-        const cleanReason = scrubSensitiveText(
-            err?.userMessage || err?.safeMessage || rawMsg,
-            "Your prompt violates our content safety policy."
-        );
-        return {
-            code: "CONTENT_SAFETY_VIOLATION",
-            category: "CONTENT_SAFETY_VIOLATION",
-            statusCode: 422,
-            retryable: false,
-            message: cleanReason,
-            userMessage: cleanReason,
-        };
-    }
-
-    // 2. HOLD_EXPIRED (409)
+    // Generation-specific billing hold expiration (409)
     if (rawCode === "HOLD_EXPIRED" || rawCategory === "HOLD_EXPIRED" || rawStatus === 409) {
         const msg = "Generation session expired before completion. Your credits have been refunded.";
         return {
@@ -461,87 +383,54 @@ export function sanitizeClientError(err) {
         };
     }
 
-    // 3. USER_FAULT (400 / 403 / 404)
-    if (
-        rawCategory === "USER_FAULT" ||
-        rawStatus === 400 ||
-        rawStatus === 403 ||
-        rawStatus === 404 ||
-        rawCode === "GENERATION_VALIDATION_ERROR" ||
-        rawCode === "GENERATION_NOT_FOUND" ||
-        rawCode === "USE_CASE_NOT_FOUND" ||
-        rawCode === "FORBIDDEN" ||
-        rawCode === "OWNERSHIP_VERIFICATION_FAILED" ||
-        rawCode === "TARGET_VERIFICATION_FAILED"
-    ) {
-        const statusCode = rawStatus === 403 || rawStatus === 404 ? rawStatus : 400;
-        const cleanMsg = scrubSensitiveText(
-            err?.userMessage || err?.safeMessage || rawMsg,
-            "Invalid request parameters."
-        );
-        return {
-            code: rawCode || "GENERATION_VALIDATION_ERROR",
-            category: "USER_FAULT",
-            statusCode,
-            retryable: false,
-            message: cleanMsg,
-            userMessage: cleanMsg,
-        };
+    const base = sanitizePublicError(err);
+
+    if (base.code === "SAFETY_CHECK_UNAVAILABLE" && base.category !== "RATE_LIMIT") {
+        const userMessage =
+            "Safety check service is temporarily unavailable. Your credits have been refunded. Please try again shortly.";
+        return { ...base, message: userMessage, userMessage };
     }
 
-    // 4. UPSTREAM_FAULT / RATE_LIMIT (429 / 502 / 503)
-    if (
-        rawCode === "PROVIDER_QUOTA_EXCEEDED" ||
-        rawCode === "CIRCUIT_BREAKER_OPEN" ||
-        rawCategory === "UPSTREAM_FAULT" ||
-        rawCategory === "RATE_LIMIT" ||
-        rawStatus === 429 ||
-        rawStatus === 502 ||
-        rawStatus === 503 ||
-        /rate limit|quota|timeout|timed out|upstream/i.test(rawCode) ||
-        /rate limit|quota|timed out/i.test(rawMsg)
-    ) {
-        const isProviderQuota = rawCode === "PROVIDER_QUOTA_EXCEEDED";
-        const isRateLimit =
-            !isProviderQuota &&
-            (rawCategory === "RATE_LIMIT" || rawStatus === 429 || /rate limit|quota/i.test(rawCode));
-        const category = isRateLimit ? "RATE_LIMIT" : "UPSTREAM_FAULT";
-        const statusCode = isProviderQuota
-            ? 503
-            : isRateLimit
-              ? 429
-              : rawStatus === 503 || rawCode === "CIRCUIT_BREAKER_OPEN"
-                ? 503
-                : 502;
-        const userMessage = isProviderQuota
-            ? "This model is temporarily unavailable due to upstream provider maintenance. Your credits have been refunded. Please select a different model."
-            : isRateLimit
-              ? "Generation service is currently busy. Please try again in a moment."
-              : "Generation failed due to a temporary service issue. Your credits have been refunded.";
+    if (base.code === "CONTENT_SAFETY_VIOLATION" && base.userMessage === "Input violates content safety policy.") {
+        const userMessage = scrubSensitiveText(
+            err?.userMessage || err?.safeMessage || err?.message,
+            "Your prompt violates our content safety policy."
+        );
+        return { ...base, message: userMessage, userMessage };
+    }
+
+    if (base.category === "USER_FAULT" && base.code === "VALIDATION_ERROR") {
+        return { ...base, code: "GENERATION_VALIDATION_ERROR" };
+    }
+
+    if (base.code === "PROVIDER_QUOTA_EXCEEDED") {
+        const userMessage =
+            "This model is temporarily unavailable due to upstream provider maintenance. Your credits have been refunded. Please select a different model.";
+        return { ...base, message: userMessage, userMessage };
+    }
+
+    if (base.category === "RATE_LIMIT" && base.code !== "SAFETY_CHECK_UNAVAILABLE") {
+        const userMessage = "Generation service is currently busy. Please try again in a moment.";
+        return { ...base, message: userMessage, userMessage };
+    }
+
+    if (base.category === "UPSTREAM_FAULT") {
+        const userMessage = "Generation failed due to a temporary service issue. Your credits have been refunded.";
         return {
-            code: rawCode || (isRateLimit ? "RATE_LIMIT_EXCEEDED" : "GENERATION_UPSTREAM_ERROR"),
-            category,
-            statusCode,
-            retryable: isProviderQuota || rawCode === "CIRCUIT_BREAKER_OPEN"
-                ? false
-                : err?.retryable !== undefined
-                  ? Boolean(err.retryable)
-                  : true,
+            ...base,
+            code: base.code === "UPSTREAM_ERROR" ? "GENERATION_UPSTREAM_ERROR" : base.code,
             message: userMessage,
             userMessage,
         };
     }
 
-    // 5. SERVER_FAULT (500 — default fail-closed internal category)
-    const fallbackMessage = "Generation failed due to an unexpected internal error. Your credits have been refunded.";
-    return {
-        code: rawCode || "SERVER_ERROR",
-        category: "SERVER_FAULT",
-        statusCode: 500,
-        retryable: false,
-        message: fallbackMessage,
-        userMessage: fallbackMessage,
-    };
+    if (base.category === "SERVER_FAULT") {
+        const fallbackMessage =
+            "Generation failed due to an unexpected internal error. Your credits have been refunded.";
+        return { ...base, message: fallbackMessage, userMessage: fallbackMessage };
+    }
+
+    return base;
 }
 
 export class CompilationError extends Error {
@@ -559,9 +448,12 @@ export class CompilationError extends Error {
 
 export function throwCompilationErrors(errors) {
     if (errors.length > 0) {
-        const err = new Error(`Workflow compilation failed with ${errors.length} error(s).`);
+        const serialized = errors.map((e) => e.toJSON());
+        const err = new GenerationCompilationError(
+            `Workflow compilation failed with ${errors.length} error(s).`,
+            { errors: serialized }
+        );
         err.name = "CompilationFailed";
-        err.errors = errors.map((e) => e.toJSON());
         throw err;
     }
 }

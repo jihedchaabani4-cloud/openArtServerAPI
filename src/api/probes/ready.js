@@ -1,5 +1,6 @@
 import express from "express";
-import { rateLimitRedisConnection, redisConnection, createLogger, envConfig } from "#shared";
+import { createLogger, envConfig } from "#shared";
+import { rateLimitRedisConnection, redisConnection } from "#shared/redis";
 
 const router = express.Router();
 const readyLogger = createLogger("ready");

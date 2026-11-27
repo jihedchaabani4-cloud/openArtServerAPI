@@ -1,29 +1,23 @@
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ExecutionEngine,
   GenerationService,
   GenerationRequestService,
 } from "#generation/tools";
-import {
-  WorkflowExecutor,
-  GraphCompiler,
-  NodeRegistry,
-  LlmNode,
-  ImageGenerateNode,
-  VideoGenerateNode,
-  SaveMediaNode,
-  createDefaultV3NodeRegistry,
-  imageGenerationV3,
-  videoGenerationV3,
-} from "../../../src/systems/generation/internal/v3/index.js";
+import { ExecutionEngine } from "../../../src/systems/workflow-engine/internal/core/ExecutionEngine.js";
+import { WorkflowExecutor } from "../../../src/systems/workflow-engine/internal/core/WorkflowExecutor.js";
+import { GraphCompiler } from "../../../src/systems/workflow-engine/internal/core/GraphCompiler.js";
+import { NodeRegistry } from "../../../src/systems/workflow-engine/internal/core/NodeRegistry.js";
+import { LlmNode, ImageGenerateNode, VideoGenerateNode, SaveMediaNode, createDefaultV3NodeRegistry } from "../../../src/systems/workflow-engine/internal/nodes/index.js";
+import { imageGenerationV3, videoGenerationV3 } from "../../../src/systems/workflow-engine/internal/workflows/index.js";
 import {
   ERROR_CODES,
   parseProviderError,
   sanitizeClientError,
 } from "../../../src/systems/generation/internal/errors.js";
 import { db } from "../../../src/container.js";
-import { redisConnection, workerRedisConnection, baseLogger, LogEvents } from "#shared";
+import { baseLogger, LogEvents } from "#shared";
+import { redisConnection, workerRedisConnection } from "#shared/redis";
 import { calculateCost } from "#models/tools";
 import { ProviderTransientError } from "../../../src/systems/models/internal/errors.js";
 import {
@@ -33,8 +27,8 @@ import {
 } from "../../../src/systems/models/internal/runtime/providerRuntimeRegistry.js";
 import { getModelBindings } from "../../../src/systems/models/internal/registry/modelRegistry.js";
 import { randomUUID } from "node:crypto";
-import * as imageController from "#generation/api";
-import { failWorkflowPendingMedia } from "#media/tools";
+import * as imageController from "../../../src/systems/generation/internal/controllers/imageController.js";
+import { failWorkflowPendingMedia } from "../../../src/systems/media/internal/services/MediaLifecycleService.js";
 
 after(async () => {
   try {
@@ -155,11 +149,11 @@ describe("F2 — Server-Side Workflow Context & Failure Handling Boundary Tests 
 
     await assert.rejects(
       async () => {
-        await engine.execute({
-          useCaseId: "image-generation-v3",
-          input: { prompt: "Test prompt", media_id: "m-1" },
-          userId: "user-test-f2b",
-        });
+        await engine.runWorkflow(
+          "image-generation-v3",
+          { prompt: "Test prompt", media_id: "m-1" },
+          { userId: "user-test-f2b" }
+        );
       },
       (err) => {
         assert.strictEqual(err.code, "WORKFLOW_INCOMPLETE");
@@ -196,15 +190,15 @@ describe("F2 — Server-Side Workflow Context & Failure Handling Boundary Tests 
     };
 
     await assert.rejects(async () => {
-      await engine.execute({
-        workflow: failingWorkflow,
-        input: {
+      await engine.runWorkflow(
+        failingWorkflow,
+        {
           workflow_id: spoofedInputWfId,
           serverWorkflowId: realCharWorkflowId,
           serverMediaIds: [`media-${realCharWorkflowId}`],
         },
-        userId: "user-char-owner-1",
-      });
+        { userId: "user-char-owner-1" }
+      );
     });
 
     assert.deepStrictEqual(
@@ -501,10 +495,10 @@ describe("Multi-Asset Outputs & Count Boundary (F2.4-b / V3)", () => {
   });
 
   it("TEST 4: imageController clamps output count to 1 and pre-allocates exactly 1 placeholder even if count=4 is requested", async () => {
-    const { executionEngine } = await import("../../../src/container.js");
-    const origLaunch = executionEngine.launch;
+    const { workflowDispatcher } = await import("../../../src/container.js");
+    const origDispatch = workflowDispatcher.dispatch;
     let preparedArgs = null;
-    executionEngine.launch = async (args) => {
+    workflowDispatcher.dispatch = async (args) => {
       preparedArgs = args;
       return { executionId: "exec-multi-test", cost: { totalCredits: 8 } };
     };
@@ -545,7 +539,7 @@ describe("Multi-Asset Outputs & Count Boundary (F2.4-b / V3)", () => {
       assert.strictEqual(preparedArgs.serverContext.mediaIds.length, 1, "serverContext.mediaIds must contain exactly 1 id");
       assert.strictEqual(mediaRows.size, 1, "Exactly 1 media placeholder created in db.media");
     } finally {
-      executionEngine.launch = origLaunch;
+      workflowDispatcher.dispatch = origDispatch;
     }
   });
 });
@@ -874,8 +868,8 @@ describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", ()
       },
     };
 
-    const mockExecutionEngine = {
-      launch: async (args) => ({
+    const mockWorkflowDispatcher = {
+      dispatch: async (args) => ({
         jobId: "job-123",
         executionId: args.executionId,
         cost: { totalCredits: 10 },
@@ -888,7 +882,7 @@ describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", ()
 
     const service = new GenerationRequestService({
       db: mockDb,
-      executionEngine: mockExecutionEngine,
+      workflowDispatcher: mockWorkflowDispatcher,
       folderService: mockFolderService,
       assertOwns: async () => true,
       assertOwnsAny: async () => true,
@@ -1153,8 +1147,8 @@ describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", ()
       workflowMedia: { linkMedia: async () => {} },
     };
 
-    const mockExecutionEngine = {
-      launch: async (args) => ({
+    const mockWorkflowDispatcher = {
+      dispatch: async (args) => ({
         jobId: "job-edit-2",
         executionId: args.executionId,
       }),
@@ -1162,7 +1156,7 @@ describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", ()
 
     const service = new GenerationRequestService({
       db: mockDb,
-      executionEngine: mockExecutionEngine,
+      workflowDispatcher: mockWorkflowDispatcher,
       folderService: { validateAndAssertUsable: async () => null },
       assertOwns: async () => true,
       assertOwnsAny: async () => true,
@@ -1205,13 +1199,13 @@ describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", ()
       workflowMedia: { linkMedia: async () => {} },
     };
 
-    const mockExecutionEngine = {
-      launch: async () => ({ jobId: "job-should-not-run" }),
+    const mockWorkflowDispatcher = {
+      dispatch: async () => ({ jobId: "job-should-not-run" }),
     };
 
     const service = new GenerationRequestService({
       db: mockDb,
-      executionEngine: mockExecutionEngine,
+      workflowDispatcher: mockWorkflowDispatcher,
       folderService: { validateAndAssertUsable: async () => null },
       assertOwns: async () => true,
       assertOwnsAny: async () => true,
@@ -1378,7 +1372,7 @@ describe("Per-Media Generation Config Lifecycle & Boundary Tests (Hardened)", ()
 
     const service = new GenerationRequestService({
       db: mockDb,
-      executionEngine: { launch: async () => ({ jobId: "job-secret" }) },
+      workflowDispatcher: { dispatch: async () => ({ jobId: "job-secret" }) },
       folderService: { validateAndAssertUsable: async () => null },
       assertOwns: async () => true,
       assertOwnsAny: async () => true,

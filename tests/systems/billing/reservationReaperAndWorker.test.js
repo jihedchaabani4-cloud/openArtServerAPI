@@ -6,8 +6,7 @@ import { runReservationReaper, settleCredits, startWalletWorker, stopWalletWorke
 import { WalletService } from "../../../src/systems/billing/internal/services/WalletService.js";
 import { reconcileExpiredHolds, handleExpireStaleHolds } from "../../../src/systems/billing/internal/services/ReservationReaperService.js";
 import { walletWorker } from "../../../src/systems/billing/internal/workers/walletWorker.js";
-import { ExecutionEngine } from "#generation/tools";
-import { SaveMediaNode } from "../../../src/systems/generation/internal/v3/index.js";
+import { SaveMediaNode } from "../../../src/systems/workflow-engine/internal/nodes/index.js";
 import { WorkflowMediaService } from "../../../src/systems/generation/internal/services/WorkflowMediaService.js";
 import { db, mediaWorkflowLifecycleService } from "../../../src/container.js";
 import { MediaWorkflowLifecycleService, WorkflowMediaRepository } from "#media/tools";

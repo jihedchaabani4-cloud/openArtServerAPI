@@ -11,6 +11,7 @@
 import { supabase, supabaseAdmin } from "./elementClient.js";
 import { trashRepository } from "#workspace/tools";
 import { createLogger } from "#shared";
+import { ElementsNotFoundError } from "../errors.js";
 
 const elementRepositoryLogger = createLogger("elements:repository");
 
@@ -210,9 +211,9 @@ export class ElementRepository {
     async updateByWorkflowId(workflowId, updates) {
         const existing = await this.findByWorkflowId(workflowId);
         if (!existing) {
-            const err = new Error(`Element not found for workflow: ${workflowId}`);
-            err.statusCode = 404;
-            throw err;
+            throw new ElementsNotFoundError(`Element not found for workflow: ${workflowId}`, {
+                context: { workflowId },
+            });
         }
         return this.update(existing.id, updates);
     }

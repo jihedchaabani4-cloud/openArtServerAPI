@@ -15,7 +15,7 @@ export async function createCharacter(req, res) {
             name,
             prompt = "",
             references = []
-        } = req.body;
+        } = req.body || {};
 
         const targetProjectId = project_id || projectId;
         if (!targetProjectId) {
@@ -39,7 +39,7 @@ export async function createCharacter(req, res) {
 
         return res.json({ ok: true, ...result });
     } catch (err) {
-        controllerLogger.error({ err }, `createCharacter error: ${err.message}`);
+        controllerLogger.error({ err }, `createCharacter error: ${err?.message}`);
         const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
         return res.status(statusCode).json({ ok: false, errorCode, message: publicMessage });
     }
@@ -52,7 +52,7 @@ export async function createCharacter(req, res) {
 export async function generateCharacterSheet(req, res) {
     try {
         const { characterId } = req.params;
-        const { prompt, references, project_id, projectId } = req.body;
+        const { prompt, references, project_id, projectId } = req.body || {};
         const userId = req.user.id;
 
         if (!characterId) {
@@ -70,9 +70,9 @@ export async function generateCharacterSheet(req, res) {
 
         return res.json({ ok: true, ...result });
     } catch (err) {
-        controllerLogger.error({ characterId: req.params?.characterId, err }, `generateCharacterSheet error: ${err.message}`);
+        controllerLogger.error({ characterId: req.params?.characterId, err }, `generateCharacterSheet error: ${err?.message}`);
         const { statusCode, errorCode, publicMessage } = safePublicRouteError(err, {
-            statusCode: err.statusCode || (err.code === "INSUFFICIENT_CREDITS" ? 402 : 500),
+            statusCode: err?.statusCode || (err?.code === "INSUFFICIENT_CREDITS" ? 402 : 500),
         });
         return res.status(statusCode).json({ ok: false, errorCode, message: publicMessage });
     }
@@ -84,25 +84,26 @@ export async function generateCharacterSheet(req, res) {
  */
 export async function generateCharacterDescription(req, res) {
     try {
-        const { concept, archetype, style } = req.body;
+        const { concept, archetype, style } = req.body || {};
         const userId = req.user?.id;
         const characterService = getCharacterService();
         const result = await characterService.generateDescription({ concept, archetype, style, userId });
         return res.json({ ok: true, ...result });
     } catch (err) {
-        controllerLogger.error({ err }, `generateCharacterDescription error: ${err.message}`);
-        const statusCode = err.statusCode || 500;
-        const isServerFault = statusCode >= 500 || err.category === "SERVER_FAULT";
-        const clientCode = isServerFault ? "INTERNAL_ERROR" : (err.code || "REQUEST_ERROR");
+        controllerLogger.error({ err }, `generateCharacterDescription error: ${err?.message}`);
+        const rawStatus = Number(err?.statusCode);
+        const statusCode = Number.isInteger(rawStatus) && rawStatus >= 400 && rawStatus < 600 ? rawStatus : 500;
+        const isServerFault = statusCode >= 500 || err?.category === "SERVER_FAULT";
+        const clientCode = isServerFault ? "INTERNAL_ERROR" : (err?.code || "REQUEST_ERROR");
         const clientMessage = isServerFault
             ? "An unexpected error occurred. Please try again later."
-            : err.message;
-        const traceId = req.headers["x-trace-id"] || req.headers["traceparent"] || undefined;
+            : (err?.safeMessage || err?.message || "Request failed");
+        const traceId = req.headers?.["x-trace-id"] || req.headers?.["traceparent"] || undefined;
         return res.status(statusCode).json({
             ok: false,
             error: true,
             code: clientCode,
-            category: err.category || (isServerFault ? "SERVER_FAULT" : "USER_FAULT"),
+            category: err?.category || (isServerFault ? "SERVER_FAULT" : "USER_FAULT"),
             message: clientMessage,
             ...(traceId ? { traceId } : {}),
         });

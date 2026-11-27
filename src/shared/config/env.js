@@ -2,6 +2,32 @@ export const BULK_DELETE_CONCURRENCY_DEFAULT = 10;
 export const BULK_DELETE_CONCURRENCY_MIN = 1;
 export const BULK_DELETE_CONCURRENCY_MAX = 15;
 
+export const USECASE_WORKER_CONCURRENCY_DEFAULT = 6;
+export const USECASE_WORKER_CONCURRENCY_MIN = 1;
+export const USECASE_WORKER_CONCURRENCY_MAX = 20;
+
+/**
+ * Parses and clamps use-case worker BullMQ concurrency into [1, 20].
+ * Unset, empty, boolean, or non-finite values fall back to default (6).
+ */
+export function clampUseCaseWorkerConcurrency(rawValue) {
+  if (rawValue === undefined || rawValue === null || typeof rawValue === "boolean") {
+    return USECASE_WORKER_CONCURRENCY_DEFAULT;
+  }
+  const normalized = typeof rawValue === "string" ? rawValue.trim() : rawValue;
+  if (normalized === "") {
+    return USECASE_WORKER_CONCURRENCY_DEFAULT;
+  }
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) {
+    return USECASE_WORKER_CONCURRENCY_DEFAULT;
+  }
+  const intVal = Math.trunc(parsed);
+  if (intVal < USECASE_WORKER_CONCURRENCY_MIN) return USECASE_WORKER_CONCURRENCY_MIN;
+  if (intVal > USECASE_WORKER_CONCURRENCY_MAX) return USECASE_WORKER_CONCURRENCY_MAX;
+  return intVal;
+}
+
 /**
  * Parses and clamps bulk-delete worker-pool concurrency into [1, 15].
  * Unset, empty, boolean, or non-finite values fall back to default (10).
@@ -46,6 +72,9 @@ export const envConfig = {
   },
   get bulkDeleteConcurrency() {
     return clampBulkDeleteConcurrency(process.env.BULK_DELETE_CONCURRENCY);
+  },
+  get useCaseWorkerConcurrency() {
+    return clampUseCaseWorkerConcurrency(process.env.USECASE_WORKER_CONCURRENCY);
   },
   get elementMaxMedia() {
     const raw = process.env.ELEMENT_MAX_MEDIA || process.env.ELEMENT_MAX_REFERENCE_MEDIA;

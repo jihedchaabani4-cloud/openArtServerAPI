@@ -1,5 +1,4 @@
 import { getGenerationServices } from "../services/serviceAccessor.js";
-import { WorkflowService } from "../services/WorkflowService.js";
 import { createLogger, safePublicRouteError } from "#shared";
 
 const controllerLogger = createLogger("controller");

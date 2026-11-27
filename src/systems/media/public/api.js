@@ -1,54 +1,34 @@
 /**
  * System 4: Media & Storage — Public HTTP Gateway (Rule 1, Rule 3, Rule 4, Rule 13)
  *
- * Exposes Express routes for media ingestion, uploads, retrieval, and deletion,
- * plus the canonical multipart upload middleware factory.
+ * Sealed gateway exposing ONLY mediaIngestRouter, assetsRouter, and createUploadMiddleware.
  */
 
 import { Router } from "express";
 import multer from "multer";
 import { createLogger } from "#shared";
 import { requireAuth } from "#identity/tools";
-import { DEFAULT_UPLOAD_POLICY } from "../internal/ingestion/UploadPolicy.js";
+import { DEFAULT_UPLOAD_POLICY, resolveMiddlewarePolicy } from "../internal/ingestion/UploadPolicy.js";
 import { createSizeLimitedMemoryStorage } from "../internal/ingestion/sizeLimitedStorage.js";
+import { ValidationError } from "../internal/errors.js";
 import {
     handleMediaIngest,
     handleAssetUpload,
     handleDeleteMedia,
     handleMoveToFolder,
-    handleGetMedia,
 } from "../internal/controllers/mediaController.js";
 
 const uploadMiddlewareLogger = createLogger("upload-middleware");
 
-// ── Multipart Upload Middleware Factory ──────────────────────────────────────
-
-export function resolveMiddlewarePolicy(policy = DEFAULT_UPLOAD_POLICY) {
-    const resolved =
-        policy && typeof policy === "object" && Array.isArray(policy.allowedTypes)
-            ? policy
-            : DEFAULT_UPLOAD_POLICY;
-    const imageLimit = resolved.maxImageSize ?? 0;
-    const videoLimit = resolved.maxVideoSize ?? 0;
-    const maxSizeBytes = Math.max(imageLimit, videoLimit);
-    return {
-        isPolicyObject: true,
-        imageLimit,
-        videoLimit,
-        maxSizeBytes,
-        allowedMimeTypes: resolved.allowedMimeTypes,
-        streamAllowedMimeTypes: resolved.allowedMimeTypes,
-        allowedTypes: resolved.allowedTypes,
-    };
-}
-
 function createMimeFileFilter(allowedMimeTypes) {
     return (_req, file, cb) => {
         if (allowedMimeTypes && !allowedMimeTypes.includes(file.mimetype)) {
-            const err = new Error(`Unsupported file type: ${file.mimetype}`);
-            err.statusCode = 415;
-            err.code = "UNSUPPORTED_MEDIA_TYPE";
-            return cb(err);
+            return cb(
+                new ValidationError(`Unsupported file type: ${file.mimetype}`, {
+                    statusCode: 415,
+                    code: "UNSUPPORTED_MEDIA_TYPE",
+                })
+            );
         }
         cb(null, true);
     };
@@ -150,9 +130,10 @@ export function createUploadMiddleware(policyOrPurpose = "default", fieldName = 
                     resolvedPolicy.imageLimit &&
                     req.file.size > resolvedPolicy.imageLimit
                 ) {
-                    const sizeErr = new Error("Image file exceeds maximum allowed size");
-                    sizeErr.code = "LIMIT_FILE_SIZE";
-                    sizeErr.statusCode = 413;
+                    const sizeErr = new ValidationError("Image file exceeds maximum allowed size", {
+                        statusCode: 413,
+                        code: "LIMIT_FILE_SIZE",
+                    });
                     return sendMiddlewareError(sizeErr, req, res, next, resolvedPolicy);
                 }
             }
@@ -162,34 +143,17 @@ export function createUploadMiddleware(policyOrPurpose = "default", fieldName = 
     };
 }
 
-export const mediaRouter = Router();
 export const assetsRouter = Router();
 export const mediaIngestRouter = Router();
 
-// Middleware setup
 const upload = createUploadMiddleware(DEFAULT_UPLOAD_POLICY);
 
-// ── Wire Routers ─────────────────────────────────────────────────────────────
-
-// Canonical mediaRouter: handles /ingest, /upload, /:id
-mediaRouter.use(requireAuth);
-mediaRouter.post("/ingest", upload, handleMediaIngest);
-mediaRouter.post("/upload", upload, handleAssetUpload);
-mediaRouter.get("/:id", handleGetMedia);
-mediaRouter.delete("/:id", handleDeleteMedia);
-
-// Legacy assetsRouter compatibility
+// /api/assets
 assetsRouter.use(requireAuth);
 assetsRouter.post("/upload", upload, handleAssetUpload);
 assetsRouter.delete("/:id", handleDeleteMedia);
 assetsRouter.patch("/:assetId/folder", handleMoveToFolder);
 
-// Legacy mediaIngestRouter compatibility
+// /api/media
 mediaIngestRouter.use(requireAuth);
 mediaIngestRouter.post("/ingest", upload, handleMediaIngest);
-
-export {
-    handleDeleteMedia,
-    handleGetMedia,
-};
-

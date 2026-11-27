@@ -1,14 +1,17 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { GenerationRequestService } from "#generation/tools";
-import { AppError, redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared";
+import { AppError } from "#shared";
+import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared/redis";
 import express from "express";
 import http from "node:http";
 import apiRouter from "../../../src/api/routes.js";
-import { db, walletService, executionEngine, folderService, workflowService } from "../../../src/container.js";
+import { db, walletService, workflowDispatcher, folderService, workflowService } from "../../../src/container.js";
+import { createWorkflowEngine } from "#workflow-engine/tools";
 import { supabase } from "#shared/db/supabase.js";
-import { CharacterGenerationService } from "#characters/tools";
-import { generateImage, generateVideo } from "#generation/api";
+import { CharacterGenerationService } from "../../../src/systems/characters/internal/services/CharacterGenerationService.js";
+import { generateImage } from "../../../src/systems/generation/internal/controllers/imageController.js";
+import { generateVideo } from "../../../src/systems/generation/internal/controllers/videoController.js";
 
 // ─── Source: generationRequestService.test.js ───
 {
@@ -41,7 +44,7 @@ describe("GenerationRequestService unit tests", () => {
         };
 
         const mockExecutionEngine = {
-            launch: async (args) => {
+            dispatch: async (args) => {
                 enqueuedPayload = args;
                 return {
                     jobId: "job-img-999",
@@ -57,7 +60,7 @@ describe("GenerationRequestService unit tests", () => {
 
         const service = new GenerationRequestService({
             db: mockDb,
-            executionEngine: mockExecutionEngine,
+            workflowDispatcher: mockExecutionEngine,
             folderService: mockFolderService,
             assertOwns: async () => true,
             assertOwnsAny: async () => true,
@@ -114,7 +117,7 @@ describe("GenerationRequestService unit tests", () => {
             };
 
             const mockExecutionEngine = {
-                launch: async () => {
+                dispatch: async () => {
                     const err = new Error("User does not have enough credits");
                     err.code = errCode;
                     throw err;
@@ -127,7 +130,7 @@ describe("GenerationRequestService unit tests", () => {
 
             const service = new GenerationRequestService({
                 db: mockDb,
-                executionEngine: mockExecutionEngine,
+                workflowDispatcher: mockExecutionEngine,
                 folderService: mockFolderService,
                 assertOwns: async () => true,
                 assertOwnsAny: async () => true,
@@ -178,7 +181,7 @@ describe("GenerationRequestService unit tests", () => {
         };
 
         const mockExecutionEngine = {
-            launch: async () => {
+            dispatch: async () => {
                 const err = new Error("Redis cluster unreachable");
                 err.code = "QUEUE_DISPATCH_FAILED";
                 throw err;
@@ -191,7 +194,7 @@ describe("GenerationRequestService unit tests", () => {
 
         const service = new GenerationRequestService({
             db: mockDb,
-            executionEngine: mockExecutionEngine,
+            workflowDispatcher: mockExecutionEngine,
             folderService: mockFolderService,
             assertOwns: async () => true,
             assertOwnsAny: async () => true,
@@ -265,7 +268,7 @@ describe("GenerationRequestService unit tests", () => {
         };
 
         const mockExecutionEngine = {
-            launch: async (args) => {
+            dispatch: async (args) => {
                 launchedArgs = args;
                 return { jobId: "job-vid-atomic", executionId: args.executionId, cost: { totalCredits: 10 } };
             },
@@ -273,7 +276,7 @@ describe("GenerationRequestService unit tests", () => {
 
         const service = new GenerationRequestService({
             db: mockDb,
-            executionEngine: mockExecutionEngine,
+            workflowDispatcher: mockExecutionEngine,
             folderService: { validateAndAssertUsable: async (fid) => fid },
             assertOwns: async () => true,
             assertOwnsAny: async () => true,
@@ -346,8 +349,8 @@ describe("GenerationRequestService unit tests", () => {
 
         const service = new GenerationRequestService({
             db: mockDb,
-            executionEngine: {
-                launch: async (args) => ({ jobId: "job-fb", executionId: args.executionId, cost: { totalCredits: 5 } }),
+            workflowDispatcher: {
+                dispatch: async (args) => ({ jobId: "job-fb", executionId: args.executionId, cost: { totalCredits: 5 } }),
             },
             folderService: { validateAndAssertUsable: async () => null },
             assertOwns: async () => true,
@@ -398,8 +401,8 @@ describe("GenerationRequestService unit tests", () => {
 
         const service = new GenerationRequestService({
             db: mockDb,
-            executionEngine: {
-                launch: async (args) => {
+            workflowDispatcher: {
+                dispatch: async (args) => {
                     launchedArgs = args;
                     return { jobId: "job-own-1", executionId: args.executionId, cost: { totalCredits: 10 } };
                 },
@@ -510,7 +513,7 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
       const proj = projects.find((p) => p.id === wf.project_id);
       return Boolean(proj && proj.user_id === userId);
     };
-    origLaunch = executionEngine.launch;
+    origLaunch = workflowDispatcher.dispatch;
     origHoldCredits = walletService?.holdCredits;
     origDbMethods = {
       findByUser: db.projects.findByUser,
@@ -553,7 +556,7 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
   after(async () => {
     supabase.auth.getUser = origGetUser;
     if (origVerifyWorkflowOwnership) workflowService.authService.verifyWorkflowOwnership = origVerifyWorkflowOwnership;
-    if (origLaunch) executionEngine.launch = origLaunch;
+    if (origLaunch) workflowDispatcher.dispatch = origLaunch;
     if (walletService && origHoldCredits) walletService.holdCredits = origHoldCredits;
     if (origDbMethods) {
       db.projects.findByUser = origDbMethods.findByUser;
@@ -624,7 +627,7 @@ describe("Generation & Upload Endpoints with folderId & Worker Fallback (Task F-
     };
 
     // Mock executionEngine / wallet
-    executionEngine.launch = async (opts) => {
+    workflowDispatcher.dispatch = async (opts) => {
       return { jobId: "job-1", executionId: opts.executionId, cost: { totalCredits: 1 } };
     };
 
@@ -802,22 +805,21 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
   let origWalletService;
 
   beforeEach(() => {
-    origLaunch = executionEngine.launch;
-    origJobQueueService = executionEngine.jobQueueService;
+    origLaunch = workflowDispatcher.dispatch;
+    origJobQueueService = workflowDispatcher.queue;
     origCreateWorkflow = db.workflows?.createWorkflow;
     origCreateMedia = db.media?.createMedia;
     origUpdateMedia = db.media?.updateMedia;
     origUpdateFields = db.media?.updateFields;
     origFindWorkflow = db.workflows?.findById;
     origProjectsFindById = db.projects?.findById;
-    origWalletService = executionEngine.walletService;
+    origWalletService = null;
   });
 
   afterEach(() => {
-    executionEngine.launch = origLaunch;
-    executionEngine.jobQueueService = origJobQueueService;
-    executionEngine.walletService = origWalletService;
-
+    workflowDispatcher.dispatch = origLaunch;
+    workflowDispatcher.queue = origJobQueueService;
+    
     if (db.workflows) {
       db.workflows.createWorkflow = origCreateWorkflow;
       db.workflows.findById = origFindWorkflow;
@@ -860,7 +862,7 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
     };
 
     const mockExecutionEngine = {
-      launch: async (params) => {
+      dispatch: async (params) => {
         capturedPrepare = params;
         return {
           executionId: params.executionId,
@@ -871,7 +873,7 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
 
     const service = new CharacterGenerationService({
       db: mockDb,
-      executionEngine: mockExecutionEngine,
+      workflowDispatcher: mockExecutionEngine,
     });
 
     const res = await service.enqueueSheetGeneration({
@@ -902,7 +904,7 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
   it("TEST 6: imageController.generateImage creates workflow and placeholder and propagates server targets", async () => {
     let capturedPrepare = null;
 
-    executionEngine.launch = async (params) => {
+    workflowDispatcher.dispatch = async (params) => {
       capturedPrepare = params;
       return {
         jobId: "job-img-123",
@@ -967,7 +969,7 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
   it("TEST 7: videoController.generateVideo creates workflow and placeholder and propagates server targets", async () => {
     let capturedPrepare = null;
 
-    executionEngine.launch = async (params) => {
+    workflowDispatcher.dispatch = async (params) => {
       capturedPrepare = params;
       return {
         jobId: "job-vid-123",
@@ -1074,9 +1076,9 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
 
     let enqueuedJobData = null;
     const mockQueue = {
-      addUseCaseJob: async (jobData) => {
+      add: async (_name, jobData, opts) => {
         enqueuedJobData = jobData;
-        return { id: "job-char-e2e" };
+        return { id: opts?.jobId || "job-char-e2e" };
       },
     };
 
@@ -1091,13 +1093,12 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
       extendHold: async () => ({ status: "extended" }),
     };
 
-    executionEngine.jobQueueService = mockQueue;
-    executionEngine.walletService = mockWallet;
+    workflowDispatcher.queue = mockQueue;
 
     // 1. CharacterGenerationService creates placeholder, links it to character upfront, & enqueues
     const charGenService = new CharacterGenerationService({
       db,
-      executionEngine,
+      workflowDispatcher,
     });
 
     await charGenService.enqueueSheetGeneration({
@@ -1118,12 +1119,9 @@ describe("F2.2-b — Entry Point Wiring & Target Media Propagation Tests", () =>
     assert.strictEqual(enqueuedJobData.input.media_id, "media-e2e-char-1");
     assert.deepStrictEqual(enqueuedJobData.input.serverMediaIds, ["media-e2e-char-1"]);
 
-    // 2. Worker executes queued job end-to-end with mocked V3 node context (purely media-centric save_media)
-    const result = await executionEngine.execute({
-      useCaseId: enqueuedJobData.useCaseId,
-      input: enqueuedJobData.input,
+    // 2. Worker executes queued job end-to-end with fresh standalone workflow engine
+    const result = await createWorkflowEngine().runWorkflow(enqueuedJobData.useCaseId, enqueuedJobData.input, {
       userId: enqueuedJobData.userId,
-      billingHoldId: enqueuedJobData.billingHoldId,
       executionId: enqueuedJobData.executionId,
       runId: enqueuedJobData.workflowRunId,
       nodeContext: {

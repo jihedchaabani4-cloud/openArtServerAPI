@@ -11,38 +11,40 @@ Creating new top-level code directories (such as `controllers/`, `routes/`, `lib
 
 ```text
 apiOpenArt/
-├── index.js                          # Server bootstrap (Express + Socket.IO + Workers)
-├── package.json                      # Subpath imports (#shared, #<system>/api, #<system>/tools)
+├── index.js                          # Process 0: HTTP API Server bootstrap (Express + Socket.IO)
+├── worker.js                         # Process 1: Generation & Billing Worker bootstrap
+├── package.json                      # Subpath imports (#shared, #shared/redis, #<system>/api, #<system>/tools)
 ├── arch-baseline.json                # Must ALWAYS remain {} (0 violations)
 ├── CLAUDE.md / AGENTS.md             # This file — Master Agent Instructions
 ├── docs/
 │   ├── architecture/
-│   │   ├── SYSTEMS_ARCHITECTURE.md   # Deep guide to the 8 Business Systems & internal services
-│   │   └── ARCHITECTURE_RULES.md     # Complete specification of Rules R1–R17 & protocols
+│   │   ├── SYSTEMS_ARCHITECTURE.md   # Deep guide to the 9 Business Systems & internal services
+│   │   └── ARCHITECTURE_RULES.md     # Complete specification of Rules R1–R18 & protocols
 │   └── agents/
 │       ├── GLOSSARY.md               # Canonical domain & architectural vocabulary
 │       └── service-catalog.md        # Auto-generated catalog of public tools & API routes
 └── src/
     ├── container.js                  # Dependency wiring across system public gateways ONLY
     ├── api/
-    │   ├── routes.js                 # Main Router mounting #<system>/api gateways (86 routes)
+    │   ├── routes.js                 # Main Router mounting #<system>/api gateways
     │   └── probes/                   # Health (/health) and Readiness (/ready) probes
-    ├── shared/                       # Pure technical kernel (#shared) — ZERO domain/DB business logic
+    ├── shared/                       # Pure technical kernel (#shared) — ZERO domain/DB/Redis eager coupling
     │   ├── config/                   # Validated envConfig & rateLimitPolicies
-    │   ├── db/                       # Raw Supabase factory (supabase.js)
-    │   ├── errors/                   # AppError, CrudServiceError, ErrorSystem, errorPolicy
+    │   ├── db/                       # Raw Supabase factory (#shared/db/supabase.js)
+    │   ├── errors/                   # AppError, CrudServiceError, ErrorSystem, errorPolicy, sanitizeError
     │   ├── logger/                   # Pino structured logger + AsyncLocalStorage context
-    │   ├── redis/                    # redisConnection, workerRedisConnection, rateLimitRedisConnection
-    │   └── utils/                    # Pure helpers (ratioUtils, assetDto, crudOperationLog)
-    └── systems/                      # The 8 Isolated Black-Box Business Systems
-        ├── generation/               # System 1: Generation & Workflows
-        ├── models/                   # System 2: Models Management
+    │   ├── redis/                    # Lazy Redis connections (#shared/redis, lazyConnect: true)
+    │   └── utils/                    # Pure helpers (pathUtils, templateUtils, mediaTypeUtils, ratioUtils, assetDto)
+    └── systems/                      # The 9 Isolated Black-Box Business Systems
+        ├── generation/               # System 1: Generation Intake, Queue Dispatch & BullMQ Worker
+        ├── models/                   # System 2: Models Management (pure stateless provider/pricing kernel)
         ├── billing/                  # System 3: Billing & Wallet
         ├── media/                    # System 4: Media & Storage
         ├── identity/                 # System 5: Identity & Security
         ├── characters/               # System 6: Characters
         ├── elements/                 # System 7: Elements
-        └── workspace/                # System 8: Workspace (Projects, Folders, Trash)
+        ├── workspace/                # System 8: Workspace (Projects, Folders, Trash)
+        └── workflow-engine/          # System 9: Standalone Queue-Free Black-Box DAG Engine (Rule R18)
 ```
 
 ---
@@ -54,7 +56,7 @@ Every Business System inside `src/systems/<system>/` follows the exact same inte
 ```text
 src/systems/<system>/
 ├── public/
-│   ├── api.js            # Express Router mounted by src/api/routes.js (HTTP boundary ONLY)
+│   ├── api.js            # Express Router mounted by src/api/routes.js (HTTP-facing systems ONLY)
 │   └── tools.js          # Pure async DTO functions called by other systems & workers
 └── internal/             # STRICTLY PRIVATE — Never imported outside src/systems/<system>/
     ├── controllers/      # Express request/response handlers wired into public/api.js
@@ -63,7 +65,7 @@ src/systems/<system>/
     └── errors.js         # Single unified file for all system-specific AppError subclasses
 ```
 
-*(Systems with specialized engines may include 1–2 dedicated internal subfolders such as `generation/internal/{v2,use-cases,gateways,workers}`, `models/internal/{registry,execution,runtime,manifests,pricing,mapping,schema}`, `media/internal/{ingestion,storage}`, `billing/internal/workers`, or `identity/internal/middleware`.)*
+*(Systems with specialized engines include dedicated internal subfolders such as `workflow-engine/internal/{core,nodes,skills,workflows}`, `generation/internal/workers`, `models/internal/{registry,execution,runtime,manifests,pricing,mapping,schema}`, `media/internal/{ingestion,storage}`, `billing/internal/workers`, or `identity/internal/middleware`.)*
 
 ---
 
@@ -78,15 +80,15 @@ src/systems/<system>/
 4. **Express Confinement (`Rule R13`):**
    `express` and HTTP `req`/`res` objects are confined to `src/api/`, `public/api.js`, `internal/controllers/`, and `internal/middleware/`. Never pass `req`, `res`, or raw DB clients into `public/tools.js` or `internal/services/`.
 5. **Zero Circular Dependencies (`Rule R14`):**
-   Both static `import`/`require` and dynamic `await import(...)` are scanned by Tarjan's SCC algorithm. Circular dependencies between files or between systems are strictly prohibited.
-6. **Closed `package.json` `#imports` (`Rule R15`):**
-   Only `#shared`, `#<system>/api`, and `#<system>/tools` are permitted in `package.json#imports`. Never add wildcard `#*` aliases pointing into `internal/`.
+   Both static `import`/`require` and dynamic `await import(...)` are scanned by Tarjan's SCC algorithm at both file and system levels. Circular dependencies are strictly prohibited.
+6. **Closed `package.json` `#imports` & `workflow-engine` Allowlist (`Rule R15` & `Rule R18`):**
+   Only `#shared`, `#shared/redis`, `#shared/db/supabase.js`, `#<system>/api`, and `#<system>/tools` are permitted in `package.json#imports`. Inside `src/systems/workflow-engine/**`, `Rule R18` enforces a strict closed allowlist (zero Redis, BullMQ, Supabase, Express, or peer-domain imports).
 7. **Zero Outbound Legacy Imports & Folder Lock (`Rule R16` & `Rule R17`):**
    All code inside `src/systems/**` and `src/shared/**` is self-contained. Never create files or folders outside `src/{api,shared,systems}`.
 8. **Environment Variables & Logging (`Rule R2` & `Rule R3`):**
    Never use `console.log`/`console.warn`/`console.error` (use `createLogger` from `#shared`). Never read `process.env` directly in services or controllers (use `envConfig` from `#shared`).
 9. **Two-Phase Credit Hold & Media Zombie Protection:**
-   All billable AI generation goes through `generation` (`UseCaseService`), which reserves credits via `#billing/tools`, creates pending media via `#media/tools`, and wraps queue dispatch in a `try/catch` that both releases the hold AND marks pending media `failed` if queueing or worker execution fails.
+   Generation intake (`GenerationRequestService` / `CharacterGenerationService`) creates pending media via `#media/tools`, dispatches via `WorkflowDispatchService`, and compensates immediately if dispatch fails; `useCaseWorker` executes via `#workflow-engine/tools` with `createGenerationFailureHandler` marking only `serverContext.mediaIds` `failed` on execution failure or crash.
 10. **Zero Ratchet Tolerance (`arch-baseline.json` = `{}`):**
     `arch-baseline.json` and `arch-exceptions.json` must remain completely empty (`0` violations). Never add exceptions to silence a rule violation.
 
@@ -96,8 +98,8 @@ src/systems/<system>/
 
 Tests mirror `src/` 1:1. Never create flat micro-ticket test files or `fs.readFileSync` source-inspection tests:
 - `tests/architecture/` — Tests for `scripts/arch-check.cjs` (`archRules.test.js`) and DI/route table audits (`containerAndRoutesAudit.test.js`).
-- `tests/shared/` — Tests for `#shared` (`sharedKernel.test.js`).
-- `tests/systems/{generation,models,billing,media,identity,characters,elements,workspace}/` — Consolidated behavioral & boundary tests importing exclusively from `#<system>/tools` and `#<system>/api`.
+- `tests/shared/` — Tests for `#shared` and `#shared/redis` (`sharedKernel.test.js`).
+- `tests/systems/{generation,workflow-engine,models,billing,media,identity,characters,elements,workspace}/` — Consolidated behavioral & boundary tests importing from `#<system>/tools` and `#<system>/api`.
 - `tests/helpers/` — Shared test doubles (`inMemoryWalletService.js`).
 
 ---
@@ -107,10 +109,10 @@ Tests mirror `src/` 1:1. Never create flat micro-ticket test files or `fs.readFi
 Every agent must run and pass the full quality gate before committing or completing a task:
 
 ```bash
-npm run arch              # Runs scripts/arch-check.cjs (Rules R1–R17 + Cycle Detector)
+npm run arch              # Runs scripts/arch-check.cjs (Rules R1–R18 + Cycle Detector)
 npm run catalog           # Regenerates and verifies docs/agents/service-catalog.md
 node scripts/check-doc-paths.cjs  # Verifies all file paths referenced in markdown docs
-npm test                  # Runs the full hermetic test suite (41 files, 1,331 tests)
+npm test                  # Runs the full hermetic test suite
 npm run gate              # Runs all of the above + secrets scan in one command
 ```
 

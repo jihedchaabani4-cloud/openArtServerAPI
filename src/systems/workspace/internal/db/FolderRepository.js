@@ -6,6 +6,7 @@
  */
 import { getWorkspaceDbClient } from "./workspaceClient.js";
 import { trashRepository } from "./TrashRepository.js";
+import { WorkspaceValidationError, WorkspaceUnauthorizedError } from "../errors.js";
 
 export class FolderRepository {
   constructor(client = null) {
@@ -88,7 +89,7 @@ export class FolderRepository {
    */
   async create({ projectId, userId, parentId = null, name, color = null, description = null, position = 0 }) {
     if (!projectId || !userId || !name) {
-      throw new Error("Missing required parameters for folder creation");
+      throw new WorkspaceValidationError("Missing required parameters for folder creation");
     }
 
     const { data, error } = await this.client()
@@ -245,19 +246,19 @@ export class FolderRepository {
   }
 
   findById() {
-    throw new Error("Unscoped repository access is forbidden: userId required. Use findOwned().");
+    throw new WorkspaceUnauthorizedError("Unscoped repository access is forbidden: userId required. Use findOwned().");
   }
 
   deleteById() {
-    throw new Error("Unscoped repository access is forbidden: userId required. Use deleteOwned().");
+    throw new WorkspaceUnauthorizedError("Unscoped repository access is forbidden: userId required. Use deleteOwned().");
   }
 
   delete() {
-    throw new Error("Unscoped repository access is forbidden: userId required. Use deleteOwned().");
+    throw new WorkspaceUnauthorizedError("Unscoped repository access is forbidden: userId required. Use deleteOwned().");
   }
 
   updateFields() {
-    throw new Error("Unscoped repository access is forbidden: userId required. Use updateOwned().");
+    throw new WorkspaceUnauthorizedError("Unscoped repository access is forbidden: userId required. Use updateOwned().");
   }
 }
 

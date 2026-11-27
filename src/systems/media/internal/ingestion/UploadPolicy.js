@@ -100,4 +100,23 @@ export const UPLOAD_POLICIES = Object.freeze({
     CHARACTER_DETAIL_UPLOAD_POLICY,
 });
 
+export function resolveMiddlewarePolicy(policy = DEFAULT_UPLOAD_POLICY) {
+    const resolved =
+        policy && typeof policy === "object" && Array.isArray(policy.allowedTypes)
+            ? policy
+            : DEFAULT_UPLOAD_POLICY;
+    const imageLimit = resolved.maxImageSize ?? 0;
+    const videoLimit = resolved.maxVideoSize ?? 0;
+    const maxSizeBytes = Math.max(imageLimit, videoLimit);
+    return {
+        isPolicyObject: true,
+        imageLimit,
+        videoLimit,
+        maxSizeBytes,
+        allowedMimeTypes: resolved.allowedMimeTypes,
+        streamAllowedMimeTypes: resolved.allowedMimeTypes,
+        allowedTypes: resolved.allowedTypes,
+    };
+}
+
 export default UPLOAD_POLICIES;

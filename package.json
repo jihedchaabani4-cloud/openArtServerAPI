@@ -6,6 +6,7 @@
     "type": "module",
     "imports": {
         "#shared": "./src/shared/index.js",
+        "#shared/redis": "./src/shared/redis/index.js",
         "#shared/*": "./src/shared/*",
         "#identity/api": "./src/systems/identity/public/api.js",
         "#identity/tools": "./src/systems/identity/public/tools.js",
@@ -22,7 +23,8 @@
         "#workspace/api": "./src/systems/workspace/public/api.js",
         "#workspace/tools": "./src/systems/workspace/public/tools.js",
         "#generation/api": "./src/systems/generation/public/api.js",
-        "#generation/tools": "./src/systems/generation/public/tools.js"
+        "#generation/tools": "./src/systems/generation/public/tools.js",
+        "#workflow-engine/tools": "./src/systems/workflow-engine/public/tools.js"
     },
     "scripts": {
         "test": "node --import ./tests/setup-env.js --test \"tests/**/*.test.js\"",

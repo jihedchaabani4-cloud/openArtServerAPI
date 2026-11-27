@@ -1,4 +1,5 @@
-import { rateLimitRedisConnection, createLogger, envConfig } from "#shared";
+import { createLogger, envConfig } from "#shared";
+import { rateLimitRedisConnection } from "#shared/redis";
 
 const systemLogger = createLogger("ratelimit");
 

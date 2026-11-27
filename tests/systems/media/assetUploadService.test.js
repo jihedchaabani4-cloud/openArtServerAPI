@@ -1,6 +1,7 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { AssetUploadService, DEFAULT_UPLOAD_POLICY, MediaService, WorkflowMediaRepository } from "#media/tools";
+import { AssetUploadService, MediaService, WorkflowMediaRepository } from "#media/tools";
+import { DEFAULT_UPLOAD_POLICY } from "../../../src/systems/media/internal/ingestion/UploadPolicy.js";
 import { WorkflowMediaService } from "../../../src/systems/generation/internal/services/WorkflowMediaService.js";
 
 // ─── Source: assetUploadServiceMigrated.test.js ───
@@ -425,7 +426,7 @@ describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaS
     });
 
     it("9. StoragePathResolver.validateFolderSegment enforces whitelist of allowed storage folders", async () => {
-        const { StoragePathResolver } = await import("#media/tools");
+        const { StoragePathResolver } = await import("../../../src/systems/media/internal/storage/StoragePathResolver.js");
         // Allowed folders
         assert.equal(StoragePathResolver.validateFolderSegment("uploads"), "uploads");
         assert.equal(StoragePathResolver.validateFolderSegment("element-references"), "element-references");
@@ -593,7 +594,7 @@ describe("AssetUploadService — Migrated to MediaUploadService & WorkflowMediaS
 
     it("12. Real storage folder enforcement: uploadAsset with real MediaUploadService stores image strictly under uploads/ even if folder='element-references' is passed", async () => {
         const { MediaUploadService } = await import("#media/tools");
-        const { StoragePathResolver } = await import("#media/tools");
+        const { StoragePathResolver } = await import("../../../src/systems/media/internal/storage/StoragePathResolver.js");
 
         let savedStorageKey = null;
         const resolver = new StoragePathResolver();

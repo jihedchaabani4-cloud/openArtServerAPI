@@ -9,11 +9,14 @@
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { relightImage, changeImageAngle, removeImageBackground, editImage, getProjectData, imagesRouter } from "#generation/api";
+import { imagesRouter } from "#generation/api";
+import { relightImage, changeImageAngle, removeImageBackground, editImage } from "../../../src/systems/generation/internal/controllers/imageController.js";
+import { getProjectData } from "../../../src/systems/generation/internal/controllers/projectController.js";
 import { GenerationRequestService } from "#generation/tools";
 import { appendMediaToWorkflow, completeMedia, WorkflowMediaRepository } from "#media/tools";
-import { WorkflowExecutor, createDefaultV3NodeRegistry } from "../../../src/systems/generation/internal/v3/index.js";
-import { imageEditV3 } from "../../../src/systems/generation/internal/v3/workflows/imageEditV3.js";
+import { WorkflowExecutor } from "../../../src/systems/workflow-engine/internal/core/WorkflowExecutor.js";
+import { createDefaultV3NodeRegistry } from "../../../src/systems/workflow-engine/internal/nodes/index.js";
+import { imageEditV3 } from "../../../src/systems/workflow-engine/internal/workflows/imageEditV3.js";
 import { generationRequestService, db } from "../../../src/container.js";
 import { AppError } from "#shared";
 
@@ -68,8 +71,8 @@ function createControllerBackedEditService({
         updateMedia: async (id, patch) => ({ id, ...patch }),
       },
     },
-    executionEngine: {
-      launch: async (args) => {
+    workflowDispatcher: {
+      dispatch: async (args) => {
         launchCalls.push(args);
         return {
           jobId: "job-ctrl-edit",
@@ -560,7 +563,7 @@ describe("GenerationRequestService.requestImageEdit behavioral tests", () => {
     };
 
     const mockExecutionEngine = {
-      launch: async (args) => {
+      dispatch: async (args) => {
         launchCalls.push(args);
         if (launchImpl) return launchImpl(args);
         return {
@@ -573,7 +576,7 @@ describe("GenerationRequestService.requestImageEdit behavioral tests", () => {
 
     const service = new GenerationRequestService({
       db: mockDb,
-      executionEngine: mockExecutionEngine,
+      workflowDispatcher: mockExecutionEngine,
       folderService: {},
       assertOwns: async () => true,
       assertOwnsAny: async () => true,
@@ -1283,8 +1286,8 @@ describe("GenerationRequestService.requestImageEdit behavioral tests", () => {
           },
         },
       },
-      executionEngine: {
-        launch: async (args) => {
+      workflowDispatcher: {
+        dispatch: async (args) => {
           launchCalls.push(args);
           if (shouldFailCredits) {
             const err = new Error("Not enough credits");
@@ -1369,8 +1372,8 @@ describe("GenerationRequestService.requestImageEdit behavioral tests", () => {
           },
         },
       },
-      executionEngine: {
-        launch: async (args) => {
+      workflowDispatcher: {
+        dispatch: async (args) => {
           launchCalls.push(args);
           if (shouldFailDispatch) {
             const err = new Error("Redis unavailable");
@@ -1827,8 +1830,8 @@ describe("POST /api/images/edit — General In-Place Image Edit (Dynamic Edit-Ca
           updateMedia: async (id, patch) => ({ id, ...patch }),
         },
       },
-      executionEngine: {
-        launch: async (args) => {
+      workflowDispatcher: {
+        dispatch: async (args) => {
           launchedArgs = args;
           return { jobId: "job-ce-1", executionId: args.executionId, cost: { totalCredits: 13 } };
         },

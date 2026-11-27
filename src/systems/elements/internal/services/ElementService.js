@@ -22,6 +22,7 @@ import { MediaRepository, WorkflowMediaRepository } from "#media/tools";
 import { ElementMediaService } from "./ElementMediaService.js";
 import { ElementAnalysisService } from "./ElementAnalysisService.js";
 import promptBuilderProService, { extractElementTokens } from "./promptBuilderProService.js";
+import { ElementsError } from "../errors.js";
 
 const logger = createLogger("elements:service");
 
@@ -74,7 +75,11 @@ export class ElementService {
         this.workflowService       = workflowService;
         const resolvedMediaService = mediaService || elementMediaService;
         if (!resolvedMediaService) {
-            throw new Error("ElementService requires mediaService (ElementMediaService)");
+            throw new ElementsError(
+                "ELEMENTS_CONFIGURATION_ERROR",
+                "ElementService requires mediaService (ElementMediaService)",
+                { statusCode: 500, category: "SERVER_FAULT" }
+            );
         }
         this.mediaService          = resolvedMediaService;
         this.analysisService       = analysisService || new ElementAnalysisService();
@@ -490,7 +495,11 @@ export class ElementService {
             let wfResult = null;
             if (targetWorkflowId) {
                 if (!this.workflowService) {
-                    throw new Error("ElementService.deleteElement requires workflowService");
+                    throw new ElementsError(
+                        "ELEMENTS_CONFIGURATION_ERROR",
+                        "ElementService.deleteElement requires workflowService",
+                        { statusCode: 500, category: "SERVER_FAULT" }
+                    );
                 }
                 wfResult = await this.workflowService.deleteWorkflow({ workflowId: targetWorkflowId, userId });
             }

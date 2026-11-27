@@ -1,8 +1,9 @@
 import { BaseRepository } from "./BaseRepository.js";
 import { trashRepository } from "#workspace/tools";
-import { createLogger } from "#shared";
+import { GenerationValidationError, GenerationNotFoundError } from "../errors.js";
 
-const workflowRepositoryLogger = createLogger("workflow_repository");
+const SAFE_ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})$/i;
+const SAFE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
 export class WorkflowRepository extends BaseRepository {
     constructor(client = null) {
@@ -229,7 +230,8 @@ export class WorkflowRepository extends BaseRepository {
         if (!projectIds || projectIds.length === 0) return { workflows: [], total: 0 };
 
         const trashedSet = await this.#getProjectTrashedWorkflowIdSet(projectIds);
-        const trashedExpr = trashedSet.size > 0 ? `(${[...trashedSet].join(",")})` : null;
+        const safeTrashedIds = [...trashedSet].map(String).filter((id) => SAFE_ID_RE.test(id));
+        const trashedExpr = safeTrashedIds.length > 0 ? `(${safeTrashedIds.join(",")})` : null;
 
         // Total count
         let countQ = this.client()
@@ -320,7 +322,7 @@ export class WorkflowRepository extends BaseRepository {
      */
     async updateFolderId(workflowId, folderId, userId, projectId) {
         if (!workflowId || !userId || !projectId) {
-            throw new Error("workflowId, userId, and projectId are required to update folderId");
+            throw new GenerationValidationError("workflowId, userId, and projectId are required to update folderId");
         }
 
         const query = this.client()
@@ -332,14 +334,18 @@ export class WorkflowRepository extends BaseRepository {
         const { data, error } = await query.select().single();
         if (error) {
             if (error.code === "PGRST116") {
-                const notFoundErr = new Error(`Workflow ${workflowId} not found in project ${projectId}`);
+                const notFoundErr = new GenerationNotFoundError(`Workflow ${workflowId} not found in project ${projectId}`, {
+                    resourceId: workflowId,
+                });
                 notFoundErr.code = "PGRST116";
                 notFoundErr.statusCode = 404;
                 notFoundErr.errorCode = "NOT_FOUND";
                 throw notFoundErr;
             }
             if (error.code === "23503") {
-                const fkErr = new Error(`Folder ${folderId} not found in project ${projectId}`);
+                const fkErr = new GenerationNotFoundError(`Folder ${folderId} not found in project ${projectId}`, {
+                    resourceId: folderId,
+                });
                 fkErr.code = "23503";
                 fkErr.statusCode = 404;
                 fkErr.errorCode = "NOT_FOUND";
@@ -402,8 +408,9 @@ export class WorkflowRepository extends BaseRepository {
             .select("*")
             .eq("project_id", projectId);
 
-        if (trashedSet.size > 0) {
-            query = query.not("id", "in", `(${[...trashedSet].join(",")})`);
+        const safeTrashedIds = [...trashedSet].map(String).filter((id) => SAFE_ID_RE.test(id));
+        if (safeTrashedIds.length > 0) {
+            query = query.not("id", "in", `(${safeTrashedIds.join(",")})`);
         }
 
         if (folderIdNull) {
@@ -412,10 +419,20 @@ export class WorkflowRepository extends BaseRepository {
             query = query.in("folder_id", folderIds);
         }
 
-        if (cursor && cursor.createTime && cursor.id) {
-            const safeTime = String(cursor.createTime);
-            const safeId = String(cursor.id);
-            if (/^\d{4}-\d{2}-\d{2}T[\d:.+-]+Z?$/i.test(safeTime) && /^[A-Za-z0-9_-]{1,128}$/.test(safeId)) {
+        if (cursor !== null && cursor !== undefined) {
+            if (typeof cursor !== "object" || Array.isArray(cursor)) {
+                throw new GenerationValidationError("Invalid cursor format", { field: "cursor" });
+            }
+            if (cursor.createTime !== undefined || cursor.id !== undefined) {
+                const safeTime = typeof cursor.createTime === "string" ? cursor.createTime.trim() : "";
+                const safeId = typeof cursor.id === "string" ? cursor.id.trim() : "";
+                if (
+                    !SAFE_ISO_TIMESTAMP_RE.test(safeTime) ||
+                    Number.isNaN(Date.parse(safeTime)) ||
+                    !SAFE_ID_RE.test(safeId)
+                ) {
+                    throw new GenerationValidationError("Invalid cursor format", { field: "cursor" });
+                }
                 query = query.or(`create_time.lt.${safeTime},and(create_time.eq.${safeTime},id.lt.${safeId})`);
             }
         }

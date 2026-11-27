@@ -21,6 +21,7 @@
 
 import { randomUUID } from "node:crypto";
 import { assertMediaUsable } from "./mediaGuards.js";
+import { GenerationError } from "../errors.js";
 import { crudOperationLog, CrudServiceError, createLogger } from "#shared";
 import {
     createMediaInWorkflow,
@@ -44,13 +45,25 @@ export class WorkflowMediaService {
      */
     constructor({ db, storageService, authService, mediaUploadService = null } = {}) {
         if (!authService || typeof authService.verifyWorkflowOwnership !== "function") {
-            throw new Error("WorkflowMediaService requires authService with verifyWorkflowOwnership method.");
+            throw new GenerationError(
+                "GENERATION_CONFIGURATION_ERROR",
+                "WorkflowMediaService requires authService with verifyWorkflowOwnership method.",
+                { statusCode: 500 }
+            );
         }
         if (!mediaUploadService || typeof mediaUploadService.discard !== "function") {
-            throw new Error("WorkflowMediaService requires mediaUploadService with a discard method.");
+            throw new GenerationError(
+                "GENERATION_CONFIGURATION_ERROR",
+                "WorkflowMediaService requires mediaUploadService with a discard method.",
+                { statusCode: 500 }
+            );
         }
         if (!db?.workflowMedia || typeof db.workflowMedia.findByMedia !== "function") {
-            throw new Error("WorkflowMediaService requires db.workflowMedia with findByMedia method.");
+            throw new GenerationError(
+                "GENERATION_CONFIGURATION_ERROR",
+                "WorkflowMediaService requires db.workflowMedia with findByMedia method.",
+                { statusCode: 500 }
+            );
         }
         this.db = db;
         this.storageService = storageService;

@@ -1,14 +1,14 @@
 # GLOSSARY.md — Canonical Domain & Architectural Vocabulary (`apiOpenArt`)
 
 > **Canonical Location:** `docs/agents/GLOSSARY.md`  
-> This glossary defines the authoritative domain and architectural terminology across all 8 Business Systems in `apiOpenArt`.
+> This glossary defines the authoritative domain and architectural terminology across all 9 Business Systems in `apiOpenArt`.
 
 ---
 
 ## 1. Architectural Concepts
 
 ### Business System
-A self-contained black-box module located in `src/systems/<system>/` (`generation`, `models`, `billing`, `media`, `identity`, `characters`, `elements`, `workspace`). Exposes functionality exclusively via `public/api.js` (HTTP Web Gateway) and `public/tools.js` (System Tools Interface). All implementation details live strictly inside `internal/`.
+A self-contained black-box module located in `src/systems/<system>/` (`generation`, `models`, `billing`, `media`, `identity`, `characters`, `elements`, `workspace`, `workflow-engine`). Exposes functionality exclusively via `public/api.js` (HTTP Web Gateway, for systems with HTTP routes) and `public/tools.js` (System Tools Interface). All implementation details live strictly inside `internal/`.
 
 ### Web Gateway (`public/api.js`)
 An Express router exposing HTTP endpoints (`req, res`) mounted by the Main Router (`src/api/routes.js`). Responsible for route definitions, attaching auth/rate-limit/upload middlewares, and delegating to `internal/controllers/`.
@@ -19,8 +19,8 @@ The contract of async functions and DTO factories exposed to other Business Syst
 ### Internal Boundary (`internal/`)
 Strictly private controllers (`internal/controllers/`), services (`internal/services/`), database repositories (`internal/db/`), and domain errors (`internal/errors.js`) of a Business System. External files are forbidden from importing anything inside `internal/` (`Rule R10`).
 
-### Shared Technical Kernel (`src/shared/` / `#shared`)
-Pure technical utilities with zero domain business logic: validated environment config (`src/shared/config/env.js`), raw Supabase factory (`src/shared/db/supabase.js`), base error classes (`src/shared/errors/AppError.js`), structured Pino logging (`src/shared/logger/index.js`), and Redis connections (`src/shared/redis/index.js`).
+### Shared Technical Kernel (`src/shared/` / `#shared` & `#shared/redis`)
+Pure technical utilities with zero domain business logic: validated environment config (`src/shared/config/env.js`), raw Supabase factory (`src/shared/db/supabase.js`), base error classes and neutral public sanitization (`src/shared/errors/AppError.js`, `src/shared/errors/sanitizeError.js`), structured Pino logging (`src/shared/logger/index.js`), pure helpers (`pathUtils.js`, `templateUtils.js`, `mediaTypeUtils.js`, `ratioUtils.js`, `assetDto.js`), and lazy-connected Redis singletons segmented behind `#shared/redis` (`src/shared/redis/index.js`, `lazyConnect: true`) so pure systems like `workflow-engine` and `models` never load `ioredis`.
 
 ### Main API Router (`src/api/routes.js`)
 The single HTTP entry point mounting all 8 `#<system>/api` routers plus health/readiness probes (`src/api/probes/health.js`, `src/api/probes/ready.js`).
@@ -32,28 +32,31 @@ The single HTTP entry point mounting all 8 `#<system>/api` routers plus health/r
 ### Two-Phase Credit Hold
 The mandatory financial safety protocol for billable AI operations enforced at the domain/billing boundary via `#billing/tools` — never coupled inside `ExecutionEngine.js` core:
 1. **Reserve**: Upfront credit hold (`reserveCredits`) placed before dispatching the BullMQ job.
-2. **Protected Dispatch**: Enqueue the job via `jobQueueService.js`; if enqueueing throws, immediately release the hold (`rollbackCredits`) and mark placeholder media as `failed` (`markMediaFailed`).
+2. **Protected Dispatch**: Enqueue the job via `WorkflowDispatchService.js`; if enqueueing throws `GenerationQueueDispatchError` (503), the calling intake service immediately releases the hold (`rollbackCredits`) and marks placeholder media as `failed`.
 3. **Settle / Rollback**: Settle the hold (`settleCredits`) on completion or refund (`rollbackCredits`) on failure/crash, backed by `ReservationReaperService.js` for stale holds.
 
 ### Workflow & Workflow Run
 - **Workflow (`workflows` table)**: A persistent creative unit in a project owning generated or uploaded media via `workflow_media`.
 - **Workflow Run**: An ephemeral in-memory/queued execution instance of a compiled V3 workflow identified by `runId` / `executionId` inside an isolated `JobExecutionContext` (`JobExecutionContext.js`) and orchestrated by `WorkflowExecutor.js`.
 
-### Black-Box Workflow Engine
-The 100% domain-agnostic internal DAG execution engine inside System 1 (`src/systems/generation/internal/v3/core/`), composed of 5 core modules (`ExecutionEngine.js`, `GraphCompiler.js`, `WorkflowExecutor.js`, `NodeRegistry.js`, `JobExecutionContext.js`). Exposes 3 strictly internal tools on `ExecutionEngine` (`verifyInput`, `calculateCost`, `runWorkflow`) with external lifecycle hooks (`onSuccess` / `onFailure`) and zero billing, media, or entity coupling.
+### Standalone Workflow Engine (`workflow-engine`)
+System 9 (`src/systems/workflow-engine/`): a standalone, 100% queue-free, DB-free, and domain-agnostic DAG execution system exposing a sealed 11-export Tools Interface (`#workflow-engine/tools`: `verifyInput`, `calculateCost`, `createWorkflowEngine`, `runWorkflow`, `configureWorkflowAdapters`, and the 6 neutral `Workflow*Error` classes). Enforced by `Rule R18`, it knows nothing about Redis, BullMQ, workers, multi-job concurrency, Supabase, or HTTP controllers; peer domain capabilities (`characters`, `elements`, `media`, `identity`) are injected via a 9-key adapter seam wired in `src/container.js`. Lifecycle hooks (`onSuccess`, `onFailure`) are strictly instance-scoped or per-run.
+
+### Workflow Dispatch Service (`WorkflowDispatchService.js`)
+The consolidated queue-publishing service inside `src/systems/generation/internal/services/WorkflowDispatchService.js` (exported on `#generation/tools`). Validates inputs fail-fast via `#workflow-engine/tools` `verifyInput()`, owns the BullMQ `workflow-jobs` producer queue with bounded 3-attempt enqueue backoff, returns `{ status: "queued", workflowId, executionId, runId, workflowRunId, jobId }`, and throws `GenerationQueueDispatchError` (503) on failure so intake services retain single ownership of synchronous placeholder compensation.
 
 ### 4-Layer Composable V3 Architecture
-The locked separation of responsibilities across the V3 Generation & Edit Engine so Base Nodes remain composable into future Composite Nodes and User Workflows:
-- **Layer 1 — API & Intake Guards**: Thin HTTP adapters delegating to `GenerationRequestService` for auth, ownership (1x fail-fast gate), rate limits, domain validation, and concurrency guards.
-- **Layer 2 — Black-Box Workflow Engine (`ExecutionEngine`, `GraphCompiler`, `WorkflowExecutor`, `NodeRegistry`, `JobExecutionContext`)**: 100% domain-agnostic internal DAG compiler and parallel wave executor exposing `verifyInput`, `calculateCost`, and `runWorkflow` with external `onSuccess` / `onFailure` hooks and zero billing, media, or entity coupling.
-- **Layer 3 — Pure Base Nodes**: Stateless, single-responsibility DAG units with a strict `inputs -> execute() -> outputs` contract, zero billing or credit-hold awareness, and report-don't-decide typed error handling.
-- **Layer 4 — Storage & DB Tools**: Idempotent permanent object-storage persistence, real media dimension extraction, atomic DB completion guards, and compensating storage discard on commit failure.
+The locked separation of responsibilities across the V3 Generation & Edit pipeline so Base Nodes remain composable into future Composite Nodes and User Workflows:
+- **Layer 1 — API, Intake Guards & Queue Dispatch (`generation`)**: Thin HTTP adapters delegating to domain intake services (`GenerationRequestService.js`, `CharacterGenerationService.js`) for auth, ownership (1x fail-fast gate), rate limits, domain validation, concurrency guards, placeholder creation, and asynchronous Redis enqueueing via `WorkflowDispatchService.js`.
+- **Layer 2 — Standalone Pure Workflow Engine (`workflow-engine`)**: Queue-free, single-execution DAG compiler and parallel wave executor exposing `verifyInput`, `calculateCost`, `createWorkflowEngine`, `runWorkflow`, and per-instance/per-run lifecycle hooks (`onSuccess` / `onFailure`), with zero Redis, BullMQ, billing, DB, or domain coupling.
+- **Layer 3 — Pure Base Nodes**: Stateless, single-responsibility DAG units (`internal/nodes/base/*`) with a strict `inputs -> execute() -> outputs` contract, adapter injection for peer domain lookups/persistence, zero billing/queue/retry awareness, and report-don't-decide typed error handling.
+- **Layer 4 — Storage & DB Tools (`media` & `billing`)**: Idempotent permanent object-storage persistence, real media dimension extraction, atomic DB completion guards, compensating storage discard on commit failure, and Two-Phase Credit Holds.
 
 ### Fail-Fast Generation Policy & Worker Lock Safety
-AI generation executions run single-attempt fail-fast (`maxAttempts: 1` on `ImageGenerateNode`, `VideoGenerateNode`, and `LlmNode`; `maxRetries: 0` default in `RuntimeExecutor`) while keeping status polling alive for already-submitted async provider jobs (capped at `180s` for WaveSpeed image/edit/upscale/remove-background and `600s` for video). On any failure or stall, `useCaseWorker.js` (`lockDuration: 300_000`, `lockRenewTime: 60_000`, `stalledInterval: 60_000`, `maxStalledCount: 0`) fails closed without re-executing the provider call and notifies registered failure hooks (such as marking pending media as `failed`) while billing holds are rolled back at the billing boundary.
+AI generation executions run single-attempt fail-fast (`maxAttempts: 1` on `ImageGenerateNode`, `VideoGenerateNode`, and `LlmNode`; `maxRetries: 0` default in `RuntimeExecutor`) while keeping status polling alive for already-submitted async provider jobs (capped at `180s` for WaveSpeed image/edit/upscale/remove-background and `600s` for video). On any failure or stall, `useCaseWorker.js` (`concurrency: envConfig.useCaseWorkerConcurrency` [default `6`, clamped `1..20`], `lockDuration: 300_000`, `lockRenewTime: 60_000`, `stalledInterval: 60_000`, `maxStalledCount: 0`) spawns one fresh isolated `createWorkflowEngine({ adapters, onFailure })` per job, fails closed without re-executing the provider call, and invokes `createGenerationFailureHandler({ markMediaFailed })` strictly on explicit `serverContext.mediaIds`.
 
 ### Service-Role Repository Access
-All server-side database repositories across the 8 Business Systems default to `supabaseAdmin || supabase` so background workers (`useCaseWorker`, `walletWorker`, reapers) and HTTP services never fail under RLS in production while ownership checks are enforced explicitly at the service/controller boundary.
+All server-side database repositories across the DB-backed Business Systems default to `supabaseAdmin || supabase` so background workers (`useCaseWorker`, `walletWorker`, reapers) and HTTP services never fail under RLS in production while ownership checks are enforced explicitly at the service/controller boundary. (`models` and `workflow-engine` are stateless and DB-free.)
 
 ### Media & Save Types
 Assets stored and tracked by `src/systems/media/` (`media` and `workflow_media` tables) with declarative retention, quota, and storage bucket policies defined in `src/systems/media/internal/services/saveTypes.js`.
@@ -64,8 +67,8 @@ A single-output image transformation (`Relighting` or `Camera Angles`) targeting
 - **Parent Ownership**: Appends a new `Media` row to the same `Workflow` (never creating a duplicate workflow) while preserving all prior media rows intact.
 - **Immediate Primary Selection**: The newly created edit placeholder immediately becomes the workflow's primary media (`is_primary = true`) upon creation, allowing successive edits on the same `workflow_id` to chain automatically.
 - **Server-Locked Model**: The underlying image-editing model is fixed on the server per edit use case and cannot be chosen or overridden by the client.
-- **Relighting**: Re-illuminates the workflow's primary image using explicit single-light controls (`light_type`, `brightness`, `color`, `size`, `rotation`, `tilt`, optional `distance`) while preserving subject identity and composition.
-- **Camera Angles**: Re-renders the workflow's primary image from a new virtual camera pose defined by `rotation`, `tilt`, and `zoom` while preserving subject, scene, and lighting continuity.
+- **Relighting**: Re-illuminates the workflow's primary image using explicit single-light controls (`light_type`, `brightness`, `color`, `size`, `rotation`, `tilt`, optional `distance`) while preserving subject identity and composition. Rendered once in `imageEditContract.js` and executed as a 3-node zero-LLM DAG (`resolve_refs -> generate_image -> save_media`).
+- **Camera Angles**: Re-renders the workflow's primary image from a new virtual camera pose defined by `rotation`, `tilt`, and `zoom` while preserving subject, scene, and lighting continuity. Rendered once in `imageEditContract.js` and executed as a 3-node zero-LLM DAG (`resolve_refs -> generate_image -> save_media`).
 
 ### Character
 A persistent AI influencer persona managed by `src/systems/characters/` with canonical traits, turnaround sheets, and reference media.

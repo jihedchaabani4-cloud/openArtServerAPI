@@ -3,11 +3,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { WorkflowService } from "#generation/tools";
 import { WorkflowMediaService, sanitizeStoragePath } from "../../../src/systems/generation/internal/services/WorkflowMediaService.js";
-import { QuotaError, ValidationError, UploadError, MediaConflictError, formatWorkflowReferenceQuotaMessage, isWorkflowReferenceQuotaError, WorkflowMediaRepository } from "#media/tools";
+import { QuotaError, ValidationError, UploadError, MediaConflictError, isWorkflowReferenceQuotaError, WorkflowMediaRepository } from "#media/tools";
+import { formatWorkflowReferenceQuotaMessage } from "../../../src/systems/media/internal/errors.js";
 import { CrudServiceError, baseLogger } from "#shared";
 import { ElementService, ElementMediaService, ElementRepository } from "#elements/tools";
 import { CharacterService, CharacterMediaService } from "#characters/tools";
-import { deleteMedia as workflowsControllerDeleteMedia } from "#generation/api";
+import { deleteMedia as workflowsControllerDeleteMedia } from "../../../src/systems/generation/internal/controllers/workflowsController.js";
 import { workflowService } from "../../../src/container.js";
 
 // ─── Source: workflowMediaServiceAttachAndRollback.test.js ───

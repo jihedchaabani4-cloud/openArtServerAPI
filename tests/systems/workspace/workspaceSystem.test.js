@@ -1,24 +1,113 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { assertProjectAccess, moveItemToTrash, ProjectService, ProjectReadService, FolderService, TrashService, folderTree, indexById, indexChildren, getDepth, wouldCreateCycle, ProjectRepository, FolderRepository, TrashRepository, WorkspaceError, WorkspaceValidationError, WorkspaceNotFoundError, WorkspaceConflictError, WorkspaceUnauthorizedError, FolderError } from "#workspace/tools";
-import { projectsRouter, foldersRouter, trashRouter, workspaceBulkRouter, workspaceRouter } from "#workspace/api";
+import { AppError } from "#shared";
+import * as workspaceToolsNamespace from "#workspace/tools";
+import * as workspaceApiNamespace from "#workspace/api";
+import {
+    assertProjectAccess,
+    moveItemToTrash,
+    configureWorkspace,
+    ProjectService,
+    ProjectReadService,
+    FolderService,
+    TrashService,
+    ProjectRepository,
+    FolderRepository,
+    TrashRepository,
+    trashRepository,
+    WorkspaceError,
+    WorkspaceValidationError,
+    WorkspaceNotFoundError,
+    WorkspaceConflictError,
+    WorkspaceUnauthorizedError,
+    FolderError,
+} from "#workspace/tools";
+import { projectsRouter, foldersRouter, trashRouter, workspaceBulkRouter } from "#workspace/api";
+import * as folderTree from "../../../src/systems/workspace/internal/services/folderTree.js";
+import { indexById, indexChildren, getDepth, wouldCreateCycle } from "../../../src/systems/workspace/internal/services/folderTree.js";
+import { createProjectFolder } from "../../../src/systems/workspace/internal/controllers/foldersController.js";
+import { listAssets } from "../../../src/systems/workspace/internal/controllers/projectsController.js";
+import { restoreWorkflow } from "../../../src/systems/workspace/internal/controllers/trashController.js";
+import { setWorkspaceServices, getFolderService, getGenerationService, getTrashService } from "../../../src/systems/workspace/internal/services/serviceAccessor.js";
 
 // ─── Source: workspaceSystem.test.js ───
 {
 /**
  * Workspace System (System 8) — Unit & Gateway Contract Tests
  *
- * Verifies System 8 Workspace (#workspace/api, #workspace/tools) boundaries,
- * typed errors, DTO contracts, and project/folder/trash operations.
+ * Verifies System 8 Workspace (#workspace/api, #workspace/tools) sealed boundaries,
+ * typed errors, 5xx controller masking, DTO contracts, and project/folder/trash operations.
  */
 
+describe("System 8: Workspace — Sealed Public Surface Contract", () => {
+    it("seals #workspace/api to ONLY the 4 mounted Express routers (zero controller handlers or unmounted routers)", () => {
+        const expectedApiExports = [
+            "foldersRouter",
+            "projectsRouter",
+            "trashRouter",
+            "workspaceBulkRouter",
+        ];
+        assert.deepEqual(Object.keys(workspaceApiNamespace).sort(), expectedApiExports);
 
+        for (const forbidden of [
+            "workspaceRouter",
+            "getAll",
+            "create",
+            "update",
+            "remove",
+            "default",
+        ]) {
+            assert.equal(workspaceApiNamespace[forbidden], undefined, `#workspace/api must not export ${forbidden}`);
+        }
+    });
 
+    it("seals #workspace/tools to exact production surface (zero folderTree helpers, unused repo singletons, or default bag)", () => {
+        const expectedToolsExports = [
+            "FolderError",
+            "FolderRepository",
+            "FolderService",
+            "ProjectReadService",
+            "ProjectRepository",
+            "ProjectService",
+            "TrashRepository",
+            "TrashService",
+            "WorkspaceConflictError",
+            "WorkspaceError",
+            "WorkspaceNotFoundError",
+            "WorkspaceUnauthorizedError",
+            "WorkspaceValidationError",
+            "assertProjectAccess",
+            "configureWorkspace",
+            "moveItemToTrash",
+            "trashRepository",
+        ];
+        assert.deepEqual(Object.keys(workspaceToolsNamespace).sort(), expectedToolsExports);
+
+        for (const forbidden of [
+            "folderTree",
+            "indexById",
+            "indexChildren",
+            "getAncestorIds",
+            "getDepth",
+            "getSubtreeHeight",
+            "collectDescendantIds",
+            "wouldCreateCycle",
+            "wouldExceedDepth",
+            "depthForNewChild",
+            "projectRepository",
+            "folderRepository",
+            "default",
+        ]) {
+            assert.equal(workspaceToolsNamespace[forbidden], undefined, `#workspace/tools must not export ${forbidden}`);
+        }
+    });
+});
 
 describe("System 8: Workspace — Gateways & Public Tools Contract", () => {
     it("should export all expected public tools and facade members", () => {
         assert.equal(typeof assertProjectAccess, "function");
         assert.equal(typeof moveItemToTrash, "function");
+        assert.equal(typeof configureWorkspace, "function");
         assert.equal(typeof ProjectService, "function");
         assert.equal(typeof ProjectReadService, "function");
         assert.equal(typeof FolderService, "function");
@@ -26,6 +115,7 @@ describe("System 8: Workspace — Gateways & Public Tools Contract", () => {
         assert.equal(typeof ProjectRepository, "function");
         assert.equal(typeof FolderRepository, "function");
         assert.equal(typeof TrashRepository, "function");
+        assert.ok(trashRepository instanceof TrashRepository);
         assert.equal(typeof folderTree, "object");
         assert.equal(typeof indexById, "function");
         assert.equal(typeof indexChildren, "function");
@@ -38,14 +128,12 @@ describe("System 8: Workspace — Gateways & Public Tools Contract", () => {
         assert.equal(typeof foldersRouter, "function");
         assert.equal(typeof trashRouter, "function");
         assert.equal(typeof workspaceBulkRouter, "function");
-        assert.equal(typeof workspaceRouter, "function");
 
         // Verify stack exists on express routers
         assert.ok(Array.isArray(projectsRouter.stack));
         assert.ok(Array.isArray(foldersRouter.stack));
         assert.ok(Array.isArray(trashRouter.stack));
         assert.ok(Array.isArray(workspaceBulkRouter.stack));
-        assert.ok(Array.isArray(workspaceRouter.stack));
     });
 
     it("should enforce Workspace typed error hierarchy", () => {
@@ -201,6 +289,116 @@ describe("System 8: Workspace — folderTree algorithms", () => {
         assert.equal(wouldCreateCycle(byId, "child-1", "root-1"), false);
         // Moving to same folder is a cycle
         assert.equal(wouldCreateCycle(byId, "child-1", "child-1"), true);
+    });
+});
+
+describe("System 8: Workspace — Controller 5xx Error Masking", () => {
+    function makeMockRes() {
+        const res = {
+            statusCode: 200,
+            body: null,
+            status(code) {
+                this.statusCode = code;
+                return this;
+            },
+            json(payload) {
+                this.body = payload;
+                return this;
+            },
+        };
+        return res;
+    }
+
+    it("foldersController masks 5xx AppError and unexpected Error messages", async () => {
+        const prevFolderService = getFolderService();
+        try {
+            setWorkspaceServices({
+                folderService: {
+                    create: async () => {
+                        throw new FolderError("Sensitive DB host connection refused", 500, "TRASH_REPO_UNAVAILABLE");
+                    },
+                },
+            });
+            const res1 = makeMockRes();
+            await createProjectFolder({ params: { projectId: "p1" }, user: { id: "u1" }, body: { name: "A" } }, res1);
+            assert.equal(res1.statusCode, 500);
+            assert.deepEqual(res1.body, { ok: false, errorCode: "INTERNAL_ERROR", message: "Internal server error" });
+
+            setWorkspaceServices({
+                folderService: {
+                    create: async () => {
+                        throw new Error("Raw SQL syntax error near SELECT");
+                    },
+                },
+            });
+            const res2 = makeMockRes();
+            await createProjectFolder({ params: { projectId: "p1" }, user: { id: "u1" }, body: { name: "A" } }, res2);
+            assert.equal(res2.statusCode, 500);
+            assert.deepEqual(res2.body, { ok: false, errorCode: "INTERNAL_ERROR", message: "Internal server error" });
+        } finally {
+            setWorkspaceServices({ folderService: prevFolderService });
+        }
+    });
+
+    it("projectsController.listAssets masks 5xx AppError and unexpected Error messages", async () => {
+        const prevGenService = getGenerationService();
+        try {
+            setWorkspaceServices({
+                generationService: {
+                    listProjectAssets: async () => {
+                        throw new AppError("WorkflowMedia repository secret detail", 500);
+                    },
+                },
+            });
+            const res1 = makeMockRes();
+            await listAssets({ params: { projectId: "p1" }, user: { id: "u1" }, query: {} }, res1);
+            assert.equal(res1.statusCode, 500);
+            assert.deepEqual(res1.body, { ok: false, errorCode: "INTERNAL_ERROR", message: "Internal server error" });
+
+            setWorkspaceServices({
+                generationService: {
+                    listProjectAssets: async () => {
+                        throw new Error("Unexpected internal DB crash");
+                    },
+                },
+            });
+            const res2 = makeMockRes();
+            await listAssets({ params: { projectId: "p1" }, user: { id: "u1" }, query: {} }, res2);
+            assert.equal(res2.statusCode, 500);
+            assert.deepEqual(res2.body, { ok: false, errorCode: "INTERNAL_ERROR", message: "Internal server error" });
+        } finally {
+            if (prevGenService) {
+                setWorkspaceServices({ generationService: prevGenService });
+            }
+        }
+    });
+
+    it("trashController masks uninitialized service and 5xx errors without leaking internal service details", async () => {
+        const prevTrashService = getTrashService();
+        try {
+            if (!prevTrashService) {
+                const resUninit = makeMockRes();
+                await restoreWorkflow({ params: { workflowId: "wf-1" }, user: { id: "u1" } }, resUninit);
+                assert.equal(resUninit.statusCode, 500);
+                assert.deepEqual(resUninit.body, { ok: false, errorCode: "INTERNAL_ERROR", message: "Internal server error" });
+            }
+
+            setWorkspaceServices({
+                trashService: {
+                    restore: async () => {
+                        throw new Error("PostgreSQL connection reset by peer");
+                    },
+                },
+            });
+            const res = makeMockRes();
+            await restoreWorkflow({ params: { workflowId: "wf-1" }, user: { id: "u1" } }, res);
+            assert.equal(res.statusCode, 500);
+            assert.deepEqual(res.body, { ok: false, errorCode: "INTERNAL_ERROR", message: "Internal server error" });
+        } finally {
+            if (prevTrashService) {
+                setWorkspaceServices({ trashService: prevTrashService });
+            }
+        }
     });
 });
 }

@@ -1,7 +1,36 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { getElementPromptContext, validateElementsExist, elementRepository, ElementRepository, ElementService, ElementMediaService, ElementAnalysisService, extractElementTokens, stripElementTokens, PromptBuilderProService, getElementContextForPrompt, ElementsError, ElementsValidationError, ElementsNotFoundError, ElementsConflictError, ElementsUnauthorizedError } from "#elements/tools";
-import elementsRouter from "#elements/api";
+import * as elementsToolsNamespace from "#elements/tools";
+import * as elementsApiNamespace from "#elements/api";
+import {
+    configureElements,
+    getElementPromptContext,
+    validateElementsExist,
+    ElementRepository,
+    ElementService,
+    ElementMediaService,
+    ElementAnalysisService,
+    ElementsError,
+    ElementsValidationError,
+    ElementsNotFoundError,
+    ElementsConflictError,
+    ElementsUnauthorizedError,
+} from "#elements/tools";
+import { elementRoutes } from "#elements/api";
+import { elementRepository } from "../../../src/systems/elements/internal/db/ElementRepository.js";
+import promptBuilderProService, {
+    extractElementTokens,
+    stripElementTokens,
+    PromptBuilderProService,
+} from "../../../src/systems/elements/internal/services/promptBuilderProService.js";
+import { getElementContextForPrompt } from "../../../src/systems/elements/internal/services/ElementService.js";
+import {
+    createElement,
+    listProjectElements,
+    addImageToElement,
+    removeImageFromElement,
+    updateElement,
+} from "../../../src/systems/elements/internal/controllers/elementController.js";
 
 // ─── Source: elementsSystem.test.js ───
 {
@@ -164,7 +193,59 @@ describe("System 7: Elements (#elements/tools & #elements/api)", () => {
             }
         });
 
-        it("exports element services, token extractors, and repository", () => {
+        it("seals #elements/api and #elements/tools to exact production surface (zero controller, singleton, prompt-builder, or default leaks)", () => {
+            const expectedApiExports = ["elementRoutes"];
+            const expectedToolsExports = [
+                "ElementAnalysisService",
+                "ElementMediaService",
+                "ElementRepository",
+                "ElementService",
+                "ElementsConflictError",
+                "ElementsError",
+                "ElementsNotFoundError",
+                "ElementsUnauthorizedError",
+                "ElementsValidationError",
+                "configureElements",
+                "getElementPromptContext",
+                "validateElementsExist",
+            ].sort();
+
+            assert.deepEqual(Object.keys(elementsApiNamespace).sort(), expectedApiExports);
+            assert.deepEqual(Object.keys(elementsToolsNamespace).sort(), expectedToolsExports);
+
+            for (const forbiddenApi of [
+                "createElement",
+                "listProjectElements",
+                "getElementById",
+                "deleteElement",
+                "addImageToElement",
+                "removeImageFromElement",
+                "updateElement",
+                "analyzeElement",
+                "buildPrompt",
+                "createPreUploadElementCapacityGuard",
+                "preUploadElementCapacityGuard",
+                "default",
+            ]) {
+                assert.equal(elementsApiNamespace[forbiddenApi], undefined, `#elements/api must not export ${forbiddenApi}`);
+            }
+
+            for (const forbiddenTool of [
+                "elementRepository",
+                "extractElementTokens",
+                "stripElementTokens",
+                "PromptBuilderProService",
+                "promptBuilderProService",
+                "getElementContextForPrompt",
+                "extractValidHttpUrls",
+                "default",
+            ]) {
+                assert.equal(elementsToolsNamespace[forbiddenTool], undefined, `#elements/tools must not export ${forbiddenTool}`);
+            }
+        });
+
+        it("exports sealed element services/classes on #elements/tools and keeps internal helpers accessible internally", () => {
+            assert.equal(typeof configureElements, "function");
             assert.ok(ElementService);
             assert.ok(ElementMediaService);
             assert.ok(ElementAnalysisService);
@@ -175,14 +256,39 @@ describe("System 7: Elements (#elements/tools & #elements/api)", () => {
             assert.ok(PromptBuilderProService);
             assert.equal(typeof getElementContextForPrompt, "function");
         });
+
+        it("internal services throw typed Elements*Error subclasses instead of raw Error", async () => {
+            await assert.rejects(
+                () => promptBuilderProService.buildMultiElementPayload({ userPrompt: "" }),
+                (err) => err instanceof ElementsValidationError && err.statusCode === 400 && err.message.includes("ERR_INVALID_PARAMS: userPrompt is required")
+            );
+
+            const analysis = new ElementAnalysisService();
+            await assert.rejects(
+                () => analysis.analyzeElement({ imageUrls: [] }),
+                (err) => err instanceof ElementsValidationError && err.statusCode === 400 && err.message.includes("No reference images found")
+            );
+
+            const repo = new ElementRepository();
+            repo.findByWorkflowId = async () => null;
+            await assert.rejects(
+                () => repo.updateByWorkflowId("missing-wf-1", { name: "X" }),
+                (err) => err instanceof ElementsNotFoundError && err.statusCode === 404 && err.message.includes("Element not found for workflow: missing-wf-1")
+            );
+
+            assert.throws(
+                () => new ElementService({ db: {}, mediaService: null }),
+                (err) => err instanceof ElementsError && err.statusCode === 500 && err.message.includes("ElementService requires mediaService")
+            );
+        });
     });
 
     describe("3. HTTP API Gateway (#elements/api)", () => {
         it("exports an Express router with all element endpoints", () => {
-            assert.ok(elementsRouter);
-            assert.ok(Array.isArray(elementsRouter.stack));
+            assert.ok(elementRoutes);
+            assert.ok(Array.isArray(elementRoutes.stack));
 
-            const routes = elementsRouter.stack
+            const routes = elementRoutes.stack
                 .filter((layer) => layer.route)
                 .map((layer) => ({
                     path: layer.route.path,
@@ -568,7 +674,6 @@ describe("Element PATCH /api/v2/elements/:id Partial Update Contract", () => {
     });
 
     it("8. Controller PATCH /api/v2/elements/:id maps req.body with coverMediaId and returns 200 with updated element", async () => {
-        const { updateElement } = await import("#elements/api");
         const { elementService, db } = await import("../../../src/container.js");
 
         const originalUpdate = elementService.updateElement;
@@ -620,10 +725,6 @@ describe("Element PATCH /api/v2/elements/:id Partial Update Contract", () => {
 {
 describe("Ticket 0.2 Unit Test: promptBuilderProService purity and ElementService token resolution", () => {
   it("exports token extraction and stripping helpers", async () => {
-    const { extractElementTokens, stripElementTokens } = await import(
-      "#elements/tools"
-    );
-
     assert.equal(typeof extractElementTokens, "function");
     assert.equal(typeof stripElementTokens, "function");
 
@@ -636,9 +737,7 @@ describe("Ticket 0.2 Unit Test: promptBuilderProService purity and ElementServic
   });
 
   it("buildMultiElementPayload builds prompt payload correctly with plain element DTOs", async () => {
-    const { promptBuilderProService: promptBuilder } = await import(
-      "#elements/tools"
-    );
+    const promptBuilder = promptBuilderProService;
 
     const payload = await promptBuilder.buildMultiElementPayload({
       userPrompt: "A hero standing on a rooftop @HeroCape",
@@ -831,7 +930,6 @@ describe("Phase 2a: Elements Thin Controller & Single-Pass Service Ownership", (
     });
 
     it("Controllers ignore spoofed req.body.userId and mask 5xx errors via safePublicRouteError helper", async () => {
-        const { createElement, addImageToElement, listProjectElements } = await import("#elements/api");
         const { elementService } = await import("../../../src/container.js");
 
         // 1. createElement ignores req.body.userId when req.user is missing -> 401 fail-closed
@@ -883,7 +981,6 @@ describe("Phase 2a: Elements Thin Controller & Single-Pass Service Ownership", (
     });
 
     it("addImageToElement & removeImageFromElement verify ownership ONCE (via ElementMediaService) and fail closed on unowned/unauthenticated", async () => {
-        const { addImageToElement, removeImageFromElement } = await import("#elements/api");
         const { elementMediaService, db } = await import("../../../src/container.js");
 
         const origAdd = elementMediaService.addReferenceMedia;

@@ -1,12 +1,13 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { MediaRepository, inferWorkflowMediaRole, WORKFLOW_MEDIA_ROLES, WorkflowMediaRepository } from "#media/tools";
+import { MediaRepository, WorkflowMediaRepository } from "#media/tools";
+import { inferWorkflowMediaRole, WORKFLOW_MEDIA_ROLES } from "../../../src/systems/media/internal/db/workflowMediaRole.js";
 import { supabase } from "#shared/db/supabase.js";
 import { WorkflowRepository, GenerationService } from "#generation/tools";
 import { WorkflowMediaService } from "../../../src/systems/generation/internal/services/WorkflowMediaService.js";
 import { ProjectReadService } from "#workspace/tools";
 import { CharacterMediaService } from "#characters/tools";
-import { ElementMediaService, elementRepository, ElementService } from "#elements/tools";
+import { ElementMediaService, ElementService } from "#elements/tools";
 import { db, createOwnershipResolvers } from "../../../src/container.js";
 import { CrudServiceError } from "#shared";
 import { assertOwns, configureOwnershipResolvers } from "#identity/tools";
@@ -1045,7 +1046,7 @@ describe("Generic Workflow Primary Media — Centralize and Reuse Canonical Cont
     });
 
     it("11. Controller PATCH /api/workflows/:id/primary-media supports primaryMediaId in req.body", async () => {
-        const { setPrimaryMedia } = await import("#generation/api");
+        const { setPrimaryMedia } = await import("../../../src/systems/generation/internal/controllers/workflowsController.js");
         const { workflowService } = await import("../../../src/container.js");
 
         let invokedParams = null;

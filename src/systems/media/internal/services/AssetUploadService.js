@@ -20,6 +20,7 @@ import { SourceResolver } from "../ingestion/SourceResolver.js";
 import { DEFAULT_UPLOAD_POLICY } from "../ingestion/UploadPolicy.js";
 import { MediaUploadService } from "./MediaUploadService.js";
 import { crudOperationLog, CrudServiceError, calculateAspectRatio } from "#shared";
+import { MediaValidationError } from "../errors.js";
 
 export class AssetUploadService {
     /**
@@ -40,13 +41,13 @@ export class AssetUploadService {
         folderService = null,
     } = {}) {
         if (!mediaUploadService || typeof mediaUploadService.upload !== "function") {
-            throw new Error("AssetUploadService requires mediaUploadService with an upload method.");
+            throw new MediaValidationError("AssetUploadService requires mediaUploadService with an upload method.");
         }
         if (!workflowMediaService || typeof workflowMediaService.attachMediaItems !== "function") {
-            throw new Error("AssetUploadService requires workflowMediaService with an attachMediaItems method.");
+            throw new MediaValidationError("AssetUploadService requires workflowMediaService with an attachMediaItems method.");
         }
         if (!authService || typeof authService.verifyWorkflowOwnership !== "function") {
-            throw new Error("AssetUploadService requires authService with a verifyWorkflowOwnership method.");
+            throw new MediaValidationError("AssetUploadService requires authService with a verifyWorkflowOwnership method.");
         }
         this.db = db;
         this.mediaUploadService = mediaUploadService;

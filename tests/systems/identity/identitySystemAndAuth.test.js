@@ -27,8 +27,8 @@ import {
 } from "../../../src/systems/identity/internal/services/jwtVerifier.js";
 import healthRouter from "../../../src/api/probes/health.js";
 import readyRouter, { _resetReadinessCacheForTest } from "../../../src/api/probes/ready.js";
-import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared";
-import { StorageService } from "#media/tools";
+import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared/redis";
+import { StorageService } from "../../../src/systems/media/internal/storage/StorageService.js";
 import http from "node:http";
 import express from "express";
 import { workflowsRouter } from "#generation/api";

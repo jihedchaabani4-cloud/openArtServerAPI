@@ -32,8 +32,17 @@ function logOk(traceId, operation, start) {
     elementLogger.info(structuredLog({ traceId, operation, durationMs: Date.now() - start, status: "success" }), `${operation} ok`);
 }
 
+function resolveErrorStatusCode(err) {
+    const raw = err?.statusCode;
+    const isValidHttpErr = Number.isInteger(raw) && raw >= 400 && raw <= 599;
+    if (err?.category === "SERVER_FAULT") {
+        return isValidHttpErr && raw >= 500 ? raw : 500;
+    }
+    return isValidHttpErr ? raw : 500;
+}
+
 function logErr(traceId, operation, start, err) {
-    const statusCode = err?.statusCode || 500;
+    const statusCode = resolveErrorStatusCode(err);
     elementLogger.error(structuredLog({ traceId, operation, durationMs: Date.now() - start, status: "error", errorCode: statusCode, message: err?.message }), `${operation} error`);
     return statusCode;
 }
@@ -50,7 +59,7 @@ function sendElementError(res, traceId, operation, start, err) {
     return res.status(statusCode).json({
         error: true,
         code: clientCode,
-        category: err?.category || (isServerFault ? "SERVER_FAULT" : "USER_FAULT"),
+        category: isServerFault ? "SERVER_FAULT" : (err?.category || "USER_FAULT"),
         message: clientMessage,
         traceId,
     });

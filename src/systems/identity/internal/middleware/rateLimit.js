@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { RateLimiterMemory } from "rate-limiter-flexible";
-import { RATE_LIMIT_POLICIES, createLogger, rateLimitRedisConnection, envConfig } from "#shared";
+import { RATE_LIMIT_POLICIES, createLogger, envConfig } from "#shared";
+import { rateLimitRedisConnection } from "#shared/redis";
 
 const systemLogger = createLogger("ratelimit");
 let lastAuthOutageLog = 0;

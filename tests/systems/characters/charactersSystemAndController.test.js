@@ -1,7 +1,35 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
-import { getCharacterPromptContext, validateCharacterExists, characterRepository, CharacterRepository, CharacterService, CharacterMediaService, CharacterGenerationService, CHARACTER_MAX_DETAIL_MEDIA, CharactersError, CharactersValidationError, CharactersNotFoundError, CharactersConflictError, CharactersUnauthorizedError } from "#characters/tools";
-import charactersRouter, { createCharacter, generateCharacterSheet, generateCharacterDescription, updateCharacter, deleteCharacter, addMediaToCharacter, removeMediaFromCharacter, setCharacterSheetMedia, uploadCharacterMedia } from "#characters/api";
+import * as charactersToolsNamespace from "#characters/tools";
+import * as charactersApiNamespace from "#characters/api";
+import {
+    configureCharacters,
+    getCharacterPromptContext,
+    validateCharacterExists,
+    CharacterRepository,
+    CharacterService,
+    CharacterMediaService,
+    CharactersError,
+    CharactersValidationError,
+    CharactersNotFoundError,
+    CharactersConflictError,
+    CharactersUnauthorizedError,
+} from "#characters/tools";
+import { charactersRouter } from "#characters/api";
+import { characterRepository } from "../../../src/systems/characters/internal/db/CharacterRepository.js";
+import { CHARACTER_MAX_DETAIL_MEDIA } from "../../../src/systems/characters/internal/services/CharacterMediaService.js";
+import { CharacterGenerationService } from "../../../src/systems/characters/internal/services/CharacterGenerationService.js";
+import {
+    createCharacter,
+    generateCharacterSheet,
+    generateCharacterDescription,
+    updateCharacter,
+    deleteCharacter,
+    addMediaToCharacter,
+    removeMediaFromCharacter,
+    setCharacterSheetMedia,
+    uploadCharacterMedia,
+} from "../../../src/systems/characters/internal/controllers/characterController.js";
 import { characterService, trashService } from "../../../src/container.js";
 import { safePublicRouteError } from "#shared";
 import { randomUUID } from "node:crypto";
@@ -10,6 +38,66 @@ import { WorkflowMediaService } from "../../../src/systems/generation/internal/s
 // ─── Source: charactersSystem.test.js ───
 {
 describe("System 6: Characters (#characters/tools & #characters/api)", () => {
+    describe("0. Sealed Public Surface Contract", () => {
+        it("seals #characters/api to export ONLY charactersRouter (zero leaked handlers or default export)", () => {
+            assert.deepEqual(Object.keys(charactersApiNamespace).sort(), ["charactersRouter"]);
+
+            const forbiddenApiExports = [
+                "createCharacter",
+                "generateCharacterSheet",
+                "generateCharacterDescription",
+                "updateCharacter",
+                "deleteCharacter",
+                "addMediaToCharacter",
+                "removeMediaFromCharacter",
+                "setCharacterSheetMedia",
+                "uploadCharacterMedia",
+                "default",
+            ];
+
+            for (const name of forbiddenApiExports) {
+                assert.equal(
+                    charactersApiNamespace[name],
+                    undefined,
+                    `#characters/api must not export "${name}"`
+                );
+            }
+        });
+
+        it("seals #characters/tools to the exact 11 canonical production exports (zero leaked internals or default export)", () => {
+            const expectedToolsExports = [
+                "CharacterMediaService",
+                "CharacterRepository",
+                "CharacterService",
+                "CharactersConflictError",
+                "CharactersError",
+                "CharactersNotFoundError",
+                "CharactersUnauthorizedError",
+                "CharactersValidationError",
+                "configureCharacters",
+                "getCharacterPromptContext",
+                "validateCharacterExists",
+            ].sort();
+
+            assert.deepEqual(Object.keys(charactersToolsNamespace).sort(), expectedToolsExports);
+
+            const forbiddenToolsExports = [
+                "CharacterGenerationService",
+                "CHARACTER_MAX_DETAIL_MEDIA",
+                "characterRepository",
+                "extractValidHttpUrls",
+                "default",
+            ];
+
+            for (const name of forbiddenToolsExports) {
+                assert.equal(
+                    charactersToolsNamespace[name],
+                    undefined,
+                    `#characters/tools must not export "${name}"`
+                );
+            }
+        });
+    });
     describe("1. Exported Error Hierarchy", () => {
         it("CharactersError inherits from AppError with 500 status", () => {
             const err = new CharactersError("CHAR_ERR", "Characters system failure");
@@ -169,13 +257,25 @@ describe("System 6: Characters (#characters/tools & #characters/api)", () => {
             }
         });
 
-        it("exports service classes and constants", () => {
+        it("exports canonical service classes and configuration hook while internal helpers stay private", () => {
+            assert.equal(typeof configureCharacters, "function");
             assert.ok(CharacterService);
             assert.ok(CharacterMediaService);
+            assert.ok(CharacterRepository);
             assert.ok(CharacterGenerationService);
             assert.equal(CHARACTER_MAX_DETAIL_MEDIA, 5);
-            assert.ok(CharacterRepository);
             assert.ok(characterRepository);
+        });
+
+        it("service configuration guards throw typed CharactersError instances with preserved messages", () => {
+            assert.throws(
+                () => new CharacterService({}),
+                (err) => err instanceof CharactersError && err.statusCode === 500 && err.message.includes("CharacterService requires mediaService")
+            );
+            assert.throws(
+                () => new CharacterMediaService({ db: {} }),
+                (err) => err instanceof CharactersError && err.statusCode === 500 && err.message.includes("CharacterMediaService requires storageService")
+            );
         });
     });
 

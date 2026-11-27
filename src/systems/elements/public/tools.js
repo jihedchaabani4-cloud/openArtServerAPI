@@ -1,21 +1,17 @@
 /**
  * System 7: Elements — Public Tools Gateway (#elements/tools)
  *
- * Governed by:
- * - docs/architecture/constitution/01_business_systems_architecture.md (System 7)
- * - docs/architecture/constitution/02_architecture_rules_and_agent_guardrails.md
- *
- * Exposes inter-system plain DTO operations for element prompt context extraction
- * and entity existence validation.
+ * Sealed surface exposing ONLY inter-system DTO operations for element prompt
+ * context extraction and existence validation, composition-root service/repo
+ * constructors, and the 5 canonical Elements*Error classes.
  */
 
 import * as identityTools from "#identity/tools";
 import { getWorkflowVisualMedia } from "#media/tools";
 import { ElementRepository, elementRepository } from "../internal/db/ElementRepository.js";
-import { ElementService, getElementContextForPrompt } from "../internal/services/ElementService.js";
+import { ElementService } from "../internal/services/ElementService.js";
 import { ElementMediaService } from "../internal/services/ElementMediaService.js";
 import { ElementAnalysisService } from "../internal/services/ElementAnalysisService.js";
-import promptBuilderProService, { extractElementTokens, stripElementTokens, PromptBuilderProService } from "../internal/services/promptBuilderProService.js";
 import {
     ElementsError,
     ElementsValidationError,
@@ -29,9 +25,7 @@ export function configureElements(services = {}) {
     setElementServices(services);
 }
 
-
 // ── Inter-System Tools Functions ──────────────────────────────────────────────
-
 
 const ELEMENT_VISUAL_ROLE_PRIORITY = Object.freeze([
     "detail",
@@ -40,20 +34,6 @@ const ELEMENT_VISUAL_ROLE_PRIORITY = Object.freeze([
     "output",
     "original",
 ]);
-
-function extractValidHttpUrls(rawList) {
-    if (!Array.isArray(rawList)) return [];
-    const seen = new Set();
-    const out = [];
-    for (const item of rawList) {
-        const url = typeof item === "string" ? item.trim() : "";
-        if ((url.startsWith("http://") || url.startsWith("https://")) && !seen.has(url)) {
-            seen.add(url);
-            out.push(url);
-        }
-    }
-    return out;
-}
 
 /**
  * Retrieves formatted element prompt context (traits, guidelines, visual reference URLs from `workflow_media`).
@@ -151,39 +131,13 @@ export async function validateElementsExist({ elementIds = [], userId = null } =
     return true;
 }
 
-// ── Facade & Service Re-exports ──────────────────────────────────────────────
+// ── Sealed Public Surface Exports ─────────────────────────────────────────────
 
 export {
     ElementService,
     ElementMediaService,
     ElementAnalysisService,
     ElementRepository,
-    elementRepository,
-    extractElementTokens,
-    stripElementTokens,
-    PromptBuilderProService,
-    promptBuilderProService,
-    getElementContextForPrompt,
-    ElementsError,
-    ElementsValidationError,
-    ElementsNotFoundError,
-    ElementsConflictError,
-    ElementsUnauthorizedError,
-};
-
-export default {
-    getElementPromptContext,
-    validateElementsExist,
-    ElementService,
-    ElementMediaService,
-    ElementAnalysisService,
-    ElementRepository,
-    elementRepository,
-    extractElementTokens,
-    stripElementTokens,
-    PromptBuilderProService,
-    promptBuilderProService,
-    getElementContextForPrompt,
     ElementsError,
     ElementsValidationError,
     ElementsNotFoundError,

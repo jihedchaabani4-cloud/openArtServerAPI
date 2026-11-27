@@ -26,6 +26,7 @@ import {
     MediaConflictError,
 } from "#media/tools";
 import { getMediaStatusesByWorkflowIds } from "./workflowMediaStatus.js";
+import { WorkspaceError } from "../errors.js";
 import {
     indexById,
     indexChildren,
@@ -98,16 +99,16 @@ function buildEmptyDeleteResult(workflowId, extra = {}) {
 export class TrashService {
     constructor({ db, workflowService, elementService, characterService, authService = null } = {}) {
         if (!db?.trash) {
-            throw new Error("TrashService requires db.trash (TrashRepository)");
+            throw new WorkspaceError("WORKSPACE_CONFIGURATION_ERROR", "TrashService requires db.trash (TrashRepository)", { statusCode: 500 });
         }
         if (!workflowService) {
-            throw new Error("TrashService requires workflowService");
+            throw new WorkspaceError("WORKSPACE_CONFIGURATION_ERROR", "TrashService requires workflowService", { statusCode: 500 });
         }
         if (!elementService) {
-            throw new Error("TrashService requires elementService");
+            throw new WorkspaceError("WORKSPACE_CONFIGURATION_ERROR", "TrashService requires elementService", { statusCode: 500 });
         }
         if (!characterService) {
-            throw new Error("TrashService requires characterService");
+            throw new WorkspaceError("WORKSPACE_CONFIGURATION_ERROR", "TrashService requires characterService", { statusCode: 500 });
         }
 
         this.db = db;

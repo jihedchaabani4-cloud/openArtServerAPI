@@ -16,7 +16,7 @@ import { TaskFailedError, TaskTimedOutError } from "@runwayml/sdk";
 import { runWithContext, baseLogger } from "#shared";
 import modelsRouter from "#models/api";
 import { formatModelDto } from "../../../src/systems/models/internal/controllers/modelsController.js";
-import { VideoGenerateNode } from "../../../src/systems/generation/internal/v3/index.js";
+import { VideoGenerateNode } from "../../../src/systems/workflow-engine/internal/nodes/index.js";
 import { resolveMediaMetadata } from "#media/tools";
 
 // ─── Source: modelsSystem.test.js ───

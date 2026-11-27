@@ -1,13 +1,8 @@
 import { describe, it, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
+import * as mediaToolsNamespace from "#media/tools";
+import * as mediaApiNamespace from "#media/api";
 import {
-    saveTypeRegistry,
-    SAVE_TYPES,
-    RETENTION_POLICIES,
-    StorageService,
-    StoragePathResolver,
-    InMemoryStorageProvider,
-    StorageValidationError,
     MediaError,
     MediaValidationError,
     MediaNotFoundError,
@@ -16,10 +11,8 @@ import {
     WorkflowMediaRepository,
     configureMedia,
     getMediaRepository,
-    getMediaService,
     getWorkflowMediaRepository,
     getStorageService,
-    setStorageService,
     createPendingMedia,
     markMediaFailed,
     linkMediaToEntity,
@@ -27,13 +20,19 @@ import {
     deleteMedia,
     MediaService,
     resolveMediaMetadata,
-    MEDIA_IN_FLIGHT_STATUSES,
     isMediaInFlight,
-    isMediaFailed,
     hasInFlightMedia,
     areAllWorkflowMediaFailed,
 } from "#media/tools";
-import { mediaRouter, assetsRouter, mediaIngestRouter, handleDeleteMedia, handleGetMedia } from "#media/api";
+import { assetsRouter, mediaIngestRouter, createUploadMiddleware } from "#media/api";
+import { saveTypeRegistry, SAVE_TYPES, RETENTION_POLICIES } from "../../../src/systems/media/internal/services/saveTypes.js";
+import { StorageService } from "../../../src/systems/media/internal/storage/StorageService.js";
+import { StoragePathResolver } from "../../../src/systems/media/internal/storage/StoragePathResolver.js";
+import { InMemoryStorageProvider } from "../../../src/systems/media/internal/storage/providers/InMemoryStorageProvider.js";
+import { StorageValidationError } from "../../../src/systems/media/internal/errors.js";
+import { getMediaService } from "../../../src/systems/media/internal/services/serviceAccessor.js";
+import { MEDIA_IN_FLIGHT_STATUSES, isMediaFailed } from "../../../src/systems/media/internal/services/MediaLifecycleService.js";
+import { handleDeleteMedia, handleGetMedia } from "../../../src/systems/media/internal/controllers/mediaController.js";
 import { assertOwns, IdentityForbiddenError, configureOwnershipResolvers } from "#identity/tools";
 import { createOwnershipResolvers } from "../../../src/container.js";
 const setIdentityDb = (targetDb) => configureOwnershipResolvers(createOwnershipResolvers(targetDb));
@@ -203,14 +202,127 @@ describe("System 4: Media & Storage — System Unit Tests", () => {
         });
     });
 
-    describe("4. Media Public API Routers (#media/api)", () => {
-        it("exports valid Express routers for all canonical entry points", () => {
-            assert.ok(mediaRouter);
-            assert.equal(typeof mediaRouter, "function");
-            assert.ok(assetsRouter);
+    describe("4. Media Public API & Tools Sealed Surface (#media/api, #media/tools)", () => {
+        it("seals #media/api to exact production surface (assetsRouter, mediaIngestRouter, createUploadMiddleware)", () => {
+            assert.deepEqual(
+                Object.keys(mediaApiNamespace).sort(),
+                ["assetsRouter", "createUploadMiddleware", "mediaIngestRouter"]
+            );
             assert.equal(typeof assetsRouter, "function");
-            assert.ok(mediaIngestRouter);
             assert.equal(typeof mediaIngestRouter, "function");
+            assert.equal(typeof createUploadMiddleware, "function");
+
+            for (const forbidden of [
+                "mediaRouter",
+                "resolveMiddlewarePolicy",
+                "handleDeleteMedia",
+                "handleGetMedia",
+                "default",
+            ]) {
+                assert.equal(mediaApiNamespace[forbidden], undefined, `#media/api must not export ${forbidden}`);
+            }
+        });
+
+        it("seals #media/tools to exact production surface (zero test hooks, storage internals, ingestion internals, or default bag)", () => {
+            const expectedToolsExports = [
+                "AssetUploadService",
+                "CHARACTER_DETAIL_UPLOAD_POLICY",
+                "CHARACTER_SHEET_UPLOAD_POLICY",
+                "ELEMENT_REFERENCE_UPLOAD_POLICY",
+                "ELEMENT_SHEET_UPLOAD_POLICY",
+                "MEDIA_WORKFLOW_STATUS",
+                "MediaConflictError",
+                "MediaError",
+                "MediaNotFoundError",
+                "MediaQuotaError",
+                "MediaRepository",
+                "MediaService",
+                "MediaStorageError",
+                "MediaUploadError",
+                "MediaUploadService",
+                "MediaValidationError",
+                "MediaWorkflowLifecycleService",
+                "QuotaError",
+                "UploadError",
+                "ValidationError",
+                "WorkflowMediaRepository",
+                "appendMediaToWorkflow",
+                "areAllWorkflowMediaFailed",
+                "completeMedia",
+                "configureMedia",
+                "createGenerationPlaceholderAtomic",
+                "createMediaInWorkflow",
+                "createPendingMedia",
+                "deleteMedia",
+                "getMediaById",
+                "getMediaRepository",
+                "getMediaUrls",
+                "getStorageService",
+                "getWorkflowMediaRepository",
+                "getWorkflowPrimaryMedia",
+                "getWorkflowVisualMedia",
+                "hasInFlightMedia",
+                "isMediaInFlight",
+                "isWorkflowReferenceQuotaError",
+                "linkMediaToEntity",
+                "markMediaFailed",
+                "persistExternalMedia",
+                "resolveMediaMetadata",
+            ].sort();
+
+            assert.deepEqual(Object.keys(mediaToolsNamespace).sort(), expectedToolsExports);
+
+            for (const forbidden of [
+                "resetActiveUploadsForTest",
+                "resetInFlightBytesForTest",
+                "getActiveUploadsCountForTest",
+                "getInFlightBytesForTest",
+                "setStorageService",
+                "StorageService",
+                "StoragePathResolver",
+                "createStorageService",
+                "IStorageProvider",
+                "InMemoryStorageProvider",
+                "SupabaseStorageProvider",
+                "storagePathResolver",
+                "StorageError",
+                "StorageValidationError",
+                "isStream",
+                "MediaInspector",
+                "SourceResolver",
+                "SourceReader",
+                "SourcePolicy",
+                "extractImageMetadata",
+                "extractVideoMetadata",
+                "extractMediaMetadata",
+                "createSizeLimitedMemoryStorage",
+                "createPayloadTooLargeError",
+                "saveTypeRegistry",
+                "SAVE_TYPES",
+                "RETENTION_POLICIES",
+                "getSaveTypeRegistry",
+                "DEFAULT_UPLOAD_POLICY",
+                "GENERATED_OUTPUT_UPLOAD_POLICY",
+                "ELEMENT_SOURCES_UPLOAD_POLICY",
+                "UPLOAD_POLICIES",
+                "WORKFLOW_MEDIA_ROLES",
+                "normalizeWorkflowMediaRole",
+                "inferWorkflowMediaRole",
+                "linkWorkflowMediaForCreatedRow",
+                "markMediaStatus",
+                "WORKFLOW_REFERENCE_QUOTA_PREFIX",
+                "WORKFLOW_REFERENCE_QUOTA_PATTERN",
+                "formatWorkflowReferenceQuotaMessage",
+                "MEDIA_IN_FLIGHT_STATUSES",
+                "isMediaFailed",
+                "failWorkflowPendingMedia",
+                "calculateAspectRatio",
+                "getMediaUploadService",
+                "getMediaService",
+                "default",
+            ]) {
+                assert.equal(mediaToolsNamespace[forbidden], undefined, `#media/tools must not export ${forbidden}`);
+            }
         });
     });
 });
@@ -303,40 +415,34 @@ function makeInMemoryMediaRepo({ failWith = null } = {}) {
 }
 
 describe("Platform Media & Media-Ingestion Public Barrels", () => {
-    it("exports the complete media-ingestion public contract without legacy ingestion classes or workflow quota helpers", async () => {
+    it("exports sealed media-ingestion contract without leaking low-level ingestion internals or legacy classes", async () => {
         const ingestionBarrel = await import("#media/tools");
 
         assert.equal(typeof ingestionBarrel.MediaUploadService, "function");
-        assert.equal(typeof ingestionBarrel.DEFAULT_UPLOAD_POLICY, "object");
         assert.equal(typeof ingestionBarrel.ValidationError, "function");
         assert.equal(typeof ingestionBarrel.UploadError, "function");
         assert.equal(typeof ingestionBarrel.QuotaError, "function");
-        assert.equal(typeof ingestionBarrel.SourcePolicy, "function");
-        assert.equal(typeof ingestionBarrel.SourceReader, "function");
-        assert.equal(typeof ingestionBarrel.SourceResolver, "function");
-        assert.equal(typeof ingestionBarrel.MediaInspector, "function");
+        assert.equal(typeof ingestionBarrel.isWorkflowReferenceQuotaError, "function");
 
         assert.equal("BinaryIngestionService" in ingestionBarrel, false);
         assert.equal("MediaIngestionService" in ingestionBarrel, false);
-        assert.equal(typeof ingestionBarrel.isWorkflowReferenceQuotaError, "function");
-        assert.equal(typeof ingestionBarrel.formatWorkflowReferenceQuotaMessage, "function");
+        assert.equal("SourcePolicy" in ingestionBarrel, false);
+        assert.equal("SourceReader" in ingestionBarrel, false);
+        assert.equal("SourceResolver" in ingestionBarrel, false);
+        assert.equal("MediaInspector" in ingestionBarrel, false);
     });
 
-    it("exports the complete platform media public contract", async () => {
+    it("exports the sealed platform media public contract", async () => {
         const mediaBarrel = await import("#media/tools");
 
         assert.equal(typeof mediaBarrel.MediaService, "function");
         assert.equal(typeof mediaBarrel.MediaWorkflowLifecycleService, "function");
         assert.equal(typeof mediaBarrel.MEDIA_WORKFLOW_STATUS, "object");
-        assert.ok(Array.isArray(mediaBarrel.MEDIA_IN_FLIGHT_STATUSES));
         assert.equal(typeof mediaBarrel.isMediaInFlight, "function");
-        assert.equal(typeof mediaBarrel.isMediaFailed, "function");
         assert.equal(typeof mediaBarrel.hasInFlightMedia, "function");
         assert.equal(typeof mediaBarrel.areAllWorkflowMediaFailed, "function");
         assert.equal(typeof mediaBarrel.MediaConflictError, "function");
-        assert.equal(typeof mediaBarrel.failWorkflowPendingMedia, "function");
         assert.equal(typeof mediaBarrel.resolveMediaMetadata, "function");
-        assert.equal(typeof mediaBarrel.calculateAspectRatio, "function");
     });
 });
 
@@ -1117,7 +1223,8 @@ describe("D2.6 — Media Ratio & Dimension Preservation Boundary Tests", () => {
   });
 
   it("TEST 6: SaveMediaNode preserves placeholder dimensions when provider asset lacks width/height", async () => {
-    const { SaveMediaNode } = await import("../../../src/systems/generation/internal/v3/index.js");
+    const { SaveMediaNode } = await import("../../../src/systems/workflow-engine/internal/nodes/index.js");
+    const { completeMedia } = await import("#media/tools");
 
     let updatedMedia = null;
     const mockDb = {
@@ -1144,6 +1251,7 @@ describe("D2.6 — Media Ratio & Dimension Preservation Boundary Tests", () => {
       },
       {
         db: mockDb,
+        completeMedia,
       }
     );
 

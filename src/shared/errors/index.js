@@ -15,3 +15,4 @@ export { CrudServiceError } from "./CrudServiceError.js";
 export { safePublicRouteError } from "./safePublicRouteError.js";
 export { ERROR_POLICY } from "./errorPolicy.js";
 export { ErrorSystem } from "./ErrorSystem.js";
+export { scrubSensitiveText, sanitizePublicError } from "./sanitizeError.js";

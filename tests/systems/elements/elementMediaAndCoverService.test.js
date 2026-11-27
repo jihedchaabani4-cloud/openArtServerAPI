@@ -1,9 +1,10 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { ElementMediaService, ElementService } from "#elements/tools";
-import { ELEMENT_REFERENCE_UPLOAD_POLICY, ELEMENT_SHEET_UPLOAD_POLICY, ELEMENT_SOURCES_UPLOAD_POLICY, WorkflowMediaRepository } from "#media/tools";
+import { ELEMENT_REFERENCE_UPLOAD_POLICY, ELEMENT_SHEET_UPLOAD_POLICY, WorkflowMediaRepository } from "#media/tools";
+import { ELEMENT_SOURCES_UPLOAD_POLICY } from "../../../src/systems/media/internal/ingestion/UploadPolicy.js";
 import { CrudServiceError } from "#shared";
-import { createPreUploadElementCapacityGuard } from "#elements/api";
+import { createPreUploadElementCapacityGuard } from "../../../src/systems/elements/internal/middleware/elementUploadGuard.js";
 
 // ─── Source: elementMediaServiceMigrated.test.js ───
 {

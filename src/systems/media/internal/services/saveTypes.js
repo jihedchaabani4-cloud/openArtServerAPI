@@ -5,6 +5,8 @@
  * max size limits, storage bucket folders, and retention policies.
  */
 
+import { MediaValidationError } from "../errors.js";
+
 const MB = 1024 * 1024;
 
 const DEFAULT_IMAGE_MIMES = Object.freeze([
@@ -167,10 +169,10 @@ export class SaveTypeRegistry {
 
     register(name, config) {
         if (!name || typeof name !== "string") {
-            throw new Error("[SaveTypeRegistry] SaveType name must be a non-empty string");
+            throw new MediaValidationError("[SaveTypeRegistry] SaveType name must be a non-empty string");
         }
         if (!config || !config.storageFolder) {
-            throw new Error(`[SaveTypeRegistry] Configuration for save type "${name}" must define storageFolder`);
+            throw new MediaValidationError(`[SaveTypeRegistry] Configuration for save type "${name}" must define storageFolder`);
         }
 
         const normalizedName = name.trim().toLowerCase();

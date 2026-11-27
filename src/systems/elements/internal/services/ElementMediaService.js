@@ -20,6 +20,7 @@ import {
     ELEMENT_REFERENCE_UPLOAD_POLICY,
     ELEMENT_SHEET_UPLOAD_POLICY,
 } from "#media/tools";
+import { ElementsError } from "../errors.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -44,16 +45,31 @@ export class ElementMediaService {
         authService,
     } = {}) {
         if (!db) {
-            throw new Error("ElementMediaService requires db");
+            throw new ElementsError("ELEMENTS_CONFIGURATION_ERROR", "ElementMediaService requires db", {
+                statusCode: 500,
+                category: "SERVER_FAULT",
+            });
         }
         if (!mediaUploadService || typeof mediaUploadService.upload !== "function") {
-            throw new Error("ElementMediaService requires mediaUploadService with an upload method");
+            throw new ElementsError(
+                "ELEMENTS_CONFIGURATION_ERROR",
+                "ElementMediaService requires mediaUploadService with an upload method",
+                { statusCode: 500, category: "SERVER_FAULT" }
+            );
         }
         if (!workflowMediaService || typeof workflowMediaService.attachMediaItems !== "function") {
-            throw new Error("ElementMediaService requires workflowMediaService with an attachMediaItems method");
+            throw new ElementsError(
+                "ELEMENTS_CONFIGURATION_ERROR",
+                "ElementMediaService requires workflowMediaService with an attachMediaItems method",
+                { statusCode: 500, category: "SERVER_FAULT" }
+            );
         }
         if (!authService || typeof authService.verifyWorkflowOwnership !== "function") {
-            throw new Error("ElementMediaService requires authService with a verifyWorkflowOwnership method");
+            throw new ElementsError(
+                "ELEMENTS_CONFIGURATION_ERROR",
+                "ElementMediaService requires authService with a verifyWorkflowOwnership method",
+                { statusCode: 500, category: "SERVER_FAULT" }
+            );
         }
 
         this.db = db;
@@ -384,7 +400,7 @@ export class ElementMediaService {
     /**
      * Remove a reference image from an element.
      */
-    async removeReferenceMedia({ elementId, mediaId, userId, req = null }) {
+    async removeReferenceMedia({ elementId, mediaId, userId }) {
         const traceId = randomUUID();
         const start = Date.now();
 

@@ -1,20 +1,16 @@
 /**
  * System 6: Characters — Public Tools Gateway (#characters/tools)
  *
- * Governed by:
- * - docs/architecture/constitution/01_business_systems_architecture.md (System 6)
- * - docs/architecture/constitution/02_architecture_rules_and_agent_guardrails.md
- *
- * Exposes inter-system plain DTO operations for character context extraction,
- * entity existence validation, and sheet result attachment.
+ * Sealed surface exposing ONLY inter-system plain DTO operations for character
+ * context extraction & existence validation, composition-root service wiring,
+ * and canonical Characters*Error classes.
  */
 
 import * as identityTools from "#identity/tools";
 import { getWorkflowVisualMedia } from "#media/tools";
 import { CharacterRepository, characterRepository } from "../internal/db/CharacterRepository.js";
 import { CharacterService } from "../internal/services/CharacterService.js";
-import { CharacterMediaService, CHARACTER_MAX_DETAIL_MEDIA } from "../internal/services/CharacterMediaService.js";
-import { CharacterGenerationService } from "../internal/services/CharacterGenerationService.js";
+import { CharacterMediaService } from "../internal/services/CharacterMediaService.js";
 import {
     CharactersError,
     CharactersValidationError,
@@ -40,20 +36,6 @@ const CHARACTER_VISUAL_ROLE_PRIORITY = Object.freeze([
     "original",
 ]);
 const SHEET_ROLES = new Set(["sheet", "turnaround", "avatar"]);
-
-function extractValidHttpUrls(rawList) {
-    if (!Array.isArray(rawList)) return [];
-    const seen = new Set();
-    const out = [];
-    for (const item of rawList) {
-        const url = typeof item === "string" ? item.trim() : "";
-        if ((url.startsWith("http://") || url.startsWith("https://")) && !seen.has(url)) {
-            seen.add(url);
-            out.push(url);
-        }
-    }
-    return out;
-}
 
 /**
  * Retrieves normalized prompt context (traits, description, visual references from `workflow_media`)
@@ -143,31 +125,12 @@ export async function validateCharacterExists({ characterId, userId = null } = {
     return true;
 }
 
-// ── Facade & Service Re-exports ──────────────────────────────────────────────
+// ── Sealed Public Surface Exports ─────────────────────────────────────────────
 
 export {
     CharacterService,
     CharacterMediaService,
-    CharacterGenerationService,
-    CHARACTER_MAX_DETAIL_MEDIA,
     CharacterRepository,
-    characterRepository,
-    CharactersError,
-    CharactersValidationError,
-    CharactersNotFoundError,
-    CharactersConflictError,
-    CharactersUnauthorizedError,
-};
-
-export default {
-    getCharacterPromptContext,
-    validateCharacterExists,
-    CharacterService,
-    CharacterMediaService,
-    CharacterGenerationService,
-    CHARACTER_MAX_DETAIL_MEDIA,
-    CharacterRepository,
-    characterRepository,
     CharactersError,
     CharactersValidationError,
     CharactersNotFoundError,

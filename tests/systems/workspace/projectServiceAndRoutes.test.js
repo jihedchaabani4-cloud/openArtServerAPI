@@ -1,10 +1,12 @@
 import { describe, it, beforeEach, afterEach, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { ProjectService, ProjectReadService, ProjectRepository } from "#workspace/tools";
-import { getAll, create, update, remove, projectsRouter } from "#workspace/api";
+import { projectsRouter } from "#workspace/api";
+import { getAll, create, update, remove } from "../../../src/systems/workspace/internal/controllers/projectsController.js";
 import { MediaConflictError } from "#media/tools";
 import { projectService } from "../../../src/container.js";
-import { AppError, redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared";
+import { AppError } from "#shared";
+import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared/redis";
 import express from "express";
 import http from "node:http";
 import { supabase, supabaseAdmin } from "#shared/db/supabase.js";

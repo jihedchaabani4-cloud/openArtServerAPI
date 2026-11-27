@@ -1,20 +1,20 @@
 # apiOpenArt — Business Systems & Internal Services Reference (`SYSTEMS_ARCHITECTURE.md`)
 
 > **Canonical Location:** `docs/architecture/SYSTEMS_ARCHITECTURE.md`  
-> **Architecture:** 8 Self-Contained Business Systems + 1 Shared Technical Kernel (`#shared`) + 1 Main API Router (`src/api/`).
+> **Architecture:** 9 Self-Contained Business Systems + 1 Segmented Shared Technical Kernel (`#shared` & `#shared/redis`) + 1 Main API Router (`src/api/`).
 
 ---
 
 ## 1. How a Business System Is Structured
 
-Every Business System inside `src/systems/<system>/` is a strict black box. It owns its HTTP controllers, domain services, database repositories, and errors inside one folder.
+Every Business System inside `src/systems/<system>/` is a strict black box. It owns its HTTP controllers (if HTTP-facing), domain services, database repositories (if DB-backed), and errors inside one folder.
 
 ### Standard Internal Layers Inside Every System
-1. **`public/api.js` (Web Gateway):**
+1. **`public/api.js` (Web Gateway — HTTP-facing systems only):**
    - Exports the Express `Router` mounted by `src/api/routes.js`.
    - Wires route paths and middlewares (`requireAuth`, rate limiters, upload guards) to handlers in `internal/controllers/`.
 2. **`public/tools.js` (System Tools Interface):**
-   - Exports pure async functions that accept and return plain JSON-serializable DTOs.
+   - Exports pure async functions / DTO factories that accept and return plain JSON-serializable DTOs.
    - This is the **only** file other Business Systems may import (via `#<system>/tools`).
 3. **`internal/controllers/`:**
    - Extracts HTTP inputs (`req.body`, `req.params`, `req.query`, `req.user.id`), invokes `internal/services/`, and formats the HTTP response (`res.status(...).json(...)`).
@@ -30,22 +30,21 @@ Every Business System inside `src/systems/<system>/` is a strict black box. It o
 
 ---
 
-## 2. Detailed Specification of the 8 Business Systems
+## 2. Detailed Specification of the 9 Business Systems
 
 ### System 1: Generation & Workflows (`src/systems/generation/`)
 - **Import Aliases:** `#generation/api`, `#generation/tools`
-- **Role:** Central execution brain for all AI generation (images, videos, character sheets, element analysis) powered 100% by the ComfyUI-Style V3 Node Engine (`src/systems/generation/internal/v3/`).
+- **Role:** Generation API, 1x fail-fast domain intake guards, BullMQ queue dispatching (`workflow-jobs`), and background worker execution delegating DAG runs to System 9 (`#workflow-engine/tools`) as a pure black box.
 - **Directory Structure & Internal Services:**
-  - `public/api.js`: Mounts `/api/images/*`, `/api/video/*`, `/api/workflows/*`, and `/api/v2/workflows/*`.
-  - `public/tools.js`: Exposes `jobQueueService`, `GenerationService`, `GenerationRequestService`, `WorkflowService`, `WorkflowRepository`, `ExecutionEngine`, `JobExecutionContext`, `createJobExecutionContext`, and `configureGeneration`. Internal V3 engine modules remain private to System 1.
-  - `internal/controllers/`: `imageController.js`, `videoController.js`, `workflowsController.js`, `generationsQueryController.js`, `generationsMutationController.js`, `projectController.js`.
+  - `public/api.js`: Sealed gateway exporting ONLY the 4 mounted routers: `imagesRouter` (`/api/images/*`), `videoRouter` (`/api/video/*`), `workflowsRouter` (`/api/workflows/*`), and `v2WorkflowsRouter` (`/api/v2/workflows/*`).
+  - `public/tools.js`: Sealed 7-export surface exposing `configureGeneration`, `startGenerationWorker`, `WorkflowDispatchService`, `GenerationService`, `GenerationRequestService`, `WorkflowService`, and `WorkflowRepository`.
+  - `internal/controllers/`: `imageController.js`, `videoController.js`, `generationControllerHelpers.js`, `workflowsController.js`, `generationsQueryController.js`, `generationsMutationController.js`, `projectController.js`.
   - `internal/services/`:
-    - `GenerationService.js` & `GenerationRequestService.js`: Request preparation and parameter normalization.
-    - `WorkflowService.js`, `WorkflowMediaService.js`, `WorkflowAuthorizationService.js`, `mediaGuards.js`: Workflow state transitions and media attachment coordination.
-    - `jobQueueService.js`: BullMQ producer for `workflow-jobs`.
-  - `internal/v3/`:
-    - ComfyUI-Style Node Engine Core (`NodeRegistry.js`, `GraphCompiler.js`, `JobExecutionContext.js`, `WorkflowExecutor.js`, `ExecutionEngine.js`), 6 Base Nodes (`resolveRefsNode.js` [`base.resolve_references`], `llmNode.js` [`base.llm`], `extractNode.js` [`base.extract`], `imageGenerateNode.js` [`base.image_generate`], `videoGenerateNode.js` [`base.video_generate`], `saveMediaNode.js` [`base.save_media`]), 0 Custom Nodes, and 3 Declarative V3 Workflows (`imageGenerationV3.js`, `videoGenerationV3.js`, `characterSheetV3.js`).
-  - `internal/workers/`: `useCaseWorker.js` and `worker.js` (BullMQ consumers executing V3 runs via `ExecutionEngine` and settling holds/media).
+    - `GenerationService.js` & `GenerationRequestService.js`: 1x fail-fast intake gate, ownership checks, edit locks, placeholder persistence, and dispatch compensation.
+    - `imageEditContract.js`: In-place image edit validation, raw-URL ban, inline entity extraction, and single-source relight/angles prompt templates.
+    - `WorkflowDispatchService.js`: Consolidated BullMQ queue producer (`workflow-jobs`) with upfront `#workflow-engine/tools` `verifyInput()` validation and 3-attempt enqueue backoff.
+    - `WorkflowService.js`, `WorkflowMediaService.js`, `WorkflowAuthorizationService.js`, `mediaGuards.js`, `serviceAccessor.js`: Workflow state transitions, media-type guards, and DI wiring.
+  - `internal/workers/`: `useCaseWorker.js` (BullMQ consumer spawning one fresh `createWorkflowEngine({ adapters, onFailure })` per job + `createGenerationFailureHandler`) and `worker.js` (starts `useCaseWorker` + 5m Reservation Reaper).
   - `internal/db/`: `generationClient.js`, `BaseRepository.js`, `WorkflowRepository.js`.
 - **Owned Database Tables:** `workflows`, `workflow_runs`, `node_runs`, `generation_configs`.
 
@@ -87,8 +86,8 @@ Every Business System inside `src/systems/<system>/` is a strict black box. It o
 - **Import Aliases:** `#media/api`, `#media/tools`
 - **Role:** Exclusive owner of all media assets, declarative save types & quota policies, upload MIME/resolution inspection (`sharp`), cloud storage buckets (Supabase Storage / S3 / R2), and workflow-media linking.
 - **Directory Structure & Internal Services:**
-  - `public/api.js`: Mounts `/api/media/*` and `/api/assets/*`.
-  - `public/tools.js`: Exposes `MediaService`, `AssetUploadService`, `createMediaInWorkflow`, `markMediaStatus`, `markMediaFailed`, `failWorkflowPendingMedia`, `linkWorkflowMediaForCreatedRow`, `createUploadMiddleware`, `saveTypeRegistry`.
+  - `public/api.js`: Sealed gateway mounting `/api/media/*` (`mediaIngestRouter`), `/api/assets/*` (`assetsRouter`), and `createUploadMiddleware`.
+  - `public/tools.js`: Sealed surface exposing DTO media tools (`createPendingMedia`, `persistExternalMedia`, `completeMedia`, `markMediaFailed`, `linkMediaToEntity`, `getMediaUrls`, `getMediaById`, `getWorkflowVisualMedia`, `getWorkflowPrimaryMedia`, `deleteMedia`), composition/lifecycle services, upload policies, and typed `Media*Error` classes.
   - `internal/controllers/`: `mediaController.js`.
   - `internal/services/`: `MediaService.js`, `MediaLifecycleService.js`, `AssetUploadService.js`, `MediaUploadService.js`, `mediaMetadataResolver.js`, `saveTypes.js`, `serviceAccessor.js`.
   - `internal/ingestion/`: `MediaInspector.js` (`sharp`), `MediaMetadataExtractor.js`, `SourcePolicy.js` (SSRF protection), `SourceReader.js`, `SourceResolver.js`, `UploadPolicy.js`, `sizeLimitedStorage.js`.
@@ -116,14 +115,14 @@ Every Business System inside `src/systems/<system>/` is a strict black box. It o
 
 ### System 6: Characters (`src/systems/characters/`)
 - **Import Aliases:** `#characters/api`, `#characters/tools`
-- **Role:** Manages persistent AI character personas, traits, and multi-view reference media links. Delegates sheet/description generation to `#generation/tools` and media storage to `#media/tools`.
+- **Role:** Manages persistent AI character personas, traits, and multi-view reference media links. Dispatches character sheet generation via `WorkflowDispatchService` (`#generation/tools`) and delegates media storage to `#media/tools`.
 - **Directory Structure & Internal Services:**
-  - `public/api.js`: Mounts `/api/characters/*`.
-  - `public/tools.js`: Exposes `CharacterService`, `CharacterMediaService`, `CharacterGenerationService`, `getCharacterPromptContext`.
+  - `public/api.js`: Sealed gateway exporting ONLY `charactersRouter` (`/api/characters/*`).
+  - `public/tools.js`: Sealed surface exposing `CharacterService`, `CharacterMediaService`, `CharacterRepository`, `configureCharacters`, `getCharacterPromptContext`, `validateCharacterExists`, and canonical `Characters*Error` classes (`CharactersError`, `CharactersValidationError`, `CharactersNotFoundError`, `CharactersConflictError`, `CharactersUnauthorizedError`).
   - `internal/controllers/`: `characterController.js`.
   - `internal/services/`: `CharacterService.js`, `CharacterMediaService.js`, `CharacterGenerationService.js`, `serviceAccessor.js`.
   - `internal/db/`: `characterClient.js`, `CharacterRepository.js`.
-  - `internal/errors.js`: Unified character domain errors.
+  - `internal/errors.js`: `CharactersError`, `CharactersValidationError`, `CharactersNotFoundError`, `CharactersConflictError`, `CharactersUnauthorizedError`.
 - **Owned Database Tables:** `characters`, `character_media`.
 
 ---
@@ -132,13 +131,13 @@ Every Business System inside `src/systems/<system>/` is a strict black box. It o
 - **Import Aliases:** `#elements/api`, `#elements/tools`
 - **Role:** Manages reusable visual elements (outfits, props, styles, backgrounds), consistency guidelines, and `@Element` prompt token resolution.
 - **Directory Structure & Internal Services:**
-  - `public/api.js`: Mounts `/api/elements/*`.
-  - `public/tools.js`: Exposes `ElementService`, `ElementMediaService`, `ElementAnalysisService`, `PromptBuilderProService`, `extractElementTokens`, `stripElementTokens`, `getElementContextForPrompt`.
+  - `public/api.js`: Sealed gateway exporting ONLY `elementRoutes` (`/api/v2/elements/*`).
+  - `public/tools.js`: Sealed surface exposing `ElementService`, `ElementMediaService`, `ElementAnalysisService`, `ElementRepository`, `configureElements`, `getElementPromptContext`, `validateElementsExist`, and canonical `Elements*Error` classes (`ElementsError`, `ElementsValidationError`, `ElementsNotFoundError`, `ElementsConflictError`, `ElementsUnauthorizedError`).
   - `internal/controllers/`: `elementController.js`.
   - `internal/services/`: `ElementService.js`, `ElementMediaService.js`, `ElementAnalysisService.js`, `promptBuilderProService.js`, `serviceAccessor.js`.
   - `internal/middleware/`: `elementUploadGuard.js`.
   - `internal/db/`: `elementClient.js`, `ElementRepository.js`.
-  - `internal/errors.js`: Unified element domain errors.
+  - `internal/errors.js`: `ElementsError`, `ElementsValidationError`, `ElementsNotFoundError`, `ElementsConflictError`, `ElementsUnauthorizedError`.
 - **Owned Database Tables:** `elements`, `element_media`.
 
 ---
@@ -147,10 +146,25 @@ Every Business System inside `src/systems/<system>/` is a strict black box. It o
 - **Import Aliases:** `#workspace/api`, `#workspace/tools`
 - **Role:** Organizes user projects, cycle-safe hierarchical folder trees, and two-stage soft-delete trash/restore lifecycle.
 - **Directory Structure & Internal Services:**
-  - `public/api.js`: Mounts `/api/projects/*`, `/api/folders/*`, and `/api/trash/*`.
-  - `public/tools.js`: Exposes `ProjectService`, `ProjectReadService`, `FolderService`, `folderTree`, `TrashService`.
+  - `public/api.js`: Sealed gateway exporting ONLY the 4 mounted routers: `projectsRouter` (`/api/projects/*`), `foldersRouter` (`/api/folders/*`), `trashRouter` (`/api/trash/*`), and `workspaceBulkRouter` (`/api/workspace/*`).
+  - `public/tools.js`: Sealed surface exposing `ProjectService`, `ProjectReadService`, `FolderService`, `TrashService`, `ProjectRepository`, `FolderRepository`, `TrashRepository`, `trashRepository`, `configureWorkspace`, `assertProjectAccess`, `moveItemToTrash`, `FolderError`, and canonical `Workspace*Error` classes (`WorkspaceError`, `WorkspaceValidationError`, `WorkspaceNotFoundError`, `WorkspaceConflictError`, `WorkspaceUnauthorizedError`).
   - `internal/controllers/`: `projectsController.js`, `foldersController.js`, `trashController.js`.
   - `internal/services/`: `ProjectService.js`, `ProjectReadService.js`, `FolderService.js`, `folderTree.js`, `TrashService.js`, `serviceAccessor.js`.
   - `internal/db/`: `workspaceClient.js`, `ProjectRepository.js`, `FolderRepository.js`, `TrashRepository.js`.
-  - `internal/errors.js`: `FolderError`, `WorkspaceError`, `TrashError`.
+  - `internal/errors.js`: `WorkspaceError`, `WorkspaceValidationError`, `WorkspaceNotFoundError`, `WorkspaceConflictError`, `WorkspaceUnauthorizedError`, `FolderError`.
 - **Owned Database Tables:** `projects`, `folders`, `trash_items`.
+
+---
+
+### System 9: Workflow Engine (`src/systems/workflow-engine/`)
+- **Import Aliases:** `#workflow-engine/tools` *(no `public/api.js` — pure internal library system)*
+- **Role:** Standalone, 100% queue-free, Redis-free, DB-free, single-execution DAG runner usable anywhere (inside a BullMQ worker, directly inside an HTTP service, or in a standalone script). Mechanically protected by `Rule R18`.
+- **Directory Structure & Internal Modules:**
+  - `public/tools.js`: Sealed **11-export** black-box surface: `verifyInput`, `calculateCost`, `createWorkflowEngine`, `runWorkflow`, `configureWorkflowAdapters`, and the 6 neutral `Workflow*Error` classes.
+  - `internal/core/`: `NodeRegistry.js`, `GraphCompiler.js` (instance-scoped `WeakMap` plan cache), `JobExecutionContext.js`, `WorkflowExecutor.js` (reuses engine's `GraphCompiler`), `ExecutionEngine.js` (pure single-execution runner with pre-Wave-1 adapter validation and per-instance/per-run `onSuccess`/`onFailure` hooks).
+  - `internal/adapters.js`: 9-key adapter seam (`getCharacterPromptContext`, `getElementPromptContext`, `getMediaById`, `getMediaUrls`, `getWorkflowPrimaryMedia`, `completeMedia`, `persistExternalMedia`, `assertOwns`, `assertOwnsAny`) wired once in `src/container.js` and locked in non-test environments.
+  - `internal/nodes/`: `index.js` + 7 pure Base Nodes (`resolveRefsNode.js`, `llmNode.js`, `extractNode.js`, `textTemplateNode.js`, `imageGenerateNode.js`, `videoGenerateNode.js`, `saveMediaNode.js`, `mediaNodeHelpers.js`).
+  - `internal/skills/`: `index.js` + 7 active `SKILL.md` skills.
+  - `internal/workflows/`: `index.js` + 7 declarative V3 workflow blueprints (`imageGenerationV3.js`, `videoGenerationV3.js`, `characterSheetV3.js`, `imageEditV3.js`, `imageRelightV3.js`, `imageAnglesV3.js`, `imageRemoveBackgroundV3.js`).
+  - `internal/errors.js`: `WorkflowEngineError`, `WorkflowValidationError`, `WorkflowCompilationError`, `WorkflowUpstreamError`, `WorkflowNotFoundError`, `WorkflowSafetyError`.
+- **Owned Database Tables:** None (100% stateless and DB-free).

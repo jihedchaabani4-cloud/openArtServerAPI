@@ -5,7 +5,8 @@ import {
     createFailedOpsService,
     getCreditBalance,
 } from "#billing/tools";
-import { redisConnection, createLogger, envConfig } from "#shared";
+import { createLogger, envConfig } from "#shared";
+import { redisConnection } from "#shared/redis";
 
 const systemLogger = createLogger("system");
 
@@ -16,10 +17,10 @@ import {
     GenerationService,
     GenerationRequestService,
     WorkflowService,
-    ExecutionEngine,
-    jobQueueService,
+    WorkflowDispatchService,
     configureGeneration,
 } from "#generation/tools";
+import { configureWorkflowAdapters } from "#workflow-engine/tools";
 import {
     MediaRepository,
     WorkflowMediaRepository,
@@ -29,11 +30,34 @@ import {
     AssetUploadService,
     getStorageService,
     configureMedia,
+    getMediaById,
+    getMediaUrls,
+    getWorkflowPrimaryMedia,
+    completeMedia,
+    persistExternalMedia,
     markMediaFailed,
 } from "#media/tools";
-import { CharacterRepository, CharacterService, CharacterMediaService, configureCharacters } from "#characters/tools";
-import { ElementRepository, ElementService, ElementMediaService, ElementAnalysisService, configureElements } from "#elements/tools";
-import { configureOwnershipResolvers, configureIdentityHooks } from "#identity/tools";
+import {
+    CharacterRepository,
+    CharacterService,
+    CharacterMediaService,
+    getCharacterPromptContext,
+    configureCharacters,
+} from "#characters/tools";
+import {
+    ElementRepository,
+    ElementService,
+    ElementMediaService,
+    ElementAnalysisService,
+    getElementPromptContext,
+    configureElements,
+} from "#elements/tools";
+import {
+    configureOwnershipResolvers,
+    configureIdentityHooks,
+    assertOwns,
+    assertOwnsAny,
+} from "#identity/tools";
 
 // ─── Services ────────────────────────────────────────────────────────────────
 export const storageService = getStorageService();
@@ -361,37 +385,21 @@ configureIdentityHooks({
 export const mediaWorkflowLifecycleService = new MediaWorkflowLifecycleService({ db });
 configureBilling({ lifecycleService: mediaWorkflowLifecycleService });
 
-// ─── V3 Execution Engine & Job Queue Services ──────────────────────────────────
-export { jobQueueService };
-export const executionEngine = new ExecutionEngine({
-    jobQueueService,
+// ─── Standalone Workflow Engine Adapters & Generation Dispatcher ─────────────
+export const workflowAdapters = Object.freeze({
+    getCharacterPromptContext,
+    getElementPromptContext,
+    getMediaById,
+    getMediaUrls,
+    getWorkflowPrimaryMedia,
+    completeMedia,
+    persistExternalMedia,
+    assertOwns,
+    assertOwnsAny,
 });
+configureWorkflowAdapters(workflowAdapters);
 
-// External Media domain hook: marks pending media rows failed when a media-backed run
-// fails or crashes, keeping ExecutionEngine and useCaseWorker 100% decoupled from #media/tools.
-executionEngine.onFailure(async ({ input, serverContext, errorCode, errorMessage }) => {
-    const mediaIds = [...new Set([
-        ...(Array.isArray(serverContext?.mediaIds) ? serverContext.mediaIds : []),
-        ...(Array.isArray(input?.serverMediaIds) ? input.serverMediaIds : []),
-        input?.media_id,
-        input?.mediaId,
-        input?.pendingMediaId,
-        serverContext?.pendingMediaId,
-    ].filter((id) => typeof id === "string" && id.trim()))];
-
-    for (const mediaId of mediaIds) {
-        await markMediaFailed({
-            mediaId,
-            errorCode: errorCode || "V3_EXECUTION_FAILED",
-            errorMessage: errorMessage || "Generation failed. Please try again.",
-        }).catch((mediaErr) => {
-            systemLogger.warn(
-                { mediaId, errorCode, err: mediaErr?.message },
-                "[Container] External media failure hook encountered an error"
-            );
-        });
-    }
-});
+export const workflowDispatcher = new WorkflowDispatchService();
 
 
 // ─── Domain & Platform Services ──────────────────────────────────────────────
@@ -429,7 +437,7 @@ export const characterMediaService = new CharacterMediaService({
 export const characterService = new CharacterService({
     db,
     workflowService,
-    executionEngine,
+    workflowDispatcher,
     mediaService: characterMediaService,
 });
 
@@ -472,7 +480,7 @@ folderService.setPermanentDeleteWorkflow(({ workflowId, userId, req = null }) =>
 export const projectReadService = new ProjectReadService({ db, folderService });
 export const projectService = new ProjectService({ projectRepo: db.projects, mediaRepo: db.media });
 export const generationService = new GenerationService({ db });
-export const generationRequestService = new GenerationRequestService({ db, executionEngine, folderService });
+export const generationRequestService = new GenerationRequestService({ db, workflowDispatcher, folderService });
 configureCharacters({ characterService, characterMediaService, trashService });
 configureMedia({ db, assetUploadService, workflowService, storageService, mediaUploadService, mediaService });
 configureWorkspace({ trashService, projectService, folderService, projectReadService, generationService });
@@ -484,6 +492,8 @@ configureGeneration({
     characterService,
     elementService,
     trashService,
-    executionEngine,
+    workflowDispatcher,
+    markMediaFailed,
+    workflowAdapters,
     db,
 });

@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { LlmNode, characterSheetV3, getV3Workflow } from "../../../src/systems/generation/internal/v3/index.js";
+import { LlmNode } from "../../../src/systems/workflow-engine/internal/nodes/index.js";
+import { characterSheetV3, getV3Workflow } from "../../../src/systems/workflow-engine/internal/workflows/index.js";
 import { sanitizeClientError } from "../../../src/systems/generation/internal/errors.js";
 import { llmService } from "../../../src/systems/models/internal/services/LLMService.js";
 

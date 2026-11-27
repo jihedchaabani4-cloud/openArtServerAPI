@@ -8,7 +8,37 @@
  * - If workflow_id is provided, media must belong to that workflow
  * - If project_id is provided, media must belong to that project
  */
+import { inferMediaType, normalizeAllowedMediaTypes } from "#shared";
 import { getGenerationServices } from "./serviceAccessor.js";
+import { GenerationError, GenerationValidationError, GenerationNotFoundError } from "../errors.js";
+
+export function assertAllowedMediaType(mediaInfo, allowedMediaTypes, resourceId = null) {
+    const allowedSet =
+        allowedMediaTypes instanceof Set ? allowedMediaTypes : normalizeAllowedMediaTypes(allowedMediaTypes);
+    if (!allowedSet) return;
+    const info = typeof mediaInfo === "string" ? { url: mediaInfo } : (mediaInfo || {});
+    const detectedType = inferMediaType(info);
+    if (!allowedSet.has(detectedType)) {
+        const allowedList = [...allowedSet].join(", ");
+        throw new GenerationError({
+            code: "UNSUPPORTED_MEDIA_TYPE",
+            message: `Unsupported media type "${detectedType}"${resourceId ? ` for resource "${resourceId}"` : ""}. Allowed media types: ${allowedList}.`,
+            userMessage: `This workflow only supports ${allowedList} media.`,
+            status: 400,
+            statusCode: 400,
+            category: "USER_FAULT",
+            retryable: false,
+            billingAction: "REFUND_HOLD",
+            isInternal: false,
+            context: {
+                detectedType,
+                allowedMediaTypes: [...allowedSet],
+                ...(resourceId ? { resourceId } : {}),
+                ...(typeof info.url === "string" && info.url.trim() ? { url: info.url.trim() } : {}),
+            },
+        });
+    }
+}
 
 export async function assertMediaUsable({
     media_id,
@@ -18,9 +48,11 @@ export async function assertMediaUsable({
     const { allowProcessing = false } = options;
     const db = options.db || getGenerationServices().db;
     if (!db) {
-        const err = new Error("Database repository map is required for assertMediaUsable");
-        err.statusCode = 500;
-        throw err;
+        throw new GenerationError(
+            "GENERATION_CONFIGURATION_ERROR",
+            "Database repository map is required for assertMediaUsable",
+            { statusCode: 500 }
+        );
     }
 
     let targetMediaId = media_id;
@@ -30,16 +62,12 @@ export async function assertMediaUsable({
     }
 
     if (!targetMediaId) {
-        const err = new Error("media_id or workflow_id is required to resolve media");
-        err.statusCode = 400;
-        throw err;
+        throw new GenerationValidationError("media_id or workflow_id is required to resolve media");
     }
 
     const media = await db.media.findWithContext(targetMediaId);
     if (!media) {
-        const err = new Error("Media not found");
-        err.statusCode = 404;
-        throw err;
+        throw new GenerationNotFoundError("Media not found", { resourceId: targetMediaId });
     }
 
     const status = (media.status || "").toString().toLowerCase();
@@ -54,9 +82,10 @@ export async function assertMediaUsable({
 
     if (!isCompleted) {
         if (!(allowProcessing && isProcessing)) {
-            const err = new Error("Media is not completed yet");
-            err.statusCode = 403;
-            throw err;
+            throw new GenerationError("MEDIA_NOT_COMPLETED", "Media is not completed yet", {
+                statusCode: 403,
+                category: "USER_FAULT",
+            });
         }
     }
 
@@ -72,16 +101,18 @@ export async function assertMediaUsable({
             isLinked = links.some((row) => row.workflow_id === workflow_id);
         }
         if (!isLinked) {
-            const err = new Error("Media does not belong to this workflow");
-            err.statusCode = 403;
-            throw err;
+            throw new GenerationError("MEDIA_WORKFLOW_MISMATCH", "Media does not belong to this workflow", {
+                statusCode: 403,
+                category: "USER_FAULT",
+            });
         }
     }
 
     if (project_id && media.project_id !== project_id) {
-        const err = new Error("Media does not belong to this project");
-        err.statusCode = 403;
-        throw err;
+        throw new GenerationError("MEDIA_PROJECT_MISMATCH", "Media does not belong to this project", {
+            statusCode: 403,
+            category: "USER_FAULT",
+        });
     }
 
     return media;

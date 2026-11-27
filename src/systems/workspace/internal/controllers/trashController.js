@@ -11,11 +11,12 @@ export async function restoreWorkflow(req, res) {
     try {
         const trashService = getTrashService();
         if (!trashService) {
-            return res.status(500).json({ ok: false, message: "TrashService not initialized" });
+            controllerLogger.error({ event: "trash_controller.restoreWorkflow_uninitialized" }, "TrashService not initialized");
+            return res.status(500).json({ ok: false, errorCode: "INTERNAL_ERROR", message: "Internal server error" });
         }
         const result = await trashService.restore({
             workflowId: req.params.workflowId,
-            userId: req.user.id,
+            userId: req.user?.id,
         });
         return res.json({ ok: true, workflow_id: result.workflow_id, restored: true });
     } catch (err) {
@@ -36,11 +37,12 @@ export async function restoreAllWorkflows(req, res) {
 
         const trashService = getTrashService();
         if (!trashService) {
-            return res.status(500).json({ ok: false, message: "TrashService not initialized" });
+            controllerLogger.error({ event: "trash_controller.restoreAllWorkflows_uninitialized" }, "TrashService not initialized");
+            return res.status(500).json({ ok: false, errorCode: "INTERNAL_ERROR", message: "Internal server error" });
         }
 
         const result = await trashService.restoreAll({
-            userId: req.user.id,
+            userId: req.user?.id,
             projectId,
             workflowIds,
         });
@@ -66,12 +68,13 @@ export async function bulkDeleteWorkspace(req, res) {
     try {
         const trashService = getTrashService();
         if (!trashService) {
-            return res.status(500).json({ ok: false, message: "TrashService not initialized" });
+            controllerLogger.error({ event: "trash_controller.bulkDeleteWorkspace_uninitialized" }, "TrashService not initialized");
+            return res.status(500).json({ ok: false, errorCode: "INTERNAL_ERROR", message: "Internal server error" });
         }
 
         const body = req.body && typeof req.body === "object" ? req.body : {};
         const result = await trashService.bulkDeleteWorkspace({
-            userId: req.user.id,
+            userId: req.user?.id,
             folder_ids: body.folder_ids,
             folderIds: body.folderIds,
             workflow_ids: body.workflow_ids,
@@ -98,12 +101,13 @@ export async function deleteTrashed(req, res) {
     try {
         const trashService = getTrashService();
         if (!trashService) {
-            return res.status(500).json({ ok: false, message: "TrashService not initialized" });
+            controllerLogger.error({ event: "trash_controller.deleteTrashed_uninitialized" }, "TrashService not initialized");
+            return res.status(500).json({ ok: false, errorCode: "INTERNAL_ERROR", message: "Internal server error" });
         }
 
         const body = req.body && typeof req.body === "object" ? req.body : {};
         const result = await trashService.deleteTrashed({
-            userId: req.user.id,
+            userId: req.user?.id,
             workflow_ids: body.workflow_ids,
             workflowIds: body.workflowIds,
             folder_ids: body.folder_ids,

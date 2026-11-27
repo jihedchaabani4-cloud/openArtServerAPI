@@ -1,0 +1,43 @@
+import { NodeRegistry } from "../core/NodeRegistry.js";
+import { ResolveRefsNode } from "./base/resolveRefsNode.js";
+import { LlmNode, LLM_SKILLS_REGISTRY, buildUnifiedLlmInstruction } from "./base/llmNode.js";
+import { ExtractNode } from "./base/extractNode.js";
+import { TextTemplateNode, renderTextTemplate } from "./base/textTemplateNode.js";
+import { ImageGenerateNode } from "./base/imageGenerateNode.js";
+import { VideoGenerateNode } from "./base/videoGenerateNode.js";
+import { SaveMediaNode } from "./base/saveMediaNode.js";
+
+export const V3_BASE_NODES = Object.freeze([
+  ResolveRefsNode,
+  LlmNode,
+  ExtractNode,
+  TextTemplateNode,
+  ImageGenerateNode,
+  VideoGenerateNode,
+  SaveMediaNode,
+]);
+
+export const V3_CUSTOM_NODES = Object.freeze([]);
+
+export const ALL_V3_NODES = Object.freeze([...V3_BASE_NODES]);
+
+export function createDefaultV3NodeRegistry(extraNodes = []) {
+  const reg = new NodeRegistry(ALL_V3_NODES);
+  if (Array.isArray(extraNodes) && extraNodes.length > 0) {
+    reg.registerAll(extraNodes);
+  }
+  return reg.freeze();
+}
+
+export {
+  ResolveRefsNode,
+  LlmNode,
+  ExtractNode,
+  TextTemplateNode,
+  renderTextTemplate,
+  LLM_SKILLS_REGISTRY,
+  buildUnifiedLlmInstruction,
+  ImageGenerateNode,
+  VideoGenerateNode,
+  SaveMediaNode,
+};

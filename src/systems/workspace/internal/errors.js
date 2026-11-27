@@ -106,14 +106,13 @@ export class WorkspaceUnauthorizedError extends WorkspaceError {
     }
 }
 
-import { FolderError } from "./services/FolderService.js";
-export { FolderError };
-
-export default {
-    WorkspaceError,
-    WorkspaceValidationError,
-    WorkspaceNotFoundError,
-    WorkspaceConflictError,
-    WorkspaceUnauthorizedError,
-    FolderError,
-};
+/**
+ * Domain error class for folder tree & lifecycle validations with structured status and error codes.
+ */
+export class FolderError extends AppError {
+    constructor(message, statusCode = 400, errorCode = "FOLDER_ERROR") {
+        super(message, statusCode);
+        this.name = "FolderError";
+        this.errorCode = errorCode;
+    }
+}

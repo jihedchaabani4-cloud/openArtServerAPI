@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { indexById, indexChildren, getAncestorIds, getDepth, getSubtreeHeight, collectDescendantIds, wouldCreateCycle, wouldExceedDepth, depthForNewChild, FolderService, FolderError, FolderRepository } from "#workspace/tools";
+import { FolderService, FolderError, FolderRepository } from "#workspace/tools";
+import { indexById, indexChildren, getAncestorIds, getDepth, getSubtreeHeight, collectDescendantIds, wouldCreateCycle, wouldExceedDepth, depthForNewChild } from "../../../src/systems/workspace/internal/services/folderTree.js";
 import { MediaConflictError } from "#media/tools";
 import express from "express";
 import http from "node:http";
@@ -8,7 +9,7 @@ import apiRouter from "../../../src/api/routes.js";
 import { db, folderService } from "../../../src/container.js";
 import { supabase } from "#shared/db/supabase.js";
 import { setLimiterForTest, resetLimitersForTest } from "../../../src/systems/identity/internal/middleware/rateLimit.js";
-import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared";
+import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared/redis";
 
 // ─── Source: folderTree.test.js ───
 {

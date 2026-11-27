@@ -2,7 +2,7 @@
  * @owns System 6: Characters
  * CharacterGenerationService
  * Dedicated Domain Service owning character AI generation orchestration:
- * - ExecutionEngine job dispatching for character 3-view turnaround sheet ("character-sheet-v3")
+ * - WorkflowDispatchService job dispatching for character 3-view turnaround sheet ("character-sheet-v3")
  * - LLM prompt generation for Haute-Couture character concepts
  */
 
@@ -11,6 +11,7 @@ import { executeLLM } from "#models/tools";
 import { crudOperationLog, CrudServiceError } from "#shared";
 import { createMediaInWorkflow } from "#media/tools";
 import { toMediaIdList } from "#identity/tools";
+import { CharactersError } from "../errors.js";
 
 const CHARACTER_GENERATOR_SYSTEM_PROMPT = `
 You are an elite haute-couture AI Art Director and Master Character Designer for high-budget cinematic films and editorial fashion houses.
@@ -35,19 +36,12 @@ Do NOT include any markdown code blocks or extra text outside the JSON object.
 export class CharacterGenerationService {
     /**
      * @param {Object} deps
-     * @param {Object} deps.db                - Repository map (db.workflows, db.characters, db.media)
-     * @param {Object} [deps.executionEngine] - ExecutionEngine instance for credit check & job queuing
+     * @param {Object} deps.db                   - Repository map (db.workflows, db.characters, db.media)
+     * @param {Object} [deps.workflowDispatcher] - WorkflowDispatchService instance for job queueing
      */
-    constructor({ db, executionEngine, useCaseService } = {}) {
+    constructor({ db, workflowDispatcher } = {}) {
         this.db = db;
-        this.executionEngine = executionEngine || useCaseService || null;
-    }
-
-    /**
-     * Allows setting/updating executionEngine after initialization
-     */
-    setExecutionEngine(executionEngine) {
-        this.executionEngine = executionEngine;
+        this.workflowDispatcher = workflowDispatcher || null;
     }
 
     /**
@@ -62,6 +56,7 @@ export class CharacterGenerationService {
         crudOperationLog({ traceId, operation: "enqueueSheetGeneration", characterId, workflowId: resolvedWorkflowId });
 
         let placeholderMedia = null;
+        let placeholderCompensated = false;
         try {
             if (!characterId && !workflowId) {
                 throw new CrudServiceError("characterId or workflowId is required", {
@@ -95,7 +90,11 @@ export class CharacterGenerationService {
                     operation: "enqueueSheetGeneration:linkWorkflowMedia",
                 });
                 if (!linkResult) {
-                    throw new Error(`Failed to link placeholder media ${placeholderMedia?.id} to workflow ${resolvedWorkflowId}`);
+                    throw new CharactersError(
+                        "CHARACTERS_MEDIA_LINK_FAILED",
+                        `Failed to link placeholder media ${placeholderMedia?.id} to workflow ${resolvedWorkflowId}`,
+                        { context: { mediaId: placeholderMedia?.id, workflowId: resolvedWorkflowId } }
+                    );
                 }
                 const targetCharId = characterId || resolvedWorkflowId;
                 if (placeholderMedia?.id && targetCharId && this.db?.characters) {
@@ -116,6 +115,7 @@ export class CharacterGenerationService {
                 }
             } catch (mediaErr) {
                 if (placeholderMedia?.id && this.db?.media) {
+                    placeholderCompensated = true;
                     await this.db.media.updateMedia(placeholderMedia.id, {
                         status: "failed",
                         error_message: mediaErr.message || "Failed to link workflow media",
@@ -149,21 +149,20 @@ export class CharacterGenerationService {
                 verify_ownership: false,
             };
 
-            // 3. Dispatch ExecutionEngine job with credit reservation
+            // 3. Dispatch workflow job via WorkflowDispatchService
             let taskId = null;
             let hasSufficientCredits = true;
             let creditErrorMsg = null;
 
-            if (this.executionEngine) {
+            if (this.workflowDispatcher) {
                 const executionId = randomUUID();
                 try {
-                    const prepared = await this.executionEngine.launch({
+                    const prepared = await this.workflowDispatcher.dispatch({
                         useCaseId: "character-sheet-v3",
                         input: runtimeInput,
                         userId,
                         executionId,
                         traceId,
-                        projectId,
                         serverContext: {
                             workflowId: resolvedWorkflowId,
                             characterId,
@@ -189,14 +188,16 @@ export class CharacterGenerationService {
                         hasSufficientCredits = false;
                         creditErrorMsg = serviceErr.message;
                         if (placeholderMedia?.id && this.db?.media) {
+                            placeholderCompensated = true;
                             await this.db.media.updateMedia(placeholderMedia.id, {
                                 status: "saved",
                                 error_message: creditErrorMsg,
                             }).catch(() => {});
                         }
                     } else {
-                        // Queue dispatch failure or unexpected launch error: fail closed
+                        // Queue dispatch failure or unexpected dispatch error: fail closed once
                         if (placeholderMedia?.id && this.db?.media) {
+                            placeholderCompensated = true;
                             await this.db.media.updateMedia(placeholderMedia.id, {
                                 status: "failed",
                                 error_message: serviceErr.message,
@@ -228,7 +229,7 @@ export class CharacterGenerationService {
                 placeholderMedia,
             };
         } catch (err) {
-            if (placeholderMedia?.id && this.db?.media) {
+            if (!placeholderCompensated && placeholderMedia?.id && this.db?.media) {
                 await this.db.media.updateMedia(placeholderMedia.id, {
                     status: "failed",
                     error_message: err.message || "Failed to prepare character sheet generation",

@@ -17,7 +17,38 @@
 import { randomUUID } from "node:crypto";
 import { calculateAspectRatio, AppError, createLogger, envConfig } from "#shared";
 import { toAssetDto } from "./assetDto.js";
-import { indexChildren, collectDescendantIds } from "#workspace/tools";
+import { GenerationNotFoundError } from "../errors.js";
+
+function indexFolderChildren(folders = []) {
+    const map = new Map();
+    for (const folder of folders) {
+        if (!folder) continue;
+        const parentKey = folder.parentId ?? folder.parent_id ?? null;
+        const list = map.get(parentKey);
+        if (list) {
+            list.push(folder);
+        } else {
+            map.set(parentKey, [folder]);
+        }
+    }
+    return map;
+}
+
+function collectFolderDescendantIds(children, folderId) {
+    const result = new Set();
+    const walk = (id) => {
+        if (!id || result.has(id)) return;
+        result.add(id);
+        const directChildren = children.get(id);
+        if (directChildren) {
+            for (const child of directChildren) {
+                walk(child.id);
+            }
+        }
+    };
+    if (folderId) walk(folderId);
+    return result;
+}
 
 function isModelHidden(_name) {
     return false;
@@ -269,17 +300,13 @@ export class GenerationService {
 
         const project = await this.db.projects.findById(projectId);
         if (!project) {
-            const err = new Error("Project not found");
-            err.statusCode = 404;
-            throw err;
+            throw new GenerationNotFoundError("Project not found", { resourceId: projectId });
         }
 
         const isOwner = project.user_id === userId;
         if (!isOwner) {
             log("getAssets", "foreign_denied", { traceId, userId, resourceId: projectId, resourceType: "project" });
-            const err = new Error("Project not found");
-            err.statusCode = 404;
-            throw err;
+            throw new GenerationNotFoundError("Project not found", { resourceId: projectId });
         }
 
         const items = await this.db.media.findByProjectPaginated(projectId, {
@@ -339,16 +366,12 @@ export class GenerationService {
 
         const projectIds = await this.#getOwnedProjectIds(userId);
         if (projectIds.length === 0) {
-            const err = new Error("Workflow not found");
-            err.statusCode = 404;
-            throw err;
+            throw new GenerationNotFoundError("Workflow not found", { resourceId: workflowId });
         }
 
         const workflow = await this.db.workflows.findByIdInProjects(workflowId, projectIds);
         if (!workflow) {
-            const err = new Error("Workflow not found");
-            err.statusCode = 404;
-            throw err;
+            throw new GenerationNotFoundError("Workflow not found", { resourceId: workflowId });
         }
 
         const [entry] = await this.#buildLibraryPayload([workflow]);
@@ -368,15 +391,11 @@ export class GenerationService {
         if (userId) {
             const projectIds = await this.#getOwnedProjectIds(userId);
             if (projectIds.length === 0) {
-                const err = new Error("Workflow not found");
-                err.statusCode = 404;
-                throw err;
+                throw new GenerationNotFoundError("Workflow not found", { resourceId: workflowId });
             }
             const workflow = await this.db.workflows.findByIdInProjects(workflowId, projectIds);
             if (!workflow) {
-                const err = new Error("Workflow not found");
-                err.statusCode = 404;
-                throw err;
+                throw new GenerationNotFoundError("Workflow not found", { resourceId: workflowId });
             }
         }
 
@@ -458,8 +477,8 @@ export class GenerationService {
                 const shouldIncludeDescendants = includeDescendants === true || includeDescendants === "true";
                 if (shouldIncludeDescendants) {
                     const allFolders = await this.db.folders.listByProject(projectId, userId);
-                    const childrenMap = indexChildren(allFolders || []);
-                    const descendantSet = collectDescendantIds(childrenMap, trimmed);
+                    const childrenMap = indexFolderChildren(allFolders || []);
+                    const descendantSet = collectFolderDescendantIds(childrenMap, trimmed);
                     targetFolderIds = Array.from(descendantSet);
                 } else {
                     targetFolderIds = [trimmed];

@@ -8,7 +8,7 @@ import { toPublicPackage, PUBLIC_PACKAGE_FIELDS } from "../../../src/systems/bil
 import { walletService } from "../../../src/container.js";
 import { supabase } from "#shared/db/supabase.js";
 import { WalletError } from "#billing/tools";
-import { redisConnection, workerRedisConnection } from "#shared";
+import { redisConnection, workerRedisConnection } from "#shared/redis";
 
 // ─── Source: paymentsWebhookBoundary.test.js ───
 {

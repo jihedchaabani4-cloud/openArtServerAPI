@@ -1,11 +1,11 @@
 import { describe, it, before, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
 import { LLMService, llmService } from "../../../src/systems/models/internal/services/LLMService.js";
-import { LlmNode } from "../../../src/systems/generation/internal/v3/index.js";
+import { LlmNode } from "../../../src/systems/workflow-engine/internal/nodes/index.js";
 import { ElementAnalysisService } from "#elements/tools";
-import { createElement, analyzeElement } from "#elements/api";
+import { createElement, analyzeElement } from "../../../src/systems/elements/internal/controllers/elementController.js";
 import { elementService, characterService, db } from "../../../src/container.js";
-import { redisConnection, workerRedisConnection } from "#shared";
+import { redisConnection, workerRedisConnection } from "#shared/redis";
 
 // ─── Source: elementAnalysisBillingBoundary.test.js ───
 {

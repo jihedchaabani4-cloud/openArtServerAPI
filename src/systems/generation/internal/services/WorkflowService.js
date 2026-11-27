@@ -21,7 +21,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { crudOperationLog, CrudServiceError, AppError, createLogger } from "#shared";
+import { crudOperationLog, CrudServiceError, AppError, createLogger, safePublicRouteError } from "#shared";
 import { toAssetDto } from "./assetDto.js";
 import { WorkflowAuthorizationService } from "./WorkflowAuthorizationService.js";
 import { WorkflowMediaService } from "./WorkflowMediaService.js";
@@ -438,7 +438,7 @@ export class WorkflowService {
                 results: results.map((r, i) => ({
                     id: ownedIds[i],
                     status: r.status,
-                    ...(r.status === "fulfilled" ? r.value : { error: r.reason?.message }),
+                    ...(r.status === "fulfilled" ? r.value : { error: safePublicRouteError(r.reason).publicMessage }),
                 })),
             };
         } catch (err) {

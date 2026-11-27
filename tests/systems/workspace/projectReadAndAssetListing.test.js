@@ -12,7 +12,7 @@ import http from "node:http";
 import apiRouter from "../../../src/api/routes.js";
 import { db, createOwnershipResolvers } from "../../../src/container.js";
 const setDb = (targetDb) => configureOwnershipResolvers(createOwnershipResolvers(targetDb));
-import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared";
+import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared/redis";
 
 // ─── Source: projectReadServiceFallback.test.js ───
 {

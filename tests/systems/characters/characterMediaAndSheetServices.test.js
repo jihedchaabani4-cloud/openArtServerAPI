@@ -8,7 +8,9 @@ import { InMemoryWalletService } from "../../helpers/inMemoryWalletService.js";
 import { WorkflowMediaService } from "../../../src/systems/generation/internal/services/WorkflowMediaService.js";
 import { ElementMediaService, ElementService } from "#elements/tools";
 import { supabase } from "#shared/db/supabase.js";
-import { setDb } from "#identity/tools";
+import { configureOwnershipResolvers } from "#identity/tools";
+import { createOwnershipResolvers } from "../../../src/container.js";
+const setDb = (targetDb) => configureOwnershipResolvers(createOwnershipResolvers(targetDb));
 import { BillingConfigurationError } from "#billing/tools";
 
 // ─── Source: characterMediaServiceMigrated.test.js ───

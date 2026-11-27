@@ -49,9 +49,4 @@ workspaceRouter.use("/projects", projectsRouter);
 workspaceRouter.use("/folders", foldersRouter);
 workspaceRouter.use("/trash", trashRouter);
 
-export const { getAll, create, update, remove, listAssets } = projectsController;
-export const { createProjectFolder, updateFolder, deleteFolder } = foldersController;
-export const { restoreWorkflow, restoreAllWorkflows, bulkDeleteWorkspace, deleteTrashed } = trashController;
-export { projectsController, foldersController, trashController };
-
-export default workspaceRouter;
+export const { getAll, create, update, remove } = projectsController;

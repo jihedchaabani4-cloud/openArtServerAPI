@@ -189,12 +189,7 @@ mediaIngestRouter.use(requireAuth);
 mediaIngestRouter.post("/ingest", upload, handleMediaIngest);
 
 export {
-    handleMediaIngest,
-    handleAssetUpload,
     handleDeleteMedia,
-    handleMoveToFolder,
     handleGetMedia,
 };
-
-export default mediaRouter;
 

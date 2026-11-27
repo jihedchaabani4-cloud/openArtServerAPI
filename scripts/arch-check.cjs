@@ -207,7 +207,10 @@ function checkRuleR12(f) {
 
   const hits = [];
   for (const s of specifiers(f)) {
-    if (/@supabase\/|supabase|@prisma\/|prisma|\bpg\b|mongoose|@aws-sdk\//i.test(s.spec)) {
+    if (
+      /@supabase\/|supabase|@prisma\/|prisma|\bpg\b|mongoose|@aws-sdk\//i.test(s.spec) ||
+      /(^|\/)(?!authClient)[a-z]+Client(\.c?js)?$/i.test(s.spec)
+    ) {
       hits.push({ line: s.line, text: s.text });
     }
   }
@@ -445,6 +448,90 @@ function findImportCycles(files, packageImports = null) {
   return cycles;
 }
 
+function findSystemImportCycles(files) {
+  const pkgPath = path.join(ROOT, 'package.json');
+  let pkg = {};
+  try {
+    pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')).imports || {};
+  } catch {}
+
+  function resolveSystem(fileRel, spec) {
+    if (spec.startsWith('#')) {
+      const target = pkg[spec];
+      if (typeof target === 'string') {
+        const m = target.replace(/^\.\//, '').match(/^src\/systems\/([^/]+)\//);
+        if (m) return m[1];
+      }
+      return null;
+    }
+    if (spec.startsWith('.')) {
+      const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(fileRel), spec));
+      const m = resolved.match(/^src\/systems\/([^/]+)\//);
+      if (m) return m[1];
+    }
+    return null;
+  }
+
+  const edges = new Map();
+  for (const f of files) {
+    const srcMatch = f.rel.match(/^src\/systems\/([^/]+)\//);
+    if (!srcMatch) continue;
+    const srcSys = srcMatch[1];
+    if (!edges.has(srcSys)) edges.set(srcSys, new Set());
+    for (const s of specifiers(f)) {
+      if (/import\s*\(/.test(s.text)) continue;
+      const targetSys = resolveSystem(f.rel, s.spec);
+      if (targetSys && targetSys !== srcSys) {
+        edges.get(srcSys).add(targetSys);
+      }
+    }
+  }
+
+  let idx = 0;
+  const stack = [];
+  const onStack = new Set();
+  const indices = new Map();
+  const lowlinks = new Map();
+  const cycles = [];
+
+  function strongConnect(v) {
+    indices.set(v, idx);
+    lowlinks.set(v, idx);
+    idx++;
+    stack.push(v);
+    onStack.add(v);
+
+    for (const w of edges.get(v) || []) {
+      if (!indices.has(w)) {
+        strongConnect(w);
+        lowlinks.set(v, Math.min(lowlinks.get(v), lowlinks.get(w)));
+      } else if (onStack.has(w)) {
+        lowlinks.set(v, Math.min(lowlinks.get(v), indices.get(w)));
+      }
+    }
+
+    if (lowlinks.get(v) === indices.get(v)) {
+      const component = [];
+      let w;
+      do {
+        w = stack.pop();
+        onStack.delete(w);
+        component.push(w);
+      } while (w !== v);
+      if (component.length > 1) {
+        cycles.push(component);
+      }
+    }
+  }
+
+  for (const v of edges.keys()) {
+    if (!indices.has(v)) {
+      strongConnect(v);
+    }
+  }
+  return cycles;
+}
+
 const grep = (file, regex) => {
   const hits = [];
   file.lines.forEach((l, i) => {
@@ -458,7 +545,7 @@ const RULES = [
     id: 'R1',
     desc: 'routes/ and controllers/ must not import repositories, db, supabase or StorageService',
     run(f) {
-      if (!/^(src\/)?(routes|controllers)\//.test(f.rel)) return [];
+      if (!/^(src\/)?(routes|controllers)\/|^src\/systems\/[^/]+\/internal\/controllers\//.test(f.rel)) return [];
       return specifiers(f).filter((s) =>
         /(^|\/)(db|repositories|repository)(\/|$)|Repository(\.c?js)?$|(^|\/)supabase(\/|$)|@supabase\/|StorageService/i.test(s.spec));
     },
@@ -565,7 +652,7 @@ function collect() {
   const mig = migrationViolations();
   violations.push(...mig.violations);
 
-  // R14: Static import cycles across codebase
+  // R14: Static import cycles across codebase (file-level AND system-level)
   const cycles = findImportCycles(files);
   for (const cycle of cycles) {
     const sorted = [...cycle].sort();
@@ -577,6 +664,16 @@ function collect() {
         detail: `${fileRel}:1  Import cycle: ${cycleSummary.slice(0, 100)}...`,
       });
     }
+  }
+  const sysCycles = findSystemImportCycles(files);
+  for (const cycle of sysCycles) {
+    const sorted = [...cycle].sort();
+    const cycleSummary = sorted.join(' <-> ');
+    violations.push({
+      rule: 'R14',
+      key: `R14|systems:${cycleSummary}`,
+      detail: `src/systems/${sorted[0]}:1  System-level import cycle: ${cycleSummary}`,
+    });
   }
 
   // R15: package.json #imports validation

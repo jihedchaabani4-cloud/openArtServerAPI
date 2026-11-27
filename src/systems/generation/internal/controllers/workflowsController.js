@@ -1,7 +1,6 @@
 import { getGenerationServices } from "../services/serviceAccessor.js";
 import { WorkflowService } from "../services/WorkflowService.js";
-import { promptService } from "#models/tools";
-import { createLogger } from "#shared";
+import { createLogger, safePublicRouteError } from "#shared";
 
 const controllerLogger = createLogger("controller");
 
@@ -29,10 +28,11 @@ export const patchWorkflow = async (req, res) => {
         return res.json({ ok: true, workflow: result.workflow, display_name: result.displayName });
     } catch (err) {
         controllerLogger.error({ workflowId: cleanId, err }, `patchWorkflow ${cleanId} failed: ${err.message}`);
-        return res.status(err.statusCode || 500).json({
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        return res.status(statusCode).json({
             ok: false,
-            code: err.code || err.errorCode,
-            message: err.message,
+            code: statusCode >= 500 ? "INTERNAL_ERROR" : (err.code || err.errorCode || errorCode),
+            message: publicMessage,
         });
     }
 };
@@ -55,12 +55,12 @@ export const deleteWorkflow = async (req, res) => {
             ...(result.trashed ? { trashed: true } : {}),
         });
     } catch (err) {
-        const statusCode = err.statusCode || 500;
-        const errorCode = err.errorCode || err.code;
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        const resolvedCode = statusCode >= 500 ? "INTERNAL_ERROR" : (err.errorCode || err.code || errorCode);
         return res.status(statusCode).json({
             ok: false,
-            ...(errorCode ? { errorCode } : {}),
-            message: err.message,
+            ...(resolvedCode ? { errorCode: resolvedCode } : {}),
+            message: publicMessage,
         });
     }
 };
@@ -88,12 +88,12 @@ export const bulkDeleteWorkflows = async (req, res) => {
             ...(result.trashed ? { trashed: true } : {}),
         });
     } catch (err) {
-        const statusCode = err.statusCode || 500;
-        const errorCode = err.errorCode || err.code;
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        const resolvedCode = statusCode >= 500 ? "INTERNAL_ERROR" : (err.errorCode || err.code || errorCode);
         return res.status(statusCode).json({
             ok: false,
-            ...(errorCode ? { errorCode } : {}),
-            message: err.message,
+            ...(resolvedCode ? { errorCode: resolvedCode } : {}),
+            message: publicMessage,
         });
     }
 };
@@ -109,7 +109,8 @@ export const toggleLike = async (req, res) => {
         return res.json({ ok: true, favorited: result.favorited });
     } catch (err) {
         controllerLogger.error({ workflowId: req.params.id, err }, `Error toggling like for workflow ${req.params.id}: ${err.message}`);
-        return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+        const { statusCode, publicMessage } = safePublicRouteError(err);
+        return res.status(statusCode).json({ ok: false, message: publicMessage });
     }
 };
 
@@ -136,7 +137,8 @@ export const bulkToggleLike = async (req, res) => {
         });
     } catch (err) {
         controllerLogger.error({ err }, `Bulk like error: ${err.message}`);
-        return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+        const { statusCode, publicMessage } = safePublicRouteError(err);
+        return res.status(statusCode).json({ ok: false, message: publicMessage });
     }
 };
 
@@ -166,7 +168,8 @@ export const setPrimaryMedia = async (req, res) => {
         });
     } catch (err) {
         controllerLogger.error({ workflowId: req.params.id, err }, `Error setting primary media for workflow ${req.params.id}: ${err.message}`);
-        return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+        const { statusCode, publicMessage } = safePublicRouteError(err);
+        return res.status(statusCode).json({ ok: false, message: publicMessage });
     }
 };
 
@@ -181,7 +184,8 @@ export const getWorkflowByMedia = async (req, res) => {
         return res.json({ ok: true, workflow: result.workflow, items: result.items });
     } catch (err) {
         controllerLogger.error({ mediaId: req.params.media_id, err }, `Error fetching workflow by media: ${err.message}`);
-        return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+        const { statusCode, publicMessage } = safePublicRouteError(err);
+        return res.status(statusCode).json({ ok: false, message: publicMessage });
     }
 };
 
@@ -203,7 +207,8 @@ export const detachMediaToNewWorkflow = async (req, res) => {
         return res.json({ ok: true, workflow: result.workflow });
     } catch (err) {
         controllerLogger.error({ mediaId: req.body?.media_id, err }, `Error detaching media to new workflow: ${err.message}`);
-        return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+        const { statusCode, publicMessage } = safePublicRouteError(err);
+        return res.status(statusCode).json({ ok: false, message: publicMessage });
     }
 };
 
@@ -225,31 +230,13 @@ export const deleteMedia = async (req, res) => {
         });
     } catch (err) {
         controllerLogger.error({ mediaId: req.params.media_id, err }, `Error deleting media ${req.params.media_id}: ${err.message}`);
-        const statusCode = err.statusCode || 500;
-        const errorCode = err.errorCode || err.code;
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        const resolvedCode = statusCode >= 500 ? "INTERNAL_ERROR" : (err.errorCode || err.code || errorCode);
         return res.status(statusCode).json({
             ok: false,
-            ...(errorCode ? { errorCode } : {}),
-            message: err.message,
+            ...(resolvedCode ? { errorCode: resolvedCode } : {}),
+            message: publicMessage,
         });
-    }
-};
-
-// ── POST /api/prompt/optimize ─────────────────────────────────────────────────
-export const optimizePrompt = async (req, res) => {
-    const { prompt, mode = "image" } = req.body || {};
-    if (!prompt?.trim()) {
-        return res.status(400).json({ ok: false, message: "prompt is required" });
-    }
-    try {
-        const result = await promptService.optimizePrompt(prompt.trim(), {
-            mode,
-            userId: req.user?.id,
-        });
-        return res.json({ ok: true, ...result });
-    } catch (err) {
-        controllerLogger.error({ err }, `optimizePrompt failed: ${err.message}`);
-        return res.status(500).json({ ok: false, message: "Failed to optimize prompt" });
     }
 };
 

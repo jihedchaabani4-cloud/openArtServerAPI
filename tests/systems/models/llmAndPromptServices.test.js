@@ -1,8 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { llmService, executeLLM, ALLOWED_INTERNAL_REASONS } from "#models/tools";
-import { LLMService } from "../../../src/systems/models/internal/services/LLMService.js";
-import { PromptService } from "../../../src/systems/models/internal/services/PromptService.js";
+import { executeLLM } from "#models/tools";
+import { LLMService, llmService, ALLOWED_INTERNAL_REASONS } from "../../../src/systems/models/internal/services/LLMService.js";
 import { run as runGoogle } from "../../../src/systems/models/internal/runtime/google/runner.js";
 import { LlmNode } from "../../../src/systems/generation/internal/v3/index.js";
 import { ElementAnalysisService } from "#elements/tools";
@@ -155,11 +154,11 @@ describe("LLMService NoCharge Defense & UserId Enforcement (Task T5)", () => {
     }
   });
 
-  // ── TEST 7: ElementAnalysisService forwards userId to llmService.analyzeVision ──
+  // ── TEST 7: ElementAnalysisService forwards userId to executeLLM / llmService.generate ──
   it("TEST 7: ElementAnalysisService forwards userId to llmService", async () => {
     let receivedUserId = null;
-    const originalAnalyzeVision = llmService.analyzeVision;
-    llmService.analyzeVision = async (params) => {
+    const originalGenerate = llmService.generate;
+    llmService.generate = async (params) => {
       receivedUserId = params.userId || params.options?.userId;
       return {
         raw: JSON.stringify({ description: "Artistic style element", keywords: ["oil", "classic"] }),
@@ -179,25 +178,11 @@ describe("LLMService NoCharge Defense & UserId Enforcement (Task T5)", () => {
       assert.strictEqual(
         receivedUserId,
         "user-element-owner-456",
-        "Expected ElementAnalysisService to forward userId to llmService.analyzeVision"
+        "Expected ElementAnalysisService to forward userId to llmService.generate via executeLLM"
       );
     } finally {
-      llmService.analyzeVision = originalAnalyzeVision;
+      llmService.generate = originalGenerate;
     }
-  });
-
-  // ── TEST 8: PromptService optimizePrompt requires an authenticated userId ──
-  it("TEST 8: PromptService optimizePrompt rejects when userId is missing", async () => {
-    const promptService = new PromptService();
-    await assert.rejects(
-      async () => {
-        await promptService.optimizePrompt("Make this prompt better", {
-          // userId explicitly omitted
-        });
-      },
-      /(userId is required|authenticated)/i,
-      "Expected optimizePrompt without userId to throw"
-    );
   });
 
   // ── TEST 9: executeLLM forwards timeoutMs and enforces a real per-call timeout ──

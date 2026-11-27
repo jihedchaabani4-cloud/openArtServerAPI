@@ -2,7 +2,7 @@
   "id": "seedream_5_lite",
   "domain": "image",
   "displayName": "Seedream 5 Lite",
-  "description": "ByteDance Seedream 5 Lite via Runway — high-resolution 2K/3K generation with multi-image fusion and web grounding.",
+  "description": "ByteDance Seedream 5 Lite high-resolution 2K/3K generation with multi-image fusion and web grounding.",
   "status": "active",
   "aliases": [
     "seedream5_lite",

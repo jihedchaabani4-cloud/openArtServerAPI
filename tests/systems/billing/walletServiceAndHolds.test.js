@@ -1,6 +1,12 @@
 import { describe, it, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { WalletService, createWalletService, WalletError, WalletRepository, TransactionRepository, FailedOpsRepository, CreditPackageRepository, BillingError, createBillingRepositories } from "#billing/tools";
+import { createWalletService, WalletError, BillingError } from "#billing/tools";
+import { WalletService } from "../../../src/systems/billing/internal/services/WalletService.js";
+import { WalletRepository } from "../../../src/systems/billing/internal/db/WalletRepository.js";
+import { TransactionRepository } from "../../../src/systems/billing/internal/db/TransactionRepository.js";
+import { FailedOpsRepository } from "../../../src/systems/billing/internal/db/FailedOpsRepository.js";
+import { CreditPackageRepository } from "../../../src/systems/billing/internal/db/CreditPackageRepository.js";
+import { createBillingRepositories } from "../../../src/systems/billing/internal/db/billingRepositoryFactory.js";
 
 // ─── Source: atomicWalletHoldRPCsBoundary.test.js ───
 {

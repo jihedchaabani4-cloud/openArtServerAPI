@@ -7,7 +7,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { llmService } from "#models/tools";
+import { executeLLM } from "#models/tools";
 import { crudOperationLog, CrudServiceError } from "#shared";
 import { createMediaInWorkflow } from "#media/tools";
 import { toMediaIdList } from "#identity/tools";
@@ -261,7 +261,7 @@ export class CharacterGenerationService {
                 style ? `Incorporate style influences: ${style}.` : ""
             }`;
 
-            const result = await llmService.generate({
+            const result = await executeLLM({
                 prompt: promptText,
                 systemInstruction: CHARACTER_GENERATOR_SYSTEM_PROMPT,
                 jsonMode: true,

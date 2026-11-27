@@ -17,6 +17,10 @@
  *   all instances, switch to Redis store (RATE_LIMIT_STORE=redis).
  * ─────────────────────────────────────────────────────────────────────────────
  */
+import { envConfig } from "./env.js";
+
+const envNum = (key, fallback) => Number(envConfig.getEnvVar(key)) || fallback;
+
 export const DEFAULT_MAX_CONCURRENT_UPLOADS = 3;
 
 export const RATE_LIMIT_POLICIES = {
@@ -38,32 +42,32 @@ export const RATE_LIMIT_POLICIES = {
 
   /** POST /api/auth/login (10 per 5 min per IP) */
   loginIp: {
-    points:     Number(process.env.RATE_LIMIT_LOGIN_IP_POINTS) || 10,
-    duration:   Number(process.env.RATE_LIMIT_LOGIN_IP_DURATION) || 300,  // 5 minutes
+    points:     envNum("RATE_LIMIT_LOGIN_IP_POINTS", 10),
+    duration:   envNum("RATE_LIMIT_LOGIN_IP_DURATION", 300),  // 5 minutes
     keyBy:      "ip",
     failPolicy: "insurance",
   },
 
   /** POST /api/auth/login (5 per 15 min per email) */
   loginEmail: {
-    points:     Number(process.env.RATE_LIMIT_LOGIN_EMAIL_POINTS) || 5,
-    duration:   Number(process.env.RATE_LIMIT_LOGIN_EMAIL_DURATION) || 900,  // 15 minutes
+    points:     envNum("RATE_LIMIT_LOGIN_EMAIL_POINTS", 5),
+    duration:   envNum("RATE_LIMIT_LOGIN_EMAIL_DURATION", 900),  // 15 minutes
     keyBy:      "email",
     failPolicy: "insurance",
   },
 
   /** POST /api/auth/signup (10 per hour per IP) */
   signupIp: {
-    points:     Number(process.env.RATE_LIMIT_SIGNUP_IP_POINTS) || 10,
-    duration:   Number(process.env.RATE_LIMIT_SIGNUP_IP_DURATION) || 3600, // 1 hour
+    points:     envNum("RATE_LIMIT_SIGNUP_IP_POINTS", 10),
+    duration:   envNum("RATE_LIMIT_SIGNUP_IP_DURATION", 3600), // 1 hour
     keyBy:      "ip",
     failPolicy: "insurance",
   },
 
   /** POST /api/auth/login legacy alias */
   login: {
-    points:     Number(process.env.RATE_LIMIT_LOGIN_IP_POINTS) || 10,
-    duration:   Number(process.env.RATE_LIMIT_LOGIN_IP_DURATION) || 300,
+    points:     envNum("RATE_LIMIT_LOGIN_IP_POINTS", 10),
+    duration:   envNum("RATE_LIMIT_LOGIN_IP_DURATION", 300),
     keyBy:      "ip",
     failPolicy: "insurance",
   },
@@ -78,51 +82,51 @@ export const RATE_LIMIT_POLICIES = {
 
   /** POST /api/characters/generate-description (configurable, default 10/min) */
   characterDescription: {
-    points:     Number(process.env.RATE_LIMIT_CHARACTER_DESC_POINTS) || 10,
-    duration:   Number(process.env.RATE_LIMIT_CHARACTER_DESC_DURATION) || 60,
+    points:     envNum("RATE_LIMIT_CHARACTER_DESC_POINTS", 10),
+    duration:   envNum("RATE_LIMIT_CHARACTER_DESC_DURATION", 60),
     keyBy:      "user",
     failPolicy: "close",
   },
 
   /** POST /api/v2/elements/analyze (configurable, default 10/min) */
   elementAnalysis: {
-    points:     Number(process.env.RATE_LIMIT_ELEMENT_ANALYZE_POINTS) || 10,
-    duration:   Number(process.env.RATE_LIMIT_ELEMENT_ANALYZE_DURATION) || 60,
+    points:     envNum("RATE_LIMIT_ELEMENT_ANALYZE_POINTS", 10),
+    duration:   envNum("RATE_LIMIT_ELEMENT_ANALYZE_DURATION", 60),
     keyBy:      "user",
     failPolicy: "close",
   },
 
   /** Scoped large-body pre-parsing rate limit (IP-based, configurable, default 60/min) */
   scopedLargeBodyIp: {
-    points:     Number(process.env.RATE_LIMIT_SCOPED_LARGE_BODY_POINTS) || 60,
-    duration:   Number(process.env.RATE_LIMIT_SCOPED_LARGE_BODY_DURATION) || 60,
+    points:     envNum("RATE_LIMIT_SCOPED_LARGE_BODY_POINTS", 60),
+    duration:   envNum("RATE_LIMIT_SCOPED_LARGE_BODY_DURATION", 60),
     keyBy:      "ip",
     failPolicy: "insurance",
   },
 
-  /** Per-user concurrent upload limit (configurable via MAX_CONCURRENT_UPLOADS_PER_USER, default 2) */
+  /** Per-user concurrent upload limit (configurable via MAX_CONCURRENT_UPLOADS_PER_USER, default 3) */
   concurrentUploads: {
-    limit: Number(process.env.MAX_CONCURRENT_UPLOADS_PER_USER) || DEFAULT_MAX_CONCURRENT_UPLOADS,
+    limit: envNum("MAX_CONCURRENT_UPLOADS_PER_USER", DEFAULT_MAX_CONCURRENT_UPLOADS),
     keyBy: "user",
   },
 
   /** Per-instance total in-flight upload memory cap (configurable via MAX_IN_FLIGHT_UPLOAD_BYTES, default 250MB) */
   inFlightUploadMemory: {
-    maxBytes: Number(process.env.MAX_IN_FLIGHT_UPLOAD_BYTES) || 250 * 1024 * 1024,
+    maxBytes: envNum("MAX_IN_FLIGHT_UPLOAD_BYTES", 250 * 1024 * 1024),
   },
 
   /** Folder write operations (POST, PATCH, DELETE) */
   folderWrite: {
-    points:     Number(process.env.RATE_LIMIT_FOLDER_WRITE_POINTS) || 60,
-    duration:   Number(process.env.RATE_LIMIT_FOLDER_WRITE_DURATION) || 60,
+    points:     envNum("RATE_LIMIT_FOLDER_WRITE_POINTS", 60),
+    duration:   envNum("RATE_LIMIT_FOLDER_WRITE_DURATION", 60),
     keyBy:      "user",
     failPolicy: "open",
   },
 
   /** Bulk delete operations (POST /api/workspace/bulk-delete, POST /api/trash/delete) */
   bulkDelete: {
-    points:     Number(process.env.RATE_LIMIT_BULK_DELETE_POINTS) || 30,
-    duration:   Number(process.env.RATE_LIMIT_BULK_DELETE_DURATION) || 60,
+    points:     envNum("RATE_LIMIT_BULK_DELETE_POINTS", 30),
+    duration:   envNum("RATE_LIMIT_BULK_DELETE_DURATION", 60),
     keyBy:      "user",
     failPolicy: "open",
   },

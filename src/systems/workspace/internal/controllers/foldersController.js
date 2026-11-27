@@ -3,6 +3,21 @@ import { getFolderService } from "../services/serviceAccessor.js";
 
 const controllerLogger = createLogger("workspace:folders_controller");
 
+function handleFolderError(res, err, next) {
+  if (err instanceof AppError && err.statusCode < 500) {
+    return res.status(err.statusCode).json({
+      ok: false,
+      errorCode: err.errorCode || "APP_ERROR",
+      message: err.message,
+    });
+  }
+  if (err instanceof AppError) {
+    controllerLogger.error({ err: err.message, statusCode: err.statusCode }, "Folder controller internal error");
+    return res.status(500).json({ ok: false, errorCode: "INTERNAL_ERROR", message: "Internal server error" });
+  }
+  return next(err);
+}
+
 /**
  * POST /api/projects/:projectId/folders
  * Creates a new folder/collection in the specified project.
@@ -30,14 +45,7 @@ export const createProjectFolder = async (req, res, next) => {
     });
     return res.status(201).json(folder);
   } catch (err) {
-    if (err instanceof AppError) {
-      return res.status(err.statusCode).json({
-        ok: false,
-        errorCode: err.errorCode || "APP_ERROR",
-        message: err.message,
-      });
-    }
-    return next(err);
+    return handleFolderError(res, err, next);
   }
 };
 
@@ -60,14 +68,7 @@ export const updateFolder = async (req, res, next) => {
     });
     return res.status(200).json(folder);
   } catch (err) {
-    if (err instanceof AppError) {
-      return res.status(err.statusCode).json({
-        ok: false,
-        errorCode: err.errorCode || "APP_ERROR",
-        message: err.message,
-      });
-    }
-    return next(err);
+    return handleFolderError(res, err, next);
   }
 };
 
@@ -90,13 +91,6 @@ export const deleteFolder = async (req, res, next) => {
     });
     return res.status(204).send();
   } catch (err) {
-    if (err instanceof AppError) {
-      return res.status(err.statusCode).json({
-        ok: false,
-        errorCode: err.errorCode || "APP_ERROR",
-        message: err.message,
-      });
-    }
-    return next(err);
+    return handleFolderError(res, err, next);
   }
 };

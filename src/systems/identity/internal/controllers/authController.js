@@ -1,10 +1,9 @@
 /**
  * System 5: Identity & Auth — Auth Controller
  */
-import { AuthService, mapSessionUser } from "../services/AuthService.js";
+import { AuthService, mapSessionUser, fetchUserCreditBalance } from "../services/AuthService.js";
 import { OAuthService } from "../services/OAuthService.js";
 import { clearAuthCookies } from "../services/cookies.js";
-import { getCreditBalance } from "#billing/tools";
 import { createLogger } from "#shared";
 
 const authLogger = createLogger("auth_api");
@@ -120,8 +119,7 @@ export async function getWalletBalance(req, res) {
 
     let balance = 0;
     try {
-      const result = await getCreditBalance({ userId: user.id });
-      balance = result?.balance ?? 0;
+      balance = await fetchUserCreditBalance(user.id);
     } catch {
       // Fallback if wallet service is not configured
     }

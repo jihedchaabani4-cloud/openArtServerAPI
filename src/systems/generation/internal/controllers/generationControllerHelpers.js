@@ -30,7 +30,7 @@ export function sendGenerationControllerError(res, err, { logger, actionName, fa
   return res.status(statusCode).json({
     ok: false,
     code: statusCode >= 500 ? "INTERNAL_ERROR" : (err.code || "REQUEST_FAILED"),
-    message: err.isOperational ? err.message : fallbackMessage,
+    message: (err.isOperational && statusCode < 500) ? err.message : fallbackMessage,
     traceId,
   });
 }

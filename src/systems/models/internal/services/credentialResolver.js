@@ -56,31 +56,7 @@ export async function resolveCredential(binding, provider, credentialProvider = 
     }
   }
 
-  // 3. Resolution Tier 2: Database `provider_credentials` table
-  if (dbClient) {
-    try {
-      const { data, error } = await dbClient
-        .from("provider_credentials")
-        .select("encrypted_key")
-        .eq("provider_id", providerId)
-        .single();
-
-      if (!error && data?.encrypted_key) {
-        const resolvedKey = data.encrypted_key;
-        if (cacheKey || providerId) {
-          credentialCache.set(cacheKey || providerId, {
-            apiKey: resolvedKey,
-            expiresAt: Date.now() + CACHE_TTL_MS,
-          });
-        }
-        return { apiKey: resolvedKey, credentialSource: "database" };
-      }
-    } catch {
-      // Fall through to environment lookup
-    }
-  }
-
-  // 4. Resolution Tier 3: Platform secret lookup from environment variables
+  // 3. Resolution Tier 2: Platform secret lookup from environment variables
   let platformKey = null;
 
   // Check explicit provider manifest envKeys first (declarative)

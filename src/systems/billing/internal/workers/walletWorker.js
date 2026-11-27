@@ -4,7 +4,6 @@ import { Worker } from "bullmq";
 import {
   workerRedisConnection,
   redisConnection,
-  RECONCILIATION_CACHE_KEY,
   createLogger,
   LogEvents,
   envConfig,
@@ -17,8 +16,14 @@ import {
   getTransactionRepository,
 } from "../services/serviceAccessor.js";
 import { runReservationReaper } from "../services/ReservationReaperService.js";
+import {
+  BillingError,
+  BillingValidationError,
+  BillingConfigurationError,
+} from "../errors.js";
 
 const logger = createLogger("wallet-worker");
+export const RECONCILIATION_CACHE_KEY = "reconciliation:latest";
 
 /**
  * Wallet Maintenance Worker (System 3: Billing & Wallet)
@@ -203,7 +208,7 @@ export async function replayOperation(op, { walletService: injectedWallet = null
     }
 
     default:
-      throw new Error(`Unknown operation_type: ${operation_type}`);
+      throw new BillingValidationError(`Unknown operation_type: ${operation_type}`);
   }
 }
 
@@ -216,7 +221,7 @@ export async function handleReconcileWallets({ supabaseClient = null } = {}) {
       .from("wallets")
       .select("id, user_id, balance");
     if (walletsError) {
-      throw new Error(`[reconcile-wallets] Failed to fetch wallets: ${walletsError.message}`);
+      throw new BillingError("BILLING_RECONCILE_ERROR", `[reconcile-wallets] Failed to fetch wallets: ${walletsError.message}`);
     }
     wallets = data || [];
   } else {
@@ -338,7 +343,7 @@ async function processWalletJob(job) {
       return handleReconcileWallets();
 
     default:
-      throw new Error(`[WalletWorker] Unknown job name: ${job.name}`);
+      throw new BillingValidationError(`[WalletWorker] Unknown job name: ${job.name}`);
   }
 }
 
@@ -380,7 +385,7 @@ export async function startWalletWorker({
         { event: "worker.boot_failed" },
         "[WalletWorker] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY — cannot start wallet worker."
       );
-      throw new Error("[WalletWorker] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+      throw new BillingConfigurationError("[WalletWorker] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
     }
   }
 

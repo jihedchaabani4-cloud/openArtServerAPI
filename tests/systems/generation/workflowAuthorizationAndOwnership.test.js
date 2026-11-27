@@ -9,7 +9,8 @@ import { workflowsRouter, imagesRouter, videoRouter } from "#generation/api";
 import { db, executionEngine, elementService, workflowMediaService } from "../../../src/container.js";
 import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared";
 import { supabase } from "#shared/db/supabase.js";
-import { resetLimitersForTest, toMediaIdList } from "#identity/tools";
+import { toMediaIdList } from "#identity/tools";
+import { resetLimitersForTest } from "../../../src/systems/identity/internal/middleware/rateLimit.js";
 import apiRouter from "../../../src/api/routes.js";
 
 // ─── Source: workflowAuthorizationFailClosed.test.js ───

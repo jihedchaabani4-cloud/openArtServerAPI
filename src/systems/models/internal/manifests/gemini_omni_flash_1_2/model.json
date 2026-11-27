@@ -2,7 +2,7 @@
   "id": "gemini_omni_flash_1_2",
   "domain": "video",
   "displayName": "Gemini Omni Flash 1.2",
-  "description": "Google Gemini Omni Flash 1.2 latest multimodal video generation & editing up to 15s and 4K via Runway.",
+  "description": "Google Gemini Omni Flash 1.2 latest multimodal video generation & editing up to 15s and 4K.",
   "status": "active",
   "aliases": [
     "gemini_omni_flash_1.2",

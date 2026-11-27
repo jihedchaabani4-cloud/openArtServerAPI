@@ -1,8 +1,9 @@
 /**
  * System 3: Billing & Wallet — Public Tools Gateway (Rule 1, Rule 8)
  *
- * @description Exposes clean language-level async DTO operations for credit reservation,
- * holds, settlements, refunds, balances, and credit package resolution.
+ * @description Sealed surface exposing ONLY pure async DTO billing operations,
+ * composition-root wiring, worker/reaper entrypoints, and typed Billing errors.
+ * Zero repositories, zero internal service classes, zero worker internals.
  */
 
 import {
@@ -15,74 +16,16 @@ import {
     WalletError,
 } from "../internal/errors.js";
 
-import { WalletRepository } from "../internal/db/WalletRepository.js";
-import { TransactionRepository } from "../internal/db/TransactionRepository.js";
-import { CreditPackageRepository } from "../internal/db/CreditPackageRepository.js";
-import { FailedOpsRepository } from "../internal/db/FailedOpsRepository.js";
-import { UsageEventRepository } from "../internal/db/UsageEventRepository.js";
-import { getBillingSupabaseAdminClient } from "../internal/db/billingClient.js";
-
+import { createDefaultBillingRepositories } from "../internal/db/billingRepositoryFactory.js";
 import { WalletService } from "../internal/services/WalletService.js";
+import { FailedOpsService } from "../internal/services/FailedOpsService.js";
+import { runReservationReaper } from "../internal/services/ReservationReaperService.js";
+import { startWalletWorker, stopWalletWorker } from "../internal/workers/walletWorker.js";
 import {
-    FailedOpsService,
-    FAILED_OPS_BACKOFF_BASE_MS,
-    FAILED_OPS_BACKOFF_MULTIPLIER,
-    FAILED_OPS_DEFAULT_MAX_RETRIES,
-} from "../internal/services/FailedOpsService.js";
-import {
-    reconcileExpiredHolds,
-    handleExpireStaleHolds,
-    runReservationReaper,
-} from "../internal/services/ReservationReaperService.js";
-
-import {
-    walletMaintenanceQueue,
-    WALLET_QUEUE_NAME,
-    scheduleWalletJobs,
-} from "../internal/workers/walletQueue.js";
-
-import {
-    walletWorker,
-    startWalletWorker,
-    stopWalletWorker,
-    handleRetryFailedOps,
-    replayOperation,
-    handleReconcileWallets,
-} from "../internal/workers/walletWorker.js";
-
-import {
-    createBillingRepositories,
     configureBilling,
-    getPricingService,
-    getRedisConnection,
     getDefaultWalletService,
-    getWalletService,
-    getBillingService,
-    getCreditPackageRepository,
-    getFailedOpsService,
-    getWalletRepository,
-    getTransactionRepository,
-    getUsageEventRepository,
     listCreditPackages,
-    getCreditPackage,
-    resolvePackageCredits,
 } from "../internal/services/serviceAccessor.js";
-
-export {
-    configureBilling,
-    getPricingService,
-    getRedisConnection,
-    getWalletService,
-    getBillingService,
-    getCreditPackageRepository,
-    getFailedOpsService,
-    getWalletRepository,
-    getTransactionRepository,
-    getUsageEventRepository,
-    listCreditPackages,
-    getCreditPackage,
-    resolvePackageCredits,
-};
 
 function _resolveWalletService(ctx = {}) {
     const service = ctx?.walletService || getDefaultWalletService();
@@ -367,62 +310,38 @@ export async function listTransactions(input = {}, ctx = {}) {
     return service.getTransactions(userId, limit, before, beforeId);
 }
 
-// ── Factories & Service Builders ──────────────────────────────────────────────
+// ── Composition-Root Service Builders ─────────────────────────────────────────
 
 export function createWalletService(options = {}) {
-    const activeClient = options.supabase || options.client || getBillingSupabaseAdminClient();
-    const activeWalletRepo = options.walletRepo || (activeClient ? new WalletRepository(activeClient) : null);
-    const activeTxRepo = options.transactionRepo || options.txRepo || (activeClient ? new TransactionRepository(activeClient) : null);
-    const activeUsageRepo = options.usageEventRepo || (activeClient ? new UsageEventRepository(activeClient) : null);
-
+    const repos = createDefaultBillingRepositories(options);
     return new WalletService({
-        walletRepo: activeWalletRepo,
-        txRepo: activeTxRepo,
-        usageEventRepo: activeUsageRepo,
+        walletRepo: options.walletRepo || repos?.walletRepo || null,
+        txRepo: options.transactionRepo || options.txRepo || repos?.txRepo || null,
+        usageEventRepo: options.usageEventRepo || repos?.usageEventRepo || null,
         defaultInitialBalance: options.defaultInitialBalance,
-        supabase: activeClient,
+        supabase: options.supabase || options.client || repos?.walletRepo?.supabase || null,
     });
 }
 
 export function createFailedOpsService(options = {}) {
-    const activeClient = options.supabase || options.client || getBillingSupabaseAdminClient();
-    const activeRepo = options.failedOpsRepo || (activeClient ? new FailedOpsRepository(activeClient) : null);
+    const repos = createDefaultBillingRepositories(options);
+    const activeRepo = options.failedOpsRepo || repos?.failedOpsRepo || null;
     return new FailedOpsService({ failedOpsRepo: activeRepo });
 }
 
-// ── Re-exports for Architecture & Compatibility ───────────────────────────────
+// ── Sealed Public Surface Exports ─────────────────────────────────────────────
 
 export {
-    // Services
-    WalletService,
-    FailedOpsService,
-    reconcileExpiredHolds,
-    handleExpireStaleHolds,
-    runReservationReaper,
-    FAILED_OPS_BACKOFF_BASE_MS,
-    FAILED_OPS_BACKOFF_MULTIPLIER,
-    FAILED_OPS_DEFAULT_MAX_RETRIES,
+    // Composition & Capability Exports
+    configureBilling,
+    listCreditPackages,
 
-    // Queue & Workers
-    walletMaintenanceQueue,
-    WALLET_QUEUE_NAME,
-    scheduleWalletJobs,
-    walletWorker,
+    // Worker & Reaper Lifecycle Entrypoints
+    runReservationReaper,
     startWalletWorker,
     stopWalletWorker,
-    handleRetryFailedOps,
-    replayOperation,
-    handleReconcileWallets,
 
-    // Repositories
-    WalletRepository,
-    TransactionRepository,
-    CreditPackageRepository,
-    FailedOpsRepository,
-    UsageEventRepository,
-    createBillingRepositories,
-
-    // Typed Errors
+    // Typed Error Hierarchy
     BillingError,
     BillingValidationError,
     BillingNotFoundError,
@@ -430,28 +349,4 @@ export {
     BillingConflictError,
     BillingConfigurationError,
     WalletError,
-};
-
-export default {
-    getCreditBalance,
-    reserveCredits,
-    settleCredits,
-    rollbackCredits,
-    extendHold,
-    addCredits,
-    listTransactions,
-    listCreditPackages,
-    getCreditPackage,
-    resolvePackageCredits,
-    configureBilling,
-    getBillingService,
-    getWalletService,
-    getCreditPackageRepository,
-    getFailedOpsService,
-    getWalletRepository,
-    createBillingRepositories,
-    createWalletService,
-    createFailedOpsService,
-    startWalletWorker,
-    stopWalletWorker,
 };

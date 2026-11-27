@@ -1,16 +1,10 @@
 import "dotenv/config";
 import {
-    WalletService,
-    FailedOpsService,
     configureBilling,
     createWalletService,
     createFailedOpsService,
-    getUsageEventRepository,
-    getCreditPackageRepository,
-    getWalletRepository,
-    getTransactionRepository,
+    getCreditBalance,
 } from "#billing/tools";
-import { PricingService, promptService } from "#models/tools";
 import { redisConnection, createLogger, envConfig } from "#shared";
 
 const systemLogger = createLogger("system");
@@ -39,10 +33,9 @@ import {
 } from "#media/tools";
 import { CharacterRepository, CharacterService, CharacterMediaService, configureCharacters } from "#characters/tools";
 import { ElementRepository, ElementService, ElementMediaService, ElementAnalysisService, configureElements } from "#elements/tools";
-import { setDb as setIdentityDb } from "#identity/tools";
+import { configureOwnershipResolvers, configureIdentityHooks } from "#identity/tools";
 
 // ─── Services ────────────────────────────────────────────────────────────────
-export { promptService };
 export const storageService = getStorageService();
 const walletServiceKey = envConfig.supabaseServiceRoleKey || null;
 
@@ -88,12 +81,6 @@ export function assertSecurityConfiguredForEnvironment() {
                 `Fatal: INTERNAL_SECRET is required in production mode (NODE_ENV=${envConfig.getEnvVar("NODE_ENV") || "unset"}) and must be at least 32 characters long.`
             );
         }
-        const rawBypass = envConfig.getEnvVar("DEV_AUTH_BYPASS");
-        if (rawBypass === "true" || rawBypass === true) {
-            throw new Error(
-                `Fatal: DEV_AUTH_BYPASS cannot be enabled in production mode (NODE_ENV=${envConfig.getEnvVar("NODE_ENV") || "unset"}).`
-            );
-        }
     }
 }
 
@@ -130,45 +117,18 @@ assertSecurityConfiguredForEnvironment();
 assertRateLimitConfiguredForEnvironment();
 
 const _hasBillingConfig = Boolean(envConfig.rawSupabaseUrl && walletServiceKey);
-export const usageEventRepo = _hasBillingConfig
-    ? getUsageEventRepository()
-    : null;
-export const creditPackageRepo = _hasBillingConfig
-    ? getCreditPackageRepository()
-    : null;
-export const billingRepos = _hasBillingConfig
-    ? {
-        walletRepo: getWalletRepository(),
-        txRepo: getTransactionRepository(),
-        transactionRepo: getTransactionRepository(),
-        usageEventRepo,
-        creditPackageRepo,
-    }
-    : null;
-
 export const walletService = _hasBillingConfig
-    ? createWalletService({ usageEventRepo })
+    ? createWalletService()
     : null;
 
 if (walletService) {
-    configureBilling({ walletService, creditPackageRepo });
+    configureBilling({ walletService });
     systemLogger.debug("WalletService initialized");
 } else {
     systemLogger.warn("WalletService disabled: missing SUPABASE_URL or service key");
 }
 
-// ─── Pricing Service (DB-backed + Redis cache) ────────────────────────────────
-export const pricingService = _hasBillingConfig
-    ? new PricingService({ redis: redisConnection })
-    : null;
-
-if (pricingService) {
-    configureBilling({ pricingService, redisConnection });
-    systemLogger.debug("PricingService initialized");
-} else {
-    configureBilling({ redisConnection });
-    systemLogger.warn("PricingService disabled: missing Supabase config");
-}
+configureBilling({ redisConnection });
 
 // ─── Failed Operations Service ────────────────────────────────────────────────
 export const failedOpsService = _hasBillingConfig
@@ -192,7 +152,211 @@ export const db = {
     folders:       new FolderRepository(),
     trash:         new TrashRepository(),
 };
-setIdentityDb(db);
+/**
+ * Builds the inverted per-resource-type ownership resolvers wired at the composition root.
+ * Keeps System 5 (Identity) completely decoupled from foreign repositories and table schemas.
+ */
+export function createOwnershipResolvers(targetDb) {
+    const getDb = () => targetDb || {};
+
+    return {
+        async project(id, userId) {
+            const d = getDb();
+            if (d.projects?.findByUser) {
+                const matches = await d.projects.findByUser(userId, id);
+                return matches?.[0] || null;
+            }
+            if (d.projects?.findById) {
+                const record = await d.projects.findById(id);
+                if (record && record.user_id === userId) return record;
+            }
+            return null;
+        },
+
+        async character(id, userId) {
+            const d = getDb();
+            let charRecord = null;
+            if (d.characters?.findByCharacterId) {
+                charRecord = await d.characters.findByCharacterId(id).catch(() => null);
+            }
+            if (!charRecord && d.characters?.findById) {
+                charRecord = await d.characters.findById(id).catch(() => null);
+            }
+
+            if (charRecord) {
+                if (charRecord.user_id && charRecord.user_id === userId) return charRecord;
+
+                const projectId = charRecord.project_id;
+                if (projectId && d.projects?.findByUser) {
+                    const matches = await d.projects.findByUser(userId, projectId).catch(() => []);
+                    if (matches?.length) return charRecord;
+                }
+
+                const wfId = charRecord.workflow_id || id;
+                if (d.workflows?.getWorkflow) {
+                    const wf = await d.workflows.getWorkflow(wfId).catch(() => null);
+                    if (wf?.project_id && d.projects?.findByUser) {
+                        const matches = await d.projects.findByUser(userId, wf.project_id).catch(() => []);
+                        if (matches?.length) return charRecord;
+                    }
+                }
+            } else if (d.workflows?.getWorkflow) {
+                const wf = await d.workflows.getWorkflow(id).catch(() => null);
+                if (wf?.project_id && d.projects?.findByUser) {
+                    const matches = await d.projects.findByUser(userId, wf.project_id).catch(() => []);
+                    if (matches?.length) return wf;
+                }
+            }
+            return null;
+        },
+
+        async element(id, userId) {
+            const d = getDb();
+            let elemRecord = null;
+            if (d.elements?.resolveRecord) {
+                elemRecord = await d.elements.resolveRecord(id).catch(() => null);
+            } else if (d.elements?.findById) {
+                elemRecord = await d.elements.findById(id).catch(() => null);
+            }
+
+            if (elemRecord) {
+                if (elemRecord.user_id && elemRecord.user_id === userId) return elemRecord;
+
+                const wfId = elemRecord.workflow_id || id;
+                let wf = null;
+                if (wfId && d.workflows?.getWorkflow) {
+                    wf = await d.workflows.getWorkflow(wfId).catch(() => null);
+                }
+                if (!wf && wfId && d.workflows?.findById) {
+                    wf = await d.workflows.findById(wfId).catch(() => null);
+                }
+
+                if (wf) {
+                    if (wf.user_id && wf.user_id === userId) return elemRecord;
+                    if (wf.project_id && d.projects?.findByUser) {
+                        const matches = await d.projects.findByUser(userId, wf.project_id).catch(() => []);
+                        if (matches?.length) return elemRecord;
+                    }
+                }
+            }
+            return null;
+        },
+
+        async workflow(id, userId) {
+            const d = getDb();
+            let wfRecord = null;
+            if (d.workflows?.findById) {
+                wfRecord = await d.workflows.findById(id).catch(() => null);
+            }
+            if (!wfRecord && d.workflows?.getWorkflow) {
+                wfRecord = await d.workflows.getWorkflow(id).catch(() => null);
+            }
+            if (!wfRecord && d.workflowMedia?.findByMedia && d.workflows?.findById) {
+                const links = await d.workflowMedia.findByMedia(id).catch(() => []);
+                const linkedWfId = links?.[0]?.workflow_id;
+                if (linkedWfId) {
+                    wfRecord = await d.workflows.findById(linkedWfId).catch(() => null);
+                }
+            }
+
+            if (wfRecord) {
+                if (wfRecord.user_id && wfRecord.user_id === userId) return wfRecord;
+                if (wfRecord.project_id && d.projects?.findByUser) {
+                    const matches = await d.projects.findByUser(userId, wfRecord.project_id).catch(() => []);
+                    if (matches?.length) return wfRecord;
+                }
+            }
+            return null;
+        },
+
+        async media(id, userId) {
+            const d = getDb();
+            let mediaRecord = null;
+            if (d.media?.findMediaByIdOrWorkflow) {
+                mediaRecord = await d.media.findMediaByIdOrWorkflow(id).catch(() => null);
+            }
+            if (!mediaRecord && d.media?.findById) {
+                mediaRecord = await d.media.findById(id).catch(() => null);
+            }
+
+            if (mediaRecord) {
+                if (mediaRecord.user_id && mediaRecord.user_id === userId) return mediaRecord;
+                if (mediaRecord.project_id && d.projects?.findByUser) {
+                    const matches = await d.projects.findByUser(userId, mediaRecord.project_id).catch(() => []);
+                    if (matches?.length) return mediaRecord;
+                }
+                if (d.workflowMedia?.findByMedia && d.workflows?.findById) {
+                    const links = await d.workflowMedia.findByMedia(mediaRecord.id || id).catch(() => []);
+                    const linkedWfId = links?.[0]?.workflow_id;
+                    if (linkedWfId) {
+                        const parentWf = await d.workflows.findById(linkedWfId).catch(() => null);
+                        if (parentWf?.project_id && d.projects?.findByUser) {
+                            const matches = await d.projects.findByUser(userId, parentWf.project_id).catch(() => []);
+                            if (matches?.length) return mediaRecord;
+                        }
+                    }
+                }
+            }
+            return null;
+        },
+
+        async collection_item(id, userId, { assertOwns }) {
+            const d = getDb();
+            let item = null;
+            if (d.collection_items?.findById) {
+                item = await d.collection_items.findById(id).catch(() => null);
+            } else if (d.collection_items?.findByIdAndUser) {
+                item = await d.collection_items.findByIdAndUser(id, userId).catch(() => null);
+            }
+
+            if (item) {
+                if (item.user_id && item.user_id === userId) return item;
+
+                const projectId = item.project_id;
+                if (projectId && d.projects?.findByUser) {
+                    const matches = await d.projects.findByUser(userId, projectId).catch(() => []);
+                    if (matches?.length) return item;
+                }
+
+                if (item.media?.project?.user_id && item.media.project.user_id === userId) {
+                    return item;
+                }
+
+                if (item.media_id) {
+                    try {
+                        const ownedMedia = await assertOwns("media", item.media_id, userId);
+                        if (ownedMedia) return item;
+                    } catch {
+                        // Fail closed
+                    }
+                }
+            }
+            return null;
+        },
+
+        async folder(id, userId) {
+            const d = getDb();
+            if (d.folders?.findOwned) {
+                const folder = await d.folders.findOwned(id, userId).catch(() => null);
+                if (folder) {
+                    if (folder.project_id && d.projects?.findByUser) {
+                        const matches = await d.projects.findByUser(userId, folder.project_id).catch(() => []);
+                        if (matches?.length) return folder;
+                    } else {
+                        return folder;
+                    }
+                }
+            }
+            return null;
+        },
+    };
+}
+
+configureOwnershipResolvers(createOwnershipResolvers(db));
+configureIdentityHooks({
+    ensureWallet: (userId) => walletService?.ensureWallet?.(userId),
+    getCreditBalance,
+});
 
 export const mediaWorkflowLifecycleService = new MediaWorkflowLifecycleService({ db });
 configureBilling({ lifecycleService: mediaWorkflowLifecycleService });
@@ -281,7 +445,12 @@ export const elementService = new ElementService({
     db,
     workflowService,
     mediaService: elementMediaService,
-    analysisService: new ElementAnalysisService(),
+    analysisService: new ElementAnalysisService({
+        workflowSync: {
+            findWorkflow: async (id) => db.workflows.getWorkflow(id).catch(() => null),
+            updateWorkflow: async (id, patch) => db.workflows.updateById(id, patch),
+        },
+    }),
 });
 configureElements({ elementService, elementMediaService });
 

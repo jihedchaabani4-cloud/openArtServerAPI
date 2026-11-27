@@ -2,7 +2,7 @@
   "id": "kling_4",
   "domain": "video",
   "displayName": "Kling 4",
-  "description": "Kling 4 flagship multimodal video model via Runway — T2V, I2V, and V2V up to 1080p with up to 10 image and 5 video references.",
+  "description": "Kling 4 flagship multimodal video model T2V, I2V, and V2V up to 1080p with up to 10 image and 5 video references.",
   "status": "active",
   "aliases": [
     "kling-4",

@@ -1,8 +1,17 @@
 import { describe, it, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { FailedOpsService, FAILED_OPS_BACKOFF_BASE_MS, FAILED_OPS_BACKOFF_MULTIPLIER, FAILED_OPS_DEFAULT_MAX_RETRIES, handleRetryFailedOps, replayOperation } from "#billing/tools";
-import { redisConnection, workerRedisConnection, RECONCILIATION_CACHE_KEY } from "#shared";
-import { getLatestReconciliation } from "#billing/api";
+import {
+    FailedOpsService,
+    FAILED_OPS_BACKOFF_BASE_MS,
+    FAILED_OPS_BACKOFF_MULTIPLIER,
+    FAILED_OPS_DEFAULT_MAX_RETRIES,
+} from "../../../src/systems/billing/internal/services/FailedOpsService.js";
+import { redisConnection, workerRedisConnection } from "#shared";
+import {
+    RECONCILIATION_CACHE_KEY,
+    handleRetryFailedOps,
+    replayOperation,
+} from "../../../src/systems/billing/internal/workers/walletWorker.js";
 
 // ─── Source: failedOpsService.test.js ───
 {
@@ -498,153 +507,21 @@ describe("Billing Business System — FailedOpsService & Worker Lifecycle", () =
 
 // ─── Source: adminReconciliation.test.js ───
 {
-describe("Admin Reconciliation Cache Key and Controller Unit Tests", () => {
-    describe("1. Shared Cache Key Behavioral Alignment", () => {
-        it("defines the canonical reconciliation cache key", () => {
-            assert.equal(RECONCILIATION_CACHE_KEY, "reconciliation:latest");
-        });
-
-        it("ensures writer and reader successfully exchange reconciliation reports using the shared key", async () => {
-            // Fake in-memory Redis backing store
-            const fakeRedisStore = new Map();
-            const fakeRedis = {
-                set: async (key, val) => fakeRedisStore.set(key, val),
-                get: async (key) => fakeRedisStore.get(key) || null,
-            };
-
-            // Writer side (simulating walletWorker writing summary)
-            const summaryPayload = {
-                runAt: "2026-11-04T03:00:00.000Z",
-                status: "CLEAN",
-                mismatchCount: 0,
-                mismatches: [],
-                durationMs: 85,
-            };
-            await fakeRedis.set(RECONCILIATION_CACHE_KEY, JSON.stringify(summaryPayload));
-
-            // Reader side (simulating adminController reading report)
-            const req = { redisConnection: fakeRedis };
-            let receivedJson = null;
-            const res = {
-                json: (data) => {
-                    receivedJson = data;
-                },
-            };
-            await getLatestReconciliation(req, res);
-
-            // Assert contract matches exactly
-            assert.deepEqual(receivedJson, summaryPayload);
-        });
+describe("Reconciliation Cache Key & Admin Removal Contract", () => {
+    it("defines the canonical reconciliation cache key", () => {
+        assert.equal(RECONCILIATION_CACHE_KEY, "reconciliation:latest");
     });
 
-    describe("2. GET /api/admin/reconciliation/latest Controller", () => {
-        it("returns NO_RUN_RECORDED when Redis key does not exist", async () => {
-            let receivedKey = null;
-            const mockRedis = {
-                get: async (key) => {
-                    receivedKey = key;
-                    return null;
-                },
-            };
+    it("verifies admin routes, controllers, and requireAdmin middleware are completely removed", async () => {
+        const billingApi = await import("#billing/api");
+        const identityTools = await import("#identity/tools");
 
-            const req = { redisConnection: mockRedis };
-            let responseData = null;
-            const res = {
-                json: (data) => {
-                    responseData = data;
-                },
-            };
-
-            await getLatestReconciliation(req, res);
-
-            assert.equal(receivedKey, RECONCILIATION_CACHE_KEY);
-            assert.deepEqual(responseData, {
-                cached: false,
-                status: "NO_RUN_RECORDED",
-                message: "No reconciliation run recorded in cache.",
-                runAt: null,
-                mismatchCount: 0,
-                mismatches: [],
-            });
-        });
-
-        it("returns parsed report payload when reconciliation key exists in Redis", async () => {
-            const mockPayload = {
-                runAt: "2026-11-04T03:00:00.000Z",
-                status: "CLEAN",
-                mismatchCount: 0,
-                mismatches: [],
-                durationMs: 125,
-            };
-
-            const mockRedis = {
-                get: async (key) => {
-                    if (key === RECONCILIATION_CACHE_KEY) {
-                        return JSON.stringify(mockPayload);
-                    }
-                    return null;
-                },
-            };
-
-            const req = { redisConnection: mockRedis };
-            let responseData = null;
-            const res = {
-                json: (data) => {
-                    responseData = data;
-                },
-            };
-
-            await getLatestReconciliation(req, res);
-
-            assert.deepEqual(responseData, mockPayload);
-        });
-
-        it("returns 500 INTERNAL_ERROR when Redis connection throws", async () => {
-            const mockRedis = {
-                get: async () => {
-                    throw new Error("Redis cluster connection timeout");
-                },
-            };
-
-            const req = { redisConnection: mockRedis };
-            let responseStatus = null;
-            let responseData = null;
-            const res = {
-                status: (code) => {
-                    responseStatus = code;
-                    return res;
-                },
-                json: (data) => {
-                    responseData = data;
-                },
-            };
-
-            await getLatestReconciliation(req, res);
-
-            assert.equal(responseStatus, 500);
-            assert.deepEqual(responseData, {
-                error: "INTERNAL_ERROR",
-                message: "Failed to fetch reconciliation result.",
-            });
-        });
-    });
-
-    describe("3. Route Security Verification", () => {
-        it("verifies adminRouter stack mounts requireAuth and requireAdmin before routes", async () => {
-            const { adminRouter } = await import("#billing/api");
-            const middlewareNames = adminRouter.stack
-                .map((layer) => layer.handle?.name || layer.name)
-                .filter(Boolean);
-
-            assert.ok(
-                middlewareNames.includes("requireAuth"),
-                "adminRouter must include requireAuth middleware"
-            );
-            assert.ok(
-                middlewareNames.includes("requireAdmin"),
-                "adminRouter must include requireAdmin middleware"
-            );
-        });
+        assert.equal(billingApi.adminRouter, undefined, "adminRouter must not be exported");
+        assert.equal(billingApi.adminCredit, undefined, "adminCredit must not be exported");
+        assert.equal(billingApi.getAdminWallet, undefined, "getAdminWallet must not be exported");
+        assert.equal(billingApi.getLatestReconciliation, undefined, "getLatestReconciliation must not be exported");
+        assert.equal(billingApi.reloadModels, undefined, "reloadModels must not be exported");
+        assert.equal(identityTools.requireAdmin, undefined, "requireAdmin must not be exported");
     });
 });
 }

@@ -2,7 +2,7 @@
   "id": "veo_3_1",
   "domain": "video",
   "displayName": "Google Veo 3.1",
-  "description": "Google Veo 3.1 cinema-grade video generation via Runway with native synchronized audio and first/last keyframe support.",
+  "description": "Google Veo 3.1 cinema-grade video generation with native synchronized audio and first/last keyframe support.",
   "status": "active",
   "aliases": [
     "veo3.1",

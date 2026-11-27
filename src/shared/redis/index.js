@@ -181,13 +181,10 @@ export async function waitForRateLimitRedis(timeoutMs = 5000, connection = rateL
   return waitForRedisConnection(connection, "RateLimit Redis", timeoutMs);
 }
 
-export const RECONCILIATION_CACHE_KEY = "reconciliation:latest";
-
 export default {
   redisConnection,
   workerRedisConnection,
   rateLimitRedisConnection,
   waitForRedis,
   waitForRateLimitRedis,
-  RECONCILIATION_CACHE_KEY,
 };

@@ -2,7 +2,7 @@
   "id": "kling_3_0_standard",
   "domain": "video",
   "displayName": "Kling 3.0 Standard",
-  "description": "Kling 3.0 Standard 720p video generation via Runway with native audio, first/last keyframes, and CFG control.",
+  "description": "Kling 3.0 Standard 720p video generation with native audio, first/last keyframes, and CFG control.",
   "status": "active",
   "aliases": [
     "kling3.0_standard",

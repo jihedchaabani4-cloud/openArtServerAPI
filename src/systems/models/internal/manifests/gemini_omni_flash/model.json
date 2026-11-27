@@ -2,7 +2,7 @@
   "id": "gemini_omni_flash",
   "domain": "video",
   "displayName": "Gemini Omni Flash",
-  "description": "Google Gemini Omni Flash multimodal text-to-video, image-to-video, and video-to-video model via Runway.",
+  "description": "Google Gemini Omni Flash multimodal text-to-video, image-to-video, and video-to-video model.",
   "status": "active",
   "aliases": [
     "gemini-omni-flash"

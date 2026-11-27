@@ -2,7 +2,7 @@
   "id": "nano_banana_2_1",
   "domain": "image",
   "displayName": "Nano Banana 2.1",
-  "description": "Google Nano Banana 2.1 reasoning image model via Runway — 1K to 4K with up to 14 references and configurable thinking depth.",
+  "description": "Google Nano Banana 2.1 reasoning image model 1K to 4K with up to 14 references and configurable thinking depth.",
   "status": "active",
   "aliases": [
     "nano_banana_2.1",

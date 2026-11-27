@@ -2,7 +2,50 @@
  * Supabase Auth SDK Wrapper.
  * Strictly isolates Supabase Auth SDK calls inside internal/db/ per Rule 6 & Rule 12.
  */
-import { supabase, supabaseAdmin, createRequestBoundClient } from "#shared/db/supabase.js";
+import { createClient } from "@supabase/supabase-js";
+import { envConfig } from "#shared";
+import { supabase, supabaseAdmin } from "#shared/db/supabase.js";
+
+/**
+ * Creates a request-bound Supabase client that stores OAuth PKCE verifiers
+ * in httpOnly cookies, solving the stateless server auth problem.
+ */
+function createRequestBoundClient(req, res) {
+  const storage = {
+    getItem(key) {
+      return req?.cookies?.[key] || null;
+    },
+    setItem(key, value) {
+      if (!res) return;
+      res.cookie(key, value, {
+        httpOnly: true,
+        secure: envConfig.isProduction,
+        sameSite: "lax",
+        path: "/",
+        maxAge: 10 * 60 * 1000, // 10 minutes is plenty for OAuth flow
+      });
+    },
+    removeItem(key) {
+      if (!res) return;
+      res.clearCookie(key, {
+        httpOnly: true,
+        secure: envConfig.isProduction,
+        sameSite: "lax",
+        path: "/",
+      });
+    },
+  };
+
+  return createClient(envConfig.supabaseUrl, envConfig.supabaseKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: true,
+      detectSessionInUrl: false,
+      flowType: "pkce",
+      storage,
+    },
+  });
+}
 
 export const authClient = {
   /**
@@ -49,7 +92,7 @@ export const authClient = {
   },
 
   /**
-   * Retrieve user record by ID using admin SDK (service role).
+   * Retrieve user record by ID using server service-role client (used by checkout/profile lookup).
    */
   async getUserById(userId) {
     const client = supabaseAdmin || supabase;

@@ -7,7 +7,6 @@
  * associated media / execution state. Provides per-row error isolation.
  */
 import { createLogger, LogEvents } from "#shared";
-import { markMediaFailed } from "#media/tools";
 import { getWalletService, getDefaultLifecycleService } from "./serviceAccessor.js";
 
 const logger = createLogger("reservation-reaper");
@@ -50,19 +49,6 @@ export async function reconcileExpiredHolds({
       } catch (err) {
         activeLogger.warn(
           { holdId: hold.holdId, workflowId: hold.workflowId, err: err.message },
-          `Failed to mark media failed for expired hold ${hold.holdId}: ${err.message}`
-        );
-      }
-    } else if (hold.mediaId && injectedLifecycle === undefined) {
-      try {
-        await markMediaFailed({
-          mediaId: hold.mediaId,
-          errorCode: "EXECUTION_TIMEOUT",
-          errorMessage: "Generation execution timed out. Your credits have been refunded.",
-        });
-      } catch (err) {
-        activeLogger.warn(
-          { holdId: hold.holdId, mediaId: hold.mediaId, err: err.message },
           `Failed to mark media failed for expired hold ${hold.holdId}: ${err.message}`
         );
       }

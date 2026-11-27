@@ -9,6 +9,7 @@ import { IStorageProvider } from "./IStorageProvider.js";
 import { InMemoryStorageProvider } from "./providers/InMemoryStorageProvider.js";
 import { SupabaseStorageProvider } from "./providers/SupabaseStorageProvider.js";
 import { StorageError } from "../errors.js";
+import { getMediaSupabaseAdminClient } from "../db/mediaClient.js";
 
 /**
  * Factory creating a StorageService wired with the Supabase storage provider.
@@ -30,6 +31,11 @@ export function createStorageService({
     }
     const provider = new SupabaseStorageProvider({ bucketName, client });
     return new StorageService({ bucketName, provider });
+}
+
+export function createDefaultStorageService({ bucketName = "generated_images" } = {}) {
+    const client = getMediaSupabaseAdminClient();
+    return createStorageService({ client, bucketName });
 }
 
 export {

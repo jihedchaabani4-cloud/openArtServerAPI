@@ -1,4 +1,4 @@
-import { createLogger, envConfig } from "#shared";
+import { createLogger } from "#shared";
 
 const authLogger = createLogger("workflow_auth");
 
@@ -6,7 +6,6 @@ const authLogger = createLogger("workflow_auth");
  * WorkflowAuthorizationService
  * @owns System 1: Generation & Workflows
  * Dedicated security and ownership verification service for workflows and media assets.
- * Encapsulates internal service-to-service secrets, development bypasses, and project owner checks.
  */
 export class WorkflowAuthorizationService {
     /**
@@ -17,16 +16,11 @@ export class WorkflowAuthorizationService {
         this.db = db;
     }
 
-    _isBypassed(_req = null) {
-        return envConfig.devAuthBypass;
-    }
-
     /**
      * Verifies that a given user owns the project associated with a single workflow.
      */
     async verifyWorkflowOwnership(workflowId, userId, req = null) {
         if (!workflowId) return false;
-        if (this._isBypassed(req)) return true;
 
         const result = await this.verifyWorkflowOwnershipBulk([workflowId], userId, req);
         return Boolean(result && result.length === 1);
@@ -36,10 +30,9 @@ export class WorkflowAuthorizationService {
      * Bulk checks ownership for an array of workflow IDs.
      * Returns array of owned workflow IDs if all match, or null if any unauthorized.
      */
-    async verifyWorkflowOwnershipBulk(workflowIds = [], userId, req = null) {
+    async verifyWorkflowOwnershipBulk(workflowIds = [], userId, _req = null) {
         const cleanIds = [...new Set((workflowIds || []).map((id) => String(id || "").replace(/^workflows\//, "").trim()).filter(Boolean))];
         if (!cleanIds.length) return [];
-        if (this._isBypassed(req)) return cleanIds;
 
         // Query workflows joined with their project owner
         const { data, error } = await this.db.workflows.client()
@@ -74,9 +67,8 @@ export class WorkflowAuthorizationService {
      * - record does not exist → false
      * - database failure → throws (an infrastructure fault is never a "yes")
      */
-    async verifyMediaOwnership(mediaId, userId, req = null) {
+    async verifyMediaOwnership(mediaId, userId, _req = null) {
         if (!mediaId) return false;
-        if (this._isBypassed(req)) return true;
 
         let media;
         try {

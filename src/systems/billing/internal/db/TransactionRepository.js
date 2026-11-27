@@ -3,7 +3,7 @@
  *
  * TransactionRepository (System 3: Billing & Wallet)
  */
-import { WalletError } from "../errors.js";
+import { WalletError, BillingConfigurationError } from "../errors.js";
 
 export class TransactionRepository {
     /**
@@ -11,7 +11,7 @@ export class TransactionRepository {
      */
     constructor(supabaseClient) {
         if (!supabaseClient) {
-            throw new Error("[TransactionRepository] supabaseClient is required");
+            throw new BillingConfigurationError("[TransactionRepository] supabaseClient is required");
         }
         this.supabase = supabaseClient;
     }
@@ -117,9 +117,13 @@ export class TransactionRepository {
             .limit(limit + 1);
 
         if (before && beforeId) {
-            query = query.or(
-                `created_at.lt.${before},and(created_at.eq.${before},id.lt.${beforeId})`
-            );
+            const safeBefore = String(before);
+            const safeBeforeId = String(beforeId);
+            if (/^\d{4}-\d{2}-\d{2}T[\d:.+-]+Z?$/i.test(safeBefore) && /^[A-Za-z0-9_-]{1,128}$/.test(safeBeforeId)) {
+                query = query.or(
+                    `created_at.lt.${safeBefore},and(created_at.eq.${safeBefore},id.lt.${safeBeforeId})`
+                );
+            }
         }
 
         const { data, error } = await query;
@@ -244,6 +248,39 @@ export class TransactionRepository {
             .eq("status", "COMPLETED");
 
         return { data, error };
+    }
+
+    /**
+     * Direct table fallback for extendHold when extend_hold RPC is unavailable.
+     */
+    async extendHoldDirect(referenceId, additionalSeconds = 300) {
+        const { data: currentTx, error: fetchErr } = await this.supabase
+            .from("transactions")
+            .select("*")
+            .eq("reference_id", referenceId)
+            .maybeSingle();
+
+        if (fetchErr) throw new WalletError(fetchErr.message, "DB_ERROR");
+        if (!currentTx) {
+            throw new WalletError(`Transaction not found for reference ${referenceId}`, "TRANSACTION_NOT_FOUND");
+        }
+        if (currentTx.status !== "PENDING") {
+            throw new WalletError(`Cannot extend transaction with status ${currentTx.status}`, "INVALID_STATUS");
+        }
+
+        const currentExpiresMs = currentTx.expires_at ? new Date(currentTx.expires_at).getTime() : Date.now();
+        const newExpiresAt = new Date(Math.max(Date.now(), currentExpiresMs) + additionalSeconds * 1000).toISOString();
+
+        const { data: updatedTx, error: updateErr } = await this.supabase
+            .from("transactions")
+            .update({ expires_at: newExpiresAt })
+            .eq("reference_id", referenceId)
+            .eq("status", "PENDING")
+            .select()
+            .maybeSingle();
+
+        if (updateErr) throw new WalletError(updateErr.message, "DB_ERROR");
+        return updatedTx;
     }
 }
 

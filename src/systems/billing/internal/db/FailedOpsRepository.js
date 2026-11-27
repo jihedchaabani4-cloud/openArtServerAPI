@@ -4,13 +4,15 @@
  * FailedOpsRepository (System 3: Billing & Wallet)
  */
 
+import { BillingConfigurationError, BillingError } from "../errors.js";
+
 export class FailedOpsRepository {
     /**
      * @param {import('@supabase/supabase-js').SupabaseClient} supabaseClient
      */
     constructor(supabaseClient) {
         if (!supabaseClient) {
-            throw new Error("[FailedOpsRepository] supabaseClient is required");
+            throw new BillingConfigurationError("[FailedOpsRepository] supabaseClient is required");
         }
         this.supabase = supabaseClient;
     }
@@ -54,7 +56,7 @@ export class FailedOpsRepository {
             .order("created_at", { ascending: true })
             .limit(limit);
 
-        if (error) throw new Error(`[FailedOpsRepository] getPendingOps failed: ${error.message}`);
+        if (error) throw new BillingError("BILLING_DB_ERROR", `[FailedOpsRepository] getPendingOps failed: ${error.message}`);
         return data || [];
     }
 
@@ -67,7 +69,7 @@ export class FailedOpsRepository {
             .update({ status: "COMPLETED" })
             .eq("id", id);
 
-        if (error) throw new Error(`[FailedOpsRepository] markCompleted(${id}) failed: ${error.message}`);
+        if (error) throw new BillingError("BILLING_DB_ERROR", `[FailedOpsRepository] markCompleted(${id}) failed: ${error.message}`);
     }
 
     /**
@@ -82,7 +84,7 @@ export class FailedOpsRepository {
             })
             .eq("id", id);
 
-        if (error) throw new Error(`[FailedOpsRepository] markRetryScheduled(${id}) failed: ${error.message}`);
+        if (error) throw new BillingError("BILLING_DB_ERROR", `[FailedOpsRepository] markRetryScheduled(${id}) failed: ${error.message}`);
     }
 
     /**
@@ -94,7 +96,7 @@ export class FailedOpsRepository {
             .update({ status: "ABANDONED", failure_reason: reason })
             .eq("id", id);
 
-        if (error) throw new Error(`[FailedOpsRepository] markAbandoned(${id}) failed: ${error.message}`);
+        if (error) throw new BillingError("BILLING_DB_ERROR", `[FailedOpsRepository] markAbandoned(${id}) failed: ${error.message}`);
     }
 }
 

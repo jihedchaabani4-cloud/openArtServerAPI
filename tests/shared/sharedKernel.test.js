@@ -13,7 +13,6 @@ import {
   rateLimitRedisConnection,
   waitForRedis,
   waitForRateLimitRedis,
-  RECONCILIATION_CACHE_KEY,
   RATE_LIMIT_POLICIES,
   clampBulkDeleteConcurrency,
   BULK_DELETE_CONCURRENCY_DEFAULT,
@@ -236,11 +235,10 @@ describe("Shared Redis & Config Kernel", () => {
     assert.equal(typeof envConfig.level, "string");
   });
 
-  it("exports Redis connection singletons and constants", async () => {
+  it("exports Redis connection singletons without domain-specific keys", async () => {
     assert.ok(redisConnection);
     assert.ok(workerRedisConnection);
     assert.ok(rateLimitRedisConnection);
-    assert.equal(RECONCILIATION_CACHE_KEY, "reconciliation:latest");
 
     const ready = await waitForRateLimitRedis(100);
     assert.equal(ready, true); // in test environment, resolves immediately to true

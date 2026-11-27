@@ -1,8 +1,6 @@
 import { describe, it, before, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { llmService } from "#models/tools";
-import { LLMService } from "../../../src/systems/models/internal/services/LLMService.js";
-import { PromptService } from "../../../src/systems/models/internal/services/PromptService.js";
+import { LLMService, llmService } from "../../../src/systems/models/internal/services/LLMService.js";
 import { LlmNode } from "../../../src/systems/generation/internal/v3/index.js";
 import { ElementAnalysisService } from "#elements/tools";
 import { createElement, analyzeElement } from "#elements/api";
@@ -84,7 +82,7 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
   // ── TEST 3: POST /api/v2/elements still works (LLM mocked) for an authenticated user ──
   it("TEST 3: POST /api/v2/elements creates element and forwards userId to LLM analysis", async () => {
     let capturedAnalysisUserId = null;
-    llmService.analyzeVision = async (params) => {
+    llmService.generate = async (params) => {
       capturedAnalysisUserId = params.userId;
       if (!params.userId) {
         const err = new Error("User billing context required");
@@ -250,33 +248,6 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
     );
   });
 
-  // ── TEST 7: PromptService complete/completeJSON without userId throws BILLING_CONTEXT_MISSING ──
-  it("TEST 7: PromptService complete and completeJSON reject without userId (no fallback)", async () => {
-    const ps = new PromptService();
-    await assert.rejects(
-      async () => {
-        await ps.complete({ systemPrompt: "Sys", userPrompt: "User" });
-      },
-      (err) => {
-        assert.strictEqual(err.code, "BILLING_CONTEXT_MISSING");
-        assert.strictEqual(err.statusCode, 500);
-        assert.strictEqual(err.category, "SERVER_FAULT");
-        return true;
-      }
-    );
-    await assert.rejects(
-      async () => {
-        await ps.completeJSON({ systemPrompt: "Sys", userPrompt: "User" });
-      },
-      (err) => {
-        assert.strictEqual(err.code, "BILLING_CONTEXT_MISSING");
-        assert.strictEqual(err.statusCode, 500);
-        assert.strictEqual(err.category, "SERVER_FAULT");
-        return true;
-      }
-    );
-  });
-
   // ── TEST 8: LlmNode uses ONLY ctx.userId and ignores spoofed inputs.userId ──
   it("TEST 8: LlmNode derives userId ONLY from ctx.userId, ignoring spoofed input.userId", async () => {
     let capturedUserId = null;
@@ -335,6 +306,34 @@ describe("F1 — Element Analysis & LLMService Billing Context Boundary Tests", 
         return true;
       }
     );
+  });
+
+  // ── TEST 9: Regression for code-review bugs (authClient.getUserById, workflowSync.updateById, positional getWorkflowVisualMedia) ──
+  it("TEST 9: authClient exposes getUserById for checkout and ElementAnalysisService delegates workflowSync + positional visual media", async () => {
+    const { authClient } = await import("../../../src/systems/identity/internal/db/authClient.js");
+    assert.strictEqual(typeof authClient.getUserById, "function", "authClient.getUserById must exist for checkout flow");
+
+    const updatedCalls = [];
+    const analysis = new ElementAnalysisService({
+      workflowSync: {
+        findWorkflow: async (id) => ({ id, metadata: { existing: true }, element_type: "style" }),
+        updateWorkflow: async (id, patch) => {
+          updatedCalls.push({ id, patch });
+          return { id, ...patch };
+        },
+      },
+    });
+
+    await analysis.persistElementMetadata("wf-elem-sync-1", { description: "Warm cinema tone" });
+    assert.strictEqual(updatedCalls.length, 1);
+    assert.strictEqual(updatedCalls[0].id, "wf-elem-sync-1");
+    assert.deepStrictEqual(updatedCalls[0].patch, {
+      metadata: { existing: true, description: "Warm cinema tone" },
+    });
+
+    const ctx = await analysis.fetchWorkflowContext("proj-1", "wf-elem-sync-1");
+    assert.strictEqual(ctx.elementType, "style");
+    assert.ok(Array.isArray(ctx.urls));
   });
 });
 }

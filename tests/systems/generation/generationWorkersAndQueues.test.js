@@ -25,7 +25,7 @@ import { executionEngine } from "../../../src/container.js";
 import { configureMedia, getMediaRepository } from "#media/tools";
 import { InMemoryWalletService } from "../../helpers/inMemoryWalletService.js";
 import { redisConnection, baseLogger, LogEvents } from "#shared";
-import { walletMaintenanceQueue } from "#billing/tools";
+import { walletMaintenanceQueue } from "../../../src/systems/billing/internal/workers/walletQueue.js";
 
 // ─── Source: useCaseWorkerFailureIdempotencyBoundary.test.js ───
 {

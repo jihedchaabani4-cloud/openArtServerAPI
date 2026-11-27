@@ -2,7 +2,7 @@
   "id": "gpt_image_2_6_flare",
   "domain": "image",
   "displayName": "GPT Image 2.6 Flare",
-  "description": "OpenAI GPT Image 2.6 Flare via Runway — latest 1K–4K image model supporting PNG/JPEG/WebP/GIF/SVG and up to 16 references.",
+  "description": "OpenAI GPT Image 2.6 Flare latest 1K–4K image model supporting PNG/JPEG/WebP/GIF/SVG and up to 16 references.",
   "status": "active",
   "aliases": [
     "gpt-image-2.6-flare",

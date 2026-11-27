@@ -1,7 +1,7 @@
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { getProvider } from "../registry/modelRegistry.js";
-import { ConfigIntegrityError } from "../errors.js";
+import { ConfigIntegrityError, ModelsConfigurationError } from "../errors.js";
 import { createLogger, envConfig } from "#shared";
 
 import { resolveWaveSpeedRoute } from "./wavespeed/resolver.js";
@@ -139,8 +139,13 @@ export function unregisterProviderRunner(providerId) {
  * @returns {Promise<any>} rawResponse
  */
 export async function executeProvider({ provider, binding, payload, credential, timeoutMs, options = {} }) {
-  // Allow injected sdkRunner for integration testing without real HTTP calls
+  // Allow injected sdkRunner strictly in test mode
   if (typeof options.sdkRunner === "function") {
+    if (!envConfig.isTest) {
+      throw new ModelsConfigurationError(
+        `options.sdkRunner override is only allowed when NODE_ENV === "test" (current: "${envConfig.env}")`
+      );
+    }
     return options.sdkRunner({ provider, binding, payload, credential, timeoutMs, options });
   }
   const runnerFn = await getRunner(provider.id);

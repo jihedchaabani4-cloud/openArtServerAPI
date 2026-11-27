@@ -1,14 +1,8 @@
 /**
  * System 2: Models Management — Models Controller
  */
-import {
-  getCatalog,
-} from "../services/catalogQueries.js";
-import {
-  reloadRegistry,
-  getRegistry,
-  getModel,
-} from "../registry/modelRegistry.js";
+import { getCatalog } from "../services/catalogQueries.js";
+import { getModel } from "../registry/modelRegistry.js";
 import {
   validateCanonicalInput,
   validateBindingConstraints,
@@ -16,6 +10,35 @@ import {
 } from "../schema/schemaValidator.js";
 import { resolveExecutionPlan } from "../registry/bindingResolver.js";
 import { calculateRetailCredits } from "../pricing/pricingEngine.js";
+import { ModelsNotFoundError } from "../errors.js";
+
+const PROVIDER_LEAK_RE =
+  /\b(wavespeed|runwayml|runway|ltx|google|gemini|vertex|openai|binding\s+"[^"]+")\b/gi;
+
+function isInternalModel(model) {
+  return Boolean(model?.systemOnly || model?.visibility === "internal");
+}
+
+function getPublicModelOrThrow(modelFamily) {
+  const model = getModel(modelFamily);
+  if (isInternalModel(model)) {
+    throw new ModelsNotFoundError(`Model "${modelFamily}" not found`, { modelFamily });
+  }
+  return model;
+}
+
+function safePublicControllerMessage(err, fallback) {
+  const raw = typeof err?.safeMessage === "string" && err.safeMessage.trim()
+    ? err.safeMessage
+    : typeof err?.message === "string"
+      ? err.message
+      : "";
+  if (!raw || PROVIDER_LEAK_RE.test(raw)) {
+    PROVIDER_LEAK_RE.lastIndex = 0;
+    return fallback;
+  }
+  return raw;
+}
 
 export function formatModelDto(m) {
   return {
@@ -34,7 +57,7 @@ export function formatModelDto(m) {
 }
 
 function getModelSchema(modelOrFamily) {
-  const model = typeof modelOrFamily === "string" ? getModel(modelOrFamily) : modelOrFamily;
+  const model = typeof modelOrFamily === "string" ? getPublicModelOrThrow(modelOrFamily) : modelOrFamily;
   const schema = getModelSchemaInternal(model);
 
   return {
@@ -52,7 +75,7 @@ function getModelSchema(modelOrFamily) {
 }
 
 function getSchema(modelFamily, operation = null) {
-  const model = getModel(modelFamily);
+  const model = getPublicModelOrThrow(modelFamily);
 
   if (operation && model.operations?.[operation]) {
     const opDef = model.operations[operation];
@@ -68,14 +91,14 @@ function getSchema(modelFamily, operation = null) {
     };
   }
 
-  return getModelSchema(modelFamily);
+  return getModelSchema(model);
 }
 
 function estimatePrice(modelFamily, rawInput = {}, options = {}) {
-  const model = getModel(modelFamily);
+  const model = getPublicModelOrThrow(modelFamily);
   const modelContract = getModelSchema(model);
   const cleanInput = validateCanonicalInput(modelContract.parameters, rawInput);
-  const { model: planModel, route, planIdentity } = resolveExecutionPlan(modelFamily, cleanInput, options);
+  const { model: planModel, route } = resolveExecutionPlan(model.id, cleanInput, options);
   validateBindingConstraints(route, cleanInput);
   const amount = calculateRetailCredits(planModel, cleanInput, route);
   return {
@@ -83,16 +106,6 @@ function estimatePrice(modelFamily, rawInput = {}, options = {}) {
     currency: "credits",
     pricingVersion: "fixed_retail",
     manifestVersion: planModel?.version || "1.0.0",
-    planIdentity: planIdentity?.id || null,
-  };
-}
-
-function getRegistryStats() {
-  const { models, providers, bindings } = getRegistry();
-  return {
-    models: models.size,
-    providers: providers.size,
-    bindings: bindings.size,
   };
 }
 
@@ -102,7 +115,7 @@ export function handleGetCatalog(req, res) {
 
   const catalog = getCatalog(targetDomain ? { domain: targetDomain } : {});
 
-  const publicModels = catalog.filter((m) => !m.systemOnly && m.visibility !== "internal");
+  const publicModels = catalog.filter((m) => !isInternalModel(m));
   const models = publicModels.map(formatModelDto);
 
   res.json({
@@ -116,24 +129,6 @@ export function handleGetCatalog(req, res) {
       }, {}),
     },
   });
-}
-
-export function handleReloadRegistry(req, res) {
-  try {
-    reloadRegistry();
-    const stats = getRegistryStats();
-    return res.json({
-      success: true,
-      message: "Model registry successfully reloaded",
-      data: stats,
-    });
-  } catch (err) {
-    return res.status(500).json({
-      success: false,
-      error: err.message,
-      code: "REGISTRY_RELOAD_ERROR",
-    });
-  }
 }
 
 export function handleGetModelDetail(req, res) {
@@ -167,7 +162,7 @@ export function handleGetModelSchema(req, res) {
   } catch (err) {
     return res.status(err.statusCode || 404).json({
       success: false,
-      error: err.message,
+      error: safePublicControllerMessage(err, `Model "${key}" not found`),
       code: err.code || "SCHEMA_ERROR",
     });
   }
@@ -181,20 +176,15 @@ export function handleEstimatePrice(req, res) {
       success: true,
       data: {
         credits: estimate.amount,
-        amountString: estimate.amountString,
         currency: estimate.currency,
         pricingVersion: estimate.pricingVersion,
-        planIdentity: estimate.planIdentity,
-        breakdown: {
-          basePrice: estimate.basePrice,
-          modifiers: estimate.modifiersApplied,
-        },
+        manifestVersion: estimate.manifestVersion,
       },
     });
   } catch (err) {
     return res.status(err.statusCode || 400).json({
       success: false,
-      error: err.message,
+      error: safePublicControllerMessage(err, "Invalid parameters for price estimation"),
       code: err.code || "PRICING_ESTIMATION_ERROR",
     });
   }
@@ -216,7 +206,7 @@ export function handleGetLegacySchema(req, res) {
   } catch (err) {
     return res.status(err.statusCode || 400).json({
       success: false,
-      error: err.message,
+      error: safePublicControllerMessage(err, `Model "${key}" not found`),
       code: err.code || "SCHEMA_ERROR",
     });
   }
@@ -235,20 +225,15 @@ export function handleEstimateLegacyPrice(req, res) {
       success: true,
       data: {
         credits: estimate.amount,
-        amountString: estimate.amountString,
         currency: estimate.currency,
         pricingVersion: estimate.pricingVersion,
-        planIdentity: estimate.planIdentity,
-        breakdown: {
-          basePrice: estimate.basePrice,
-          modifiers: estimate.modifiersApplied,
-        },
+        manifestVersion: estimate.manifestVersion,
       },
     });
   } catch (err) {
     return res.status(err.statusCode || 400).json({
       success: false,
-      error: err.message,
+      error: safePublicControllerMessage(err, "Invalid parameters for price estimation"),
       code: err.code || "PRICING_ESTIMATION_ERROR",
     });
   }

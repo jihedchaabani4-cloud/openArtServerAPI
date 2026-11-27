@@ -13,7 +13,7 @@ import express from "express";
 import http from "node:http";
 import { supabase } from "#shared/db/supabase.js";
 import apiRouter from "../../../src/api/routes.js";
-import { resetLimitersForTest } from "#identity/tools";
+import { resetLimitersForTest } from "../../../src/systems/identity/internal/middleware/rateLimit.js";
 
 // ─── Source: imageAndVideoControllers.test.js ───
 {

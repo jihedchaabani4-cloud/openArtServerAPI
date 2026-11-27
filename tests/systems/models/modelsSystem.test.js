@@ -14,7 +14,8 @@ import { run as runLtx } from "../../../src/systems/models/internal/runtime/ltx/
 import { run as runRunway, resolveRunwayRatio } from "../../../src/systems/models/internal/runtime/runway/runner.js";
 import { TaskFailedError, TaskTimedOutError } from "@runwayml/sdk";
 import { runWithContext, baseLogger } from "#shared";
-import modelsRouter, { formatModelDto } from "#models/api";
+import modelsRouter from "#models/api";
+import { formatModelDto } from "../../../src/systems/models/internal/controllers/modelsController.js";
 import { VideoGenerateNode } from "../../../src/systems/generation/internal/v3/index.js";
 import { resolveMediaMetadata } from "#media/tools";
 
@@ -80,7 +81,7 @@ describe("System 2: Models Management (#models/tools & #models/api)", () => {
       assert.ok(credits > 0);
     });
 
-    it("calculateCost with returnQuote returns detailed financial estimate DTO", () => {
+    it("calculateCost with returnQuote returns detailed financial estimate DTO without provider leaks", () => {
       const catalog = getCatalog();
       const imageModel = catalog.find((m) => m.domain === "image" && m.parameters?.prompt?.required) || catalog[0];
       const modelId = imageModel.modelFamily || imageModel.id;
@@ -90,7 +91,8 @@ describe("System 2: Models Management (#models/tools & #models/api)", () => {
       assert.ok(quote);
       assert.equal(typeof quote.credits, "number");
       assert.ok(quote.credits > 0);
-      assert.ok(quote.planIdentity);
+      assert.equal(quote.modelId, modelId);
+      assert.equal(quote.planIdentity, undefined, "Public quote must not leak provider-bearing planIdentity");
     });
 
     it("executeGeneration throws ModelsValidationError if modelId is omitted", async () => {
@@ -122,7 +124,7 @@ describe("System 2: Models Management (#models/tools & #models/api)", () => {
       assert.ok(modelsRouter.stack.length > 0);
     });
 
-    it("registers GET /, GET /:key, GET /:key/schema, POST /:key/estimate-price, POST /admin/reload", () => {
+    it("registers public read/estimate routes and does NOT mount unauthenticated POST /admin/reload", () => {
       const routes = modelsRouter.stack
         .filter((layer) => layer.route)
         .map((layer) => ({
@@ -135,7 +137,7 @@ describe("System 2: Models Management (#models/tools & #models/api)", () => {
       assert.ok(paths.includes("/:key"));
       assert.ok(paths.includes("/:key/schema"));
       assert.ok(paths.includes("/:key/estimate-price"));
-      assert.ok(paths.includes("/admin/reload"));
+      assert.equal(paths.includes("/admin/reload"), false, "Unauthenticated /admin/reload must not exist on public models router");
     });
 
     it("formatModelDto produces normalized client DTO shape", () => {
@@ -157,32 +159,59 @@ describe("System 2: Models Management (#models/tools & #models/api)", () => {
       assert.deepEqual(dto.pricing, { standard: 15 });
     });
 
-    it("POST /admin/reload handler successfully triggers registry reload and returns stats", async () => {
-      const routeLayer = modelsRouter.stack.find(
-        (layer) => layer.route && layer.route.path === "/admin/reload" && layer.route.methods.post
+    it("GET /:key/schema and POST /:key/estimate-price return 404 for systemOnly internal models", async () => {
+      const schemaLayer = modelsRouter.stack.find(
+        (layer) => layer.route && layer.route.path === "/:key/schema" && layer.route.methods.get
       );
-      assert.ok(routeLayer, "Admin reload route should exist");
+      const estimateLayer = modelsRouter.stack.find(
+        (layer) => layer.route && layer.route.path === "/:key/estimate-price" && layer.route.methods.post
+      );
+      assert.ok(schemaLayer);
+      assert.ok(estimateLayer);
 
-      let responsePayload = null;
-      let statusCode = 200;
-
-      const mockReq = {};
-      const mockRes = {
-        status(code) {
-          statusCode = code;
-          return this;
-        },
-        json(data) {
-          responsePayload = data;
-          return this;
-        },
+      const invoke = async (layer, req) => {
+        let statusCode = 200;
+        let payload = null;
+        const res = {
+          status(code) { statusCode = code; return this; },
+          json(data) { payload = data; return this; },
+        };
+        await layer.route.stack[0].handle(req, res);
+        return { statusCode, payload };
       };
 
-      await routeLayer.route.stack[0].handle(mockReq, mockRes);
+      const schemaRes = await invoke(schemaLayer, { params: { key: "gemini_3_1_flash_lite" } });
+      assert.equal(schemaRes.statusCode, 404);
+      assert.equal(schemaRes.payload.success, false);
 
-      assert.equal(statusCode, 200);
-      assert.equal(responsePayload.success, true);
-      assert.ok(responsePayload.data.models > 0);
+      const estRes = await invoke(estimateLayer, {
+        params: { key: "gemini_3_1_flash_lite" },
+        body: { prompt: "internal probe" },
+      });
+      assert.equal(estRes.statusCode, 404);
+      assert.equal(estRes.payload.success, false);
+    });
+
+    it("executeGeneration strips _internal, data.raw, and provider-bearing metadata fields", async () => {
+      registerProviderRunner("wavespeed", async () => ({
+        outputs: ["https://cdn.example.com/sealed.png"],
+        secretDebug: "wavespeed-raw",
+      }));
+      try {
+        const res = await executeGeneration({
+          modelId: "nanobana_pro",
+          prompt: "Sealed black-box check",
+          userId: "user-seal-check",
+        });
+
+        assert.equal(res.status, "success");
+        assert.equal(res._internal, undefined, "_internal must never leave #models/tools");
+        assert.equal(res.data?.raw, undefined, "data.raw must never leave #models/tools");
+        assert.equal(res.metadata?.planIdentity, undefined, "provider-bearing planIdentity must not leave #models/tools");
+        assert.equal(res.metadata?.routeId, undefined, "internal routeId must not leave #models/tools");
+      } finally {
+        unregisterProviderRunner("wavespeed");
+      }
     });
   });
 });
@@ -192,7 +221,7 @@ describe("System 2: Models Management (#models/tools & #models/api)", () => {
 {
 describe("LTX Video Models Capability and Aspect Ratio Boundary", () => {
   before(() => {
-    models.initRegistry({ forceReload: true });
+    initRegistry({ forceReload: true });
   });
 
   it("TEST 1: calculateCost supports aspect_ratio for ltx_2_3_pro (16:9)", () => {
@@ -311,7 +340,7 @@ describe("LTX Video Models Capability and Aspect Ratio Boundary", () => {
 {
 describe("Models Error Classification, Circuit Breaker, Retry-After Fast-Fail, and LTX Polling/Logging", () => {
   before(() => {
-    models.initRegistry({ forceReload: true });
+    initRegistry({ forceReload: true });
   });
 
   describe("1. P1-2: Non-retryable CIRCUIT_BREAKER_OPEN", () => {

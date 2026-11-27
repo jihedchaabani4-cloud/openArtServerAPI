@@ -27,10 +27,6 @@ const PORT = envConfig.port;
 const isProd = envConfig.isProduction;
 const isStagingOrProd = isProd || envConfig.isStaging;
 
-if (isProd && envConfig.rawDevAuthBypass) {
-    throw new Error("Fatal: DEV_AUTH_BYPASS cannot be enabled in production mode (NODE_ENV=production).");
-}
-
 if (envConfig.trustProxy !== undefined && envConfig.trustProxy !== "") {
     const rawTrust = envConfig.trustProxy;
     if (rawTrust === "true") app.set("trust proxy", true);
@@ -57,10 +53,12 @@ if (isStagingOrProd) {
 // ── Middleware ──────────────────────────────────────────────
 const allowedOrigins = [
     envConfig.frontendUrl ? envConfig.frontendUrl.replace(/\/$/, '') : null,
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:3001", // In case Next.js moved to 3001
-    "http://127.0.0.1:3001"
+    ...(!isProd ? [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001", // In case Next.js moved to 3001
+        "http://127.0.0.1:3001",
+    ] : []),
 ].filter(Boolean);
 
 app.use(

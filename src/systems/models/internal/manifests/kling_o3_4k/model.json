@@ -2,7 +2,7 @@
   "id": "kling_o3_4k",
   "domain": "video",
   "displayName": "Kling O3 4K",
-  "description": "Kling O3 4K omni-modal T2V/I2V/V2V via Runway with native audio and up to 7 reference images.",
+  "description": "Kling O3 4K omni-modal T2V/I2V/V2V with native audio and up to 7 reference images.",
   "status": "active",
   "aliases": [
     "klingO3_4k",

@@ -24,13 +24,11 @@ import {
     normalizeWorkflowMediaRole,
     inferWorkflowMediaRole,
 } from "../internal/db/workflowMediaRole.js";
-import {
-    getMediaSupabaseAdminClient,
-} from "../internal/db/mediaClient.js";
 import { StorageService } from "../internal/storage/StorageService.js";
 import { StoragePathResolver, storagePathResolver } from "../internal/storage/StoragePathResolver.js";
 import {
     createStorageService,
+    createDefaultStorageService,
     IStorageProvider,
     InMemoryStorageProvider,
     SupabaseStorageProvider,
@@ -134,13 +132,15 @@ export function getWorkflowMediaRepository() {
 
 export function getStorageService() {
     if (!_storageService) {
-        const client = getMediaSupabaseAdminClient();
-        _storageService = createStorageService({ client });
+        _storageService = createDefaultStorageService();
     }
     return _storageService;
 }
 
 export function setStorageService(customStorageService) {
+    if (!envConfig.isTest) {
+        throw new MediaValidationError("setStorageService is only allowed in test environments.");
+    }
     _storageService = customStorageService;
 }
 

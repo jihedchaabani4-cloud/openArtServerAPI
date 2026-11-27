@@ -36,7 +36,7 @@ Every Business System inside `src/systems/<system>/` is a strict black box. It o
 - **Import Aliases:** `#generation/api`, `#generation/tools`
 - **Role:** Central execution brain for all AI generation (images, videos, character sheets, element analysis) powered 100% by the ComfyUI-Style V3 Node Engine (`src/systems/generation/internal/v3/`).
 - **Directory Structure & Internal Services:**
-  - `public/api.js`: Mounts `/api/images/*`, `/api/video/*`, `/api/prompt/*`, `/api/workflows/*`, and `/api/v2/workflows/*`.
+  - `public/api.js`: Mounts `/api/images/*`, `/api/video/*`, `/api/workflows/*`, and `/api/v2/workflows/*`.
   - `public/tools.js`: Exposes `jobQueueService`, `GenerationService`, `GenerationRequestService`, `WorkflowService`, `WorkflowRepository`, `ExecutionEngine`, `JobExecutionContext`, `createJobExecutionContext`, and `configureGeneration`. Internal V3 engine modules remain private to System 1.
   - `internal/controllers/`: `imageController.js`, `videoController.js`, `workflowsController.js`, `generationsQueryController.js`, `generationsMutationController.js`, `projectController.js`.
   - `internal/services/`:
@@ -46,26 +46,25 @@ Every Business System inside `src/systems/<system>/` is a strict black box. It o
   - `internal/v3/`:
     - ComfyUI-Style Node Engine Core (`NodeRegistry.js`, `GraphCompiler.js`, `JobExecutionContext.js`, `WorkflowExecutor.js`, `ExecutionEngine.js`), 6 Base Nodes (`resolveRefsNode.js` [`base.resolve_references`], `llmNode.js` [`base.llm`], `extractNode.js` [`base.extract`], `imageGenerateNode.js` [`base.image_generate`], `videoGenerateNode.js` [`base.video_generate`], `saveMediaNode.js` [`base.save_media`]), 0 Custom Nodes, and 3 Declarative V3 Workflows (`imageGenerationV3.js`, `videoGenerationV3.js`, `characterSheetV3.js`).
   - `internal/workers/`: `useCaseWorker.js` and `worker.js` (BullMQ consumers executing V3 runs via `ExecutionEngine` and settling holds/media).
-  - `internal/db/`: `generationClient.js`, `BaseRepository.js`, `WorkflowRepository.js`, `dbMap.js`.
+  - `internal/db/`: `generationClient.js`, `BaseRepository.js`, `WorkflowRepository.js`.
 - **Owned Database Tables:** `workflows`, `workflow_runs`, `node_runs`, `generation_configs`.
 
 ---
 
 ### System 2: Models Management (`src/systems/models/`)
 - **Import Aliases:** `#models/api`, `#models/tools`
-- **Role:** Standalone registry and execution adapter for all AI models (image, video, LLM), input schemas, conditional parameter rules, model pricing calculation, and external AI providers (WaveSpeed, Google GenAI, LTX).
+- **Role:** Standalone, pure black-box registry and execution adapter for all AI models (image, video, LLM), input schemas, conditional parameter rules, model pricing calculation, and external AI providers (WaveSpeed, Google GenAI, LTX, Runway). Zero database or Redis dependencies.
 - **Directory Structure & Internal Services:**
-  - `public/api.js`: Mounts `/api/models/*` and admin model reload/pricing endpoints.
-  - `public/tools.js`: Exposes `getModelConfig`, `getCatalog`, `calculateCost`, `validateModelInputs`, `executeGeneration`, `executeLLM`, `initRegistry`, `reloadRegistry`, `getRegistryStats`, `PricingService`, `llmService`, `promptService`.
+  - `public/api.js`: Mounts public read-only `/api/models/*` catalog, schema, and price estimation endpoints.
+  - `public/tools.js`: Exposes `getModelConfig`, `getCatalog`, `getModelSchema`, `calculateCost`, `validateModelInputs`, `executeGeneration`, `executeLLM`, `reloadRegistry`, and the 5 canonical `Models*Error` classes.
   - `internal/controllers/`: `modelsController.js`.
-  - `internal/services/`: `PricingService.js`, `LLMService.js`, `PromptService.js`, `catalogQueries.js`, `catalogPresentation.js`, `credentialResolver.js`.
+  - `internal/services/`: `LLMService.js`, `catalogQueries.js`, `catalogPresentation.js`, `credentialResolver.js`.
   - `internal/registry/`: `modelRegistry.js`, `bindingResolver.js`.
   - `internal/execution/` & `internal/mapping/` & `internal/schema/` & `internal/pricing/`: `modelRunner.js`, `runtimeExecutor.js`, `circuitBreaker.js`, `idempotencyStore.js`, `errorNormalizer.js`, `parameterMapper.js`, `outputValidator.js`, `schemaValidator.js`, `conditionalRules.js`, `pricingEngine.js`.
-  - `internal/runtime/`: Provider adapters (`wavespeed/`, `google/`, `ltx/`, `generic/`), `providerRuntimeRegistry.js`, `sseStreamReader.js`.
+  - `internal/runtime/`: Provider adapters (`wavespeed/`, `google/`, `ltx/`, `runway/`, `generic/`), `providerRuntimeRegistry.js`, `sseStreamReader.js`.
   - `internal/manifests/`: JSON model & provider manifests (`manifests/`).
-  - `internal/db/`: `modelsClient.js`.
-  - `internal/errors.js`: Unified model, binding, validation, and provider errors (`ModelNotFoundError`, `ProviderTransientError`, `ProviderContentPolicyError`, `OutputContractViolationError`).
-- **Owned Database Tables:** `models_catalog`, `model_pricing_rules`, `provider_bindings`.
+  - `internal/errors.js`: Unified model, binding, validation, and provider errors (`ModelsError`, `ModelsValidationError`, `ModelsNotFoundError`, `ModelsConfigurationError`, `ModelsProviderError`).
+- **Owned Database Tables:** None (config-driven via JSON manifests).
 
 ---
 
@@ -73,13 +72,13 @@ Every Business System inside `src/systems/<system>/` is a strict black box. It o
 - **Import Aliases:** `#billing/api`, `#billing/tools`
 - **Role:** Financial ledger managing user credit balances, credit packages, two-phase credit holds (`reserve`, `capture`, `release`), stale hold expiration reaper, and failed operations retry.
 - **Directory Structure & Internal Services:**
-  - `public/api.js`: Mounts `/api/wallet/*`, `/api/payments/*`, and `/api/admin/*`.
-  - `public/tools.js`: Exposes `getCreditBalance`, `addCredits`, `reserveCredits`, `settleCredits`, `rollbackCredits`, `getBillingService`, `FailedOpsService`.
-  - `internal/controllers/`: `walletController.js`, `adminController.js`, `payments/`.
+  - `public/api.js`: Mounts `/api/wallet/*` (`walletRouter`) and `/api/payments/*` (`paymentsRouter`).
+  - `public/tools.js`: Sealed surface exposing `getCreditBalance`, `reserveCredits`, `settleCredits`, `rollbackCredits`, `extendHold`, `addCredits`, `listTransactions`, `listCreditPackages`, `configureBilling`, `createWalletService`, `createFailedOpsService`, `runReservationReaper`, `startWalletWorker`, `stopWalletWorker`, and canonical `Billing*Error` / `WalletError` classes.
+  - `internal/controllers/`: `walletController.js`, `paymentsController.js`, `payments/`.
   - `internal/services/`: `WalletService.js`, `ReservationReaperService.js`, `FailedOpsService.js`, `serviceAccessor.js`.
   - `internal/workers/`: `walletQueue.js`, `walletWorker.js`.
-  - `internal/db/`: `billingClient.js`, `WalletRepository.js`, `TransactionRepository.js`, `CreditPackageRepository.js`, `FailedOpsRepository.js`, `UsageEventRepository.js`.
-  - `internal/errors.js`: `BillingError`, `BillingInsufficientFundsError`, `BillingConflictError`, `BillingNotFoundError`, `BillingValidationError`.
+  - `internal/db/`: `billingClient.js`, `billingRepositoryFactory.js`, `WalletRepository.js`, `TransactionRepository.js`, `CreditPackageRepository.js`, `FailedOpsRepository.js`, `UsageEventRepository.js`.
+  - `internal/errors.js`: `BillingError`, `BillingValidationError`, `BillingNotFoundError`, `BillingInsufficientFundsError`, `BillingConflictError`, `BillingConfigurationError`, `WalletError`.
 - **Owned Database Tables:** `wallets`, `credit_transactions`, `credit_reservations`, `credit_packages`, `failed_billing_ops`, `usage_events`.
 
 ---
@@ -104,12 +103,12 @@ Every Business System inside `src/systems/<system>/` is a strict black box. It o
 - **Import Aliases:** `#identity/api`, `#identity/tools`
 - **Role:** Authentication (Email, Google OAuth, Microsoft OAuth), HTTP-only session cookies, user profiles, rate limiting, and fail-closed resource ownership verification (`assertOwns`).
 - **Directory Structure & Internal Services:**
-  - `public/api.js`: Mounts `/api/auth/*`.
-  - `public/tools.js`: Exposes `verifySession`, `getUserProfile`, `assertOwns`, `assertOwnsAny`, `toMediaIdList`, `requireAuth`, `requireAdmin`, `rateLimit`, `walletRateLimit`, `safeCompareSecret`.
+  - `public/api.js`: Mounts `/api/auth/*` via `authRouter`.
+  - `public/tools.js`: Sealed surface exposing `requireAuth`, `rateLimit`, `walletRateLimit`, `assertOwns`, `assertOwnsAny`, `toMediaIdList`, `getAuthUserById`, `configureIdentityHooks`, `configureOwnershipResolvers`, and canonical `Identity*Error` classes.
   - `internal/controllers/`: `authController.js`.
-  - `internal/services/`: `AuthService.js`, `OAuthService.js`, `OwnershipService.js`, `cookies.js`, `secretComparison.js`.
-  - `internal/middleware/`: `auth.js`, `requireAdmin.js`, `rateLimit.js`, `walletRateLimit.js`.
-  - `internal/db/`: `authClient.js`, `ProfileRepository.js`, `ownershipDb.js`.
+  - `internal/services/`: `AuthService.js`, `OAuthService.js`, `OwnershipService.js`, `cookies.js`, `jwtVerifier.js`, `secretComparison.js`.
+  - `internal/middleware/`: `auth.js`, `rateLimit.js`, `walletRateLimit.js`.
+  - `internal/db/`: `authClient.js`, `ProfileRepository.js`.
   - `internal/errors.js`: `IdentityError`, `IdentityAuthenticationError`, `IdentityForbiddenError`, `IdentityNotFoundError`, `IdentityValidationError`.
 - **Owned Database Tables:** `profiles` (and Supabase `auth.users`).
 

@@ -2,7 +2,7 @@
   "id": "gemini_2_5_flash_image",
   "domain": "image",
   "displayName": "Gemini 2.5 Flash Image",
-  "description": "Google Gemini 2.5 Flash image generation via Runway with up to 3 reference images.",
+  "description": "Google Gemini 2.5 Flash image generation with up to 3 reference images.",
   "status": "active",
   "aliases": [
     "gemini_2.5_flash_image",

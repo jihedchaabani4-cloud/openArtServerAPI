@@ -222,8 +222,7 @@ apiOpenArt/
             ├── db/                                      # Exclusive table owners (Rule R12)
             │   ├── generationClient.js                  # Supabase client wrapper
             │   ├── BaseRepository.js                    # Shared CRUD helpers
-            │   ├── WorkflowRepository.js                # public.workflow owner
-            │   └── dbMap.js                             # Repository aggregator helper
+            │   └── WorkflowRepository.js                # public.workflow owner
             ├── workers/                                 # BullMQ consumers
             │   ├── worker.js                            # Starts useCaseWorker + 5m ReservationReaper
             │   └── useCaseWorker.js                     # Delegates to engine.runWorkflow(..., { async: false }) + crash handler

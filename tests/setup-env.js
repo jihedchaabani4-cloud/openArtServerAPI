@@ -10,9 +10,6 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ||
 // Internal service-to-service secret for test mode (>= 32 chars)
 process.env.INTERNAL_SECRET = process.env.INTERNAL_SECRET || "placeholder-internal-s2s-secret-32-chars-test!!";
 
-// Disable dev auth bypass by default
-process.env.DEV_AUTH_BYPASS = process.env.DEV_AUTH_BYPASS || "false";
-
 // Rate limit store fallback for test mode
 process.env.RATE_LIMIT_STORE = process.env.RATE_LIMIT_STORE || "memory";
 

@@ -5,6 +5,7 @@ import {
   BindingNotFoundError,
   BindingModelMismatchError,
   NoEligibleBindingError,
+  ModelsConfigurationError,
 } from "../errors.js";
 
 function normalizeId(id) {
@@ -107,6 +108,11 @@ export function resolveExecutionPlan(modelId, semanticInput = {}, options = {}) 
   // Isolate test overrides from production path
   let binding;
   if (options._testBinding) {
+    if (!envConfig.isTest) {
+      throw new ModelsConfigurationError(
+        `_testBinding override is only allowed when NODE_ENV === "test" (current: "${envConfig.env}")`
+      );
+    }
     binding = options._testBinding;
   } else if (options._testBindingId) {
     binding = resolveBindingForTest(model.id, options._testBindingId);

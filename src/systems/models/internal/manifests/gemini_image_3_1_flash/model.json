@@ -2,7 +2,7 @@
   "id": "gemini_image_3_1_flash",
   "domain": "image",
   "displayName": "Gemini 3.1 Flash Image",
-  "description": "Google Gemini 3.1 Flash image generation via Runway — 0.5K to 4K with up to 14 character/object references.",
+  "description": "Google Gemini 3.1 Flash image generation 0.5K to 4K with up to 14 character/object references.",
   "status": "active",
   "aliases": [
     "gemini_image3.1_flash",

@@ -740,23 +740,6 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
     assert.equal(body.ok, false);
   });
 
-  it("TEST R4-17: GET /api/admin/wallet/:userId for normal user returns 403", async () => {
-    const res = await reqAlice(`/api/admin/wallet/${FOREIGN_USER_ID}`);
-    const body = await res.json();
-    assert.equal(res.status, 403);
-    assert.equal(body.error, "FORBIDDEN");
-  });
-
-  it("TEST R4-18: PATCH /api/admin/pricing/:id for normal user returns 403", async () => {
-    const res = await reqAlice(`/api/admin/pricing/123`, {
-      method: "PATCH",
-      body: JSON.stringify({ cost_per_unit: 10 }),
-    });
-    const body = await res.json();
-    assert.equal(res.status, 403);
-    assert.equal(body.error, "FORBIDDEN");
-  });
-
   it("TEST R4-19: DELETE /api/workflows/:id for foreign workflow returns 404", async () => {
     const res = await reqAlice(`/api/workflows/${FOREIGN_WF_ID}`, {
       method: "DELETE",
@@ -1021,8 +1004,6 @@ describe("RC1.1-R4 — Route Table Completeness & Service Ownership Boundary Tes
   it("TEST R4-GENERIC: Every authenticated route touching a resource ID has an explicit foreign-refusal test asserting 404/403", () => {
     const allRoutes = extractRoutes();
     const explicitRefusalRoutes = new Set([
-      "PATCH /api/admin/pricing/:id",
-      "GET /api/admin/wallet/:userId",
       "DELETE /api/assets/:id",
       "PATCH /api/assets/:assetId/folder",
       "DELETE /api/characters/:characterId",

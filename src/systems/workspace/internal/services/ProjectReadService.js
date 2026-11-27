@@ -2,9 +2,11 @@
  * ProjectReadService
  * @owns System 8: Workspace — project read and aggregation service
  */
-import { supabase, supabaseAdmin } from "../db/workspaceClient.js";
+import { ProjectRepository } from "../db/ProjectRepository.js";
+import { FolderRepository } from "../db/FolderRepository.js";
+import { getMediaRepository, getWorkflowMediaRepository } from "#media/tools";
 import { getCatalog } from "#models/tools";
-import { crudOperationLog, CrudServiceError, calculateAspectRatio, createLogger, envConfig } from "#shared";
+import { crudOperationLog, CrudServiceError, calculateAspectRatio, createLogger } from "#shared";
 
 const projectLogger = createLogger("workspace:project_read");
 
@@ -47,9 +49,23 @@ function isUploadMediaItem({ wf, role, config, stepId }) {
 }
 
 export class ProjectReadService {
-    constructor({ db, folderService = null }) {
-        this.db = db;
+    constructor({ db, folderService = null } = {}) {
+        this.db = db || {};
         this.folderService = folderService;
+        this._defaultProjectRepo = null;
+        this._defaultFolderRepo = null;
+    }
+
+    _getProjectRepo() {
+        if (this.db?.projects?.findById) return this.db.projects;
+        if (!this._defaultProjectRepo) this._defaultProjectRepo = new ProjectRepository();
+        return this._defaultProjectRepo;
+    }
+
+    _getFolderRepo() {
+        if (this.db?.folders?.listByProject) return this.db.folders;
+        if (!this._defaultFolderRepo) this._defaultFolderRepo = new FolderRepository();
+        return this._defaultFolderRepo;
     }
 
     async getProjectData({ projectId, userId }) {
@@ -73,18 +89,7 @@ export class ProjectReadService {
 
         let projectData = null;
         try {
-            if (this.db?.projects?.findById) {
-                projectData = await this.db.projects.findById(projectId, "project_name, user_id");
-            } else {
-                const query = supabase
-                    .from("project")
-                    .select("project_name, user_id")
-                    .eq("id", projectId);
-                const res = typeof query.maybeSingle === "function"
-                    ? await query.maybeSingle()
-                    : await query.single().catch(() => ({ data: null }));
-                projectData = res?.data || null;
-            }
+            projectData = await this._getProjectRepo().findById(projectId, "project_name, user_id");
         } catch (err) {
             projectLogger.error({ event: "project_read.project_query_error", err: err?.message || String(err) }, "Project query error");
             throw new CrudServiceError("Project not found", { statusCode: 404, errorCode: "PROJECT_NOT_FOUND" });
@@ -95,22 +100,19 @@ export class ProjectReadService {
         }
 
         if (!projectData.user_id || projectData.user_id !== userId) {
-            const isDev = envConfig.devAuthBypass;
-            if (!isDev) {
-                crudOperationLog({
-                    operation: "getProjectData",
-                    status: "error",
-                    userId,
-                    resourceId: projectId,
-                    resourceType: "project",
-                    errorCode: "NOT_FOUND",
-                    message: "Project not found",
-                });
-                throw new CrudServiceError("Project not found", {
-                    statusCode: 404,
-                    errorCode: "NOT_FOUND",
-                });
-            }
+            crudOperationLog({
+                operation: "getProjectData",
+                status: "error",
+                userId,
+                resourceId: projectId,
+                resourceType: "project",
+                errorCode: "NOT_FOUND",
+                message: "Project not found",
+            });
+            throw new CrudServiceError("Project not found", {
+                statusCode: 404,
+                errorCode: "NOT_FOUND",
+            });
         }
 
         const projectName = projectData?.project_name || "Unknown Project";
@@ -129,32 +131,16 @@ export class ProjectReadService {
                           return { active: [], trashed: [] };
                       })
                 : { active: [], trashed: [] },
-            this.db?.media?.findByProjectAll
-                ? this.db.media
-                      .findByProjectAll(projectId)
-                      .catch((err) => {
-                          projectLogger.error({ event: "project_read.media_query_error", err: err?.message || String(err) }, "Media query error");
-                          return [];
-                      })
-                : supabase
-                      .from("media")
-                      .select("id, step_id, url, width, height, create_time, status, error_message, generation_config")
-                      .eq("project_id", projectId)
-                      .order("create_time", { ascending: false })
-                      .then((r) => r.data || [])
-                      .catch(() => []),
+            (this.db?.media?.findByProjectAll
+                ? this.db.media.findByProjectAll(projectId)
+                : getMediaRepository().findByProjectAll(projectId)
+            ).catch((err) => {
+                projectLogger.error({ event: "project_read.media_query_error", err: err?.message || String(err) }, "Media query error");
+                return [];
+            }),
             this.folderService?.list
                 ? this.folderService.list({ projectId, userId }).then((r) => r.items || []).catch(() => [])
-                : this.db?.folders?.listByProject
-                    ? this.db.folders.listByProject(projectId, userId).catch(() => [])
-                    : (supabaseAdmin || supabase)
-                          .from("folders")
-                          .select("*")
-                          .eq("project_id", projectId)
-                          .order("position", { ascending: true })
-                          .order("create_time", { ascending: true })
-                          .then((r) => r.data || [])
-                          .catch(() => []),
+                : this._getFolderRepo().listByProject(projectId, userId).catch(() => []),
         ]);
 
         const workflows = Array.isArray(workflowsResult)
@@ -186,41 +172,23 @@ export class ProjectReadService {
                           projectLogger.warn({ event: "project_read.element_query_warn", err: err?.message || String(err) }, "Element query warning");
                           return [];
                       })
-                    : workflowIds.length > 0
-                        ? supabase
-                              .from("element")
-                              .select("*")
-                              .in("workflow_id", workflowIds)
-                              .then((r) => r.data || [])
-                              .catch(() => [])
-                        : Promise.resolve([]),
+                    : Promise.resolve([]),
                 workflowIds.length > 0 && this.db.characters?.findByProjectOrWorkflowIds
                     ? this.db.characters.findByProjectOrWorkflowIds({ projectId, workflowIds }).catch((err) => {
                           projectLogger.warn({ event: "project_read.character_query_warn", err: err?.message || String(err) }, "Characters query warning");
                           return [];
                       })
-                    : workflowIds.length > 0
-                        ? (supabaseAdmin || supabase)
-                              .from("characters")
-                              .select("*")
-                              .or(`project_id.eq.${projectId},workflow_id.in.(${workflowIds.join(",")})`)
-                              .then((r) => r.data || [])
-                              .catch(() => [])
-                        : Promise.resolve([]),
-                this.db.workflowMedia?.findRelationsByWorkflowIds
-                    ? this.db.workflowMedia.findRelationsByWorkflowIds(allWorkflowIds).catch((err) => {
-                          projectLogger.warn(
-                              { event: "project_read.workflow_media_query_warn", err: err?.message || String(err) },
-                              "Workflow media relation query warning"
-                          );
-                          return [];
-                      })
-                    : supabase
-                          .from("workflow_media")
-                          .select("workflow_id, media_id, role, is_primary, metadata, created_at")
-                          .in("workflow_id", allWorkflowIds)
-                          .then((r) => r.data || [])
-                          .catch(() => []),
+                    : Promise.resolve([]),
+                (this.db.workflowMedia?.findRelationsByWorkflowIds
+                    ? this.db.workflowMedia.findRelationsByWorkflowIds(allWorkflowIds)
+                    : getWorkflowMediaRepository().findRelationsByWorkflowIds(allWorkflowIds)
+                ).catch((err) => {
+                    projectLogger.warn(
+                        { event: "project_read.workflow_media_query_warn", err: err?.message || String(err) },
+                        "Workflow media relation query warning"
+                    );
+                    return [];
+                }),
             ]);
 
             elementsList = elemResult || [];
@@ -259,16 +227,6 @@ export class ProjectReadService {
                 } catch (charErr) {
                     projectLogger.warn({ event: "project_read.character_query_warn", err: charErr?.message || String(charErr) }, "Characters query warning");
                 }
-            } else if (supabaseAdmin || supabase) {
-                const { data: chars } = await (supabaseAdmin || supabase)
-                    .from("characters")
-                    .select("*")
-                    .eq("project_id", projectId);
-                charactersList = chars || [];
-                charactersList.forEach((c) => {
-                    if (c.workflow_id) characterMap[c.workflow_id] = c;
-                    if (c.id) characterMap[c.id] = c;
-                });
             }
         }
 
@@ -618,23 +576,14 @@ export class ProjectReadService {
         return { workflow, items };
     }
 
-    async _verifyMediaOwnership(mediaId, userId, req = null) {
-        const isDev = envConfig.devAuthBypass;
-        if (isDev) return true;
-
-        if (this.db?.media?.findOwnerByMediaId) {
-            const ownerId = await this.db.media.findOwnerByMediaId(mediaId);
+    async _verifyMediaOwnership(mediaId, userId, _req = null) {
+        const mediaRepo = this.db?.media?.findOwnerByMediaId ? this.db.media : getMediaRepository();
+        try {
+            const ownerId = await mediaRepo.findOwnerByMediaId(mediaId);
             if (!ownerId || ownerId !== userId) return false;
             return true;
+        } catch {
+            return false;
         }
-
-        const { data: media, error } = await supabase
-            .from("media")
-            .select("id, project:project!project_id(user_id)")
-            .eq("id", mediaId)
-            .single();
-
-        if (error || !media || !media.project?.user_id || media.project?.user_id !== userId) return false;
-        return true;
     }
 }

@@ -2,7 +2,7 @@
   "id": "magnific_precision_upscaler_v2",
   "domain": "upscale",
   "displayName": "Magnific Precision Upscaler v2",
-  "description": "Magnific precision AI image upscaling via Runway — 2x to 16x up to 25.3MP with photo, denoiser, and sublime presets.",
+  "description": "Magnific precision AI image upscaling 2x to 16x up to 25.3MP with photo, denoiser, and sublime presets.",
   "status": "active",
   "aliases": [
     "magnific-precision-upscaler-v2",

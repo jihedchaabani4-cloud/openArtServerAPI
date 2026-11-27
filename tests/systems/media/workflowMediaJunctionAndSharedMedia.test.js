@@ -7,9 +7,10 @@ import { WorkflowMediaService } from "../../../src/systems/generation/internal/s
 import { ProjectReadService } from "#workspace/tools";
 import { CharacterMediaService } from "#characters/tools";
 import { ElementMediaService, elementRepository, ElementService } from "#elements/tools";
-import { db } from "../../../src/container.js";
+import { db, createOwnershipResolvers } from "../../../src/container.js";
 import { CrudServiceError } from "#shared";
-import { assertOwns, setDb } from "#identity/tools";
+import { assertOwns, configureOwnershipResolvers } from "#identity/tools";
+const setDb = (targetDb) => configureOwnershipResolvers(createOwnershipResolvers(targetDb));
 
 // ─── Source: workflowMediaCompatibilityReads.test.js ───
 {

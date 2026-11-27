@@ -6,9 +6,9 @@
  * JSON schema extraction, and database persistence.
  */
 
-import { supabase } from "../db/elementClient.js";
 import elementRepository from "../db/ElementRepository.js";
-import { llmService } from "#models/tools";
+import { executeLLM } from "#models/tools";
+import { getWorkflowVisualMedia } from "#media/tools";
 import { createLogger } from "#shared";
 
 const logger = createLogger("elements:analysis");
@@ -50,6 +50,9 @@ ${KEYWORD_EXTRACTION_INSTRUCTION}`;
 
 
 export class ElementAnalysisService {
+  constructor({ workflowSync = null } = {}) {
+    this.workflowSync = workflowSync;
+  }
   /**
    * Main entry point: Analyzes reference images using Vision AI (via LLMService),
    * updates element description and keywords in Supabase DB, and returns metadata.
@@ -135,31 +138,25 @@ export class ElementAnalysisService {
       updatedElement = await elementRepository.update(elementId, patch);
     }
 
-    // 2. Update workflow table metadata
-    const { data: wf } = await supabase
-      .from("workflow")
-      .select("id, name, metadata")
-      .or(`id.eq.${elementId},name.eq.${elementId}`)
-      .maybeSingle();
+    // 2. Sync workflow metadata through injected workflowSync hook (owned by System 1: Generation)
+    if (this.workflowSync?.findWorkflow && this.workflowSync?.updateWorkflow) {
+      const wf = await this.workflowSync.findWorkflow(elementId);
+      if (wf) {
+        const updatedMeta = {
+          ...(wf.metadata || {}),
+          ...(description !== undefined ? { description } : {}),
+          ...(keywords !== undefined ? { keywords } : {}),
+          ...(guidelines !== undefined ? { guidelines } : {}),
+          ...(name !== undefined ? { displayName: name } : {}),
+          ...(element_type !== undefined ? { elementType: element_type } : {}),
+        };
 
-    if (wf) {
-      const updatedMeta = {
-        ...(wf.metadata || {}),
-        ...(description !== undefined ? { description } : {}),
-        ...(keywords !== undefined ? { keywords } : {}),
-        ...(guidelines !== undefined ? { guidelines } : {}),
-        ...(name !== undefined ? { displayName: name } : {}),
-        ...(element_type !== undefined ? { elementType: element_type } : {}),
-      };
+        const wfPatch = { metadata: updatedMeta };
+        if (name !== undefined) wfPatch.display_name = name;
+        if (element_type !== undefined) wfPatch.element_type = element_type;
 
-      const wfPatch = { metadata: updatedMeta };
-      if (name !== undefined) wfPatch.display_name = name;
-      if (element_type !== undefined) wfPatch.element_type = element_type;
-
-      await supabase
-        .from("workflow")
-        .update(wfPatch)
-        .eq("id", wf.id);
+        await this.workflowSync.updateWorkflow(wf.id, wfPatch);
+      }
     }
 
     return {
@@ -169,7 +166,7 @@ export class ElementAnalysisService {
   }
 
   /**
-   * Helper: Fetches reference media image URLs from Supabase DB
+   * Helper: Fetches reference media image URLs via #media/tools and workflow metadata via workflowSync
    */
   async fetchWorkflowContext(projectId, workflowId) {
     try {
@@ -178,27 +175,19 @@ export class ElementAnalysisService {
 
       if (workflowId) {
         let wf = null;
-        try {
-          const { data } = await supabase
-            .from("workflow")
-            .select("id, display_name, metadata, element_type")
-            .eq("id", workflowId)
-            .maybeSingle();
-          wf = data;
-        } catch (_) {}
+        if (this.workflowSync?.findWorkflow) {
+          try {
+            wf = await this.workflowSync.findWorkflow(workflowId);
+          } catch (_) {}
+        }
 
         if (wf) {
           elementType = wf.element_type || wf.metadata?.elementType || "object";
         }
 
-        const { data: links } = await supabase
-          .from("workflow_media")
-          .select("media:media_id(id, url, file_url)")
-          .eq("workflow_id", workflowId);
-
-        if (links && links.length > 0) {
-          for (const link of links) {
-            const m = Array.isArray(link.media) ? link.media[0] : link.media;
+        const mediaItems = await getWorkflowVisualMedia(workflowId).catch(() => []);
+        if (Array.isArray(mediaItems)) {
+          for (const m of mediaItems) {
             const directUrl = m?.url || m?.file_url;
             if (directUrl) urls.push(directUrl);
           }
@@ -222,7 +211,7 @@ export class ElementAnalysisService {
     const systemInstructions = ELEMENT_TYPE_PROMPTS[mode] || DEFAULT_TYPE_PROMPT;
     const promptText = "Analyze the attached reference images and return the requested JSON object matching the schema.";
 
-    const result = await llmService.analyzeVision({
+    const result = await executeLLM({
       images: imageUrls,
       prompt: promptText,
       systemInstruction: systemInstructions,
@@ -244,30 +233,15 @@ export class ElementAnalysisService {
     try {
       logger.info({ workflowId }, "Persisting metadata for workflow");
 
-      // 1. Update workflow table
-      const { data: wf, error: wfErr } = await supabase
-        .from("workflow")
-        .select("id, name, metadata")
-        .or(`id.eq.${workflowId},name.eq.${workflowId}`)
-        .maybeSingle();
-
-      if (wfErr) {
-        logger.error({ err: wfErr }, "Error looking up workflow");
-      }
-
-      if (wf) {
-        const updatedMeta = {
-          ...(wf.metadata || {}),
-          description,
-        };
-        const { error: updateWfErr } = await supabase
-          .from("workflow")
-          .update({ metadata: updatedMeta })
-          .eq("id", wf.id);
-
-        if (updateWfErr) {
-          logger.error({ err: updateWfErr }, "Error updating workflow.metadata");
-        } else {
+      // 1. Sync workflow metadata through injected workflowSync hook
+      if (this.workflowSync?.findWorkflow && this.workflowSync?.updateWorkflow) {
+        const wf = await this.workflowSync.findWorkflow(workflowId);
+        if (wf) {
+          const updatedMeta = {
+            ...(wf.metadata || {}),
+            description,
+          };
+          await this.workflowSync.updateWorkflow(wf.id, { metadata: updatedMeta });
           logger.info({ wfId: wf.id }, "Updated workflow metadata");
         }
       }

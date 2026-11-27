@@ -1,6 +1,6 @@
 /**
  * Maps a workflow database row to a product asset DTO.
- * // "asset" in product terms = workflow row (Decision D-21, D-23)
+ * Owned by System 1 (Generation & Workflows).
  *
  * @param {Object} workflow - Raw row or workflow record
  * @returns {Object|null}

@@ -4,6 +4,7 @@
  * Feature: 026-backend-platform-layer-refactor
  */
 import { getGenerationServices } from "../services/serviceAccessor.js";
+import { safePublicRouteError } from "#shared";
 
 export const getAssets = async (req, res) => {
     try {
@@ -14,7 +15,8 @@ export const getAssets = async (req, res) => {
         const result = await generationService.getAssets(req.user.id, project_id, { limit, offset });
         res.json({ ok: true, ...result });
     } catch (err) {
-        res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+        const { statusCode, publicMessage } = safePublicRouteError(err);
+        res.status(statusCode).json({ ok: false, message: publicMessage });
     }
 };
 
@@ -25,7 +27,8 @@ export const getUserLibrary = async (req, res) => {
         const result = await generationService.getUserLibrary(req.user.id, { projectId: project_id, limit, offset });
         res.json({ ok: true, ...result });
     } catch (err) {
-        res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+        const { statusCode, publicMessage } = safePublicRouteError(err);
+        res.status(statusCode).json({ ok: false, message: publicMessage });
     }
 };
 
@@ -37,6 +40,7 @@ export const getLibraryWorkflowDetail = async (req, res) => {
         const data = await generationService.getWorkflowDetail(req.user.id, workflow_id);
         res.json({ ok: true, data });
     } catch (err) {
-        res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+        const { statusCode, publicMessage } = safePublicRouteError(err);
+        res.status(statusCode).json({ ok: false, message: publicMessage });
     }
 };

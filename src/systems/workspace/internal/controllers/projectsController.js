@@ -4,7 +4,7 @@ import { getProjectService, getGenerationService } from "../services/serviceAcce
 const logger = createLogger("workspace:projects_controller");
 
 function handleError(res, error, operation) {
-    if (error instanceof AppError) {
+    if (error instanceof AppError && error.statusCode < 500) {
         return res.status(error.statusCode).json({
             ok: false,
             errorCode: error.errorCode || "APP_ERROR",
@@ -12,7 +12,7 @@ function handleError(res, error, operation) {
         });
     }
     logger.error({ event: `projects_controller.${operation}_error`, err: error?.message || String(error) }, `${operation} error`);
-    return res.status(500).json({ ok: false, message: error?.message || "Internal server error" });
+    return res.status(500).json({ ok: false, message: "Internal server error" });
 }
 
 /** GET all projects for the authenticated user */
@@ -80,7 +80,8 @@ export const listAssets = async (req, res, next) => {
 
         const generationService = getGenerationService();
         if (!generationService) {
-            return res.status(500).json({ ok: false, message: "GenerationService not initialized" });
+            logger.error({ event: "projects_controller.listAssets_uninitialized" }, "GenerationService not initialized");
+            return res.status(500).json({ ok: false, message: "Internal server error" });
         }
 
         const result = await generationService.listProjectAssets({

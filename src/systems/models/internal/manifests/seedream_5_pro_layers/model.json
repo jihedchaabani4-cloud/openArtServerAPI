@@ -2,7 +2,7 @@
   "id": "seedream_5_pro_layers",
   "domain": "image",
   "displayName": "Seedream 5 Pro Layers",
-  "description": "ByteDance Seedream 5 Pro Layers via Runway — decomposes any image into separate transparent editable PNG layers.",
+  "description": "ByteDance Seedream 5 Pro Layers decomposes any image into separate transparent editable PNG layers.",
   "status": "active",
   "aliases": [
     "seedream5_pro_layers",

@@ -1114,7 +1114,7 @@ describe("F2.4-a — Wallet Misconfiguration & Zero Price Invariants (V3)", () =
   });
 
   it("TEST 5: WalletService.reserve throws PRICING_CONFIG_ERROR for invalid amounts (undefined, null, NaN, -1, 'abc')", async () => {
-    const { WalletService } = await import("#billing/tools");
+    const { WalletService } = await import("../../../src/systems/billing/internal/services/WalletService.js");
     const wallet = new WalletService("https://mock.supabase.co", "mock-key");
     const invalidAmounts = [undefined, null, NaN, -1, -5, "abc", "0", {}, []];
 

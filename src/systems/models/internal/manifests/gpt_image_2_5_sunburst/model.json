@@ -2,7 +2,7 @@
   "id": "gpt_image_2_5_sunburst",
   "domain": "image",
   "displayName": "GPT Image 2.5 Sunburst",
-  "description": "OpenAI GPT Image 2.5 Sunburst via Runway — 1K–4K generation with transparent background support and up to 16 references.",
+  "description": "OpenAI GPT Image 2.5 Sunburst 1K–4K generation with transparent background support and up to 16 references.",
   "status": "active",
   "aliases": [
     "gpt-image-2.5-sunburst",

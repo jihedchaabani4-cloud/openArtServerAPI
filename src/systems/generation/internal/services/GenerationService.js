@@ -15,7 +15,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { calculateAspectRatio, toAssetDto, AppError, createLogger, envConfig } from "#shared";
+import { calculateAspectRatio, AppError, createLogger, envConfig } from "#shared";
+import { toAssetDto } from "./assetDto.js";
 import { indexChildren, collectDescendantIds } from "#workspace/tools";
 
 function isModelHidden(_name) {
@@ -274,15 +275,11 @@ export class GenerationService {
         }
 
         const isOwner = project.user_id === userId;
-        const devBypass = envConfig.devAuthBypass;
-        if (!isOwner && !devBypass) {
+        if (!isOwner) {
             log("getAssets", "foreign_denied", { traceId, userId, resourceId: projectId, resourceType: "project" });
             const err = new Error("Project not found");
             err.statusCode = 404;
             throw err;
-        }
-        if (!isOwner && devBypass) {
-            genLogger.warn({ userId, projectId }, "Dev bypass: user accessing project");
         }
 
         const items = await this.db.media.findByProjectPaginated(projectId, {

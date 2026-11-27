@@ -2,7 +2,7 @@
   "id": "seedream_5_flash",
   "domain": "image",
   "displayName": "Seedream 5 Flash",
-  "description": "ByteDance Seedream 5 Flash via Runway — ultra-fast 1K/2K image generation and multi-image editing.",
+  "description": "ByteDance Seedream 5 Flash ultra-fast 1K/2K image generation and multi-image editing.",
   "status": "active",
   "aliases": [
     "seedream5_flash",

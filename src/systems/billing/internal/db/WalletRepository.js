@@ -3,7 +3,7 @@
  *
  * WalletRepository (System 3: Billing & Wallet)
  */
-import { WalletError } from "../errors.js";
+import { WalletError, BillingConfigurationError } from "../errors.js";
 import { createLogger } from "#shared";
 
 const logger = createLogger("wallet_repo");
@@ -14,7 +14,7 @@ export class WalletRepository {
      */
     constructor(supabaseClient) {
         if (!supabaseClient) {
-            throw new Error("[WalletRepository] supabaseClient is required");
+            throw new BillingConfigurationError("[WalletRepository] supabaseClient is required");
         }
         this.supabase = supabaseClient;
     }

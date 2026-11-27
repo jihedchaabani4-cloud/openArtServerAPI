@@ -2,7 +2,7 @@
   "id": "gpt_image_2_6_sunburst",
   "domain": "image",
   "displayName": "GPT Image 2.6 Sunburst",
-  "description": "OpenAI GPT Image 2.6 Sunburst via Runway — flagship 1K–4K model with transparent alpha, multi-format output, and up to 16 refs.",
+  "description": "OpenAI GPT Image 2.6 Sunburst flagship 1K–4K model with transparent alpha, multi-format output, and up to 16 refs.",
   "status": "active",
   "aliases": [
     "gpt-image-2.6-sunburst",

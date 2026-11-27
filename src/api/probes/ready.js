@@ -33,6 +33,9 @@ async function pingWithTimeout(connection, label, timeoutMs) {
 }
 
 export function _resetReadinessCacheForTest() {
+    if (!envConfig.isTest) {
+        throw new Error("_resetReadinessCacheForTest is only allowed in test environments.");
+    }
     cachedStatus = null;
 }
 

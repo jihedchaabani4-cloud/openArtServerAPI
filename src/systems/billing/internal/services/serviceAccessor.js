@@ -7,42 +7,26 @@ import {
     BillingConfigurationError,
 } from "../errors.js";
 
-import { WalletRepository } from "../db/WalletRepository.js";
-import { TransactionRepository } from "../db/TransactionRepository.js";
-import { CreditPackageRepository } from "../db/CreditPackageRepository.js";
-import { FailedOpsRepository } from "../db/FailedOpsRepository.js";
-import { UsageEventRepository } from "../db/UsageEventRepository.js";
 import {
-    getBillingSupabaseClient,
-    getBillingSupabaseAdminClient,
-} from "../db/billingClient.js";
+    createBillingRepositories,
+    createDefaultBillingRepositories,
+    createDefaultWalletRepository,
+    createDefaultTransactionRepository,
+    createDefaultUsageEventRepository,
+    createDefaultCreditPackageRepository,
+    createDefaultFailedOpsRepository,
+} from "../db/billingRepositoryFactory.js";
 
 import { WalletService } from "./WalletService.js";
 import { FailedOpsService } from "./FailedOpsService.js";
 
-export function createBillingRepositories(supabaseClient, { catalogClient = null } = {}) {
-    if (!supabaseClient) return null;
-    if (!catalogClient) {
-        throw new BillingConfigurationError("[BillingFactory] catalogClient is required for CreditPackageRepository");
-    }
-    const txRepo = new TransactionRepository(supabaseClient);
-
-    return {
-        walletRepo: new WalletRepository(supabaseClient),
-        transactionRepo: txRepo,
-        txRepo,
-        failedOpsRepo: new FailedOpsRepository(supabaseClient),
-        usageEventRepo: new UsageEventRepository(supabaseClient),
-        creditPackageRepo: new CreditPackageRepository(catalogClient),
-    };
-}
+export { createBillingRepositories };
 
 let _defaultWalletService = null;
 let _defaultCreditPackageRepo = null;
 let _defaultPackageFetcher = null;
 let _defaultFailedOpsService = null;
 let _defaultWalletRepo = null;
-let _defaultPricingService = null;
 let _defaultRedisConnection = null;
 let _defaultLifecycleService = null;
 
@@ -51,17 +35,12 @@ export function configureBilling(params = {}) {
     if ("creditPackageRepo" in params) _defaultCreditPackageRepo = params.creditPackageRepo;
     if ("packageFetcher" in params) _defaultPackageFetcher = params.packageFetcher;
     if ("failedOpsService" in params) _defaultFailedOpsService = params.failedOpsService;
-    if ("pricingService" in params) _defaultPricingService = params.pricingService;
     if ("redisConnection" in params) _defaultRedisConnection = params.redisConnection;
     if ("lifecycleService" in params) _defaultLifecycleService = params.lifecycleService;
 }
 
 export function getDefaultLifecycleService() {
     return _defaultLifecycleService;
-}
-
-export function getPricingService() {
-    return _defaultPricingService;
 }
 
 export function getRedisConnection() {
@@ -74,12 +53,12 @@ export function getDefaultWalletService() {
 
 export function getWalletService() {
     if (!_defaultWalletService) {
-        const client = getBillingSupabaseAdminClient();
+        const repos = createDefaultBillingRepositories();
         _defaultWalletService = new WalletService({
-            walletRepo: new WalletRepository(client),
-            txRepo: new TransactionRepository(client),
-            usageEventRepo: new UsageEventRepository(client),
-            supabase: client,
+            walletRepo: repos?.walletRepo || null,
+            txRepo: repos?.txRepo || null,
+            usageEventRepo: repos?.usageEventRepo || null,
+            supabase: repos?.walletRepo?.supabase || null,
         });
     }
     return _defaultWalletService;
@@ -91,16 +70,14 @@ export function getBillingService() {
 
 export function getCreditPackageRepository() {
     if (!_defaultCreditPackageRepo) {
-        const client = getBillingSupabaseClient();
-        _defaultCreditPackageRepo = new CreditPackageRepository(client);
+        _defaultCreditPackageRepo = createDefaultCreditPackageRepository();
     }
     return _defaultCreditPackageRepo;
 }
 
 export function getFailedOpsService() {
     if (!_defaultFailedOpsService) {
-        const client = getBillingSupabaseAdminClient();
-        const repo = new FailedOpsRepository(client);
+        const repo = createDefaultFailedOpsRepository();
         _defaultFailedOpsService = new FailedOpsService({ failedOpsRepo: repo });
     }
     return _defaultFailedOpsService;
@@ -111,24 +88,21 @@ let _defaultUsageEventRepo = null;
 
 export function getWalletRepository() {
     if (!_defaultWalletRepo) {
-        const client = getBillingSupabaseAdminClient();
-        _defaultWalletRepo = new WalletRepository(client);
+        _defaultWalletRepo = createDefaultWalletRepository();
     }
     return _defaultWalletRepo;
 }
 
 export function getTransactionRepository() {
     if (!_defaultTxRepo) {
-        const client = getBillingSupabaseAdminClient();
-        _defaultTxRepo = new TransactionRepository(client);
+        _defaultTxRepo = createDefaultTransactionRepository();
     }
     return _defaultTxRepo;
 }
 
 export function getUsageEventRepository() {
     if (!_defaultUsageEventRepo) {
-        const client = getBillingSupabaseAdminClient();
-        _defaultUsageEventRepo = new UsageEventRepository(client);
+        _defaultUsageEventRepo = createDefaultUsageEventRepository();
     }
     return _defaultUsageEventRepo;
 }

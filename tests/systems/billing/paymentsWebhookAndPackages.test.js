@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import http from "node:http";
 import express from "express";
-import { paymentsRouter, toPublicPackage, PUBLIC_PACKAGE_FIELDS } from "#billing/api";
+import { paymentsRouter } from "#billing/api";
+import { toPublicPackage, PUBLIC_PACKAGE_FIELDS } from "../../../src/systems/billing/internal/controllers/payments/paymentsUtils.js";
 import { walletService } from "../../../src/container.js";
 import { supabase } from "#shared/db/supabase.js";
 import { WalletError } from "#billing/tools";
@@ -287,7 +288,7 @@ describe("RC1.2-S4 — Lemon Squeezy Payments Webhook Boundary Tests", () => {
       },
     };
 
-    const { handleWebhook } = await import("#billing/api");
+    const { handleWebhook } = await import("../../../src/systems/billing/internal/controllers/paymentsController.js");
     await handleWebhook(fakeReq, fakeRes);
 
     assert.equal(statusCode, 400);

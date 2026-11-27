@@ -34,7 +34,9 @@ import {
     areAllWorkflowMediaFailed,
 } from "#media/tools";
 import { mediaRouter, assetsRouter, mediaIngestRouter, handleDeleteMedia, handleGetMedia } from "#media/api";
-import { assertOwns, IdentityForbiddenError, setDb as setIdentityDb } from "#identity/tools";
+import { assertOwns, IdentityForbiddenError, configureOwnershipResolvers } from "#identity/tools";
+import { createOwnershipResolvers } from "../../../src/container.js";
+const setIdentityDb = (targetDb) => configureOwnershipResolvers(createOwnershipResolvers(targetDb));
 import { randomUUID } from "node:crypto";
 import { AppError, calculateAspectRatio } from "#shared";
 

@@ -30,10 +30,6 @@ imagesRouter.post("/edit", requireAuth, rateLimit("imageGeneration"), imageContr
 export const videoRouter = express.Router();
 videoRouter.post("/generated", requireAuth, rateLimit("videoGeneration"), videoController.generateVideo);
 
-// ── Prompt Router ──────────────────────────────────────────────────
-export const promptRouter = Router();
-promptRouter.post("/optimize", requireAuth, rateLimit("promptOptimization"), workflowsController.optimizePrompt);
-
 // ── Workflows Run Inspection Router ────────────────────────────────
 export const v2WorkflowsRouter = express.Router();
 v2WorkflowsRouter.get("/health", workflowsController.getWorkflowHealth);
@@ -68,33 +64,16 @@ workflowsRouter.delete("/media/:media_id", workflowsController.deleteMedia);
 export const generationRouter = express.Router();
 generationRouter.use("/images", imagesRouter);
 generationRouter.use("/video", videoRouter);
-generationRouter.use("/prompt", promptRouter);
 generationRouter.use("/v2/workflows", v2WorkflowsRouter);
 generationRouter.use("/workflows", workflowsRouter);
 
-export {
-    imageController,
-    videoController,
-    generationsQuery,
-    projectController,
-    generationsMutation,
-    workflowsController,
-};
 export const { generateImage, relightImage, changeImageAngle, removeImageBackground, editImage } = imageController;
 export const { generateVideo } = videoController;
-export const { getAssets, getUserLibrary, getLibraryWorkflowDetail } = generationsQuery;
 export const { getProjectData } = projectController;
-export const { deleteGeneration, deleteItem, updateGeneration, toggleLike: toggleItemLike } = generationsMutation;
+export const { deleteItem, toggleLike: toggleItemLike } = generationsMutation;
 export const {
-    patchWorkflow,
     deleteWorkflow,
     bulkDeleteWorkflows,
-    toggleLike,
-    bulkToggleLike,
     setPrimaryMedia,
-    getWorkflowByMedia,
-    detachMediaToNewWorkflow,
     deleteMedia,
 } = workflowsController;
-
-export default generationRouter;

@@ -29,7 +29,7 @@ import {
     GenerationCompilationError,
     GenerationQueueDispatchError,
 } from "../../../src/systems/generation/internal/errors.js";
-import { imagesRouter, videoRouter, promptRouter, v2WorkflowsRouter, workflowsRouter, generationRouter } from "#generation/api";
+import { imagesRouter, videoRouter, v2WorkflowsRouter, workflowsRouter, generationRouter } from "#generation/api";
 import apiRouter from "../../../src/api/routes.js";
 import express from "express";
 import http from "node:http";
@@ -61,14 +61,12 @@ describe("System 1: Generation & Workflows — Gateways & Public Tools Contract"
     it("should export valid Express routers from #generation/api", () => {
         assert.equal(typeof imagesRouter, "function");
         assert.equal(typeof videoRouter, "function");
-        assert.equal(typeof promptRouter, "function");
         assert.equal(typeof v2WorkflowsRouter, "function");
         assert.equal(typeof workflowsRouter, "function");
         assert.equal(typeof generationRouter, "function");
 
         assert.ok(Array.isArray(imagesRouter.stack));
         assert.ok(Array.isArray(videoRouter.stack));
-        assert.ok(Array.isArray(promptRouter.stack));
         assert.ok(Array.isArray(v2WorkflowsRouter.stack));
         assert.ok(Array.isArray(workflowsRouter.stack));
         assert.ok(Array.isArray(generationRouter.stack));

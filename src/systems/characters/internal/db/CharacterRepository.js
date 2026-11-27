@@ -7,6 +7,8 @@
 import { supabaseAdmin } from "./characterClient.js";
 import { trashRepository } from "#workspace/tools";
 
+const SAFE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+
 export class CharacterRepository {
     constructor() {
         this.tableName = "characters";
@@ -58,10 +60,14 @@ export class CharacterRepository {
      * @param {string} id - Character id or workflow_id
      */
     async findByCharacterId(id) {
+        if (!id || !SAFE_ID_RE.test(String(id))) {
+            return null;
+        }
+        const safeId = String(id);
         const { data, error } = await this.client()
             .from("characters")
             .select("*")
-            .or(`id.eq.${id},workflow_id.eq.${id}`)
+            .or(`id.eq.${safeId},workflow_id.eq.${safeId}`)
             .maybeSingle();
         if (error) throw error;
         return data;
@@ -73,10 +79,14 @@ export class CharacterRepository {
      * @param {Object} fields - Fields to patch
      */
     async updateCharacterFields(id, fields) {
+        if (!id || !SAFE_ID_RE.test(String(id))) {
+            return null;
+        }
+        const safeId = String(id);
         const { data, error } = await this.client()
             .from("characters")
             .update(fields)
-            .or(`id.eq.${id},workflow_id.eq.${id}`)
+            .or(`id.eq.${safeId},workflow_id.eq.${safeId}`)
             .select()
             .maybeSingle();
         if (error) throw error;
@@ -92,20 +102,27 @@ export class CharacterRepository {
      * @param {string} id - Character id or workflow_id
      */
     async deleteById(id) {
+        if (!id || !SAFE_ID_RE.test(String(id))) {
+            return;
+        }
+        const safeId = String(id);
         const { error } = await this.client()
             .from("characters")
             .delete()
-            .or(`id.eq.${id},workflow_id.eq.${id}`);
+            .or(`id.eq.${safeId},workflow_id.eq.${safeId}`);
         if (error) throw error;
     }
 
     async findByProjectOrWorkflowIds({ projectId, workflowIds = [] } = {}) {
         let query = this.client().from("characters").select("*");
-        const ids = Array.isArray(workflowIds) ? workflowIds.filter(Boolean) : [];
-        if (projectId && ids.length > 0) {
-            query = query.or(`project_id.eq.${projectId},workflow_id.in.(${ids.join(",")})`);
-        } else if (projectId) {
-            query = query.eq("project_id", projectId);
+        const safeProjectId = projectId && SAFE_ID_RE.test(String(projectId)) ? String(projectId) : null;
+        const ids = Array.isArray(workflowIds)
+            ? workflowIds.map((x) => String(x || "")).filter((x) => SAFE_ID_RE.test(x))
+            : [];
+        if (safeProjectId && ids.length > 0) {
+            query = query.or(`project_id.eq.${safeProjectId},workflow_id.in.(${ids.join(",")})`);
+        } else if (safeProjectId) {
+            query = query.eq("project_id", safeProjectId);
         } else if (ids.length > 0) {
             query = query.in("workflow_id", ids);
         } else {

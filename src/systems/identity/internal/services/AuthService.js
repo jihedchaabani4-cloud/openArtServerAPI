@@ -7,10 +7,25 @@ import { authClient } from "../db/authClient.js";
 import { ProfileRepository } from "../db/ProfileRepository.js";
 import { setAuthCookies, clearAuthCookies } from "./cookies.js";
 import { createLogger } from "#shared";
-import { getWalletService } from "#billing/tools";
-import { IdentityValidationError, IdentityAuthenticationError } from "../errors.js";
+import { IdentityError, IdentityValidationError, IdentityAuthenticationError } from "../errors.js";
 
 const authLogger = createLogger("auth_service");
+
+let _ensureWalletHook = null;
+let _getCreditBalanceHook = null;
+
+export function configureIdentityHooks({ ensureWallet, getCreditBalance } = {}) {
+  if (ensureWallet !== undefined) _ensureWalletHook = ensureWallet;
+  if (getCreditBalance !== undefined) _getCreditBalanceHook = getCreditBalance;
+}
+
+export async function fetchUserCreditBalance(userId) {
+  if (typeof _getCreditBalanceHook !== "function") {
+    return 0;
+  }
+  const result = await _getCreditBalanceHook({ userId });
+  return typeof result === "number" ? result : (result?.balance ?? 0);
+}
 
 export function isValidEmail(email) {
   return typeof email === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
@@ -76,13 +91,12 @@ export const AuthService = {
    */
   async ensureUserAccount(userId, extra = {}) {
     let walletEnsure = Promise.resolve(null);
-    try {
-      const walletService = getWalletService();
-      if (walletService?.ensureWallet) {
-        walletEnsure = walletService.ensureWallet(userId);
+    if (typeof _ensureWalletHook === "function") {
+      try {
+        walletEnsure = Promise.resolve(_ensureWalletHook(userId)).catch(() => null);
+      } catch {
+        // Non-fatal fallback if billing hook is unconfigured
       }
-    } catch {
-      // Wallet service lazy fallback during migration
     }
 
     await Promise.all([
@@ -106,7 +120,9 @@ export const AuthService = {
     }
 
     if (!data.user?.id) {
-      throw new Error("Signup succeeded but no user was returned.");
+      throw new IdentityError("IDENTITY_SIGNUP_FAILED", "Signup succeeded but no user was returned.", {
+        statusCode: 500,
+      });
     }
 
     await this.ensureUserAccount(data.user.id);

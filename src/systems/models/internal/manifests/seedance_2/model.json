@@ -2,7 +2,7 @@
   "id": "seedance_2",
   "domain": "video",
   "displayName": "Seedance 2.0",
-  "description": "ByteDance Seedance 2.0 via Runway — multimodal T2V/I2V/V2V up to 4K with native audio and up to 9 image refs.",
+  "description": "ByteDance Seedance 2.0 multimodal T2V/I2V/V2V up to 4K with native audio and up to 9 image refs.",
   "status": "active",
   "aliases": [
     "seedance2",

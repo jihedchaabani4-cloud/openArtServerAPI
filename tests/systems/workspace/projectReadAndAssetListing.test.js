@@ -6,11 +6,12 @@ import { supabase, supabaseAdmin } from "#shared/db/supabase.js";
 import { WorkflowRepository } from "#generation/tools";
 import { ElementRepository } from "#elements/tools";
 import { CharacterRepository } from "#characters/tools";
-import { assertOwns, setDb } from "#identity/tools";
+import { assertOwns, configureOwnershipResolvers } from "#identity/tools";
 import express from "express";
 import http from "node:http";
 import apiRouter from "../../../src/api/routes.js";
-import { db } from "../../../src/container.js";
+import { db, createOwnershipResolvers } from "../../../src/container.js";
+const setDb = (targetDb) => configureOwnershipResolvers(createOwnershipResolvers(targetDb));
 import { redisConnection, workerRedisConnection, rateLimitRedisConnection } from "#shared";
 
 // ─── Source: projectReadServiceFallback.test.js ───
@@ -167,6 +168,9 @@ describe("ProjectReadService - Primary Media Fallback & Items Attachment", () =>
 
         try {
             const mockDb = {
+                projects: {
+                    findById: async (pid) => (pid === projectId ? { id: projectId, user_id: userId, project_name: "Test Project" } : null),
+                },
                 workflows: {
                     findByProject: async (pid) => [
                         {
@@ -178,6 +182,9 @@ describe("ProjectReadService - Primary Media Fallback & Items Attachment", () =>
                             create_time: new Date().toISOString(),
                         },
                     ],
+                },
+                workflowMedia: {
+                    findRelationsByWorkflowIds: async () => workflowMediaRows,
                 },
                 characters: {
                     findByProject: async () => [],
@@ -723,6 +730,9 @@ describe("ProjectReadService: Trash Rework & Media Isolation", () => {
                 media: {
                     findByProjectAll: async () => tables.media,
                 },
+                workflowMedia: {
+                    findRelationsByWorkflowIds: async () => tables.workflow_media,
+                },
                 elements: new ElementRepository("element"),
                 characters: new CharacterRepository("characters"),
             };
@@ -809,6 +819,9 @@ describe("ProjectReadService: Trash Rework & Media Isolation", () => {
                 },
                 media: {
                     findByProjectAll: async () => tables.media,
+                },
+                workflowMedia: {
+                    findRelationsByWorkflowIds: async () => tables.workflow_media,
                 },
                 elements: new ElementRepository("element"),
                 characters: new CharacterRepository("characters"),

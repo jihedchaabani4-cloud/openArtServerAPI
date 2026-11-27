@@ -2,7 +2,7 @@
   "id": "seedance_2_5_flash",
   "domain": "video",
   "displayName": "Seedance 2.5 Flash",
-  "description": "ByteDance Seedance 2.5 Flash via Runway — rapid 480p/720p T2V/I2V/V2V with native audio and reference/extend/edit modes.",
+  "description": "ByteDance Seedance 2.5 Flash rapid 480p/720p T2V/I2V/V2V with native audio and reference/extend/edit modes.",
   "status": "active",
   "aliases": [
     "seedance2_5_flash",

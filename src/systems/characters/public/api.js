@@ -77,5 +77,4 @@ export const {
 } = characterController;
 
 export const charactersRouter = router;
-export { characterController };
 export default router;

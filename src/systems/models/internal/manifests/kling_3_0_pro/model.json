@@ -2,7 +2,7 @@
   "id": "kling_3_0_pro",
   "domain": "video",
   "displayName": "Kling 3.0 Pro",
-  "description": "Kling 3.0 Pro 1080p cinematic video generation via Runway with native audio, first/last keyframes, and CFG control.",
+  "description": "Kling 3.0 Pro 1080p cinematic video generation with native audio, first/last keyframes, and CFG control.",
   "status": "active",
   "aliases": [
     "kling3.0_pro",

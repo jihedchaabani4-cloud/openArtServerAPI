@@ -38,12 +38,6 @@ export const envConfig = {
   get initialWalletBalance() {
     return Number(process.env.INITIAL_WALLET_BALANCE || process.env.DEFAULT_WALLET_BALANCE || 0);
   },
-  get rawDevAuthBypass() {
-    return process.env.DEV_AUTH_BYPASS === "true" || process.env.DEV_AUTH_BYPASS === true;
-  },
-  get devAuthBypass() {
-    return this.rawDevAuthBypass && !this.isProduction;
-  },
   get folderMaxDepth() {
     return Number(process.env.FOLDER_MAX_DEPTH || 3);
   },

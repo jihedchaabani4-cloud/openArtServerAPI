@@ -2,7 +2,7 @@
   "id": "seedream_5_5_layers",
   "domain": "image",
   "displayName": "Seedream 5.5 Layers",
-  "description": "ByteDance Seedream 5.5 Layers via Runway — next-gen image-to-layers decomposition with transparent PNG elements.",
+  "description": "ByteDance Seedream 5.5 Layers next-gen image-to-layers decomposition with transparent PNG elements.",
   "status": "active",
   "aliases": [
     "seedream5.5_layers",

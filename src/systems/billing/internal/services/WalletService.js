@@ -8,9 +8,7 @@
  */
 import { createLogger, LogEvents, envConfig } from "#shared";
 import { WalletError, BillingConfigurationError } from "../errors.js";
-import { WalletRepository } from "../db/WalletRepository.js";
-import { TransactionRepository } from "../db/TransactionRepository.js";
-import { getBillingSupabaseAdminClient } from "../db/billingClient.js";
+import { createDefaultBillingRepositories } from "../db/billingRepositoryFactory.js";
 
 const walletLogger = createLogger("wallet");
 const billingLogger = createLogger("billing");
@@ -33,14 +31,14 @@ export class WalletService {
         : envConfig.initialWalletBalance;
       this.supabase = deps.supabase || null;
     } else if (typeof supabaseUrlOrDeps === "string") {
-      const client = getBillingSupabaseAdminClient();
-      this.walletRepo = walletRepo || new WalletRepository(client);
-      this.txRepo = txRepo || new TransactionRepository(client);
+      const repos = createDefaultBillingRepositories({ walletRepo, txRepo, usageEventRepo });
+      this.walletRepo = repos?.walletRepo || null;
+      this.txRepo = repos?.txRepo || null;
       this.usageEventRepo = usageEventRepo || null;
       this.defaultInitialBalance = defaultInitialBalance !== undefined
         ? defaultInitialBalance
         : envConfig.initialWalletBalance;
-      this.supabase = client;
+      this.supabase = repos?.walletRepo?.supabase || null;
     } else {
       this.walletRepo = null;
       this.txRepo = null;
@@ -374,33 +372,10 @@ export class WalletService {
   }
 
   async extendHoldFallback(referenceId, additionalSeconds = 300) {
-    const { data: currentTx, error: fetchErr } = await this.supabase
-      .from("transactions")
-      .select("*")
-      .eq("reference_id", referenceId)
-      .maybeSingle();
-
-    if (fetchErr) throw new WalletError(fetchErr.message, "DB_ERROR");
-    if (!currentTx) {
-      throw new WalletError(`Transaction not found for reference ${referenceId}`, "TRANSACTION_NOT_FOUND");
+    if (!this.txRepo?.extendHoldDirect) {
+      throw new WalletError("TransactionRepository is not configured", "DB_ERROR");
     }
-    if (currentTx.status !== "PENDING") {
-      throw new WalletError(`Cannot extend transaction with status ${currentTx.status}`, "INVALID_STATUS");
-    }
-
-    const currentExpiresMs = currentTx.expires_at ? new Date(currentTx.expires_at).getTime() : Date.now();
-    const newExpiresAt = new Date(Math.max(Date.now(), currentExpiresMs) + additionalSeconds * 1000).toISOString();
-
-    const { data: updatedTx, error: updateErr } = await this.supabase
-      .from("transactions")
-      .update({ expires_at: newExpiresAt })
-      .eq("reference_id", referenceId)
-      .eq("status", "PENDING")
-      .select()
-      .maybeSingle();
-
-    if (updateErr) throw new WalletError(updateErr.message, "DB_ERROR");
-    return updatedTx;
+    return this.txRepo.extendHoldDirect(referenceId, additionalSeconds);
   }
 
   // ─────────────────────────────────────────────

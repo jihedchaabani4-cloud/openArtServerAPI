@@ -60,14 +60,10 @@ router.delete("/:id", deleteElement);
 export {
     createElement,
     listProjectElements,
-    getElementById,
-    deleteElement,
     addImageToElement,
     removeImageFromElement,
     updateElement,
     analyzeElement,
-    buildPrompt,
-    preUploadElementCapacityGuard,
     createPreUploadElementCapacityGuard,
 };
 

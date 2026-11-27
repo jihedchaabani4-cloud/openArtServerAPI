@@ -1,20 +1,14 @@
 /**
  * System 2: Models Management — Public Tools Gateway (#models/tools)
  *
- * Governed by:
- * - docs/architecture/constitution/01_business_systems_architecture.md (System 2)
- * - docs/architecture/constitution/02_architecture_rules_and_agent_guardrails.md
- *
- * Inter-system tool functions accept plain DTOs and return plain DTOs.
- * Model pricing calculations are pure financial estimates strictly decoupled
- * from Billing's wallet ledger (Rule 10).
+ * Pure Black-Box interface for model catalog, schema validation, manifest credit
+ * estimation, and model execution. Zero DB, zero Redis, zero provider leaks.
  */
 
 import {
   initRegistry,
-  getRegistry,
   getModel,
-  reloadRegistry,
+  reloadRegistry as reloadRegistryInternal,
 } from "../internal/registry/modelRegistry.js";
 import {
   validateCanonicalInput,
@@ -22,18 +16,12 @@ import {
 } from "../internal/schema/schemaValidator.js";
 import { getModelConfig as getInternalModelConfig } from "../internal/services/catalogPresentation.js";
 import {
-  calculateCost,
+  calculateCost as calculateCostInternal,
   getCatalog,
 } from "../internal/services/catalogQueries.js";
-import { PricingService } from "../internal/services/PricingService.js";
-import {
-  llmService,
-  BillingContextMissingError,
-  ALLOWED_INTERNAL_REASONS,
-} from "../internal/services/LLMService.js";
-import { promptService } from "../internal/services/PromptService.js";
+import { llmService } from "../internal/services/LLMService.js";
 import { run as runInternal } from "../internal/execution/modelRunner.js";
-import { createLogger } from "#shared";
+import { createLogger, envConfig } from "#shared";
 
 import {
   ModelsError,
@@ -41,31 +29,66 @@ import {
   ModelsNotFoundError,
   ModelsConfigurationError,
   ModelsProviderError,
-  ModelsSystemError,
-  ValidationError,
-  MissingOptionError,
-  ProviderTransientError,
-  ProviderRequestError,
-  OutputContractViolationError,
-  UnsupportedCapabilityError,
-  UnknownModelFamilyError,
-  UnknownOperationError,
-  BindingNotFoundError,
-  BindingModelMismatchError,
-  BindingOperationMismatchError,
-  ConfigIntegrityError,
 } from "../internal/errors.js";
 
 const modelsLogger = createLogger("models");
 
-// Eagerly initialize the registry on module load
+// Eagerly initialize the manifest registry on module load
 try {
   initRegistry();
 } catch (err) {
   modelsLogger.error({ error: err.message }, `Registry boot initialization error: ${err.message}`);
 }
 
-// ── Inter-System Tools Functions (System 2 Interface) ──────────────────────────
+function sanitizeExecutionResult(res) {
+  if (!res || typeof res !== "object") return res;
+  const cleanData =
+    res.data && typeof res.data === "object"
+      ? {
+          images: Array.isArray(res.data.images) ? res.data.images : [],
+          ...(Array.isArray(res.data.videos) ? { videos: res.data.videos } : {}),
+          ...(res.data.url ? { url: res.data.url } : {}),
+          text: res.data.text ?? null,
+          content: res.data.content ?? null,
+        }
+      : null;
+
+  const cleanMetadata = res.metadata
+    ? {
+        generationId: res.metadata.generationId ?? null,
+        modelId: res.metadata.modelId ?? null,
+        operation: res.metadata.operation ?? "execution",
+        creditsCharged: res.metadata.creditsCharged ?? 0,
+        durationMs: res.metadata.durationMs ?? 0,
+      }
+    : {};
+
+  return {
+    status: res.status || "success",
+    data: cleanData,
+    content: res.content || "",
+    text: res.text || "",
+    images: Array.isArray(res.images) ? res.images : [],
+    videos: Array.isArray(res.videos) ? res.videos : [],
+    metadata: cleanMetadata,
+  };
+}
+
+function sanitizeRunnerOptions(options = {}) {
+  const safe = { ...options };
+  // Never allow callers to inject raw DB clients into Models
+  delete safe.dbClient;
+  if (!envConfig.isTest) {
+    delete safe._testBinding;
+    delete safe._testBindingId;
+    delete safe.sdkRunner;
+    delete safe.sdkClient;
+    delete safe.runtimeExecutor;
+  }
+  return safe;
+}
+
+// ── Inter-System Tools Functions (System 2 Black-Box Interface) ────────────────
 
 /**
  * Returns the configuration for a single model (if modelId string provided)
@@ -141,16 +164,32 @@ export function validateModelInputs(modelId, params = {}) {
 }
 
 /**
- * Executes AI generation through the unified Model Runner.
+ * Calculates retail credit cost for a model without leaking provider/binding internals.
+ *
+ * @param {string} modelFamily
+ * @param {object} [cleanInput={}]
+ * @param {object} [options={}]
+ * @returns {number|object}
+ */
+export function calculateCost(modelFamily, cleanInput = {}, options = {}) {
+  const safeOptions = sanitizeRunnerOptions(options);
+  const res = calculateCostInternal(modelFamily, cleanInput, safeOptions);
+  if (res && typeof res === "object") {
+    return {
+      credits: res.credits,
+      modelId: res.planDetails?.modelId || modelFamily,
+      configVersion: res.planDetails?.configVersion || "1.0.0",
+    };
+  }
+  return res;
+}
+
+/**
+ * Executes AI generation through the unified Model Runner and returns a clean DTO
+ * stripped of provider internals (`_internal`, raw SDK payloads, route/provider IDs).
  *
  * @param {object} input
- * @param {string} input.modelId - Logical model key (e.g. 'flux-schnell', 'kling-v1.6')
- * @param {string} [input.prompt] - Prompt text
- * @param {object} [input.params={}] - Semantic model parameters
- * @param {string[]} [input.references=[]] - Optional array of reference media URLs
- * @param {string} [input.userId] - Calling user ID for billing audit
- * @param {object} [options={}] - Additional runner options
- * @returns {Promise<object>} Generation output DTO
+ * @returns {Promise<object>} Clean generation output DTO
  */
 export async function executeGeneration({
   modelId,
@@ -163,9 +202,7 @@ export async function executeGeneration({
   if (!modelId) {
     throw new ModelsValidationError("modelId is required for executeGeneration");
   }
-  const semanticParams = {
-    ...params,
-  };
+  const semanticParams = { ...params };
   if (prompt !== undefined) {
     semanticParams.prompt = prompt;
   }
@@ -182,22 +219,15 @@ export async function executeGeneration({
     `Executing model ${modelId}`
   );
 
-  return runInternal(modelId, semanticParams, { userId, ...options, model });
+  const safeOptions = sanitizeRunnerOptions(options);
+  const rawResult = await runInternal(modelId, semanticParams, { userId, ...safeOptions, model });
+  return sanitizeExecutionResult(rawResult);
 }
 
 /**
- * Executes unified LLM or Multimodal Vision generation.
+ * Executes unified LLM or Multimodal Vision generation via configured text/vision models.
  *
  * @param {object} input
- * @param {string} [input.model] - Model override (defaults to gemini-3.1-flash-lite)
- * @param {string} input.prompt - Text prompt
- * @param {string} [input.systemInstruction] - Role instruction
- * @param {string[]} [input.images] - Multimodal image references
- * @param {boolean} [input.jsonMode=false] - Whether output should parse to JSON
- * @param {object} [input.schema] - Optional schema for structured output
- * @param {string} [input.userId] - Calling user ID
- * @param {number} [input.timeoutMs] - Optional per-call timeout in milliseconds
- * @param {object} [options={}] - Extra runner options
  * @returns {Promise<{ raw: string, content: string, json?: object, model: string, durationMs: number }>}
  */
 export async function executeLLM({
@@ -211,7 +241,8 @@ export async function executeLLM({
   timeoutMs = null,
   ...options
 } = {}) {
-  const mergedOptions = timeoutMs != null ? { ...options, timeoutMs } : options;
+  const safeOptions = sanitizeRunnerOptions(options);
+  const mergedOptions = timeoutMs != null ? { ...safeOptions, timeoutMs } : safeOptions;
   return llmService.generate({
     prompt,
     systemInstruction,
@@ -226,73 +257,23 @@ export async function executeLLM({
 }
 
 /**
- * Summary stats for monitoring.
+ * Safely hot-reloads model manifests and returns a non-leaking summary DTO
+ * (never exposes raw internal registry Maps or provider/binding details).
+ *
+ * @returns {{ reloaded: true, models: number }}
  */
-export function getRegistryStats() {
-  const { models, providers, bindings } = getRegistry();
+export function reloadRegistry() {
+  const { models } = reloadRegistryInternal();
   return {
+    reloaded: true,
     models: models.size,
-    providers: providers.size,
-    bindings: bindings.size,
   };
 }
 
-// ── Public System 2 Tools Gateway Exports ─────────────────────────────────────
+// ── Public System 2 Tools Gateway Exports (Minimal Sealed Surface) ────────────
 
 export {
-  // Catalog & Execution Gateway (imported)
   getCatalog,
-  calculateCost,
-  initRegistry,
-  reloadRegistry,
-
-  // Services
-  PricingService,
-  llmService,
-  promptService,
-  BillingContextMissingError,
-  ALLOWED_INTERNAL_REASONS,
-
-  // Typed Errors
-  ModelsError,
-  ModelsValidationError,
-  ModelsNotFoundError,
-  ModelsConfigurationError,
-  ModelsProviderError,
-  ModelsSystemError,
-  ValidationError,
-  MissingOptionError,
-  ProviderTransientError,
-  ProviderRequestError,
-  OutputContractViolationError,
-  UnsupportedCapabilityError,
-  UnknownModelFamilyError,
-  UnknownOperationError,
-  BindingNotFoundError,
-  BindingModelMismatchError,
-  BindingOperationMismatchError,
-  ConfigIntegrityError,
-};
-
-export default {
-  // Inter-system tools
-  getModelConfig,
-  getModelSchema,
-  validateModelInputs,
-  calculateCost,
-  getCatalog,
-  executeGeneration,
-  executeLLM,
-  initRegistry,
-  reloadRegistry,
-  getRegistryStats,
-
-  // Services
-  PricingService,
-  llmService,
-  promptService,
-
-  // Errors
   ModelsError,
   ModelsValidationError,
   ModelsNotFoundError,

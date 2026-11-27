@@ -21,7 +21,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { crudOperationLog, CrudServiceError, toAssetDto, AppError, createLogger } from "#shared";
+import { crudOperationLog, CrudServiceError, AppError, createLogger } from "#shared";
+import { toAssetDto } from "./assetDto.js";
 import { WorkflowAuthorizationService } from "./WorkflowAuthorizationService.js";
 import { WorkflowMediaService } from "./WorkflowMediaService.js";
 import { assertOwns } from "#identity/tools";

@@ -2,9 +2,9 @@
  * Main Central Routing Aggregator
  *
  * Exclusively mounts HTTP routers from the 8 Business Systems' public/api.js gateways:
- * 1. #generation/api (images, video, prompt, v2/workflows, workflows)
+ * 1. #generation/api (images, video, v2/workflows, workflows)
  * 2. #models/api (models)
- * 3. #billing/api (payments, wallet, admin)
+ * 3. #billing/api (payments, wallet)
  * 4. #media/api (media, assets)
  * 5. #identity/api (auth)
  * 6. #characters/api (characters)
@@ -24,7 +24,6 @@ import express from 'express';
 import {
     imagesRouter,
     videoRouter,
-    promptRouter,
     v2WorkflowsRouter,
     workflowsRouter,
 } from '#generation/api';
@@ -36,7 +35,6 @@ import { modelsRouter } from '#models/api';
 import {
     paymentsRouter,
     walletRouter,
-    adminRouter,
 } from '#billing/api';
 
 // System 4: Media & Storage (#media/api)
@@ -97,13 +95,9 @@ router.use('/models',       modelsRouter);
 // ── System 4: Assets (Media System) ──────────────────────────────────────────
 router.use('/assets',       assetsRouter);
 
-// ── System 1: Prompt Optimization (Generation System) ────────────────────────
-router.use('/prompt',       promptRouter);
-
 // ── System 3: Billing & Wallet ───────────────────────────────────────────────
 router.use('/payments',     paymentsRouter);
 router.use('/wallet',       walletRouter);
-router.use('/admin',        adminRouter);
 
 // ── System 1: V2 Workflows (Generation System) ───────────────────────────────
 router.use('/v2/workflows', v2WorkflowsRouter);

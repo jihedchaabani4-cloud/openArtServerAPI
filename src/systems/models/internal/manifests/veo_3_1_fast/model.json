@@ -2,7 +2,7 @@
   "id": "veo_3_1_fast",
   "domain": "video",
   "displayName": "Google Veo 3.1 Fast",
-  "description": "Google Veo 3.1 Fast low-latency video generation via Runway with native audio and first/last frame support.",
+  "description": "Google Veo 3.1 Fast low-latency video generation with native audio and first/last frame support.",
   "status": "active",
   "aliases": [
     "veo3.1_fast",

@@ -1,6 +1,6 @@
 import { getGenerationServices } from "../services/serviceAccessor.js";
 import { getModelConfig } from "#models/tools";
-import { createLogger } from "#shared";
+import { createLogger, safePublicRouteError } from "#shared";
 
 const logger = createLogger("project_controller");
 
@@ -58,8 +58,8 @@ export const getProjectData = async (req, res) => {
         });
 
     } catch (err) {
-        const statusCode = err.statusCode || 500;
+        const { statusCode, publicMessage } = safePublicRouteError(err);
         logger.error({ event: "project_controller.getProjectData_error", err: err?.message || String(err), statusCode }, "Error fetching project data");
-        res.status(statusCode).json({ ok: false, message: err.message });
+        res.status(statusCode).json({ ok: false, message: publicMessage });
     }
 };

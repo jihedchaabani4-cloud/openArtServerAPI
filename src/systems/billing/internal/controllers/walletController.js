@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { WalletError } from "../errors.js";
+import { calculateCost } from "#models/tools";
 import { createLogger } from "#shared";
 
 const walletLogger = createLogger("wallet_controller");
@@ -65,7 +66,10 @@ export async function getBalance(req, res) {
     }, "Failed to fetch balance");
 
     if (err instanceof WalletError) {
-      return res.status(walletErrorToHttp(err)).json({ error: err.code, message: err.message });
+      const status = walletErrorToHttp(err);
+      if (status < 500) {
+        return res.status(status).json({ error: err.code, message: err.message });
+      }
     }
     return res.status(500).json({ error: "INTERNAL_ERROR", message: "Failed to fetch balance." });
   }
@@ -109,7 +113,10 @@ export async function getTransactions(req, res) {
     }, "Failed to fetch transactions");
 
     if (err instanceof WalletError) {
-      return res.status(walletErrorToHttp(err)).json({ error: err.code, message: err.message });
+      const status = walletErrorToHttp(err);
+      if (status < 500) {
+        return res.status(status).json({ error: err.code, message: err.message });
+      }
     }
     return res.status(500).json({ error: "INTERNAL_ERROR", message: "Failed to fetch transactions." });
   }
@@ -130,7 +137,15 @@ export async function getPrice(req, res) {
   const { modelKey, operationType, qualityTier } = parsed.data;
 
   try {
-    const result = await req.pricingService.getPrice(modelKey, operationType, qualityTier);
+    const creditCost = calculateCost(modelKey, { quality: qualityTier });
+    const result = {
+      modelKey,
+      operationType,
+      qualityTier,
+      creditCost,
+      isActive: true,
+      cached: false,
+    };
 
     walletLogger.info({
       operation: "get-price",
@@ -139,7 +154,7 @@ export async function getPrice(req, res) {
       modelKey,
       operationType,
       qualityTier,
-      cached: result.cached,
+      creditCost,
       durationMs: Date.now() - start,
     }, "Price calculated");
 
@@ -155,8 +170,8 @@ export async function getPrice(req, res) {
       durationMs: Date.now() - start,
     }, "Failed to calculate price");
 
-    if (err.code === "PRICING_NOT_FOUND") {
-      return res.status(404).json({ error: "PRICING_NOT_FOUND", message: err.message });
+    if (err.code === "PRICING_NOT_FOUND" || err.statusCode === 404) {
+      return res.status(404).json({ error: "PRICING_NOT_FOUND", message: `No active pricing found for ${modelKey}` });
     }
     return res.status(500).json({ error: "INTERNAL_ERROR", message: "Failed to fetch pricing." });
   }

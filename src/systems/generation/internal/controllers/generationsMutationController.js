@@ -7,7 +7,6 @@
 import { getGenerationServices } from "../services/serviceAccessor.js";
 import { assertOwns } from "#identity/tools";
 import { safePublicRouteError } from "#shared";
-import { db } from "../db/dbMap.js";
 
 export const deleteGeneration = async (req, res) => {
     try {
@@ -16,7 +15,8 @@ export const deleteGeneration = async (req, res) => {
         const result = await generationService.deleteGeneration(req.user?.id, req.params.id);
         return res.json(result);
     } catch (err) {
-        return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        return res.status(statusCode).json({ ok: false, errorCode, message: publicMessage });
     }
 };
 
@@ -26,6 +26,7 @@ export const deleteItem = async (req, res) => {
         const userId = req.user?.id;
 
         // In legacy test harness where collection_items is mocked:
+        const { workflowService, db } = getGenerationServices();
         if (db?.collection_items?.findById) {
             await assertOwns("collection_item", itemId, userId);
             if (typeof db.collection_items.delete === "function") {
@@ -35,7 +36,6 @@ export const deleteItem = async (req, res) => {
         }
 
         // Canonical domain operation: delete media item via WorkflowService
-        const { workflowService } = getGenerationServices();
         const result = await workflowService.deleteMedia({ mediaId: itemId, userId, req });
         return res.json({ ok: true, deleted: result?.deleted ?? true, workflow_deleted: result?.workflow_deleted ?? false });
     } catch (err) {
@@ -51,7 +51,8 @@ export const updateGeneration = async (req, res) => {
         const result = await generationService.updateGeneration(req.user?.id, req.params.id, req.body);
         return res.json(result);
     } catch (err) {
-        return res.status(err.statusCode || 500).json({ ok: false, message: err.message });
+        const { statusCode, errorCode, publicMessage } = safePublicRouteError(err);
+        return res.status(statusCode).json({ ok: false, errorCode, message: publicMessage });
     }
 };
 
@@ -60,6 +61,7 @@ export const toggleLike = async (req, res) => {
         const itemId = req.params.id;
         const userId = req.user?.id;
 
+        const { db } = getGenerationServices();
         if (db?.collection_items?.findById) {
             await assertOwns("collection_item", itemId, userId);
         } else {

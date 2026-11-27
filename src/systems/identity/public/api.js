@@ -15,27 +15,13 @@ import {
   getWalletBalance,
 } from "../internal/controllers/authController.js";
 
-export {
-  signup,
-  login,
-  googleRedirect,
-  microsoftRedirect,
-  googleCallback,
-  getMe,
-  logout,
-  getWalletBalance,
-};
+export const authRouter = Router();
 
-export const identityRouter = Router();
-
-identityRouter.post("/signup", rateLimit("signupIp"), signup);
-identityRouter.post("/login", rateLimit("loginIp"), rateLimit("loginEmail"), login);
-identityRouter.get("/google", googleRedirect);
-identityRouter.get("/microsoft", microsoftRedirect);
-identityRouter.get("/callback", googleCallback);
-identityRouter.get("/me", getMe);
-identityRouter.post("/logout", logout);
-identityRouter.get("/wallet/balance", getWalletBalance);
-
-export const authRouter = identityRouter;
-export default identityRouter;
+authRouter.post("/signup", rateLimit("signupIp"), signup);
+authRouter.post("/login", rateLimit("loginIp"), rateLimit("loginEmail"), login);
+authRouter.get("/google", googleRedirect);
+authRouter.get("/microsoft", microsoftRedirect);
+authRouter.get("/callback", googleCallback);
+authRouter.get("/me", getMe);
+authRouter.post("/logout", logout);
+authRouter.get("/wallet/balance", getWalletBalance);

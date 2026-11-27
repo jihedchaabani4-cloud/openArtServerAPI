@@ -2,7 +2,7 @@
   "id": "seedance_2_fast",
   "domain": "video",
   "displayName": "Seedance 2.0 Fast",
-  "description": "ByteDance Seedance 2.0 Fast via Runway — fast 480p/720p multimodal T2V/I2V/V2V with native audio.",
+  "description": "ByteDance Seedance 2.0 Fast fast 480p/720p multimodal T2V/I2V/V2V with native audio.",
   "status": "active",
   "aliases": [
     "seedance2_fast",

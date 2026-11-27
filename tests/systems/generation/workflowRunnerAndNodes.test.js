@@ -24,7 +24,8 @@ import {
 } from "../../../src/systems/generation/internal/errors.js";
 import { db } from "../../../src/container.js";
 import { redisConnection, workerRedisConnection, baseLogger, LogEvents } from "#shared";
-import { calculateCost, ProviderTransientError } from "#models/tools";
+import { calculateCost } from "#models/tools";
+import { ProviderTransientError } from "../../../src/systems/models/internal/errors.js";
 import {
   registerProviderRunner,
   unregisterProviderRunner,
@@ -273,7 +274,7 @@ describe("F2.4-b5 — Real ModelRunner & OutputMap Pipeline Boundary Tests (V3 N
     assert.strictEqual(result.assets.length, 1);
     assert.strictEqual(result.video_url, videoUrl);
     assert.strictEqual(result.metadata.model, "wan_3_0");
-    assert.strictEqual(result.metadata.provider, "wavespeed");
+    assert.strictEqual(result.metadata.provider, undefined);
   });
 
   it("TEST 2: seedance_2_5 on wavespeed through VideoGenerateNode → single video_url", async () => {
@@ -289,7 +290,7 @@ describe("F2.4-b5 — Real ModelRunner & OutputMap Pipeline Boundary Tests (V3 N
     assert.strictEqual(result.assets.length, 1);
     assert.strictEqual(result.video_url, videoUrl);
     assert.strictEqual(result.metadata.model, "seedance_2_5");
-    assert.strictEqual(result.metadata.provider, "wavespeed");
+    assert.strictEqual(result.metadata.provider, undefined);
   });
 
   it("TEST 3: ltx_2_3_fast on ltx through VideoGenerateNode → single video_url", async () => {
@@ -305,7 +306,7 @@ describe("F2.4-b5 — Real ModelRunner & OutputMap Pipeline Boundary Tests (V3 N
     assert.strictEqual(result.assets.length, 1);
     assert.strictEqual(result.video_url, videoUrl);
     assert.strictEqual(result.metadata.model, "ltx_2_3_fast");
-    assert.strictEqual(result.metadata.provider, "ltx");
+    assert.strictEqual(result.metadata.provider, undefined);
   });
 
   it("TEST 4: nanobana_2 on wavespeed through ImageGenerateNode → exactly 1 asset, no duplicates", async () => {
@@ -320,7 +321,7 @@ describe("F2.4-b5 — Real ModelRunner & OutputMap Pipeline Boundary Tests (V3 N
     assert.strictEqual(result.assets.length, 1);
     assert.strictEqual(result.image_url, imgUrl);
     assert.strictEqual(result.metadata.model, "nanobana_2");
-    assert.strictEqual(result.metadata.provider, "wavespeed");
+    assert.strictEqual(result.metadata.provider, undefined);
   });
 
   it("TEST 5: gpt_image_2 on wavespeed through ImageGenerateNode → exactly 1 asset, no duplicates", async () => {
@@ -335,7 +336,7 @@ describe("F2.4-b5 — Real ModelRunner & OutputMap Pipeline Boundary Tests (V3 N
     assert.strictEqual(result.assets.length, 1);
     assert.strictEqual(result.image_url, imgUrl);
     assert.strictEqual(result.metadata.model, "gpt_image_2");
-    assert.strictEqual(result.metadata.provider, "wavespeed");
+    assert.strictEqual(result.metadata.provider, undefined);
   });
 
   it("TEST 6: nanobana_pro on google through ImageGenerateNode → exactly 1 asset, no duplicates", async () => {
@@ -365,7 +366,7 @@ describe("F2.4-b5 — Real ModelRunner & OutputMap Pipeline Boundary Tests (V3 N
       assert.strictEqual(result.assets.length, 1);
       assert.strictEqual(result.image_url, imgUrl);
       assert.strictEqual(result.metadata.model, "nanobana_pro");
-      assert.strictEqual(result.metadata.provider, "google");
+      assert.strictEqual(result.metadata.provider, undefined);
     } finally {
       googleBinding.status = origGoogleStatus;
       wavespeedBinding.status = origWavespeedStatus;

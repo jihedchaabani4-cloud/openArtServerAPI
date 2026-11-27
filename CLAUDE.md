@@ -113,3 +113,19 @@ node scripts/check-doc-paths.cjs  # Verifies all file paths referenced in markdo
 npm test                  # Runs the full hermetic test suite (41 files, 1,331 tests)
 npm run gate              # Runs all of the above + secrets scan in one command
 ```
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs are tracked in GitHub Issues (`jihedchaabani4-cloud/openArtServerAPI`) via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role triage label vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout (`docs/agents/GLOSSARY.md` + `docs/adr/`). See `docs/agents/domain.md`.

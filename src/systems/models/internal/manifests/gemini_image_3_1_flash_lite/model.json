@@ -2,7 +2,7 @@
   "id": "gemini_image_3_1_flash_lite",
   "domain": "image",
   "displayName": "Gemini 3.1 Flash Lite Image",
-  "description": "Google Gemini 3.1 Flash Lite ultra-fast image generation via Runway with up to 14 references.",
+  "description": "Google Gemini 3.1 Flash Lite ultra-fast image generation with up to 14 references.",
   "status": "active",
   "aliases": [
     "gemini_image3.1_flash_lite",

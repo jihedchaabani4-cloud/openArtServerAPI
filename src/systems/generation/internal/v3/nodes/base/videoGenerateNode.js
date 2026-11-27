@@ -123,7 +123,6 @@ export const VideoGenerateNode = {
       assets,
       metadata: {
         model: inputs.model,
-        ...(res?._internal?.provider ? { provider: res._internal.provider } : {}),
         ...(res?.metadata || {}),
       },
     };

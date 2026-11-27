@@ -5,9 +5,25 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as modelsTools from "#models/tools";
 import { run } from "../../../src/systems/models/internal/execution/modelRunner.js";
+import { initRegistry } from "../../../src/systems/models/internal/registry/modelRegistry.js";
+import { calculateCost as calculateCostInternal } from "../../../src/systems/models/internal/services/catalogQueries.js";
+import {
+  ValidationError,
+  UnsupportedCapabilityError,
+  OutputContractViolationError,
+  ConfigIntegrityError,
+} from "../../../src/systems/models/internal/errors.js";
 
-// models test helper: combine public tools with internal run runner for boundary execution tests
-const models = { ...modelsTools, run };
+// models test helper: combine public tools with internal helpers for internal engine tests
+const models = {
+  ...modelsTools,
+  run,
+  initRegistry,
+  ValidationError,
+  UnsupportedCapabilityError,
+  OutputContractViolationError,
+  ConfigIntegrityError,
+};
 
 // ─── Source: modelsBoundary.test.js ───
 {
@@ -23,7 +39,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
   // ── 1. PUBLIC API CONTRACT TESTS ──────────────────────────────────────────
   describe("1. Public API Contract & Surface", () => {
-    it("should export only the intended stable public functions and standard error classes", () => {
+    it("should export ONLY the exact 13 sealed public functions and standard error classes", () => {
       const expectedExports = [
         "getCatalog",
         "getModelConfig",
@@ -32,44 +48,23 @@ describe("Sealed Models Subsystem Architecture", () => {
         "calculateCost",
         "executeGeneration",
         "executeLLM",
-        "initRegistry",
         "reloadRegistry",
-        "getRegistryStats",
-        "PricingService",
-        "llmService",
-        "promptService",
-        "ALLOWED_INTERNAL_REASONS",
-        "BillingContextMissingError",
-        // Typed Error Classes
+        // Canonical Typed Error Classes
         "ModelsError",
         "ModelsValidationError",
         "ModelsNotFoundError",
         "ModelsConfigurationError",
         "ModelsProviderError",
-        "ModelsSystemError",
-        "ValidationError",
-        "MissingOptionError",
-        "ProviderTransientError",
-        "ProviderRequestError",
-        "OutputContractViolationError",
-        "UnsupportedCapabilityError",
-        "UnknownModelFamilyError",
-        "UnknownOperationError",
-        "BindingNotFoundError",
-        "BindingModelMismatchError",
-        "BindingOperationMismatchError",
-        "ConfigIntegrityError",
       ];
 
-      for (const name of expectedExports) {
-        assert.ok(
-          modelsTools[name] !== undefined,
-          `Expected public export "${name}" to exist on models facade`
-        );
-      }
+      assert.deepStrictEqual(
+        Object.keys(modelsTools).sort(),
+        [...expectedExports].sort(),
+        "Public #models/tools surface must contain ONLY the 13 sealed exports"
+      );
     });
 
-    it("should NOT leak internal submodules or binding resolution functions on the public facade", () => {
+    it("should NOT leak internal submodules, legacy services, or binding resolution functions on the public facade", () => {
       const forbiddenInternalNames = [
         "modelRunner",
         "parameterMapper",
@@ -87,7 +82,7 @@ describe("Sealed Models Subsystem Architecture", () => {
         "getDefaultBinding",
         // Operation inference is strictly INTERNAL in Semantic-First architecture
         "resolveOperation",
-        // Removed duplicate/redundant aliases and internal classes
+        // Removed duplicate/redundant aliases, legacy services, and internal error classes
         "getSchema",
         "validateInput",
         "estimatePrice",
@@ -95,6 +90,27 @@ describe("Sealed Models Subsystem Architecture", () => {
         "run",
         "LLMService",
         "PromptService",
+        "PricingService",
+        "llmService",
+        "promptService",
+        "initRegistry",
+        "getRegistryStats",
+        "ALLOWED_INTERNAL_REASONS",
+        "BillingContextMissingError",
+        "ModelsSystemError",
+        "ValidationError",
+        "MissingOptionError",
+        "ProviderTransientError",
+        "ProviderRequestError",
+        "OutputContractViolationError",
+        "UnsupportedCapabilityError",
+        "UnknownModelFamilyError",
+        "UnknownOperationError",
+        "BindingNotFoundError",
+        "BindingModelMismatchError",
+        "BindingOperationMismatchError",
+        "ConfigIntegrityError",
+        "default",
       ];
 
       for (const name of forbiddenInternalNames) {
@@ -123,11 +139,12 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.ok(schema.parameters.prompt);
       assert.strictEqual(schema.parameters.prompt.required, true);
 
-      // getRegistryStats returns counts (no internal Maps leaked)
-      const stats = models.getRegistryStats();
+      // reloadRegistry returns safe counts (no internal Maps or provider/binding counts leaked)
+      const stats = models.reloadRegistry();
+      assert.strictEqual(stats.reloaded, true);
       assert.ok(typeof stats.models === "number" && stats.models > 0);
-      assert.ok(typeof stats.providers === "number" && stats.providers > 0);
-      assert.ok(typeof stats.bindings === "number" && stats.bindings > 0);
+      assert.strictEqual(stats.providers, undefined);
+      assert.strictEqual(stats.bindings, undefined);
     });
 
     it("external callers can validate canonical input via public API (no operation argument)", () => {
@@ -191,11 +208,12 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.ok(cost > 0, "calculateCost should compute cost from configured active binding");
     });
 
-    it("calculateCost with returnQuote works deterministically WITHOUT operation or bindingId", () => {
+    it("calculateCost with returnQuote works deterministically WITHOUT operation or bindingId and hides provider identity", () => {
       const estimate = models.calculateCost("nanobana_pro", { prompt: "Test", resolution: "1k" }, { returnQuote: true });
       assert.strictEqual(typeof estimate, "object");
       assert.ok(estimate.credits > 0, "calculateCost should compute amount from configured active binding");
-      assert.ok(estimate.planIdentity);
+      assert.strictEqual(estimate.modelId, "nanobana_pro");
+      assert.strictEqual(estimate.planIdentity, undefined, "Public quote must not leak provider-bearing planIdentity");
     });
 
     it("run executes successfully WITHOUT operation argument", async () => {
@@ -1661,8 +1679,8 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // TEST 22 — Quote / Execution plan identity consistency
     it("TEST 22: Quote/execution plan identity is deterministic and prevents silent execution under a mutated plan", async () => {
-      // calculateCost with returnQuote: true returns planIdentity
-      const quote = models.calculateCost("nanobana_pro", { prompt: "quote consistency test", resolution: "1k" }, { returnQuote: true });
+      // Internal pricing engine produces deterministic planIdentity for runner verification
+      const quote = calculateCostInternal("nanobana_pro", { prompt: "quote consistency test", resolution: "1k" }, { returnQuote: true });
       assert.strictEqual(quote.credits, 10);
       assert.ok(quote.planIdentity);
       assert.strictEqual(typeof quote.planIdentity, "string");
@@ -1822,7 +1840,7 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test I — pricing and execution resolve the same plan
     it("Test I: pricing and execution resolve the same plan", async () => {
-      const quote = models.calculateCost("nano-banana-pro-ultra", { prompt: "8k landscape", resolution: "8k" }, { returnQuote: true });
+      const quote = calculateCostInternal("nano-banana-pro-ultra", { prompt: "8k landscape", resolution: "8k" }, { returnQuote: true });
       assert.ok(quote.planIdentity);
 
       const runResult = await models.run("nano-banana-pro-ultra", { prompt: "8k landscape", resolution: "8k" }, {
@@ -1865,7 +1883,6 @@ describe("Sealed Models Subsystem Architecture", () => {
 
     // Test L — manifest validator rejects model.json using canonicalParameters (C1)
     it("Test L: manifest validator rejects model.json using canonicalParameters instead of canonicalInputs", async () => {
-      const { ConfigIntegrityError } = await import("#models/tools");
       assert.throws(
         () => {
           const invalidModelDef = {
@@ -1959,7 +1976,6 @@ describe("Sealed Models Subsystem Architecture", () => {
     // Test Q — Ambiguity Test: two routes with equal specificity and priority throw ConfigIntegrityError
     it("Test Q: Ambiguity Test — equal specificity and equal priority throws ConfigIntegrityError", async () => {
       const { evaluateWaveSpeedRoutes } = await import("../../../src/systems/models/internal/runtime/wavespeed/common/routeEvaluator.js");
-      const { ConfigIntegrityError } = await import("#models/tools");
 
       const mockBinding = {
         modelId: "test_ambiguity_model",
@@ -1993,7 +2009,6 @@ describe("Sealed Models Subsystem Architecture", () => {
     // Test R — No Match Test: semantic input matching no route throws UnsupportedCapabilityError
     it("Test R: No Match Test — unmatched semantic input throws UnsupportedCapabilityError", async () => {
       const { evaluateWaveSpeedRoutes } = await import("../../../src/systems/models/internal/runtime/wavespeed/common/routeEvaluator.js");
-      const { UnsupportedCapabilityError } = await import("#models/tools");
 
       const mockBinding = {
         modelId: "test_nomatch_model",
@@ -2153,7 +2168,7 @@ describe("Sealed Models Subsystem Architecture", () => {
       assert.strictEqual(sentData.success, true);
       assert.ok(sentData.data.credits > 0);
       assert.strictEqual(sentData.data.currency, "credits");
-      assert.ok(sentData.data.planIdentity.includes("nanobana_pro"));
+      assert.strictEqual(sentData.data.planIdentity, undefined, "HTTP estimate-price must not leak provider-bearing planIdentity");
     });
 
   });

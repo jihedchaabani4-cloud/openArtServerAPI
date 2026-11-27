@@ -1401,7 +1401,6 @@ describe("V3 Base Nodes Suite", () => {
     assert.deepEqual(res.assets, [{ url: "https://cdn.example.com/alpine-flight.mp4" }]);
     assert.deepEqual(res.metadata, {
       model: "ltx_2_3_fast",
-      provider: "ltx",
       seed: 7,
     });
 
@@ -1433,7 +1432,7 @@ describe("V3 Base Nodes Suite", () => {
       assert.equal(manifestRes.video_url, "https://api.ltx.io/generated/default-8s.mp4");
       assert.deepEqual(manifestRes.assets, [{ url: "https://api.ltx.io/generated/default-8s.mp4" }]);
       assert.equal(manifestRes.metadata.model, "ltx_2_3_fast");
-      assert.equal(manifestRes.metadata.provider, "ltx");
+      assert.equal(manifestRes.metadata.provider, undefined, "V3 nodes must not leak internal provider IDs");
       assert.equal(String(capturedLtxPayload.duration), "8");
     } finally {
       unregisterProviderRunner("ltx");

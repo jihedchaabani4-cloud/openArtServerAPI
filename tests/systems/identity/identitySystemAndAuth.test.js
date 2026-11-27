@@ -1,27 +1,30 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import * as identityToolsNamespace from "#identity/tools";
+import * as identityApiNamespace from "#identity/api";
 import {
-  identityTools,
-  verifySession,
-  getUserProfile,
   assertOwns,
   assertOwnsAny,
   toMediaIdList,
-  setDb,
+  configureOwnershipResolvers,
+  IdentityError,
   IdentityAuthenticationError,
   IdentityForbiddenError,
   IdentityNotFoundError,
   IdentityValidationError,
   requireAuth,
   rateLimit,
-  resetLimitersForTest,
-  safeCompareSecret,
+} from "#identity/tools";
+import { authRouter } from "#identity/api";
+import { signup, login } from "../../../src/systems/identity/internal/controllers/authController.js";
+import { resetLimitersForTest } from "../../../src/systems/identity/internal/middleware/rateLimit.js";
+import { safeCompareSecret } from "../../../src/systems/identity/internal/services/secretComparison.js";
+import {
   resetJwtVerifierForTest,
   setJwksFetcherForTest,
   setJwtClockForTest,
-} from "#identity/tools";
-import { identityRouter, signup, login } from "#identity/api";
+} from "../../../src/systems/identity/internal/services/jwtVerifier.js";
 import healthRouter from "../../../src/api/probes/health.js";
 import readyRouter, { _resetReadinessCacheForTest } from "../../../src/api/probes/ready.js";
 import { rateLimitRedisConnection, redisConnection, workerRedisConnection } from "#shared";
@@ -29,7 +32,13 @@ import { StorageService } from "#media/tools";
 import http from "node:http";
 import express from "express";
 import { workflowsRouter } from "#generation/api";
-import { assertSecurityConfiguredForEnvironment, workflowService, projectReadService } from "../../../src/container.js";
+import {
+  assertSecurityConfiguredForEnvironment,
+  workflowService,
+  projectReadService,
+  db,
+  createOwnershipResolvers,
+} from "../../../src/container.js";
 import { supabase } from "#shared/db/supabase.js";
 import { WorkflowAuthorizationService } from "../../../src/systems/generation/internal/services/WorkflowAuthorizationService.js";
 import { ProjectReadService } from "#workspace/tools";
@@ -37,17 +46,51 @@ import { ProjectReadService } from "#workspace/tools";
 // ─── Source: identitySystem.test.js ───
 {
 describe("System 5: Identity & Auth (#identity/tools and #identity/api)", () => {
-  it("exports identityTools and individual contract methods", () => {
-    assert.equal(typeof identityTools.verifySession, "function");
-    assert.equal(typeof identityTools.getUserProfile, "function");
-    assert.equal(typeof identityTools.assertOwns, "function");
-    assert.equal(typeof identityTools.assertOwnsAny, "function");
-    assert.equal(typeof identityTools.toMediaIdList, "function");
+  it("seals #identity/tools and #identity/api to exact production surface (zero test hooks or leaks)", () => {
+    const expectedToolsExports = [
+      "IdentityAuthenticationError",
+      "IdentityError",
+      "IdentityForbiddenError",
+      "IdentityNotFoundError",
+      "IdentityValidationError",
+      "assertOwns",
+      "assertOwnsAny",
+      "configureIdentityHooks",
+      "configureOwnershipResolvers",
+      "getAuthUserById",
+      "rateLimit",
+      "requireAuth",
+      "toMediaIdList",
+      "walletRateLimit",
+    ].sort();
+    assert.deepEqual(Object.keys(identityToolsNamespace).sort(), expectedToolsExports);
+    assert.deepEqual(Object.keys(identityApiNamespace).sort(), ["authRouter"]);
+
+    // Forbidden test hooks, legacy bags, and unused helpers must never leak
+    for (const forbidden of [
+      "setDb",
+      "identityTools",
+      "default",
+      "verifySession",
+      "getUserProfile",
+      "safeCompareSecret",
+      "isInternalSecretAllowedRoute",
+      "resetLimitersForTest",
+      "setLimiterForTest",
+      "resetJwtVerifierForTest",
+      "setJwksFetcherForTest",
+      "setJwtClockForTest",
+    ]) {
+      assert.equal(identityToolsNamespace[forbidden], undefined, `#identity/tools must not export ${forbidden}`);
+    }
+    for (const forbidden of ["identityRouter", "signup", "login", "default"]) {
+      assert.equal(identityApiNamespace[forbidden], undefined, `#identity/api must not export ${forbidden}`);
+    }
   });
 
-  it("exports Express identityRouter", () => {
-    assert.ok(identityRouter);
-    assert.equal(typeof identityRouter, "function");
+  it("exports Express authRouter", () => {
+    assert.ok(authRouter);
+    assert.equal(typeof authRouter, "function");
   });
 
   it("normalizes media and reference parameters with toMediaIdList", () => {
@@ -58,7 +101,7 @@ describe("System 5: Identity & Auth (#identity/tools and #identity/api)", () => 
     assert.deepEqual(toMediaIdList([" a ", { mediaId: " b " }, ""]), ["a", "b"]);
   });
 
-  it("assertOwns enforces ownership and throws 404 on missing or unowned resource (anti-enumeration)", async () => {
+  it("assertOwns enforces ownership via inverted resolvers and throws 404 on missing or unowned resource (anti-enumeration)", async () => {
     const mockDb = {
       projects: {
         findById: async (id) => {
@@ -67,23 +110,27 @@ describe("System 5: Identity & Auth (#identity/tools and #identity/api)", () => 
         },
       },
     };
-    setDb(mockDb);
+    configureOwnershipResolvers(createOwnershipResolvers(mockDb));
 
-    // Owned resource passes
-    const owned = await assertOwns("project", "proj-1", "user-owner");
-    assert.equal(owned.id, "proj-1");
+    try {
+      // Owned resource passes
+      const owned = await assertOwns("project", "proj-1", "user-owner");
+      assert.equal(owned.id, "proj-1");
 
-    // Missing resource throws 404
-    await assert.rejects(
-      async () => assertOwns("project", "non-existent", "user-owner"),
-      (err) => err.statusCode === 404 && err.message.includes("Project not found")
-    );
+      // Missing resource throws 404
+      await assert.rejects(
+        async () => assertOwns("project", "non-existent", "user-owner"),
+        (err) => err.statusCode === 404 && err.message.includes("Project not found")
+      );
 
-    // Unowned resource throws 404 (anti-enumeration mask)
-    await assert.rejects(
-      async () => assertOwns("project", "proj-1", "user-attacker"),
-      (err) => err.statusCode === 404 && err.message.includes("Project not found")
-    );
+      // Unowned resource throws 404 (anti-enumeration mask)
+      await assert.rejects(
+        async () => assertOwns("project", "proj-1", "user-attacker"),
+        (err) => err.statusCode === 404 && err.message.includes("Project not found")
+      );
+    } finally {
+      configureOwnershipResolvers(createOwnershipResolvers(db));
+    }
   });
 
   it("assertOwnsAny checks multiple resource types sequentially", async () => {
@@ -98,18 +145,39 @@ describe("System 5: Identity & Auth (#identity/tools and #identity/api)", () => 
         },
       },
     };
-    setDb(mockDb);
+    configureOwnershipResolvers(createOwnershipResolvers(mockDb));
 
-    const match = await assertOwnsAny(["project", "character"], "char-1", "user-1");
-    assert.equal(match.id, "char-1");
+    try {
+      const match = await assertOwnsAny(["project", "character"], "char-1", "user-1");
+      assert.equal(match.id, "char-1");
 
-    await assert.rejects(
-      async () => assertOwnsAny(["project", "character"], "char-99", "user-1"),
-      (err) => err.statusCode === 404
-    );
+      await assert.rejects(
+        async () => assertOwnsAny(["project", "character"], "char-99", "user-1"),
+        (err) => err.statusCode === 404
+      );
+    } finally {
+      configureOwnershipResolvers(createOwnershipResolvers(db));
+    }
+  });
+
+  it("configureOwnershipResolvers rejects reassignment outside NODE_ENV === 'test'", () => {
+    const prevEnv = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = "production";
+      assert.throws(
+        () => configureOwnershipResolvers({}),
+        (err) => err instanceof IdentityForbiddenError && err.statusCode === 403
+      );
+    } finally {
+      process.env.NODE_ENV = prevEnv;
+    }
   });
 
   it("Identity errors have correct codes and status codes", () => {
+    const baseErr = new IdentityError();
+    assert.equal(baseErr.statusCode, 500);
+    assert.equal(baseErr.code, "IDENTITY_ERROR");
+
     const authErr = new IdentityAuthenticationError("Please log in");
     assert.equal(authErr.statusCode, 401);
     assert.equal(authErr.code, "UNAUTHORIZED");
@@ -118,19 +186,13 @@ describe("System 5: Identity & Auth (#identity/tools and #identity/api)", () => 
     assert.equal(forbErr.statusCode, 403);
     assert.equal(forbErr.code, "FORBIDDEN");
 
+    const notFoundErr = new IdentityNotFoundError();
+    assert.equal(notFoundErr.statusCode, 404);
+    assert.equal(notFoundErr.code, "NOT_FOUND");
+
     const valErr = new IdentityValidationError("Bad email");
     assert.equal(valErr.statusCode, 400);
     assert.equal(valErr.code, "IDENTITY_VALIDATION_ERROR");
-  });
-
-  it("verifySession returns DTO when req.user is set", async () => {
-    const req = { user: { id: "u-123", email: "u@example.com", role: "admin" } };
-    const session = await verifySession(req);
-    assert.deepEqual(session, {
-      userId: "u-123",
-      email: "u@example.com",
-      role: "admin",
-    });
   });
 });
 }
@@ -783,61 +845,39 @@ describe("D2.6 Security Hardening Boundary Tests", () => {
     });
   });
 
-  // ── (d) DEV_AUTH_BYPASS production ban & ownership bypass removal ──────────────────────────
-  describe("(d) DEV_AUTH_BYPASS production ban and internal secret ownership enforcement", () => {
-    it("DEV_AUTH_BYPASS throws at boot/config when NODE_ENV=production", () => {
-      const origNodeEnv = process.env.NODE_ENV;
+  // ── (d) DEV_AUTH_BYPASS completely removed & strict ownership enforcement ─────────────────
+  describe("(d) DEV_AUTH_BYPASS removal and strict ownership enforcement", () => {
+    it("envConfig exposes neither devAuthBypass nor rawDevAuthBypass", async () => {
+      const { envConfig } = await import("#shared");
+      assert.equal(envConfig.devAuthBypass, undefined, "devAuthBypass must be completely removed");
+      assert.equal(envConfig.rawDevAuthBypass, undefined, "rawDevAuthBypass must be completely removed");
+    });
+
+    it("WorkflowAuthorizationService has no dev bypass and enforces ownership even if DEV_AUTH_BYPASS=true", async () => {
       const origBypass = process.env.DEV_AUTH_BYPASS;
       try {
-        process.env.NODE_ENV = "production";
-        process.env.INTERNAL_SECRET = "a".repeat(32);
         process.env.DEV_AUTH_BYPASS = "true";
-
-        assert.throws(
-          () => assertSecurityConfiguredForEnvironment(),
-          /DEV_AUTH_BYPASS cannot be enabled in production/i,
-          "Must throw at boot when DEV_AUTH_BYPASS is enabled in production"
+        const service = new WorkflowAuthorizationService({
+          db: {
+            media: { findMediaOwnershipRecord: async () => ({ id: "m-1", project: { user_id: "owner-1" } }) },
+            workflows: { client: () => ({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) }) }) },
+          },
+        });
+        assert.equal(service._isBypassed, undefined, "_isBypassed must be completely removed");
+        assert.equal(
+          await service.verifyMediaOwnership("m-1", "foreign-user"),
+          false,
+          "Foreign ownership must be rejected even if DEV_AUTH_BYPASS=true is set in env"
         );
       } finally {
-        process.env.NODE_ENV = origNodeEnv;
-        process.env.DEV_AUTH_BYPASS = origBypass;
+        if (origBypass !== undefined) process.env.DEV_AUTH_BYPASS = origBypass;
+        else delete process.env.DEV_AUTH_BYPASS;
       }
     });
 
-    it("WorkflowAuthorizationService._isBypassed returns false in production even if DEV_AUTH_BYPASS=true", () => {
-      const origNodeEnv = process.env.NODE_ENV;
-      const origBypass = process.env.DEV_AUTH_BYPASS;
-      try {
-        process.env.NODE_ENV = "production";
-        process.env.DEV_AUTH_BYPASS = "true";
-        const service = new WorkflowAuthorizationService({ db: {} });
-        assert.equal(service._isBypassed({}), false, "Must not bypass in production");
-      } finally {
-        process.env.NODE_ENV = origNodeEnv;
-        process.env.DEV_AUTH_BYPASS = origBypass;
-      }
-    });
-
-    it("WorkflowAuthorizationService._isBypassed NEVER bypasses for internal-secret (returns false)", () => {
+    it("ProjectReadService._verifyMediaOwnership NEVER bypasses for internal-secret or DEV_AUTH_BYPASS", async () => {
       process.env.INTERNAL_AUTH_ENABLED = "true";
-      const service = new WorkflowAuthorizationService({ db: {} });
-
-      const reqWithSecret = {
-        method: "PATCH",
-        originalUrl: "/api/workflows/workflows/wf-123",
-        headers: { "x-internal-secret": VALID_TEST_SECRET },
-      };
-
-      // CRITICAL: internal secret MUST NOT bypass ownership check!
-      assert.equal(
-        service._isBypassed(reqWithSecret),
-        false,
-        "Internal secret must authenticate only and never bypass ownership"
-      );
-    });
-
-    it("ProjectReadService._verifyMediaOwnership NEVER bypasses for internal-secret (must check userId)", async () => {
-      process.env.INTERNAL_AUTH_ENABLED = "true";
+      process.env.DEV_AUTH_BYPASS = "true";
       const service = new ProjectReadService({ db: {} });
 
       // Mock verifyMediaOwnership to check whether internal secret returns true without owner check
@@ -852,7 +892,7 @@ describe("D2.6 Security Hardening Boundary Tests", () => {
       try {
         // Calling _verifyMediaOwnership for foreign user must return false
         const isAuthorized = await service._verifyMediaOwnership("media-123", "foreign-user-id", reqWithSecret);
-        assert.equal(isAuthorized, false, "Internal secret must never grant ownership bypass on media");
+        assert.equal(isAuthorized, false, "Internal secret and DEV_AUTH_BYPASS must never grant ownership bypass on media");
       } finally {
         service._verifyMediaOwnership = origVerify;
       }
@@ -1400,21 +1440,24 @@ describe("P1-1 — Local JWT / JWKS Verification in requireAuth (zero hot-path a
     });
   });
 
-  it("verifySession validates Bearer JWT locally with 0 auth.getUser calls", async () => {
+  it("requireAuth validates Bearer JWT locally with 0 auth.getUser calls and populates email/role", async () => {
     process.env.SUPABASE_JWT_SECRET = TEST_HS256_SECRET;
     const token = signHs256Jwt(buildBaseClaims({ sub: "session-user-99", email: "sess@example.com", role: "authenticated" }));
 
-    const session = await verifySession({
+    const req = {
+      method: "GET",
+      path: "/api/projects",
       headers: { authorization: `Bearer ${token}` },
       cookies: {},
-    });
+    };
+    const { nextCalled, nextErr } = await runRequireAuth(req);
 
+    assert.equal(nextCalled, true);
+    assert.equal(nextErr, null);
     assert.equal(getUserCalls, 0);
-    assert.deepEqual(session, {
-      userId: "session-user-99",
-      email: "sess@example.com",
-      role: "authenticated",
-    });
+    assert.equal(req.user.id, "session-user-99");
+    assert.equal(req.user.email, "sess@example.com");
+    assert.equal(req.user.role, "authenticated");
   });
 
   it("rateLimit keys on req.user.id (sub), not raw JWT string (distinct JWTs for same sub share bucket and hit 429)", async () => {

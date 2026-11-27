@@ -2,7 +2,7 @@
   "id": "gpt_image_2_5_flare",
   "domain": "image",
   "displayName": "GPT Image 2.5 Flare",
-  "description": "OpenAI GPT Image 2.5 Flare via Runway — 1K–4K generation with up to 16 references and xhigh/max quality tiers.",
+  "description": "OpenAI GPT Image 2.5 Flare 1K–4K generation with up to 16 references and xhigh/max quality tiers.",
   "status": "active",
   "aliases": [
     "gpt-image-2.5-flare",

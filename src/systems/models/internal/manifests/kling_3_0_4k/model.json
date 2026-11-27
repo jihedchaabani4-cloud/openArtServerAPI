@@ -2,7 +2,7 @@
   "id": "kling_3_0_4k",
   "domain": "video",
   "displayName": "Kling 3.0 4K",
-  "description": "Kling 3.0 Ultra-HD 4K video generation via Runway with native audio, first/last keyframes, and CFG control.",
+  "description": "Kling 3.0 Ultra-HD 4K video generation with native audio, first/last keyframes, and CFG control.",
   "status": "active",
   "aliases": [
     "kling3.0_4k",

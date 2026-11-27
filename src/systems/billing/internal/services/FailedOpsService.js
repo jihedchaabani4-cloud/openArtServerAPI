@@ -7,8 +7,7 @@
  * wallet operations that failed and need automatic retry with exponential backoff.
  */
 import { createLogger } from "#shared";
-import { FailedOpsRepository } from "../db/FailedOpsRepository.js";
-import { getBillingSupabaseAdminClient } from "../db/billingClient.js";
+import { createDefaultBillingRepositories } from "../db/billingRepositoryFactory.js";
 
 const billingLogger = createLogger("billing");
 
@@ -17,15 +16,12 @@ export const FAILED_OPS_BACKOFF_MULTIPLIER = 2;
 export const FAILED_OPS_DEFAULT_MAX_RETRIES = 5;
 
 export class FailedOpsService {
-  constructor(supabaseUrlOrDeps = null, supabaseServiceKey = null) {
+  constructor(supabaseUrlOrDeps = null, _supabaseServiceKey = null) {
     if (supabaseUrlOrDeps && typeof supabaseUrlOrDeps === "object" && (supabaseUrlOrDeps.failedOpsRepo || supabaseUrlOrDeps.repo)) {
       this.repo = supabaseUrlOrDeps.failedOpsRepo || supabaseUrlOrDeps.repo;
-    } else if (typeof supabaseUrlOrDeps === "string") {
-      const client = getBillingSupabaseAdminClient();
-      this.repo = new FailedOpsRepository(client);
     } else {
-      const client = getBillingSupabaseAdminClient();
-      this.repo = client ? new FailedOpsRepository(client) : null;
+      const repos = createDefaultBillingRepositories();
+      this.repo = repos?.failedOpsRepo || null;
     }
   }
 

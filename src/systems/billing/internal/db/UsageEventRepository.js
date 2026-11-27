@@ -7,6 +7,7 @@
  * the financial transactions ledger. It never touches wallet balances.
  */
 import { createLogger } from "#shared";
+import { BillingConfigurationError } from "../errors.js";
 
 const logger = createLogger("usage-event-repo");
 
@@ -16,7 +17,7 @@ export class UsageEventRepository {
      */
     constructor(supabaseClient) {
         if (!supabaseClient) {
-            throw new Error("[UsageEventRepository] supabaseClient is required.");
+            throw new BillingConfigurationError("[UsageEventRepository] supabaseClient is required.");
         }
         this.supabase = supabaseClient;
     }

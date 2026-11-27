@@ -1,8 +1,31 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { AppError } from "#shared";
-import { getCreditBalance, reserveCredits, settleCredits, rollbackCredits, addCredits, listTransactions, listCreditPackages, getCreditPackage, resolvePackageCredits, configureBilling, getBillingService, getWalletService, getCreditPackageRepository, getFailedOpsService, getWalletRepository, createWalletService, createFailedOpsService, createBillingRepositories, WalletService, FailedOpsService, reconcileExpiredHolds, handleExpireStaleHolds, BillingError, BillingValidationError, BillingNotFoundError, BillingInsufficientFundsError, BillingConflictError, BillingConfigurationError, WalletError } from "#billing/tools";
-import billingApiRouter from "#billing/api";
+import * as billingToolsNamespace from "#billing/tools";
+import * as billingApiNamespace from "#billing/api";
+import {
+    getCreditBalance,
+    reserveCredits,
+    settleCredits,
+    rollbackCredits,
+    addCredits,
+    listTransactions,
+    listCreditPackages,
+    configureBilling,
+    createWalletService,
+    createFailedOpsService,
+    BillingError,
+    BillingValidationError,
+    BillingNotFoundError,
+    BillingInsufficientFundsError,
+    BillingConflictError,
+    BillingConfigurationError,
+    WalletError,
+} from "#billing/tools";
+import { paymentsRouter, walletRouter } from "#billing/api";
+import { WalletService } from "../../../src/systems/billing/internal/services/WalletService.js";
+import { reconcileExpiredHolds } from "../../../src/systems/billing/internal/services/ReservationReaperService.js";
+import { getCreditPackage, resolvePackageCredits } from "../../../src/systems/billing/internal/services/serviceAccessor.js";
 import { ExecutionEngine } from "#generation/tools";
 import { GraphCompiler, createDefaultV3NodeRegistry, getV3Workflow } from "../../../src/systems/generation/internal/v3/index.js";
 
@@ -136,27 +159,72 @@ describe("System 3: Billing & Wallet Contract & Gateway Tests", () => {
         configureBilling({ walletService: fakeWalletService });
     });
 
-    it("public tools gateway exports all required DTO operations and classes", () => {
-        assert.equal(typeof getCreditBalance, "function");
-        assert.equal(typeof reserveCredits, "function");
-        assert.equal(typeof settleCredits, "function");
-        assert.equal(typeof rollbackCredits, "function");
-        assert.equal(typeof addCredits, "function");
-        assert.equal(typeof listTransactions, "function");
-        assert.equal(typeof listCreditPackages, "function");
-        assert.equal(typeof getCreditPackage, "function");
-        assert.equal(typeof resolvePackageCredits, "function");
-        assert.equal(typeof createWalletService, "function");
-        assert.equal(typeof createBillingRepositories, "function");
-        assert.equal(typeof createFailedOpsService, "function");
-        assert.equal(typeof WalletService, "function");
-        assert.equal(typeof FailedOpsService, "function");
+    it("seals #billing/tools and #billing/api to exact production surface (zero repo/internal/router leaks)", () => {
+        const expectedToolsExports = [
+            "BillingConfigurationError",
+            "BillingConflictError",
+            "BillingError",
+            "BillingInsufficientFundsError",
+            "BillingNotFoundError",
+            "BillingValidationError",
+            "WalletError",
+            "addCredits",
+            "configureBilling",
+            "createFailedOpsService",
+            "createWalletService",
+            "extendHold",
+            "getCreditBalance",
+            "listCreditPackages",
+            "listTransactions",
+            "reserveCredits",
+            "rollbackCredits",
+            "runReservationReaper",
+            "settleCredits",
+            "startWalletWorker",
+            "stopWalletWorker",
+        ].sort();
+        assert.deepEqual(Object.keys(billingToolsNamespace).sort(), expectedToolsExports);
+        assert.deepEqual(Object.keys(billingApiNamespace).sort(), ["paymentsRouter", "walletRouter"]);
+
+        for (const forbidden of [
+            "WalletRepository",
+            "TransactionRepository",
+            "CreditPackageRepository",
+            "FailedOpsRepository",
+            "UsageEventRepository",
+            "createBillingRepositories",
+            "getWalletRepository",
+            "getTransactionRepository",
+            "getUsageEventRepository",
+            "getCreditPackageRepository",
+            "WalletService",
+            "FailedOpsService",
+            "getWalletService",
+            "getBillingService",
+            "getFailedOpsService",
+            "getCreditPackage",
+            "resolvePackageCredits",
+            "reconcileExpiredHolds",
+            "handleExpireStaleHolds",
+            "walletMaintenanceQueue",
+            "walletWorker",
+            "handleRetryFailedOps",
+            "replayOperation",
+            "default",
+        ]) {
+            assert.equal(billingToolsNamespace[forbidden], undefined, `#billing/tools must not export ${forbidden}`);
+        }
+
+        for (const forbidden of ["default", "handleWebhook", "PUBLIC_PACKAGE_FIELDS", "toPublicPackage", "adminRouter"]) {
+            assert.equal(billingApiNamespace[forbidden], undefined, `#billing/api must not export ${forbidden}`);
+        }
     });
 
-    it("public api gateway exports Express router", () => {
-        assert.ok(billingApiRouter);
-        assert.equal(typeof billingApiRouter, "function");
-        assert.equal(typeof billingApiRouter.use, "function");
+    it("public api gateway exports Express paymentsRouter and walletRouter", () => {
+        assert.equal(typeof paymentsRouter, "function");
+        assert.equal(typeof paymentsRouter.use, "function");
+        assert.equal(typeof walletRouter, "function");
+        assert.equal(typeof walletRouter.use, "function");
     });
 
     it("typed error hierarchy conforms to AppError and carries HTTP status codes", () => {

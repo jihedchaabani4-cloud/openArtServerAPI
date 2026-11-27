@@ -2,7 +2,7 @@
   "id": "kling_4_flash",
   "domain": "video",
   "displayName": "Kling 4 Flash",
-  "description": "Kling 4 Flash fast 720p video generation and editing via Runway with multimodal image and video references.",
+  "description": "Kling 4 Flash fast 720p video generation and editing with multimodal image and video references.",
   "status": "active",
   "aliases": [
     "kling-4-flash",

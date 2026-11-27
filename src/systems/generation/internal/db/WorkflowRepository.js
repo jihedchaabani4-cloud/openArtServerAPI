@@ -413,7 +413,11 @@ export class WorkflowRepository extends BaseRepository {
         }
 
         if (cursor && cursor.createTime && cursor.id) {
-            query = query.or(`create_time.lt.${cursor.createTime},and(create_time.eq.${cursor.createTime},id.lt.${cursor.id})`);
+            const safeTime = String(cursor.createTime);
+            const safeId = String(cursor.id);
+            if (/^\d{4}-\d{2}-\d{2}T[\d:.+-]+Z?$/i.test(safeTime) && /^[A-Za-z0-9_-]{1,128}$/.test(safeId)) {
+                query = query.or(`create_time.lt.${safeTime},and(create_time.eq.${safeTime},id.lt.${safeId})`);
+            }
         }
 
         query = query

@@ -7,6 +7,7 @@ import { authClient } from "../db/authClient.js";
 import { AuthService } from "./AuthService.js";
 import { setAuthCookies } from "./cookies.js";
 import { envConfig } from "#shared";
+import { IdentityValidationError } from "../errors.js";
 
 export const OAuthService = {
   /**
@@ -43,7 +44,7 @@ export const OAuthService = {
    */
   async handleCallback(code, req, res) {
     if (!code) {
-      throw new Error("Missing authorization code.");
+      throw new IdentityValidationError("Missing authorization code.");
     }
 
     const { data, error } = await authClient.exchangeCodeForSession(code, req, res);

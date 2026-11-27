@@ -2,7 +2,7 @@
   "id": "gpt_image_2",
   "domain": "image",
   "displayName": "GPT Image 2",
-  "description": "OpenAI high-fidelity photorealistic image generation model via WaveSpeed",
+  "description": "OpenAI high-fidelity photorealistic image generation model",
   "status": "active",
   "capabilities": {
     "prompt": true,
